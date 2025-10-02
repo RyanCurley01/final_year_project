@@ -1,0 +1,98 @@
+flowchart TD
+
+%% Frontend
+subgraph Frontend["Frontend - Javascript"]
+  React["React"]
+  Router["Router - React Router"]
+  FetchAPI["FetchAPI - Fetch API Calls"]
+  Bootstrap["Bootstrap - responsive UI"]
+  ReactHookForm["ReactHookForm - Login Form, Account Forms, Order Forms etc..."]
+  Redux[" Redux - Redux Toolkit (auth)"]
+end
+
+%% Backend Microservices
+subgraph Microservices["Backend Services"]
+  Manager_Account["Manager Service"]
+  Employee_Account["Employee Service"]
+  Customer_Account["Customer Service"]
+  Orders["Orders Service"]
+  Order_Items["Order_Items Service"]
+  Games["Games Service"]
+  Stock["Stock Service"]
+  Wishlist["Wishlist Service"]
+  Customer_Summary["Customer Summary Service"]
+  Purchased_Games["Purchased Games Service"]
+  Auth["Auth & RBAC Service (Spring Security)"]
+end
+
+%% Shared Backend Features
+subgraph Shared["Backend - Java"]
+  SpringBoot["SpringBoot - Core Framework"]
+  SpringWeb["SpringWeb - REST APIs"]
+  SpringDataJPAHibernate["SpringDataJPAHibernate - Mapping Java classes to SQL tables"]
+  SpringSecurity["SpringSecurity - For authentication & role-based access"]
+  DatabaseDriver["DatabaseDriver - MySQL JDBC driver"]
+  ValidationAPI["ValidationAPI - javax.validation, e.g., @NotNull, @Email"]
+  SpringSession["SpringSession - Secure login & session handling"]
+  SpringWebSocket["SpringWebSocket - Real-time updates for stock changes"]
+  ApiCallTest["Postman - Testing API calls in the backend"]
+end
+
+%% AI Recommendation Service
+subgraph AIService["Recommendation Service"]
+  padding1[" "]:::invisible
+  AIAPI["External API - PyTorch"]
+  Model["Model - ONNX Runtime"]
+  padding2[" "]:::invisible
+end
+
+classDef invisible fill:none,stroke:none
+class AIService fill:none,stroke:none
+
+%% Database
+subgraph Database["Cloud Database"]
+  MySQL["AWS RDS - MySQL Database"]
+end
+
+%% DevOps
+subgraph DevOps["CI/CD Pipeline - Azure"]
+  Git["Source Control (GitHub)"]
+  Build["Build & Unit Tests"]
+  AutoTest["Automated Testing (JUnit and Postman)"]
+  Deploy["Deploy to AWS Cloud"]
+end
+
+%% Frontend Connections
+React --> Router
+Router --> FetchAPI
+FetchAPI --> Auth
+
+%% Backend Connections
+Auth --> SpringDataJPAHibernate
+SpringDataJPAHibernate --> MySQL
+Manager_Account --> SpringDataJPAHibernate
+Employee_Account --> SpringDataJPAHibernate
+Customer_Account --> SpringDataJPAHibernate
+Orders --> SpringDataJPAHibernate
+Order_Items --> SpringDataJPAHibernate
+Games --> SpringDataJPAHibernate
+Stock --> SpringDataJPAHibernate
+Wishlist --> SpringDataJPAHibernate
+Customer_Summary --> SpringDataJPAHibernate
+Purchased_Games --> SpringDataJPAHibernate
+
+
+%% DevOps Connections
+Git --> Build
+Build --> AutoTest
+AutoTest --> Deploy
+Deploy --> Microservices
+React --> Bootstrap
+Purchased_Games --> AIAPI
+AIAPI --> FetchAPI
+AIAPI --> Model
+Model --> AIAPI
+SpringWebSocket --> Stock
+
+
+
