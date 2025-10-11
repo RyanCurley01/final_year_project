@@ -1,0 +1,86 @@
+erDiagram
+    Account {
+        INT AccountID PK
+        VARCHAR AccountName
+        VARCHAR AccountPhoneNumber
+        VARCHAR AccountEmailAddress
+        ENUM AccountType
+    }
+    Products {
+        INT ProductID PK
+        VARCHAR GameTitle
+        VARCHAR AlbumTitle
+        VARCHAR Platform
+        DECIMAL GamePrice
+        DECIMAL AlbumPrice
+        VARCHAR artist
+        VARCHAR genre
+        VARCHAR file_url
+        VARCHAR preview_url
+        INT StockQuantity
+    }
+    Orders {
+        INT OrderID PK
+        INT CustomerID FK
+        DATETIME orderDate
+        DECIMAL TotalAmount
+    }
+    Order_Items {
+        INT OrderItemID PK
+        INT OrderID FK
+        INT ProductID FK
+        INT Quantity
+        DECIMAL UnitPrice
+    }
+    Payments {
+        INT PaymentID PK
+        INT OrderID FK
+        INT ProductID FK
+        INT CustomerID FK
+        DECIMAL PaymentAmount
+        ENUM PaymentStatus
+        DATETIME PaymentDateAndTime
+    }
+    CustomerSummary {
+        INT CustomerSummaryID PK
+        INT CustomerID FK
+        INT ProductID FK
+        INT OrderID FK
+    }
+    Sold_Products {
+        INT SoldProductsID PK
+        INT OrderItemID FK
+        INT ProductID FK
+    }
+    Purchased_Products {
+        INT PurchasedProductsID PK
+        INT OrderItemID FK
+        INT ProductID FK
+    }
+    Stock {
+        INT StockID PK
+        INT ProductID FK
+        INT StockQuantity
+    }
+    GameWishlist {
+        INT WishlistID PK
+        INT CustomerID FK
+        INT ProductID FK
+    }
+
+    Orders ||--o{ Account : "belongs to"
+    Orders ||--o{ Order_Items : "has"
+    Order_Items ||--o{ Products : "contains"
+    Payments ||--o{ Orders : "for"
+    Payments ||--o{ Products : "for"
+    Payments ||--o{ Account : "by"
+    CustomerSummary ||--o{ Account : "for"
+    CustomerSummary ||--o{ Orders : "for"
+    CustomerSummary ||--o{ Products : "for"
+    Sold_Products ||--o{ Order_Items : "from"
+    Sold_Products ||--o{ Products : "of"
+    Purchased_Products ||--o{ Order_Items : "from"
+    Purchased_Products ||--o{ Products : "of"
+    Stock ||--o{ Products : "of"
+    GameWishlist ||--o{ Account : "by"
+    GameWishlist ||--o{ Products : "of"

@@ -16,8 +16,8 @@ CREATE TABLE Order_Items (
     
 	OrderID INT,
     ProductID INT,
-	orderDate DATETIME DEFAULT CURRENT_TIMESTAMP,
-	TotalAmount decimal(10, 2),
+	Quantity INT,
+	UnitPrice decimal(10, 2),
     FOREIGN KEY(OrderID) REFERENCES Orders(OrderID),
 	FOREIGN KEY(ProductID) REFERENCES Products(ProductID)
 );
