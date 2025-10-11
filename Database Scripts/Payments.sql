@@ -3,8 +3,6 @@ CREATE TABLE Payments (
 	GameCost decimal(10, 2),
 	AlbumCost decimal(10, 2),
 	OrderID INT,
-	GameTitle VARCHAR(10),
-	AlbumTitle VARCHAR(10),
     GamePaymentStatus ENUM('COMPLETED, UNCOMPLETED'),
     AlbumPaymentStatus ENUM('COMPLETED, UNCOMPLETED'),
 	GamePaymentDateAndTime DATETIME DEFAULT CURRENT_TIMESTAMP,
