@@ -1,9 +1,10 @@
 CREATE TABLE Stock (
 	StockID INT auto_increment primary key,
-	GameID INT,
-	Platform ENUM('PS4','XBOX'),
+	GameTitle VARCHAR(10),
+    AlbumTitle VARCHAR(10),
     StockQuantity INT,
-    FOREIGN KEY(GameID) REFERENCES Games(GameID)
+    ProductID INT,
+    FOREIGN KEY(ProductID) REFERENCES Products(ProductID)
 );
 
 DROP TABLE Stock;

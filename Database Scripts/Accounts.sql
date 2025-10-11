@@ -9,10 +9,8 @@ CREATE TABLE Manager_Account (
 	ManagerEmailAddress VARCHAR(10)
 );
 
-SELECT * FROM Manager_Account;
+DROP table Manager_Account;
 
-
-DROP table Employee_Account;
 
 CREATE TABLE Employee_Account (
 	EmployeeID INT auto_increment primary key,
@@ -21,8 +19,8 @@ CREATE TABLE Employee_Account (
 	EmployeeEmailAddress VARCHAR(10)
 );
 
+DROP table Employee_Account;
 
-DROP table Customer_Account;
 
 CREATE TABLE Customer_Account (
 	CustomerID INT auto_increment primary key,
@@ -30,5 +28,7 @@ CREATE TABLE Customer_Account (
 	CustomerPhoneNumber VARCHAR(10),
 	CustomerEmailAddress VARCHAR(10)
 );
+
+DROP table Customer_Account;
 
 
