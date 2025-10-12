@@ -1,0 +1,38 @@
+flowchart TD
+    A[User visits Store Website] --> B{Is user logged in?}
+    B -- No --> C[Show Login/Register Form]
+    C --> D[Authenticate User]
+    D -->|Success| E[Show Storefront]
+    D -->|Fail| C
+    B -- Yes --> E[Show Storefront]
+    E --> F[Browse Games/Music]
+    F --> G{Add to Cart or Wishlist?}
+    G -- Add to Cart --> H[Add Item to Cart]
+    G -- Add to Wishlist --> I[Add Item to Wishlist]
+    H --> J[Proceed to Checkout]
+    J --> K[Enter Payment Details]
+    K --> L[Place Order]
+    L --> M[Order Sent to Backend]
+    M --> N[Order Validated]
+    N -->|Valid| O[Update Stock]
+    N -->|Invalid| J
+    O --> P[Order Confirmation Sent to User]
+    P --> Q[Show Recommendations]
+    Q --> R[AI Recommendation Service]
+    R --> S[Display Recommended Games/Music]
+    I --> T[Wishlist Updated]
+    T --> F
+    
+    %% Backend/DevOps Flow
+    M --> U[Backend Microservices]
+    U --> V[Database Operations]
+    V --> W[Update Cloud Database]
+    W --> X[Send Confirmation]
+    X --> P
+    
+    %% DevOps
+    subgraph DevOps
+      Y[Code Commit] --> Z[CI/CD Pipeline]
+      Z --> AA[Automated Tests]
+      AA --> AB[Deploy to Cloud]
+    end
