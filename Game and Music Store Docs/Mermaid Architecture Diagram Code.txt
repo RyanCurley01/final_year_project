@@ -6,23 +6,22 @@ subgraph Frontend["Frontend - Javascript"]
   Router["Router - React Router"]
   FetchAPI["FetchAPI - Fetch API Calls"]
   Bootstrap["Bootstrap - responsive UI"]
-  ReactHookForm["ReactHookForm - Login Form, Account Forms, Order Forms etc..."]
+  ReactHookForm["ReactHookForm - Account Forms, Order Forms etc..."]
   Redux[" Redux - Redux Toolkit (auth)"]
 end
 
 %% Backend Microservices
 subgraph Microservices["Backend Services"]
-  Manager_Account["Manager Service"]
-  Employee_Account["Employee Service"]
-  Customer_Account["Customer Service"]
+  Accounts["Accounts Service - Spring Security"]
   Orders["Orders Service"]
   Order_Items["Order_Items Service"]
-  Games["Games Service"]
+  Products["Products Service"]
   Stock["Stock Service"]
-  Wishlist["Wishlist Service"]
+  GameWishlist["Wishlist Service"]
+  Payments["Payments Service"]
   Customer_Summary["Customer Summary Service"]
-  Purchased_Games["Purchased Games Service"]
-  Auth["Auth & RBAC Service (Spring Security)"]
+  Sold_Products["Sold Products Service"]
+  Purchased_Products["Purchased Products Service"]
 end
 
 %% Shared Backend Features
@@ -41,6 +40,7 @@ end
 %% AI Recommendation Service
 subgraph AIService["Recommendation Service"]
   padding1[" "]:::invisible
+  PayPal[PayPal Sandbox API Simulated Payments]
   AIAPI["External API - PyTorch"]
   Model["Model - ONNX Runtime"]
   padding2[" "]:::invisible
@@ -54,6 +54,11 @@ subgraph Database["Cloud Database"]
   MySQL["AWS RDS - MySQL Database"]
 end
 
+%% Cloud Storage for Digital Game Delivery
+subgraph CloudStorage["File Delivery - AWS S3"]
+  S3["AWS S3 Bucket - Game and Music File Storage"]
+end
+
 %% DevOps
 subgraph DevOps["CI/CD Pipeline - Azure"]
   Git["Source Control (GitHub)"]
@@ -65,22 +70,36 @@ end
 %% Frontend Connections
 React --> Router
 Router --> FetchAPI
-FetchAPI --> Auth
+FetchAPI <--> SpringWeb
+
 
 %% Backend Connections
-Auth --> SpringDataJPAHibernate
+SpringWeb --> SpringDataJPAHibernate
 SpringDataJPAHibernate --> MySQL
-Manager_Account --> SpringDataJPAHibernate
-Employee_Account --> SpringDataJPAHibernate
-Customer_Account --> SpringDataJPAHibernate
+Accounts --> SpringDataJPAHibernate
 Orders --> SpringDataJPAHibernate
 Order_Items --> SpringDataJPAHibernate
-Games --> SpringDataJPAHibernate
+Products --> SpringDataJPAHibernate
+Payments --> SpringDataJPAHibernate
 Stock --> SpringDataJPAHibernate
-Wishlist --> SpringDataJPAHibernate
+GameWishlist --> SpringDataJPAHibernate
 Customer_Summary --> SpringDataJPAHibernate
-Purchased_Games --> SpringDataJPAHibernate
+Sold_Products --> SpringDataJPAHibernate
+Purchased_Products --> SpringDataJPAHibernate
 
+%% Payment Flow (Two-Way Arrows)
+FetchAPI <--> Payments
+Payments <--> PayPal
+
+%% Digital Delivery
+Payments --> S3
+S3 --> Payments
+Payments --> FetchAPI
+
+%% AI Connections
+Purchased_Products --> AIAPI
+AIAPI <--> Model
+AIAPI --> FetchAPI
 
 %% DevOps Connections
 Git --> Build
@@ -88,11 +107,7 @@ Build --> AutoTest
 AutoTest --> Deploy
 Deploy --> Microservices
 React --> Bootstrap
-Purchased_Games --> AIAPI
-AIAPI --> FetchAPI
-AIAPI --> Model
-Model --> AIAPI
-SpringWebSocket --> Stock
+SpringWebSocket --> Stock 
 
 
 

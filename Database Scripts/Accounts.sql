@@ -9,6 +9,10 @@ CREATE TABLE Account (
     AccountType ENUM('Manager', 'Employee', 'Customer')
 );
 
+DROP TABLE Account;
+
+SHOW TABLES;
+
 
 
 
