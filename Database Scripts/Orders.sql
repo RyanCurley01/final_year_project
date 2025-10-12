@@ -2,10 +2,10 @@ CREATE TABLE Orders (
 	-- Unique identifier for each order.
 	OrderID INT auto_increment primary key,
     
-	CustomerID INT,
+	AccountID INT,
 	orderDate DATETIME DEFAULT CURRENT_TIMESTAMP,
 	TotalAmount decimal(10, 2),
-    FOREIGN KEY(CustomerID) REFERENCES Customer_Account(CustomerID)
+    FOREIGN KEY(AccountID) REFERENCES Account(AccountID)
 );
 
 DROP table Orders;

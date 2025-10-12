@@ -1,0 +1,97 @@
+flowchart TD
+
+%% Frontend
+subgraph Frontend["Frontend (React)"]
+  React["React App"]
+  Router["React Router"]
+  Forms["Forms (Login, Account, Order)"]
+  Redux["Redux Toolkit (Auth)"]
+  Bootstrap["Bootstrap UI"]
+  FetchAPI["Fetch API Calls"]
+end
+
+%% Backend Microservices
+subgraph Backend["Backend Microservices"]
+  Manager["Manager Service"]
+  Employee["Employee Service"]
+  Customer["Customer Service"]
+  Orders["Orders Service"]
+  OrderItems["Order_Items Service"]
+  Games["Games Service"]
+  Stock["Stock Service"]
+  Wishlist["Wishlist Service"]
+  CustomerSummary["Customer Summary Service"]
+  PurchasedGames["Purchased Games Service"]
+  Auth["Auth & RBAC Service"]
+end
+
+%% Shared Backend Features
+subgraph Shared["Shared Backend (Java)"]
+  SpringBoot["Spring Boot"]
+  SpringWeb["Spring Web (REST APIs)"]
+  JPA["Spring Data JPA/Hibernate"]
+  Security["Spring Security"]
+  Validation["Validation API"]
+  Session["Spring Session"]
+  WebSocket["Spring WebSocket"]
+  Postman["API Testing (Postman)"]
+end
+
+%% AI Recommendation Service
+subgraph AI["AI Recommendation Service"]
+  AIAPI["PyTorch API"]
+  Model["ONNX Model"]
+end
+
+%% Database
+subgraph DB["Database (AWS RDS MySQL)"]
+  MySQL["MySQL Database"]
+end
+
+%% DevOps
+subgraph DevOps["CI/CD Pipeline (Azure)"]
+  Git["GitHub"]
+  Build["Build & Unit Tests"]
+  AutoTest["Automated Testing"]
+  Deploy["Deploy to AWS"]
+end
+
+%% Frontend Connections
+React --> Router
+Router --> Forms
+Forms --> FetchAPI
+FetchAPI --> Auth
+FetchAPI --> Backend
+React --> Redux
+React --> Bootstrap
+
+%% Backend Connections
+Auth --> Security
+Auth --> JPA
+Manager --> JPA
+Employee --> JPA
+Customer --> JPA
+Orders --> JPA
+OrderItems --> JPA
+Games --> JPA
+Stock --> JPA
+Wishlist --> JPA
+CustomerSummary --> JPA
+PurchasedGames --> JPA
+JPA --> MySQL
+Security --> Session
+Session --> MySQL
+WebSocket --> Stock
+PurchasedGames --> AIAPI
+AIAPI --> Model
+
+%% DevOps Connections
+Git --> Build
+Build --> AutoTest
+AutoTest --> Deploy
+Deploy --> Backend
+Deploy --> DB
+
+%% API Testing
+Postman --> Backend
+

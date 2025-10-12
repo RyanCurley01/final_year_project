@@ -4,6 +4,7 @@ erDiagram
         VARCHAR AccountName
         VARCHAR AccountPhoneNumber
         VARCHAR AccountEmailAddress
+        VARCHAR AccountPassword
         ENUM AccountType
     }
     Products {
@@ -21,7 +22,7 @@ erDiagram
     }
     Orders {
         INT OrderID PK
-        INT CustomerID FK
+        INT AccountID FK
         DATETIME orderDate
         DECIMAL TotalAmount
     }
@@ -36,7 +37,7 @@ erDiagram
         INT PaymentID PK
         INT OrderID FK
         INT ProductID FK
-        INT CustomerID FK
+        INT AccountID FK
         DECIMAL PaymentAmount
         ENUM PaymentStatus
         DATETIME PaymentDateAndTime
@@ -64,7 +65,7 @@ erDiagram
     }
     GameWishlist {
         INT WishlistID PK
-        INT CustomerID FK
+        INT AccountID FK
         INT ProductID FK
     }
 

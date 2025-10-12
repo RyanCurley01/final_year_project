@@ -1,9 +1,9 @@
 CREATE TABLE CustomerSummary (
 	CustomerSummaryID INT auto_increment primary key,
-    CustomerID INT,
+    AccountID INT,
 	ProductID INT,
 	OrderID INT,
-	FOREIGN KEY(CustomerID) REFERENCES Customer_Account(CustomerID),
+	FOREIGN KEY(AccountID) REFERENCES Account(AccountID),
 	FOREIGN KEY(OrderID) REFERENCES Orders(OrderID),
 	FOREIGN KEY(ProductID) REFERENCES Products(ProductID) 
 );
