@@ -44,7 +44,7 @@ erDiagram
     }
     CustomerSummary {
         INT CustomerSummaryID PK
-        INT CustomerID FK
+        INT AccountID FK
         INT ProductID FK
         INT OrderID FK
     }
