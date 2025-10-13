@@ -1,0 +1,7 @@
+1. Started project end of week 1. Thought of initial idea of game and music store by creating a sketch flow Chart. Added user stories for accounts.
+
+2. Week 2 - Added user stories for orders, customer summary, stock.
+
+3. Week 3 - Added user stories for sold games, purchased games and wishlist. Updated flow chart to include AI recommendations. Created Database Schema. Refactored Wishlist user story. Created initial API Specification tables. Login user story added and initial architecture diagram implemented.
+
+4. Week 4 - 
