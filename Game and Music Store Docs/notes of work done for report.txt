@@ -2,6 +2,6 @@
 
 2. Week 2 - Added user stories for orders, customer summary, stock.
 
-3. Week 3 - Added user stories for sold games, purchased games and wishlist. Updated flow chart to include AI recommendations. Created Database Schema. Refactored Wishlist user story. Created initial API Specification tables. Login user story added and initial architecture diagram implemented.
+3. Week 3 - Added user stories for sold games, purchased games and Wishlist. Updated flow chart to include AI recommendations. Created ER diagram and Database Schema. Refactored Wishlist user story. Created initial API Specification tables. Login user story added and initial architecture diagram implemented.
 
-4. Week 4 - 
+4. Week 4 - Added Payments user story. Payments and music table added to database schema. Changed the idea of having PS4 and Xbox game types for random games to games that I have created that are all on the Windows platform. Refactored ER diagram and database schema to remove duplicate fields in multiple tables to prevent redundancy. Payments Service and AWS S3 bucket added to architecture diagram. Updated architecture node connections for FetchAPI, Payments Service PayPal Sandbox for more connection clarity. Refactored ER Diagram and database schema to encapsulate Customer, Employee and Manager tables into one table called Accounts to avoid duplicate fields. Added password field to accounts user story, ER Diagram and database table to use accounts service as login with password and email instead of separate unnecessary login service for login. Updated API Specification tables to remove redundancy for duplicate fields and added payments API table. New Flow Chart added for updated system flow. Updated architecture diagram to remove unnecessary login service.
