@@ -9,7 +9,10 @@
   "customizations": {
     "vscode": {
       "settings": {
-        "terminal.integrated.shell.linux": "/bin/bash"
+        "terminal.integrated.shell.linux": "/bin/bash",
+        // Point Python extension to the venv created in the devcontainer
+        "python.defaultInterpreterPath": "/opt/venv/bin/python",
+        "python.venvPath": "/opt"
       },
       "extensions": [
     "vscjava.vscode-java-pack",

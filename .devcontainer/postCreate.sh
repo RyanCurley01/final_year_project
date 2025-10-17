@@ -4,10 +4,14 @@ set -euo pipefail
 echo "Running devcontainer post-create steps..."
 
 # Ensure pip and npm are up to date
-python3 -m pip install --user --upgrade pip
+python3 -m pip install --upgrade pip
 if command -v npm >/dev/null 2>&1; then
   npm --version || true
 fi
+
+# Ensure the venv PATH is available for this script
+VENV_PATH=${VENV_PATH:-/opt/venv}
+export PATH="$VENV_PATH/bin:$PATH"
 
 # Install frontend deps if package.json exists in frontend directory
 if [ -f ./frontend/package.json ]; then
@@ -18,14 +22,15 @@ fi
 
 # Install python deps if requirements.txt exists (for AI service)
 if [ -f ./ai_service/requirements.txt ]; then
-  echo "Found ai_service/requirements.txt — installing Python dependencies..."
-  python3 -m pip install -r ./ai_service/requirements.txt || true
+  echo "Found ai_service/requirements.txt — installing Python dependencies into venv..."
+  "$VENV_PATH/bin/pip" install --upgrade pip || true
+  "$VENV_PATH/bin/pip" install -r ./ai_service/requirements.txt || true
 fi
 
 # Install python deps if requirements.txt exists in root
 if [ -f requirements.txt ]; then
   echo "Found requirements.txt — installing Python dependencies..."
-  python3 -m pip install --user -r requirements.txt || true
+  "$VENV_PATH/bin/pip" install -r requirements.txt || true
 fi
 
 # Pre-cache Gradle dependencies for any Java projects to avoid fetching at first build
