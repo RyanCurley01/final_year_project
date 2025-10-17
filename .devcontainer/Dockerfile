@@ -20,7 +20,6 @@ RUN apt-get update \
        software-properties-common \
        iputils-ping \
        openjdk-17-jdk \
-       maven \
        python3-dev \
        python3-venv \
        python3-pip \

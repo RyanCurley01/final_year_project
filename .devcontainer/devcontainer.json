@@ -9,12 +9,11 @@
   "customizations": {
     "vscode": {
       "settings": {
-        "terminal.integrated.shell.linux": "/bin/bash",
-        "maven.executable.path": "/usr/bin/mvn"
+        "terminal.integrated.shell.linux": "/bin/bash"
       },
       "extensions": [
     "vscjava.vscode-java-pack",
-    "vscjava.vscode-maven",
+    "vscjava.vscode-gradle",
     "redhat.java",
     "ms-azuretools.vscode-docker",
     "ms-python.python",

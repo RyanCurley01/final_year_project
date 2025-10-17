@@ -9,10 +9,11 @@ if command -v npm >/dev/null 2>&1; then
   npm --version || true
 fi
 
-# Install frontend deps if package.json exists
-if [ -f package.json ]; then
-  echo "Found package.json — installing npm dependencies..."
-  npm install || true
+# Install frontend deps if package.json exists in frontend directory
+if [ -f ./frontend/package.json ]; then
+  echo "Found frontend/package.json — installing npm dependencies..."
+  cd ./frontend && npm install || true
+  cd ..
 fi
 
 # Install python deps if requirements.txt exists
@@ -21,10 +22,11 @@ if [ -f requirements.txt ]; then
   python3 -m pip install --user -r requirements.txt || true
 fi
 
-# Pre-cache Maven dependencies for any Java projects to avoid fetching at first build
-if command -v mvn >/dev/null 2>&1; then
-  echo "Searching for pom.xml files to pre-cache Maven dependencies..."
-  find . -name pom.xml -print -execdir bash -lc 'mvn -DskipTests dependency:go-offline || true' \;
+# Pre-cache Gradle dependencies for any Java projects to avoid fetching at first build
+if [ -f ./backend/gradlew ]; then
+  echo "Found Gradle wrapper — pre-caching dependencies..."
+  cd ./backend && ./gradlew dependencies --no-daemon || true
+  cd ..
 fi
 
 # Initialize Git LFS for the repository
