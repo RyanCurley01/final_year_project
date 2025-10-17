@@ -19,7 +19,7 @@ RUN apt-get update \
        gnupg \
        software-properties-common \
        iputils-ping \
-       default-jdk \
+       openjdk-17-jdk \
        maven \
        python3-dev \
        python3-venv \
@@ -50,7 +50,7 @@ RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/awsc
     && rm -rf /tmp/aws /tmp/awscliv2.zip
 
 # Set Java alternatives (ensure JAVA_HOME)
-ENV JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64
+ENV JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
 ENV PATH="$JAVA_HOME/bin:$PATH"
 
 # Create a non-root vscode user (devcontainers base already creates 'vscode', ensure packages owned)
