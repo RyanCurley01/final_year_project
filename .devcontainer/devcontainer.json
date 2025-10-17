@@ -24,7 +24,21 @@
     }
   },
   "remoteUser": "vscode",
-  "forwardPorts": [8080, 3000, 5000, 5001],
+  "forwardPorts": [8080, 5173, 5000],
+  "portsAttributes": {
+    "8080": {
+      "label": "Backend (Spring Boot)",
+      "onAutoForward": "notify"
+    },
+    "5173": {
+      "label": "Frontend (React/Vite)",
+      "onAutoForward": "notify"
+    },
+    "5000": {
+      "label": "AI Service (FastAPI)",
+      "onAutoForward": "notify"
+    }
+  },
   "postCreateCommand": "./.devcontainer/postCreate.sh || true",
   "features": {},
   "mounts": [

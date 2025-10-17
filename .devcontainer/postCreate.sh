@@ -16,7 +16,13 @@ if [ -f ./frontend/package.json ]; then
   cd ..
 fi
 
-# Install python deps if requirements.txt exists
+# Install python deps if requirements.txt exists (for AI service)
+if [ -f ./ai_service/requirements.txt ]; then
+  echo "Found ai_service/requirements.txt — installing Python dependencies..."
+  python3 -m pip install -r ./ai_service/requirements.txt || true
+fi
+
+# Install python deps if requirements.txt exists in root
 if [ -f requirements.txt ]; then
   echo "Found requirements.txt — installing Python dependencies..."
   python3 -m pip install --user -r requirements.txt || true

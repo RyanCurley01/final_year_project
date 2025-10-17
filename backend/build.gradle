@@ -29,6 +29,20 @@ dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter-security'
 	implementation 'org.springframework.boot:spring-boot-starter-validation'
 	implementation 'org.springframework.boot:spring-boot-starter-web'
+	
+	// Session Management
+	implementation 'org.springframework.session:spring-session-core'
+	implementation 'org.springframework.session:spring-session-jdbc'
+	
+	// WebSocket for real-time updates
+	implementation 'org.springframework.boot:spring-boot-starter-websocket'
+	
+	// AWS SDK for S3 (file storage and delivery)
+	implementation 'software.amazon.awssdk:s3:2.20.26'
+	
+	// PayPal SDK for payments (optional - you can also use REST API directly)
+	implementation 'com.paypal.sdk:rest-api-sdk:1.14.0'
+	
 	compileOnly 'org.projectlombok:lombok'
 	developmentOnly 'org.springframework.boot:spring-boot-devtools'
 	runtimeOnly 'com.mysql:mysql-connector-j'

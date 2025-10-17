@@ -37,7 +37,21 @@ ENV VENV_PATH=/opt/venv
 RUN python3 -m venv $VENV_PATH \
     && $VENV_PATH/bin/python -m pip install --upgrade pip setuptools wheel \
     && $VENV_PATH/bin/pip install --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu \
-    && $VENV_PATH/bin/pip install --no-cache-dir onnxruntime boto3 poetry
+    && $VENV_PATH/bin/pip install --no-cache-dir \
+        onnxruntime \
+        boto3 \
+        fastapi \
+        uvicorn[standard] \
+        numpy \
+        pandas \
+        scikit-learn \
+        requests \
+        httpx \
+        pymysql \
+        sqlalchemy \
+        python-dotenv \
+        pyyaml \
+        pytest
 
 # Make the venv's python the default for interactive shells in the container
 ENV PATH="$VENV_PATH/bin:$PATH"
@@ -68,14 +82,5 @@ RUN if id -u $USERNAME >/dev/null 2>&1; then echo "user exists"; else \
 RUN apt-get clean || true
 
 WORKDIR /workspace
-
-# Pre-cache Maven dependencies for any Java projects in the repository
-# This will run mvn dependency:go-offline in each folder that contains a pom.xml
-RUN if command -v mvn >/dev/null 2>&1; then \
-            echo "Searching for pom.xml files to pre-cache Maven dependencies..." && \
-            find . -name pom.xml -print -execdir bash -lc 'mvn -DskipTests dependency:go-offline || true' \; ; \
-        else \
-            echo "mvn not found, skipping Maven pre-cache"; \
-        fi
 
 CMD ["sleep", "infinity"]
