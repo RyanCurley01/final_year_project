@@ -25,6 +25,7 @@ RUN apt-get update \
        python3-venv \
        python3-pip \
        mysql-client \
+       git-lfs \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Node.js 18 (LTS)

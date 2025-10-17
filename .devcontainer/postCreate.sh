@@ -27,4 +27,11 @@ if command -v mvn >/dev/null 2>&1; then
   find . -name pom.xml -print -execdir bash -lc 'mvn -DskipTests dependency:go-offline || true' \;
 fi
 
+# Initialize Git LFS for the repository
+if command -v git-lfs >/dev/null 2>&1; then
+  echo "Initializing Git LFS..."
+  git lfs install || true
+  git lfs pull || true
+fi
+
 echo "Devcontainer setup complete."
