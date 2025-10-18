@@ -1,0 +1,25 @@
+spring:
+  application:
+    name: soldproducts-service
+  
+  datasource:
+    url: jdbc:mysql://localhost:3306/soldproducts_db?createDatabaseIfNotExist=true
+    username: root
+    password: root
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.MySQLDialect
+        format_sql: true
+
+server:
+  port: 8089
+
+logging:
+  level:
+    com.example.soldproducts: DEBUG

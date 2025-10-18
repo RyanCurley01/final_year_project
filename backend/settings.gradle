@@ -1,1 +1,13 @@
-rootProject.name = 'demo'
+rootProject.name = "final_year_project"
+
+include("accounts-service")
+include("customerSummary-service")
+include("orderItems-service")
+include("orders-service")
+include("payments-service")
+include("products-service")
+include("purchasedProducts-service")
+include("soldProducts-service")
+include("stock-service")
+include("wishlist-service")
+
