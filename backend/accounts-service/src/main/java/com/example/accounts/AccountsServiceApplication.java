@@ -7,6 +7,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 public class AccountsServiceApplication {
 
     public static void main(String[] args) {
+        // Starts the Spring Boot application and runs the web server
         SpringApplication.run(AccountsServiceApplication.class, args);
     }
 }

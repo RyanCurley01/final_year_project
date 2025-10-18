@@ -2,6 +2,7 @@ plugins {
 	id 'java'
 	id 'org.springframework.boot' version '3.5.6'
 	id 'io.spring.dependency-management' version '1.1.7'
+	id 'jacoco'
 }
 
 group = 'com.example'
@@ -55,4 +56,56 @@ dependencies {
 
 tasks.named('test') {
 	useJUnitPlatform()
+	finalizedBy jacocoTestReport // Generate coverage report after tests
 }
+
+jacoco {
+	toolVersion = "0.8.11"
+}
+
+jacocoTestReport {
+	dependsOn test // Tests must run before generating report
+	
+	reports {
+		xml.required = true
+		html.required = true
+		csv.required = false
+	}
+	
+	afterEvaluate {
+		classDirectories.setFrom(files(classDirectories.files.collect {
+			fileTree(dir: it, exclude: [
+				'**/config/**',           // Exclude configuration classes
+				'**/Application.class',    // Exclude main application class
+				'**/model/**',            // Exclude entity/model classes
+				'**/dto/**'               // Exclude DTOs if any
+			])
+		}))
+	}
+}
+
+jacocoTestCoverageVerification {
+	violationRules {
+		rule {
+			limit {
+				minimum = 0.70 // Require 70% coverage
+			}
+		}
+		
+		rule {
+			element = 'CLASS'
+			limit {
+				counter = 'LINE'
+				value = 'COVEREDRATIO'
+				minimum = 0.60 // Each class should have 60% coverage
+			}
+			excludes = [
+				'*.config.*',
+				'*.model.*',
+				'*Application'
+			]
+		}
+	}
+}
+
+check.dependsOn jacocoTestCoverageVerification
