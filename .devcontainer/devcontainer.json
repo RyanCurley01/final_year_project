@@ -1,11 +1,8 @@
 {
   "name": "Game and Music Store Dev Container",
-  "build": {
-    "dockerfile": "Dockerfile",
-    "args": {
-      "VARIANT": "ubuntu"
-    }
-  },
+  "dockerComposeFile": "docker-compose.yml",
+  "service": "app",
+  "workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",
   "customizations": {
     "vscode": {
       "settings": {
@@ -27,7 +24,7 @@
     }
   },
   "remoteUser": "vscode",
-  "forwardPorts": [8080, 5173, 5000],
+  "forwardPorts": [8080, 5173, 5000, 3306],
   "portsAttributes": {
     "8080": {
       "label": "Backend (Spring Boot)",
@@ -40,11 +37,12 @@
     "5000": {
       "label": "AI Service (FastAPI)",
       "onAutoForward": "notify"
+    },
+    "3306": {
+      "label": "MySQL Database",
+      "onAutoForward": "ignore"
     }
   },
   "postCreateCommand": "./.devcontainer/postCreate.sh || true",
-  "features": {},
-  "mounts": [
-    "source=${localWorkspaceFolder}/Database Scripts,target=/workspace/database,type=bind,consistency=cached"
-  ]
+  "features": {}
 }

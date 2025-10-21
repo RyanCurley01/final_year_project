@@ -3,14 +3,10 @@ spring:
     name: accounts-service
   
   datasource:
-    # Connect to host machine's MySQL (use 'host.docker.internal' or your host IP)
-    # Option 1: Use host.docker.internal (recommended for Docker Desktop on Windows/Mac)
-    url: jdbc:mysql://host.docker.internal:3306/accounts_db?createDatabaseIfNotExist=true
-    # Option 2: If above doesn't work, use your local IP (e.g., 192.168.x.x or 172.x.x.x)
-    # url: jdbc:mysql://YOUR_LOCAL_IP:3306/accounts_db?createDatabaseIfNotExist=true
-    
-    username: root
-    password: root
+    # Connect to MySQL in the devcontainer
+    url: jdbc:mysql://localhost:3306/Game_Store_System?createDatabaseIfNotExist=true
+    username: gamestore_user
+    password: gamestore_pass
     driver-class-name: com.mysql.cj.jdbc.Driver
   
   jpa:

@@ -1,0 +1,35 @@
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - ..:/workspaces/final_year_project:cached
+    command: sleep infinity
+    network_mode: service:db
+    environment:
+      MYSQL_HOST: localhost
+      MYSQL_PORT: 3306
+      MYSQL_DATABASE: Game_Store_System
+      MYSQL_USER: gamestore_user
+      MYSQL_PASSWORD: gamestore_pass
+      MYSQL_ROOT_PASSWORD: rootpassword
+
+  db:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: Game_Store_System
+      MYSQL_USER: gamestore_user
+      MYSQL_PASSWORD: gamestore_pass
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./init-database.sh:/docker-entrypoint-initdb.d/init-database.sh
+    ports:
+      - "3306:3306"
+
+volumes:
+  mysql-data:
