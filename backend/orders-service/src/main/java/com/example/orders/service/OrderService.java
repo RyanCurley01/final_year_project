@@ -24,11 +24,7 @@ public class OrderService {
     }
 
     public List<Order> getOrdersByCustomerId(Long customerId) {
-        return orderRepository.findByCustomerId(customerId);
-    }
-
-    public List<Order> getOrdersByStatus(String orderStatus) {
-        return orderRepository.findByOrderStatus(orderStatus);
+        return orderRepository.findByAccountId(customerId);
     }
 
     @Transactional
@@ -41,17 +37,14 @@ public class OrderService {
         Order order = orderRepository.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Order not found with id: " + id));
 
-        if (orderDetails.getCustomerId() != null) {
-            order.setCustomerId(orderDetails.getCustomerId());
+        if (orderDetails.getAccountId() != null) {
+            order.setAccountId(orderDetails.getAccountId());
         }
         if (orderDetails.getOrderDate() != null) {
             order.setOrderDate(orderDetails.getOrderDate());
         }
         if (orderDetails.getTotalAmount() != null) {
             order.setTotalAmount(orderDetails.getTotalAmount());
-        }
-        if (orderDetails.getOrderStatus() != null) {
-            order.setOrderStatus(orderDetails.getOrderStatus());
         }
 
         return orderRepository.save(order);

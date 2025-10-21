@@ -19,14 +19,10 @@ public class ProductController {
 
     @GetMapping
     public ResponseEntity<List<Product>> getAllProducts(
-            @RequestParam(required = false) String type,
             @RequestParam(required = false) String genre,
             @RequestParam(required = false) String artist,
             @RequestParam(required = false) String platform) {
         
-        if (type != null) {
-            return ResponseEntity.ok(productService.getProductsByType(type));
-        }
         if (genre != null) {
             return ResponseEntity.ok(productService.getProductsByGenre(genre));
         }

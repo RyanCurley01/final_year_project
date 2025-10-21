@@ -19,14 +19,10 @@ public class OrderController {
 
     @GetMapping
     public ResponseEntity<List<Order>> getAllOrders(
-            @RequestParam(required = false) Long customerId,
-            @RequestParam(required = false) String status) {
+            @RequestParam(required = false) Long customerId) {
         
         if (customerId != null) {
             return ResponseEntity.ok(orderService.getOrdersByCustomerId(customerId));
-        }
-        if (status != null) {
-            return ResponseEntity.ok(orderService.getOrdersByStatus(status));
         }
         
         return ResponseEntity.ok(orderService.getAllOrders());

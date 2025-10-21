@@ -8,7 +8,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 @Entity
-@Table(name = "accounts")
+@Table(name = "Account")
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
@@ -16,27 +16,28 @@ public class Account {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Column(name = "AccountID")
     private Long id;
 
     @NotBlank(message = "Account name is required")
-    @Column(name = "account_name", nullable = false)
+    @Column(name = "AccountName", nullable = false, length = 10)
     private String accountName;
 
     @NotBlank(message = "Phone number is required")
-    @Column(name = "account_phone_number")
+    @Column(name = "AccountPhoneNumber", length = 10)
     private String accountPhoneNumber;
 
     @Email(message = "Email should be valid")
     @NotBlank(message = "Email is required")
-    @Column(name = "account_email_address", unique = true, nullable = false)
+    @Column(name = "AccountEmailAddress", unique = true, nullable = false, length = 20)
     private String accountEmailAddress;
 
     @NotBlank(message = "Password is required")
-    @Column(name = "account_password", nullable = false)
+    @Column(name = "AccountPassword", nullable = false, length = 10)
     private String accountPassword;
 
     @NotBlank(message = "Account type is required")
-    @Column(name = "account_type", nullable = false)
+    @Column(name = "AccountType", nullable = false)
     private String accountType; // Manager, Employee, Customer
 
     @Column(name = "created_at")

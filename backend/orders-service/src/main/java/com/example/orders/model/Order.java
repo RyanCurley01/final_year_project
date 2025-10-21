@@ -11,7 +11,7 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "orders")
+@Table(name = "Orders")
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
@@ -19,23 +19,20 @@ public class Order {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Column(name = "OrderID")
     private Long id;
 
-    @NotNull(message = "Customer ID is required")
-    @Column(name = "customer_id", nullable = false)
-    private Long customerId;
+    @NotNull(message = "Account ID is required")
+    @Column(name = "AccountID", nullable = false)
+    private Long accountId;
 
-    @NotNull(message = "Order date is required")
-    @Column(name = "order_date", nullable = false)
+    @Column(name = "orderDate")
     private LocalDateTime orderDate;
 
     @NotNull(message = "Total amount is required")
     @Positive(message = "Total amount must be positive")
-    @Column(name = "total_amount", nullable = false, precision = 10, scale = 2)
+    @Column(name = "TotalAmount", nullable = false, precision = 10, scale = 2)
     private BigDecimal totalAmount;
-
-    @Column(name = "order_status")
-    private String orderStatus; // PENDING, PROCESSING, COMPLETED, CANCELLED
 
     @Column(name = "created_at")
     private LocalDateTime createdAt;
@@ -47,8 +44,8 @@ public class Order {
     protected void onCreate() {
         createdAt = LocalDateTime.now();
         updatedAt = LocalDateTime.now();
-        if (orderStatus == null) {
-            orderStatus = "PENDING";
+        if (orderDate == null) {
+            orderDate = LocalDateTime.now();
         }
     }
 

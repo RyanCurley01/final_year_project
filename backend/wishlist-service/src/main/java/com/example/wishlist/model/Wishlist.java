@@ -9,7 +9,7 @@ import lombok.NoArgsConstructor;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "wishlist")
+@Table(name = "GameWishlist")
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
@@ -17,18 +17,16 @@ public class Wishlist {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Column(name = "WishlistID")
     private Long id;
 
-    @NotNull(message = "Customer ID is required")
-    @Column(name = "customer_id", nullable = false)
-    private Long customerId;
+    @NotNull(message = "Account ID is required")
+    @Column(name = "AccountID", nullable = false)
+    private Long accountId;
 
     @NotNull(message = "Product ID is required")
-    @Column(name = "product_id", nullable = false)
+    @Column(name = "ProductID", nullable = false)
     private Long productId;
-
-    @Column(name = "added_date")
-    private LocalDateTime addedDate;
 
     @Column(name = "created_at")
     private LocalDateTime createdAt;
@@ -40,9 +38,6 @@ public class Wishlist {
     protected void onCreate() {
         createdAt = LocalDateTime.now();
         updatedAt = LocalDateTime.now();
-        if (addedDate == null) {
-            addedDate = LocalDateTime.now();
-        }
     }
 
     @PreUpdate

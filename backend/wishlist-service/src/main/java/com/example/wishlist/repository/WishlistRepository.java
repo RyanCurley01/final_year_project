@@ -9,7 +9,7 @@ import java.util.List;
 @Repository
 public interface WishlistRepository extends JpaRepository<Wishlist, Long> {
     
-    List<Wishlist> findByCustomerId(Long customerId);
+    List<Wishlist> findByAccountId(Long accountId);
     
     List<Wishlist> findByProductId(Long productId);
 }

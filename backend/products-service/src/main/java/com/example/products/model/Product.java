@@ -1,9 +1,6 @@
 package com.example.products.model;
 
 import jakarta.persistence.*;
-import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.NotNull;
-import jakarta.validation.constraints.Positive;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -12,7 +9,7 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "products")
+@Table(name = "Products")
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
@@ -20,43 +17,38 @@ public class Product {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Column(name = "ProductID")
     private Long id;
 
-    @NotBlank(message = "Product type is required")
-    @Column(name = "product_type", nullable = false)
-    private String productType; // "GAME" or "ALBUM"
-
-    @Column(name = "game_title")
+    @Column(name = "GameTitle", length = 10)
     private String gameTitle;
 
-    @Column(name = "album_title")
+    @Column(name = "AlbumTitle", length = 10)
     private String albumTitle;
 
-    @Column(name = "platform")
+    @Column(name = "Platform", length = 10)
     private String platform; // For games: PC, PS5, Xbox, etc.
 
-    @Column(name = "artist")
+    @Column(name = "GamePrice", precision = 4, scale = 2)
+    private BigDecimal gamePrice;
+
+    @Column(name = "AlbumPrice", precision = 4, scale = 2)
+    private BigDecimal albumPrice;
+
+    @Column(name = "artist", length = 7)
     private String artist; // For albums
 
-    @Column(name = "genre")
+    @Column(name = "genre", length = 20)
     private String genre;
 
-    @NotNull(message = "Price is required")
-    @Positive(message = "Price must be positive")
-    @Column(name = "price", nullable = false, precision = 10, scale = 2)
-    private BigDecimal price;
-
-    @Column(name = "file_url")
+    @Column(name = "file_url", length = 255)
     private String fileUrl; // URL to download full game/album
 
-    @Column(name = "preview_url")
+    @Column(name = "preview_url", length = 255)
     private String previewUrl; // URL for preview/demo
 
-    @Column(name = "stock_quantity")
+    @Column(name = "StockQuantity")
     private Integer stockQuantity;
-
-    @Column(name = "description", columnDefinition = "TEXT")
-    private String description;
 
     @Column(name = "created_at")
     private LocalDateTime createdAt;

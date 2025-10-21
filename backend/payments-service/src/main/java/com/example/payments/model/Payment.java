@@ -11,7 +11,7 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "payments")
+@Table(name = "Payments")
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
@@ -19,37 +19,32 @@ public class Payment {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Column(name = "PaymentID")
     private Long id;
 
     @NotNull(message = "Order ID is required")
-    @Column(name = "order_id", nullable = false)
+    @Column(name = "OrderID", nullable = false)
     private Long orderId;
 
     @NotNull(message = "Product ID is required")
-    @Column(name = "product_id", nullable = false)
+    @Column(name = "ProductID", nullable = false)
     private Long productId;
 
-    @NotNull(message = "Customer ID is required")
-    @Column(name = "customer_id", nullable = false)
-    private Long customerId;
+    @NotNull(message = "Account ID is required")
+    @Column(name = "AccountID", nullable = false)
+    private Long accountId;
 
     @NotNull(message = "Payment amount is required")
     @Positive(message = "Payment amount must be positive")
-    @Column(name = "payment_amount", nullable = false, precision = 10, scale = 2)
+    @Column(name = "PaymentAmount", nullable = false, precision = 10, scale = 2)
     private BigDecimal paymentAmount;
 
     @NotNull(message = "Payment status is required")
-    @Column(name = "payment_status", nullable = false)
-    private String paymentStatus; // PENDING, COMPLETED, FAILED, REFUNDED
+    @Column(name = "PaymentStatus", nullable = false)
+    private String paymentStatus; // COMPLETED, UNCOMPLETED
 
-    @Column(name = "payment_method")
-    private String paymentMethod; // CREDIT_CARD, PAYPAL, etc.
-
-    @Column(name = "transaction_id")
-    private String transactionId;
-
-    @Column(name = "payment_date")
-    private LocalDateTime paymentDate;
+    @Column(name = "PaymentDateAndTime")
+    private LocalDateTime paymentDateAndTime;
 
     @Column(name = "created_at")
     private LocalDateTime createdAt;
@@ -61,8 +56,11 @@ public class Payment {
     protected void onCreate() {
         createdAt = LocalDateTime.now();
         updatedAt = LocalDateTime.now();
+        if (paymentDateAndTime == null) {
+            paymentDateAndTime = LocalDateTime.now();
+        }
         if (paymentStatus == null) {
-            paymentStatus = "PENDING";
+            paymentStatus = "UNCOMPLETED";
         }
     }
 

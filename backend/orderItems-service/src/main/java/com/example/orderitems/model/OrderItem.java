@@ -11,7 +11,7 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "order_items")
+@Table(name = "Order_Items")
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
@@ -19,24 +19,25 @@ public class OrderItem {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Column(name = "OrderItemID")
     private Long id;
 
     @NotNull(message = "Order ID is required")
-    @Column(name = "order_id", nullable = false)
+    @Column(name = "OrderID", nullable = false)
     private Long orderId;
 
     @NotNull(message = "Product ID is required")
-    @Column(name = "product_id", nullable = false)
+    @Column(name = "ProductID", nullable = false)
     private Long productId;
 
     @NotNull(message = "Quantity is required")
     @Positive(message = "Quantity must be positive")
-    @Column(name = "quantity", nullable = false)
+    @Column(name = "Quantity", nullable = false)
     private Integer quantity;
 
     @NotNull(message = "Unit price is required")
     @Positive(message = "Unit price must be positive")
-    @Column(name = "unit_price", nullable = false, precision = 10, scale = 2)
+    @Column(name = "UnitPrice", nullable = false, precision = 10, scale = 2)
     private BigDecimal unitPrice;
 
     @Column(name = "created_at")

@@ -23,10 +23,6 @@ public class ProductService {
         return productRepository.findById(id);
     }
 
-    public List<Product> getProductsByType(String productType) {
-        return productRepository.findByProductType(productType);
-    }
-
     public List<Product> getProductsByGenre(String genre) {
         return productRepository.findByGenre(genre);
     }
@@ -49,9 +45,6 @@ public class ProductService {
         Product product = productRepository.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Product not found with id: " + id));
 
-        if (productDetails.getProductType() != null) {
-            product.setProductType(productDetails.getProductType());
-        }
         if (productDetails.getGameTitle() != null) {
             product.setGameTitle(productDetails.getGameTitle());
         }
@@ -67,8 +60,11 @@ public class ProductService {
         if (productDetails.getGenre() != null) {
             product.setGenre(productDetails.getGenre());
         }
-        if (productDetails.getPrice() != null) {
-            product.setPrice(productDetails.getPrice());
+        if (productDetails.getGamePrice() != null) {
+            product.setGamePrice(productDetails.getGamePrice());
+        }
+        if (productDetails.getAlbumPrice() != null) {
+            product.setAlbumPrice(productDetails.getAlbumPrice());
         }
         if (productDetails.getFileUrl() != null) {
             product.setFileUrl(productDetails.getFileUrl());
@@ -78,9 +74,6 @@ public class ProductService {
         }
         if (productDetails.getStockQuantity() != null) {
             product.setStockQuantity(productDetails.getStockQuantity());
-        }
-        if (productDetails.getDescription() != null) {
-            product.setDescription(productDetails.getDescription());
         }
 
         return productRepository.save(product);

@@ -10,7 +10,7 @@ import lombok.NoArgsConstructor;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "stock")
+@Table(name = "Stock")
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
@@ -18,22 +18,17 @@ public class Stock {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Column(name = "StockID")
     private Long id;
 
     @NotNull(message = "Product ID is required")
-    @Column(name = "product_id", nullable = false, unique = true)
+    @Column(name = "ProductID", nullable = false)
     private Long productId;
 
     @NotNull(message = "Stock quantity is required")
     @PositiveOrZero(message = "Stock quantity cannot be negative")
-    @Column(name = "stock_quantity", nullable = false)
+    @Column(name = "StockQuantity", nullable = false)
     private Integer stockQuantity;
-
-    @Column(name = "reorder_level")
-    private Integer reorderLevel;
-
-    @Column(name = "last_restocked_date")
-    private LocalDateTime lastRestockedDate;
 
     @Column(name = "created_at")
     private LocalDateTime createdAt;

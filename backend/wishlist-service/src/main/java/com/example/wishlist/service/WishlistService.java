@@ -24,7 +24,7 @@ public class WishlistService {
     }
 
     public List<Wishlist> getWishlistsByCustomerId(Long customerId) {
-        return wishlistRepository.findByCustomerId(customerId);
+        return wishlistRepository.findByAccountId(customerId);
     }
 
     public List<Wishlist> getWishlistsByProductId(Long productId) {
@@ -41,14 +41,11 @@ public class WishlistService {
         Wishlist wishlist = wishlistRepository.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Wishlist not found with id: " + id));
 
-        if (wishlistDetails.getCustomerId() != null) {
-            wishlist.setCustomerId(wishlistDetails.getCustomerId());
+        if (wishlistDetails.getAccountId() != null) {
+            wishlist.setAccountId(wishlistDetails.getAccountId());
         }
         if (wishlistDetails.getProductId() != null) {
             wishlist.setProductId(wishlistDetails.getProductId());
-        }
-        if (wishlistDetails.getAddedDate() != null) {
-            wishlist.setAddedDate(wishlistDetails.getAddedDate());
         }
 
         return wishlistRepository.save(wishlist);

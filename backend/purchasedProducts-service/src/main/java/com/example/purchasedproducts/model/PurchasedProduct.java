@@ -9,7 +9,7 @@ import lombok.NoArgsConstructor;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "purchased_products")
+@Table(name = "Purchased_Products")
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
@@ -17,18 +17,16 @@ public class PurchasedProduct {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Column(name = "PurchasedProductsID")
     private Long id;
 
     @NotNull(message = "Order item ID is required")
-    @Column(name = "order_item_id", nullable = false)
+    @Column(name = "OrderItemID", nullable = false)
     private Long orderItemId;
 
     @NotNull(message = "Product ID is required")
-    @Column(name = "product_id", nullable = false)
+    @Column(name = "ProductID", nullable = false)
     private Long productId;
-
-    @Column(name = "purchased_date")
-    private LocalDateTime purchasedDate;
 
     @Column(name = "created_at")
     private LocalDateTime createdAt;
@@ -40,9 +38,6 @@ public class PurchasedProduct {
     protected void onCreate() {
         createdAt = LocalDateTime.now();
         updatedAt = LocalDateTime.now();
-        if (purchasedDate == null) {
-            purchasedDate = LocalDateTime.now();
-        }
     }
 
     @PreUpdate

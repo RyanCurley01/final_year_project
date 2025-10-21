@@ -28,7 +28,7 @@ public class PaymentService {
     }
 
     public List<Payment> getPaymentsByCustomerId(Long customerId) {
-        return paymentRepository.findByCustomerId(customerId);
+        return paymentRepository.findByAccountId(customerId);
     }
 
     public List<Payment> getPaymentsByStatus(String paymentStatus) {
@@ -51,8 +51,8 @@ public class PaymentService {
         if (paymentDetails.getProductId() != null) {
             payment.setProductId(paymentDetails.getProductId());
         }
-        if (paymentDetails.getCustomerId() != null) {
-            payment.setCustomerId(paymentDetails.getCustomerId());
+        if (paymentDetails.getAccountId() != null) {
+            payment.setAccountId(paymentDetails.getAccountId());
         }
         if (paymentDetails.getPaymentAmount() != null) {
             payment.setPaymentAmount(paymentDetails.getPaymentAmount());
@@ -60,14 +60,8 @@ public class PaymentService {
         if (paymentDetails.getPaymentStatus() != null) {
             payment.setPaymentStatus(paymentDetails.getPaymentStatus());
         }
-        if (paymentDetails.getPaymentMethod() != null) {
-            payment.setPaymentMethod(paymentDetails.getPaymentMethod());
-        }
-        if (paymentDetails.getTransactionId() != null) {
-            payment.setTransactionId(paymentDetails.getTransactionId());
-        }
-        if (paymentDetails.getPaymentDate() != null) {
-            payment.setPaymentDate(paymentDetails.getPaymentDate());
+        if (paymentDetails.getPaymentDateAndTime() != null) {
+            payment.setPaymentDateAndTime(paymentDetails.getPaymentDateAndTime());
         }
 
         return paymentRepository.save(payment);
