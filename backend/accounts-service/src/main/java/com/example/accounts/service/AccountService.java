@@ -1,5 +1,6 @@
 package com.example.accounts.service;
 
+import com.example.accounts.dto.LoginResponse;
 import com.example.accounts.model.Account;
 import com.example.accounts.repository.AccountRepository;
 import lombok.RequiredArgsConstructor;
@@ -73,5 +74,29 @@ public class AccountService {
             throw new IllegalArgumentException("Account not found with id: " + id);
         }
         accountRepository.deleteById(id);
+    }
+
+    public LoginResponse authenticateUser(String email, String password) {
+        Optional<Account> accountOptional = accountRepository.findByAccountEmailAddress(email);
+        
+        if (accountOptional.isEmpty()) {
+            return new LoginResponse(false, "User not found", null, null, null, null);
+        }
+        
+        Account account = accountOptional.get();
+        
+        // Check if password matches
+        if (passwordEncoder.matches(password, account.getAccountPassword())) {
+            return new LoginResponse(
+                true, 
+                "Login successful", 
+                account.getId(),
+                account.getAccountName(),
+                account.getAccountType(),
+                account.getAccountEmailAddress()
+            );
+        } else {
+            return new LoginResponse(false, "Invalid password", null, null, null, null);
+        }
     }
 }

@@ -1,5 +1,6 @@
 package com.example.accounts.controller;
 
+import com.example.accounts.dto.LoginResponse;
 import com.example.accounts.model.Account;
 import com.example.accounts.service.AccountService;
 import jakarta.validation.Valid;
@@ -25,6 +26,20 @@ public class AccountController {
             return ResponseEntity.ok(accountService.getAccountsByType(accountType));
         }
         return ResponseEntity.ok(accountService.getAllAccounts());
+    }
+
+    @GetMapping("/login")
+    public ResponseEntity<LoginResponse> login(
+            @RequestParam String email, 
+            @RequestParam String password) {
+        
+        LoginResponse response = accountService.authenticateUser(email, password);
+        
+        if (response.isSuccess()) {
+            return ResponseEntity.ok(response);
+        } else {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(response);
+        }
     }
 
     @GetMapping("/{id}")
