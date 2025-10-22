@@ -11,7 +11,6 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.http.SessionCreationPolicy;
-import org.springframework.security.config.annotation.web.configuration.WebSecurityCustomizer;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import lombok.RequiredArgsConstructor;
 
@@ -28,24 +27,22 @@ public class SecurityConfig
         return new BCryptPasswordEncoder();
     }
 
-    // To bypass Spring Security filters for /api/accounts/** endpoints
-    @Bean
-    public WebSecurityCustomizer webSecurityCustomizer() {
-        return (web) -> web.ignoring()
-            .requestMatchers("/api/accounts/**");
-    }
-
     // Defines security rules as to what endpoints a manager, employee or customer have access to
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception
     {
         http
             .csrf(csrf -> csrf.disable())
+            .cors(cors -> cors.disable())
             .authorizeHttpRequests(auth -> auth
+                .requestMatchers("/api/accounts/**").permitAll()
                 .anyRequest().authenticated()
             )
             .sessionManagement(session -> session
                 .sessionCreationPolicy(SessionCreationPolicy.STATELESS)
+            )
+            .headers(headers -> headers
+                .frameOptions(frameOptions -> frameOptions.disable())
             );
 
         return http.build();

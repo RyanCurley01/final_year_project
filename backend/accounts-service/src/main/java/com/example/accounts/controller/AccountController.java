@@ -1,5 +1,6 @@
 package com.example.accounts.controller;
 
+import com.example.accounts.dto.LoginRequest;
 import com.example.accounts.dto.LoginResponse;
 import com.example.accounts.model.Account;
 import com.example.accounts.service.AccountService;
@@ -18,7 +19,7 @@ public class AccountController {
 
     private final AccountService accountService;
 
-    @GetMapping
+    @GetMapping("/getAllAccounts")
     public ResponseEntity<List<Account>> getAllAccounts(
             @RequestParam(required = false) String accountType) {
         
@@ -28,12 +29,13 @@ public class AccountController {
         return ResponseEntity.ok(accountService.getAllAccounts());
     }
 
-    @GetMapping("/login")
-    public ResponseEntity<LoginResponse> login(
-            @RequestParam String email, 
-            @RequestParam String password) {
-        
-        LoginResponse response = accountService.authenticateUser(email, password);
+    @PostMapping("/login")
+    public ResponseEntity<LoginResponse> login(@Valid @RequestBody LoginRequest request)
+    {   
+        LoginResponse response = accountService.authenticateUser(
+            request.getEmail(), 
+            request.getPassword()
+        );
         
         if (response.isSuccess()) {
             return ResponseEntity.ok(response);
