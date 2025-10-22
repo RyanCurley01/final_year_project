@@ -10,6 +10,8 @@ import org.springframework.security.config.annotation.web.configuration.EnableWe
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 
 import org.springframework.security.config.Customizer;
+import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.config.annotation.web.configuration.WebSecurityCustomizer;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import lombok.RequiredArgsConstructor;
 
@@ -26,6 +28,13 @@ public class SecurityConfig
         return new BCryptPasswordEncoder();
     }
 
+    // To bypass Spring Security filters for /api/accounts/** endpoints
+    @Bean
+    public WebSecurityCustomizer webSecurityCustomizer() {
+        return (web) -> web.ignoring()
+            .requestMatchers("/api/accounts/**");
+    }
+
     // Defines security rules as to what endpoints a manager, employee or customer have access to
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception
@@ -33,17 +42,11 @@ public class SecurityConfig
         http
             .csrf(csrf -> csrf.disable())
             .authorizeHttpRequests(auth -> auth
-                .requestMatchers("/api/accounts/register", "/api/accounts/login").permitAll()
-
-                .requestMatchers("/api/accounts/manager/**").hasRole("MANAGER")
-
-                .requestMatchers("/api/accounts/employee/**").hasAnyRole("MANAGER", "EMPLOYEE")
-
-                .requestMatchers("/api/accounts/customer/**").hasAnyRole("MANAGER", "EMPLOYEE", "CUSTOMER")
-
                 .anyRequest().authenticated()
             )
-            .httpBasic(Customizer.withDefaults());
+            .sessionManagement(session -> session
+                .sessionCreationPolicy(SessionCreationPolicy.STATELESS)
+            );
 
         return http.build();
     }

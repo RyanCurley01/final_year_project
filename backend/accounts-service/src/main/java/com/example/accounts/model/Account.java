@@ -20,40 +20,23 @@ public class Account {
     private Long id;
 
     @NotBlank(message = "Account name is required")
-    @Column(name = "AccountName", nullable = false, length = 10)
+    @Column(name = "AccountName", nullable = false, length = 100)
     private String accountName;
 
     @NotBlank(message = "Phone number is required")
-    @Column(name = "AccountPhoneNumber", length = 10)
+    @Column(name = "AccountPhoneNumber", length = 15)
     private String accountPhoneNumber;
 
     @Email(message = "Email should be valid")
     @NotBlank(message = "Email is required")
-    @Column(name = "AccountEmailAddress", unique = true, nullable = false, length = 20)
+    @Column(name = "AccountEmailAddress", unique = true, nullable = false, length = 100)
     private String accountEmailAddress;
 
     @NotBlank(message = "Password is required")
-    @Column(name = "AccountPassword", nullable = false, length = 10)
+    @Column(name = "AccountPassword", nullable = false, length = 255)
     private String accountPassword;
 
     @NotBlank(message = "Account type is required")
     @Column(name = "AccountType", nullable = false)
     private String accountType; // Manager, Employee, Customer
-
-    @Column(name = "created_at")
-    private java.time.LocalDateTime createdAt;
-
-    @Column(name = "updated_at")
-    private java.time.LocalDateTime updatedAt;
-
-    @PrePersist
-    protected void onCreate() {
-        createdAt = java.time.LocalDateTime.now();
-        updatedAt = java.time.LocalDateTime.now();
-    }
-
-    @PreUpdate
-    protected void onUpdate() {
-        updatedAt = java.time.LocalDateTime.now();
-    }
 }
