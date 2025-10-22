@@ -1,6 +1,7 @@
 package com.example.accounts.config;
 
 import com.example.accounts.service.CustomUserDetailsService;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.context.annotation.Bean;
@@ -35,9 +36,22 @@ public class SecurityConfig
             .csrf(csrf -> csrf.disable())
             .cors(cors -> cors.disable())
             .authorizeHttpRequests(auth -> auth
-                .requestMatchers("/api/accounts/**").permitAll()
+                // Public endpoints
+                .requestMatchers(HttpMethod.POST, "/api/accounts/login").permitAll()
+                .requestMatchers(HttpMethod.POST, "/api/accounts").permitAll() // Register new account
+                
+                // Manager-only endpoints 
+                .requestMatchers(HttpMethod.GET, "/api/accounts/getAllAccounts").hasRole("MANAGER")
+                .requestMatchers(HttpMethod.DELETE, "/api/accounts/**").hasRole("MANAGER")
+
+                // Manager and Employee only endpoints 
+                .requestMatchers(HttpMethod.GET, "/api/accounts/{id}").hasAnyRole("MANAGER", "EMPLOYEE")
+                .requestMatchers(HttpMethod.PUT, "/api/accounts/{id}").hasAnyRole("MANAGER", "EMPLOYEE")
+                
+                // All other requests must be authenticated
                 .anyRequest().authenticated()
             )
+            .httpBasic(Customizer.withDefaults()) // Enable HTTP Basic Authentication
             .sessionManagement(session -> session
                 .sessionCreationPolicy(SessionCreationPolicy.STATELESS)
             )
@@ -46,10 +60,5 @@ public class SecurityConfig
             );
 
         return http.build();
-    }
-
-    @Bean
-    public UserDetailsService userDetailsService() {
-        return customUserDetailsService;
     }
 }

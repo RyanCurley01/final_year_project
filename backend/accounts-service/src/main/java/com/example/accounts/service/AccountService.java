@@ -1,5 +1,6 @@
 package com.example.accounts.service;
 
+import com.example.accounts.dto.AccountResponse;
 import com.example.accounts.dto.LoginResponse;
 import com.example.accounts.model.Account;
 import com.example.accounts.repository.AccountRepository;
@@ -10,6 +11,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -30,6 +32,24 @@ public class AccountService {
         return accountRepository.findById(id);
     }
 
+    // DTO conversion methods
+    public List<AccountResponse> getAllAccountsResponse() {
+        return accountRepository.findAll().stream()
+                .map(AccountResponse::fromAccount)
+                .collect(Collectors.toList());
+    }
+
+    public List<AccountResponse> getAccountsByTypeResponse(String accountType) {
+        return accountRepository.findByAccountType(accountType).stream()
+                .map(AccountResponse::fromAccount)
+                .collect(Collectors.toList());
+    }
+
+    public Optional<AccountResponse> getAccountByIdResponse(Long id) {
+        return accountRepository.findById(id)
+                .map(AccountResponse::fromAccount);
+    }
+
     public Optional<Account> getAccountByEmail(String email) {
         return accountRepository.findByAccountEmailAddress(email);
     }
@@ -42,6 +62,12 @@ public class AccountService {
         // Hash the password before saving
         account.setAccountPassword(passwordEncoder.encode(account.getAccountPassword()));
         return accountRepository.save(account);
+    }
+
+    @Transactional
+    public AccountResponse createAccountResponse(Account account) {
+        Account savedAccount = createAccount(account);
+        return AccountResponse.fromAccount(savedAccount);
     }
 
     @Transactional
@@ -66,6 +92,12 @@ public class AccountService {
         }
 
         return accountRepository.save(account);
+    }
+
+    @Transactional
+    public AccountResponse updateAccountResponse(Long id, Account accountDetails) {
+        Account updatedAccount = updateAccount(id, accountDetails);
+        return AccountResponse.fromAccount(updatedAccount);
     }
 
     @Transactional

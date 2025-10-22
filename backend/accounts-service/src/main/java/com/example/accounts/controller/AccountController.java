@@ -1,5 +1,6 @@
 package com.example.accounts.controller;
 
+import com.example.accounts.dto.AccountResponse;
 import com.example.accounts.dto.LoginRequest;
 import com.example.accounts.dto.LoginResponse;
 import com.example.accounts.model.Account;
@@ -20,13 +21,13 @@ public class AccountController {
     private final AccountService accountService;
 
     @GetMapping("/getAllAccounts")
-    public ResponseEntity<List<Account>> getAllAccounts(
+    public ResponseEntity<List<AccountResponse>> getAllAccounts(
             @RequestParam(required = false) String accountType) {
         
         if (accountType != null && !accountType.isEmpty()) {
-            return ResponseEntity.ok(accountService.getAccountsByType(accountType));
+            return ResponseEntity.ok(accountService.getAccountsByTypeResponse(accountType));
         }
-        return ResponseEntity.ok(accountService.getAllAccounts());
+        return ResponseEntity.ok(accountService.getAllAccountsResponse());
     }
 
     @PostMapping("/login")
@@ -45,16 +46,16 @@ public class AccountController {
     }
 
     @GetMapping("/{id}")
-    public ResponseEntity<Account> getAccountById(@PathVariable Long id) {
-        return accountService.getAccountById(id)
+    public ResponseEntity<AccountResponse> getAccountById(@PathVariable Long id) {
+        return accountService.getAccountByIdResponse(id)
                 .map(ResponseEntity::ok)
                 .orElse(ResponseEntity.notFound().build());
     }
 
     @PostMapping
-    public ResponseEntity<Account> createAccount(@Valid @RequestBody Account account) {
+    public ResponseEntity<AccountResponse> createAccount(@Valid @RequestBody Account account) {
         try {
-            Account createdAccount = accountService.createAccount(account);
+            AccountResponse createdAccount = accountService.createAccountResponse(account);
             return ResponseEntity.status(HttpStatus.CREATED).body(createdAccount);
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().build();
@@ -62,11 +63,11 @@ public class AccountController {
     }
 
     @PutMapping("/{id}")
-    public ResponseEntity<Account> updateAccount(
+    public ResponseEntity<AccountResponse> updateAccount(
             @PathVariable Long id,
             @RequestBody Account accountDetails) {
         try {
-            Account updatedAccount = accountService.updateAccount(id, accountDetails);
+            AccountResponse updatedAccount = accountService.updateAccountResponse(id, accountDetails);
             return ResponseEntity.ok(updatedAccount);
         } catch (IllegalArgumentException e) {
             return ResponseEntity.notFound().build();
