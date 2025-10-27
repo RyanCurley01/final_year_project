@@ -23,8 +23,8 @@ public class CustomerSummaryService {
         return customerSummaryRepository.findById(id);
     }
 
-    public List<CustomerSummary> getCustomerSummariesByCustomerId(Long customerId) {
-        return customerSummaryRepository.findByCustomerId(customerId);
+    public List<CustomerSummary> getCustomerSummariesByAccountId(Long accountId) {
+        return customerSummaryRepository.findByAccountId(accountId);
     }
 
     public List<CustomerSummary> getCustomerSummariesByProductId(Long productId) {

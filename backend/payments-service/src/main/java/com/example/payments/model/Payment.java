@@ -46,26 +46,13 @@ public class Payment {
     @Column(name = "PaymentDateAndTime")
     private LocalDateTime paymentDateAndTime;
 
-    @Column(name = "created_at")
-    private LocalDateTime createdAt;
-
-    @Column(name = "updated_at")
-    private LocalDateTime updatedAt;
-
     @PrePersist
     protected void onCreate() {
-        createdAt = LocalDateTime.now();
-        updatedAt = LocalDateTime.now();
         if (paymentDateAndTime == null) {
             paymentDateAndTime = LocalDateTime.now();
         }
         if (paymentStatus == null) {
             paymentStatus = "UNCOMPLETED";
         }
-    }
-
-    @PreUpdate
-    protected void onUpdate() {
-        updatedAt = LocalDateTime.now();
     }
 }

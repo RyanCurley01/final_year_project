@@ -21,6 +21,7 @@ import lombok.RequiredArgsConstructor;
 public class SecurityConfig
 {
     private final CustomUserDetailsService customUserDetailsService;
+    
     // To return hashed password
     @Bean
     public PasswordEncoder passwordEncoder()

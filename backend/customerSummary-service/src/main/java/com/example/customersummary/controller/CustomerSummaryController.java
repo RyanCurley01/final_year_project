@@ -17,14 +17,14 @@ public class CustomerSummaryController {
 
     private final CustomerSummaryService customerSummaryService;
 
-    @GetMapping
+    @GetMapping("/getAllCustomerSummaries")
     public ResponseEntity<List<CustomerSummary>> getAllCustomerSummaries(
-            @RequestParam(required = false) Long customerId,
+            @RequestParam(required = false) Long accountId,
             @RequestParam(required = false) Long productId,
             @RequestParam(required = false) Long orderId) {
         
-        if (customerId != null) {
-            return ResponseEntity.ok(customerSummaryService.getCustomerSummariesByCustomerId(customerId));
+        if (accountId != null) {
+            return ResponseEntity.ok(customerSummaryService.getCustomerSummariesByAccountId(accountId));
         }
         if (productId != null) {
             return ResponseEntity.ok(customerSummaryService.getCustomerSummariesByProductId(productId));
@@ -41,21 +41,5 @@ public class CustomerSummaryController {
         return customerSummaryService.getCustomerSummaryById(id)
                 .map(ResponseEntity::ok)
                 .orElse(ResponseEntity.notFound().build());
-    }
-
-    @PostMapping
-    public ResponseEntity<CustomerSummary> createCustomerSummary(@Valid @RequestBody CustomerSummary customerSummary) {
-        CustomerSummary created = customerSummaryService.createCustomerSummary(customerSummary);
-        return ResponseEntity.status(HttpStatus.CREATED).body(created);
-    }
-
-    @DeleteMapping("/{id}")
-    public ResponseEntity<Void> deleteCustomerSummary(@PathVariable Long id) {
-        try {
-            customerSummaryService.deleteCustomerSummary(id);
-            return ResponseEntity.noContent().build();
-        } catch (IllegalArgumentException e) {
-            return ResponseEntity.notFound().build();
-        }
     }
 }
