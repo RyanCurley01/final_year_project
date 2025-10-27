@@ -13,12 +13,12 @@ mysql -u root -p"${MYSQL_ROOT_PASSWORD}" <<-EOSQL
 
     -- Account Table
     CREATE TABLE IF NOT EXISTS Accounts (
-        AccountID INT AUTO_INCREMENT PRIMARY KEY,
-        AccountName VARCHAR(100),
-        AccountPhoneNumber VARCHAR(15),
-        AccountEmailAddress VARCHAR(100),
-        AccountPassword VARCHAR(255),
-        AccountType ENUM('Manager', 'Employee', 'Customer')
+        AccountID BIGINT AUTO_INCREMENT PRIMARY KEY,
+        AccountName VARCHAR(255) NOT NULL,
+        AccountPhoneNumber VARCHAR(255),
+        AccountEmailAddress VARCHAR(255) NOT NULL,
+        AccountPassword VARCHAR(255) NOT NULL,
+        AccountType VARCHAR(255) NOT NULL
     );
 
     -- Products Table (must be created before Orders, Stock, etc.)
@@ -39,7 +39,7 @@ mysql -u root -p"${MYSQL_ROOT_PASSWORD}" <<-EOSQL
     -- Orders Table
     CREATE TABLE IF NOT EXISTS Orders (
         OrderID INT AUTO_INCREMENT PRIMARY KEY,
-        AccountID INT,
+        AccountID BIGINT,
         orderDate DATETIME DEFAULT CURRENT_TIMESTAMP,
         TotalAmount DECIMAL(10, 2),
         FOREIGN KEY(AccountID) REFERENCES Accounts(AccountID)
@@ -61,7 +61,7 @@ mysql -u root -p"${MYSQL_ROOT_PASSWORD}" <<-EOSQL
         PaymentID INT AUTO_INCREMENT PRIMARY KEY,
         OrderID INT,
         ProductID INT,
-        AccountID INT,
+        AccountID BIGINT,
         PaymentAmount DECIMAL(10, 2),
         PaymentStatus ENUM('COMPLETED', 'UNCOMPLETED'),
         PaymentDateAndTime DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -72,10 +72,10 @@ mysql -u root -p"${MYSQL_ROOT_PASSWORD}" <<-EOSQL
 
     -- CustomerSummary Table
     CREATE TABLE IF NOT EXISTS CustomerSummary (
-        CustomerSummaryID INT AUTO_INCREMENT PRIMARY KEY,
-        AccountID INT,
-        ProductID INT,
-        OrderID INT,
+        CustomerSummaryID BIGINT AUTO_INCREMENT PRIMARY KEY,
+        AccountID BIGINT NOT NULL,
+        ProductID INT NOT NULL,
+        OrderID INT NOT NULL,
         FOREIGN KEY(AccountID) REFERENCES Accounts(AccountID),
         FOREIGN KEY(OrderID) REFERENCES Orders(OrderID),
         FOREIGN KEY(ProductID) REFERENCES Products(ProductID)
@@ -110,7 +110,7 @@ mysql -u root -p"${MYSQL_ROOT_PASSWORD}" <<-EOSQL
     -- GameWishlist Table
     CREATE TABLE IF NOT EXISTS GameWishlist (
         WishlistID INT AUTO_INCREMENT PRIMARY KEY,
-        AccountID INT,
+        AccountID BIGINT,
         ProductID INT,
         FOREIGN KEY(AccountID) REFERENCES Accounts(AccountID),
         FOREIGN KEY(ProductID) REFERENCES Products(ProductID)
@@ -121,17 +121,18 @@ mysql -u root -p"${MYSQL_ROOT_PASSWORD}" <<-EOSQL
     -- ============================================
 
     -- Insert Accounts (Managers, Employees, Customers)
+    -- All passwords are BCrypt hashed version of 'password123'
     INSERT INTO Accounts (AccountName, AccountPhoneNumber, AccountEmailAddress, AccountPassword, AccountType) VALUES
-    ('John Smith', '5551234567', 'john.smith@store.com', 'password123', 'Manager'),
-    ('Sarah Johnson', '5552345678', 'sarah.j@store.com', 'password123', 'Employee'),
-    ('Mike Wilson', '5553456789', 'mike.w@store.com', 'password123', 'Employee'),
-    ('Alice Brown', '5554567890', 'alice.b@gmail.com', 'password123', 'Customer'),
-    ('Bob Davis', '5555678901', 'bob.d@gmail.com', 'password123', 'Customer'),
-    ('Carol White', '5556789012', 'carol.w@gmail.com', 'password123', 'Customer'),
-    ('David Lee', '5557890123', 'david.l@gmail.com', 'password123', 'Customer'),
-    ('Emma Garcia', '5558901234', 'emma.g@gmail.com', 'password123', 'Customer'),
-    ('Frank Martinez', '5559012345', 'frank.m@gmail.com', 'password123', 'Customer'),
-    ('Grace Taylor', '5550123456', 'grace.t@gmail.com', 'password123', 'Customer');
+    ('John Smith', '5551234567', 'john.smith@store.com', '$2a$10$2.9guWus3aeN2wJSpK42KexyGnXDSnWl/do8L1A2CIQdLTCCe2ioa', 'Manager'),
+    ('Sarah Johnson', '5552345678', 'sarah.j@store.com', '$2a$10$2.9guWus3aeN2wJSpK42KexyGnXDSnWl/do8L1A2CIQdLTCCe2ioa', 'Employee'),
+    ('Mike Wilson', '5553456789', 'mike.w@store.com', '$2a$10$2.9guWus3aeN2wJSpK42KexyGnXDSnWl/do8L1A2CIQdLTCCe2ioa', 'Employee'),
+    ('Alice Brown', '5554567890', 'alice.b@gmail.com', '$2a$10$2.9guWus3aeN2wJSpK42KexyGnXDSnWl/do8L1A2CIQdLTCCe2ioa', 'Customer'),
+    ('Bob Davis', '5555678901', 'bob.d@gmail.com', '$2a$10$2.9guWus3aeN2wJSpK42KexyGnXDSnWl/do8L1A2CIQdLTCCe2ioa', 'Customer'),
+    ('Carol White', '5556789012', 'carol.w@gmail.com', '$2a$10$2.9guWus3aeN2wJSpK42KexyGnXDSnWl/do8L1A2CIQdLTCCe2ioa', 'Customer'),
+    ('David Lee', '5557890123', 'david.l@gmail.com', '$2a$10$2.9guWus3aeN2wJSpK42KexyGnXDSnWl/do8L1A2CIQdLTCCe2ioa', 'Customer'),
+    ('Emma Garcia', '5558901234', 'emma.g@gmail.com', '$2a$10$2.9guWus3aeN2wJSpK42KexyGnXDSnWl/do8L1A2CIQdLTCCe2ioa', 'Customer'),
+    ('Frank Martinez', '5559012345', 'frank.m@gmail.com', '$2a$10$2.9guWus3aeN2wJSpK42KexyGnXDSnWl/do8L1A2CIQdLTCCe2ioa', 'Customer'),
+    ('Grace Taylor', '5550123456', 'grace.t@gmail.com', '$2a$10$2.9guWus3aeN2wJSpK42KexyGnXDSnWl/do8L1A2CIQdLTCCe2ioa', 'Customer');
 
     -- Insert Products (Games and Music Albums)
     INSERT INTO Products (GameTitle, AlbumTitle, Platform, GamePrice, AlbumPrice, artist, genre, file_url, preview_url, StockQuantity) VALUES
