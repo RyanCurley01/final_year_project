@@ -12,7 +12,7 @@ mysql -u root -p"${MYSQL_ROOT_PASSWORD}" <<-EOSQL
     -- ============================================
 
     -- Account Table
-    CREATE TABLE IF NOT EXISTS Account (
+    CREATE TABLE IF NOT EXISTS Accounts (
         AccountID INT AUTO_INCREMENT PRIMARY KEY,
         AccountName VARCHAR(100),
         AccountPhoneNumber VARCHAR(15),
@@ -42,7 +42,7 @@ mysql -u root -p"${MYSQL_ROOT_PASSWORD}" <<-EOSQL
         AccountID INT,
         orderDate DATETIME DEFAULT CURRENT_TIMESTAMP,
         TotalAmount DECIMAL(10, 2),
-        FOREIGN KEY(AccountID) REFERENCES Account(AccountID)
+        FOREIGN KEY(AccountID) REFERENCES Accounts(AccountID)
     );
 
     -- Order_Items Table
@@ -67,7 +67,7 @@ mysql -u root -p"${MYSQL_ROOT_PASSWORD}" <<-EOSQL
         PaymentDateAndTime DATETIME DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY(OrderID) REFERENCES Orders(OrderID),
         FOREIGN KEY(ProductID) REFERENCES Products(ProductID),
-        FOREIGN KEY(AccountID) REFERENCES Account(AccountID)
+        FOREIGN KEY(AccountID) REFERENCES Accounts(AccountID)
     );
 
     -- CustomerSummary Table
@@ -76,7 +76,7 @@ mysql -u root -p"${MYSQL_ROOT_PASSWORD}" <<-EOSQL
         AccountID INT,
         ProductID INT,
         OrderID INT,
-        FOREIGN KEY(AccountID) REFERENCES Account(AccountID),
+        FOREIGN KEY(AccountID) REFERENCES Accounts(AccountID),
         FOREIGN KEY(OrderID) REFERENCES Orders(OrderID),
         FOREIGN KEY(ProductID) REFERENCES Products(ProductID)
     );
@@ -112,7 +112,7 @@ mysql -u root -p"${MYSQL_ROOT_PASSWORD}" <<-EOSQL
         WishlistID INT AUTO_INCREMENT PRIMARY KEY,
         AccountID INT,
         ProductID INT,
-        FOREIGN KEY(AccountID) REFERENCES Account(AccountID),
+        FOREIGN KEY(AccountID) REFERENCES Accounts(AccountID),
         FOREIGN KEY(ProductID) REFERENCES Products(ProductID)
     );
 
@@ -121,7 +121,7 @@ mysql -u root -p"${MYSQL_ROOT_PASSWORD}" <<-EOSQL
     -- ============================================
 
     -- Insert Accounts (Managers, Employees, Customers)
-    INSERT INTO Account (AccountName, AccountPhoneNumber, AccountEmailAddress, AccountPassword, AccountType) VALUES
+    INSERT INTO Accounts (AccountName, AccountPhoneNumber, AccountEmailAddress, AccountPassword, AccountType) VALUES
     ('John Smith', '5551234567', 'john.smith@store.com', 'password123', 'Manager'),
     ('Sarah Johnson', '5552345678', 'sarah.j@store.com', 'password123', 'Employee'),
     ('Mike Wilson', '5553456789', 'mike.w@store.com', 'password123', 'Employee'),

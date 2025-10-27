@@ -10,7 +10,9 @@ spring:
   
   jpa:
     hibernate:
-      ddl-auto: update
+      ddl-auto: none
+      naming:
+        physical-strategy: org.hibernate.boot.model.naming.PhysicalNamingStrategyStandardImpl
     show-sql: true
     properties:
       hibernate:
@@ -23,3 +25,4 @@ server:
 logging:
   level:
     com.example.customersummary: DEBUG
+    org.springframework.security: DEBUG
