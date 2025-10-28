@@ -1,7 +1,11 @@
+Starts a Spring boot application for a particular service
 ./gradlew :customerSummary-service:bootRun
 
+Generates code coverage report
+./gradlew :accounts-service:jacocoTestReport
 
+Restarts Server
 cd /workspaces/final_year_project/backend && sudo fuser -k 8087/tcp 2>/dev/null || echo "No process on 8087" && sleep 1 && ./gradlew :wishlist-service:bootRun
 
-
+Runs MySql queryies in ther terminal with a remote host
 mysql --protocol=TCP -h 127.0.0.1 -P 3306 -u root -prootpassword Game_Store_System -e "SELECT * FROM Accounts;"
