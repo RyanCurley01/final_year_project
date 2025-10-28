@@ -1,11 +1,7 @@
 ./gradlew :customerSummary-service:bootRun
 
 
-ps aux | grep -i "customerSummary\|8088" | grep -v grep | awk '{print $2}' | xargs -r sudo kill -9 && echo "Killed all related processes"
-
-sudo fuser -k 8088/tcp 2>/dev/null && echo "Killed using fuser" || echo "No process found with fuser"
-
-sleep 2 && sudo lsof -iTCP:8088 -sTCP:LISTEN -Pn || echo "✅ Port 8088 is completely free now"
+cd /workspaces/final_year_project/backend && sudo fuser -k 8087/tcp 2>/dev/null || echo "No process on 8087" && sleep 1 && ./gradlew :wishlist-service:bootRun
 
 
 mysql --protocol=TCP -h 127.0.0.1 -P 3306 -u root -prootpassword Game_Store_System -e "SELECT * FROM Accounts;"

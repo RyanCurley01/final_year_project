@@ -38,32 +38,4 @@ public class WishlistController {
                 .map(ResponseEntity::ok)
                 .orElse(ResponseEntity.notFound().build());
     }
-
-    @PostMapping
-    public ResponseEntity<Wishlist> createWishlist(@Valid @RequestBody Wishlist wishlist) {
-        Wishlist createdWishlist = wishlistService.createWishlist(wishlist);
-        return ResponseEntity.status(HttpStatus.CREATED).body(createdWishlist);
-    }
-
-    @PutMapping("/{id}")
-    public ResponseEntity<Wishlist> updateWishlist(
-            @PathVariable Long id,
-            @RequestBody Wishlist wishlistDetails) {
-        try {
-            Wishlist updatedWishlist = wishlistService.updateWishlist(id, wishlistDetails);
-            return ResponseEntity.ok(updatedWishlist);
-        } catch (IllegalArgumentException e) {
-            return ResponseEntity.notFound().build();
-        }
-    }
-
-    @DeleteMapping("/{id}")
-    public ResponseEntity<Void> deleteWishlist(@PathVariable Long id) {
-        try {
-            wishlistService.deleteWishlist(id);
-            return ResponseEntity.noContent().build();
-        } catch (IllegalArgumentException e) {
-            return ResponseEntity.notFound().build();
-        }
-    }
 }
