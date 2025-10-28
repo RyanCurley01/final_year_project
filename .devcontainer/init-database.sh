@@ -3,7 +3,7 @@ set -e
 
 echo "Initializing Game Store Database..."
 
-mysql -u root -p"${MYSQL_ROOT_PASSWORD}" <<-EOSQL
+mysql -u root -p"${MYSQL_ROOT_PASSWORD}" <<-'EOSQL'
     CREATE DATABASE IF NOT EXISTS Game_Store_System;
     USE Game_Store_System;
 
