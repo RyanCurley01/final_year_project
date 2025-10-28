@@ -34,11 +34,6 @@ public class SecurityConfig {
                 // Manager and Employee can view sold products
                 .requestMatchers(HttpMethod.GET, "/api/sold-products", "/api/sold-products/{id}").hasAnyRole("MANAGER", "EMPLOYEE")
                 
-                // Manager and Employee can create/manage sold products
-                .requestMatchers(HttpMethod.POST, "/api/sold-products").hasAnyRole("MANAGER", "EMPLOYEE")
-                .requestMatchers(HttpMethod.PUT, "/api/sold-products/**").hasAnyRole("MANAGER", "EMPLOYEE")
-                .requestMatchers(HttpMethod.DELETE, "/api/sold-products/**").hasRole("MANAGER")
-                
                 // All other requests must be authenticated
                 .anyRequest().authenticated()
             )

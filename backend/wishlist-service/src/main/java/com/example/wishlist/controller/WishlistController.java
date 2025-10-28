@@ -17,13 +17,13 @@ public class WishlistController {
 
     private final WishlistService wishlistService;
 
-    @GetMapping
+    @GetMapping("/getAllWishlists")
     public ResponseEntity<List<Wishlist>> getAllWishlists(
-            @RequestParam(required = false) Long customerId,
+            @RequestParam(required = false) Long accountId,
             @RequestParam(required = false) Long productId) {
-        
-        if (customerId != null) {
-            return ResponseEntity.ok(wishlistService.getWishlistsByCustomerId(customerId));
+
+        if (accountId != null) {
+            return ResponseEntity.ok(wishlistService.getWishlistsByAccountId(accountId));
         }
         if (productId != null) {
             return ResponseEntity.ok(wishlistService.getWishlistsByProductId(productId));

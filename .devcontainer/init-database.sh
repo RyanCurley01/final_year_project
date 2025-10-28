@@ -113,7 +113,6 @@ mysql -u root -p"${MYSQL_ROOT_PASSWORD}" <<-'EOSQL'
         AccountID BIGINT,
         ProductID INT,
         FOREIGN KEY(AccountID) REFERENCES Accounts(AccountID),
-        FOREIGN KEY(ProductID) REFERENCES Products(ProductID)
     );
 
     -- ============================================

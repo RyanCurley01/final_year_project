@@ -17,7 +17,7 @@ public class SoldProductController {
 
     private final SoldProductService soldProductService;
 
-    @GetMapping
+    @GetMapping("/getAllSoldProducts")
     public ResponseEntity<List<SoldProduct>> getAllSoldProducts(
             @RequestParam(required = false) Long orderItemId,
             @RequestParam(required = false) Long productId) {
@@ -37,21 +37,5 @@ public class SoldProductController {
         return soldProductService.getSoldProductById(id)
                 .map(ResponseEntity::ok)
                 .orElse(ResponseEntity.notFound().build());
-    }
-
-    @PostMapping
-    public ResponseEntity<SoldProduct> createSoldProduct(@Valid @RequestBody SoldProduct soldProduct) {
-        SoldProduct created = soldProductService.createSoldProduct(soldProduct);
-        return ResponseEntity.status(HttpStatus.CREATED).body(created);
-    }
-
-    @DeleteMapping("/{id}")
-    public ResponseEntity<Void> deleteSoldProduct(@PathVariable Long id) {
-        try {
-            soldProductService.deleteSoldProduct(id);
-            return ResponseEntity.noContent().build();
-        } catch (IllegalArgumentException e) {
-            return ResponseEntity.notFound().build();
-        }
     }
 }

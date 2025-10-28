@@ -32,8 +32,9 @@ public class SecurityConfig {
             .cors(cors -> cors.disable())
             .authorizeHttpRequests(auth -> auth
                 // Customers can manage their own wishlist
-                .requestMatchers(HttpMethod.POST, "/api/wishlist").authenticated()
                 .requestMatchers(HttpMethod.GET, "/api/wishlist", "/api/wishlist/{id}").authenticated()
+                .requestMatchers(HttpMethod.POST, "/api/wishlist").authenticated()
+                .requestMatchers(HttpMethod.PUT, "/api/wishlist").authenticated()
                 .requestMatchers(HttpMethod.DELETE, "/api/wishlist/**").authenticated()
                 
                 // All other requests must be authenticated

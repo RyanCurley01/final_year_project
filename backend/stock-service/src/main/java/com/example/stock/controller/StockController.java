@@ -17,7 +17,7 @@ public class StockController {
 
     private final StockService stockService;
 
-    @GetMapping
+    @GetMapping("/getAllStock")
     public ResponseEntity<List<Stock>> getAllStock(
             @RequestParam(required = false) Long productId) {
         

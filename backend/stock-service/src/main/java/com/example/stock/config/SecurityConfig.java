@@ -34,9 +34,9 @@ public class SecurityConfig {
                 // Customers can view stock levels
                 .requestMatchers(HttpMethod.GET, "/api/stock", "/api/stock/{id}").authenticated()
                 
-                // Manager and Employee can manage stock
-                .requestMatchers(HttpMethod.POST, "/api/stock").hasAnyRole("MANAGER", "EMPLOYEE")
-                .requestMatchers(HttpMethod.PUT, "/api/stock/**").hasAnyRole("MANAGER", "EMPLOYEE")
+                // Manager can manage stock
+                .requestMatchers(HttpMethod.POST, "/api/stock").hasRole("MANAGER")
+                .requestMatchers(HttpMethod.PUT, "/api/stock/**").hasRole("MANAGER")
                 .requestMatchers(HttpMethod.DELETE, "/api/stock/**").hasRole("MANAGER")
                 
                 // All other requests must be authenticated

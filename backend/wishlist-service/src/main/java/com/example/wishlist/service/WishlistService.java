@@ -23,8 +23,8 @@ public class WishlistService {
         return wishlistRepository.findById(id);
     }
 
-    public List<Wishlist> getWishlistsByCustomerId(Long customerId) {
-        return wishlistRepository.findByAccountId(customerId);
+    public List<Wishlist> getWishlistsByAccountId(Long accountId) {
+        return wishlistRepository.findByAccountId(accountId);
     }
 
     public List<Wishlist> getWishlistsByProductId(Long productId) {

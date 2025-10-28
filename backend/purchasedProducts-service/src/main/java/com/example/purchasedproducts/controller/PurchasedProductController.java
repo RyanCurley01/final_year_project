@@ -17,7 +17,7 @@ public class PurchasedProductController {
 
     private final PurchasedProductService purchasedProductService;
 
-    @GetMapping
+    @GetMapping("/getAllPurchasedProducts")
     public ResponseEntity<List<PurchasedProduct>> getAllPurchasedProducts(
             @RequestParam(required = false) Long orderItemId,
             @RequestParam(required = false) Long productId) {
@@ -37,21 +37,5 @@ public class PurchasedProductController {
         return purchasedProductService.getPurchasedProductById(id)
                 .map(ResponseEntity::ok)
                 .orElse(ResponseEntity.notFound().build());
-    }
-
-    @PostMapping
-    public ResponseEntity<PurchasedProduct> createPurchasedProduct(@Valid @RequestBody PurchasedProduct purchasedProduct) {
-        PurchasedProduct created = purchasedProductService.createPurchasedProduct(purchasedProduct);
-        return ResponseEntity.status(HttpStatus.CREATED).body(created);
-    }
-
-    @DeleteMapping("/{id}")
-    public ResponseEntity<Void> deletePurchasedProduct(@PathVariable Long id) {
-        try {
-            purchasedProductService.deletePurchasedProduct(id);
-            return ResponseEntity.noContent().build();
-        } catch (IllegalArgumentException e) {
-            return ResponseEntity.notFound().build();
-        }
     }
 }
