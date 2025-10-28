@@ -40,7 +40,6 @@ public class SecurityConfig {
                 
                 // Manager and Employee can update/delete orders
                 .requestMatchers(HttpMethod.PUT, "/api/orders/**").hasAnyRole("MANAGER", "EMPLOYEE")
-                .requestMatchers(HttpMethod.DELETE, "/api/orders/**").hasRole("MANAGER")
                 
                 // All other requests must be authenticated
                 .anyRequest().authenticated()

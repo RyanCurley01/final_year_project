@@ -17,7 +17,7 @@ public class OrderController {
 
     private final OrderService orderService;
 
-    @GetMapping
+    @GetMapping("/getAllOrders")
     public ResponseEntity<List<Order>> getAllOrders(
             @RequestParam(required = false) Long customerId) {
         
@@ -48,16 +48,6 @@ public class OrderController {
         try {
             Order updatedOrder = orderService.updateOrder(id, orderDetails);
             return ResponseEntity.ok(updatedOrder);
-        } catch (IllegalArgumentException e) {
-            return ResponseEntity.notFound().build();
-        }
-    }
-
-    @DeleteMapping("/{id}")
-    public ResponseEntity<Void> deleteOrder(@PathVariable Long id) {
-        try {
-            orderService.deleteOrder(id);
-            return ResponseEntity.noContent().build();
         } catch (IllegalArgumentException e) {
             return ResponseEntity.notFound().build();
         }

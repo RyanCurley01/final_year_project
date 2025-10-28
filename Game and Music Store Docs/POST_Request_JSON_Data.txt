@@ -1,0 +1,399 @@
+===============================================================================
+           JSON DATA FOR POST REQUESTS - Game and Music Store API
+===============================================================================
+
+This file contains sample JSON data for all POST endpoints in the system.
+Use these examples when testing with Postman or other API clients.
+
+All endpoints require Basic Authentication:
+- Username: john.smith@store.com (Manager)
+- Password: password123
+
+===============================================================================
+
+1. ACCOUNTS SERVICE
+   Base URL: http://localhost:8081/api/accounts
+
+-------------------------------------------------------------------------------
+1.1 Login (POST /api/accounts/login)
+-------------------------------------------------------------------------------
+{
+  "email": "john.smith@store.com",
+  "password": "password123"
+}
+
+{
+  "email": "alice.b@gmail.com",
+  "password": "password123"
+}
+
+-------------------------------------------------------------------------------
+1.2 Create Account (POST /api/accounts)
+-------------------------------------------------------------------------------
+-- Create Manager Account --
+{
+  "accountName": "Jane Manager",
+  "accountPhoneNumber": "5559998888",
+  "accountEmailAddress": "jane.manager@store.com",
+  "accountPassword": "securePassword123",
+  "accountType": "Manager"
+}
+
+-- Create Employee Account --
+{
+  "accountName": "Tom Employee",
+  "accountPhoneNumber": "5557776666",
+  "accountEmailAddress": "tom.employee@store.com",
+  "accountPassword": "employeePass456",
+  "accountType": "Employee"
+}
+
+-- Create Customer Account --
+{
+  "accountName": "Lisa Customer",
+  "accountPhoneNumber": "5551112222",
+  "accountEmailAddress": "lisa.customer@gmail.com",
+  "accountPassword": "customerPass789",
+  "accountType": "Customer"
+}
+
+
+===============================================================================
+
+2. PRODUCTS SERVICE
+   Base URL: http://localhost:8082/api/products
+
+-------------------------------------------------------------------------------
+2.1 Create Game Product (POST /api/products)
+-------------------------------------------------------------------------------
+{
+  "gameTitle": "Cyber Wars",
+  "platform": "PC",
+  "gamePrice": 49.99,
+  "genre": "Shooter",
+  "fileUrl": "https://cdn.store.com/games/cyberwars.zip",
+  "previewUrl": "https://cdn.store.com/games/cyberwars_preview.mp4",
+  "stockQuantity": 100
+}
+
+{
+  "gameTitle": "Dragon Quest",
+  "platform": "PS5",
+  "gamePrice": 69.99,
+  "genre": "RPG",
+  "fileUrl": "https://cdn.store.com/games/dragonquest.zip",
+  "previewUrl": "https://cdn.store.com/games/dragonquest_preview.mp4",
+  "stockQuantity": 50
+}
+
+-------------------------------------------------------------------------------
+2.2 Create Music Album Product (POST /api/products)
+-------------------------------------------------------------------------------
+{
+  "albumTitle": "Rock Legends",
+  "albumPrice": 14.99,
+  "artist": "The Band",
+  "genre": "Rock",
+  "fileUrl": "https://cdn.store.com/music/rocklegends.zip",
+  "previewUrl": "https://cdn.store.com/music/rocklegends_preview.mp3",
+  "stockQuantity": 200
+}
+
+{
+  "albumTitle": "Jazz Night",
+  "albumPrice": 12.99,
+  "artist": "Cool Jazz",
+  "genre": "Jazz",
+  "fileUrl": "https://cdn.store.com/music/jazznight.zip",
+  "previewUrl": "https://cdn.store.com/music/jazznight_preview.mp3",
+  "stockQuantity": 150
+}
+
+
+===============================================================================
+
+3. ORDERS SERVICE
+   Base URL: http://localhost:8083/api/orders
+
+-------------------------------------------------------------------------------
+3.1 Create Order (POST /api/orders)
+-------------------------------------------------------------------------------
+{
+  "accountId": 4,
+  "totalAmount": 119.98
+}
+
+{
+  "accountId": 5,
+  "totalAmount": 59.99
+}
+
+{
+  "accountId": 6,
+  "totalAmount": 149.97
+}
+
+Note: orderDate will be automatically set to current timestamp
+
+
+===============================================================================
+
+4. ORDER ITEMS SERVICE
+   Base URL: http://localhost:8084/api/order-items
+
+-------------------------------------------------------------------------------
+4.1 Create Order Item (POST /api/order-items)
+-------------------------------------------------------------------------------
+{
+  "orderId": 1,
+  "productId": 1,
+  "quantity": 2,
+  "unitPrice": 59.99
+}
+
+{
+  "orderId": 1,
+  "productId": 2,
+  "quantity": 1,
+  "unitPrice": 49.99
+}
+
+{
+  "orderId": 2,
+  "productId": 9,
+  "quantity": 3,
+  "unitPrice": 12.99
+}
+
+
+===============================================================================
+
+5. PAYMENTS SERVICE
+   Base URL: http://localhost:8085/api/payments
+
+-------------------------------------------------------------------------------
+5.1 Create Payment (POST /api/payments)
+-------------------------------------------------------------------------------
+{
+  "orderId": 1,
+  "productId": 1,
+  "accountId": 4,
+  "paymentAmount": 59.99,
+  "paymentStatus": "COMPLETED"
+}
+
+{
+  "orderId": 1,
+  "productId": 2,
+  "accountId": 4,
+  "paymentAmount": 49.99,
+  "paymentStatus": "COMPLETED"
+}
+
+{
+  "orderId": 2,
+  "productId": 3,
+  "accountId": 5,
+  "paymentAmount": 39.99,
+  "paymentStatus": "UNCOMPLETED"
+}
+
+Note: 
+- paymentStatus must be either "COMPLETED" or "UNCOMPLETED"
+- paymentDateAndTime will be automatically set to current timestamp
+
+
+===============================================================================
+
+6. STOCK SERVICE
+   Base URL: http://localhost:8086/api/stock
+
+-------------------------------------------------------------------------------
+6.1 Create Stock Entry (POST /api/stock)
+-------------------------------------------------------------------------------
+{
+  "productId": 1,
+  "stockQuantity": 75
+}
+
+{
+  "productId": 2,
+  "stockQuantity": 100
+}
+
+{
+  "productId": 9,
+  "stockQuantity": 250
+}
+
+Note: stockQuantity cannot be negative (must be 0 or greater)
+
+
+===============================================================================
+
+7. WISHLIST SERVICE
+   Base URL: http://localhost:8087/api/wishlist
+
+-------------------------------------------------------------------------------
+7.1 Create Wishlist Entry (POST /api/wishlist)
+-------------------------------------------------------------------------------
+{
+  "accountId": 4,
+  "productId": 5
+}
+
+{
+  "accountId": 5,
+  "productId": 1
+}
+
+{
+  "accountId": 6,
+  "productId": 7
+}
+
+{
+  "accountId": 4,
+  "productId": 15
+}
+
+
+===============================================================================
+
+8. PURCHASED PRODUCTS SERVICE
+   Base URL: http://localhost:8089/api/purchased-products
+
+-------------------------------------------------------------------------------
+8.1 Create Purchased Product (POST /api/purchased-products)
+-------------------------------------------------------------------------------
+{
+  "orderItemId": 1,
+  "productId": 1
+}
+
+{
+  "orderItemId": 2,
+  "productId": 2
+}
+
+{
+  "orderItemId": 3,
+  "productId": 9
+}
+
+
+===============================================================================
+
+9. SOLD PRODUCTS SERVICE
+   Base URL: http://localhost:8090/api/sold-products
+
+-------------------------------------------------------------------------------
+9.1 Create Sold Product (POST /api/sold-products)
+-------------------------------------------------------------------------------
+{
+  "orderItemId": 1,
+  "productId": 1
+}
+
+{
+  "orderItemId": 2,
+  "productId": 2
+}
+
+{
+  "orderItemId": 4,
+  "productId": 10
+}
+
+
+===============================================================================
+
+TIPS FOR TESTING:
+
+1. Authentication:
+   - All endpoints (except login) require Basic Auth
+   - Use valid credentials from the Accounts table
+   
+2. Foreign Key Relationships:
+   - Ensure referenced IDs exist before creating related records
+   - Example: Create Account → Create Order → Create Order Items
+   
+3. Required Fields:
+   - Fields marked as @NotNull in models are required
+   - Check validation messages in response for missing fields
+   
+4. Decimal Values:
+   - Use proper decimal format: 59.99, not "59.99"
+   - No need for quotes around numbers
+   
+5. Enums/Status Values:
+   - Payment Status: "COMPLETED" or "UNCOMPLETED"
+   - Account Type: "Manager", "Employee", or "Customer"
+   
+6. Auto-Generated Fields:
+   - IDs are auto-generated (don't include them in POST)
+   - Dates are auto-set to current timestamp if not provided
+
+===============================================================================
+
+TESTING WORKFLOW EXAMPLE:
+
+Step 1: Login to get authentication working
+POST http://localhost:8081/api/accounts/login
+Body: {"email": "john.smith@store.com", "password": "password123"}
+
+Step 2: Create a new product
+POST http://localhost:8082/api/products
+Body: Game or Album JSON from section 2
+
+Step 3: Create a new order for a customer
+POST http://localhost:8083/api/orders
+Body: {"accountId": 4, "totalAmount": 59.99}
+
+Step 4: Add items to the order
+POST http://localhost:8084/api/order-items
+Body: {"orderId": 1, "productId": 1, "quantity": 1, "unitPrice": 59.99}
+
+Step 5: Create payment for the order
+POST http://localhost:8085/api/payments
+Body: Payment JSON from section 5
+
+Step 6: Track the purchased/sold product
+POST http://localhost:8089/api/purchased-products
+POST http://localhost:8090/api/sold-products
+
+===============================================================================
+
+PORT REFERENCE:
+- Accounts Service:          8081
+- Products Service:           8082
+- Orders Service:             8083
+- Order Items Service:        8084
+- Payments Service:           8085
+- Stock Service:              8086
+- Wishlist Service:           8087
+- Customer Summary Service:   8088
+- Purchased Products Service: 8089
+- Sold Products Service:      8090
+
+===============================================================================
+
+EXISTING TEST ACCOUNTS (All use password: "password123"):
+
+Managers:
+- john.smith@store.com (ID: 1)
+
+Employees:
+- sarah.j@store.com (ID: 2)
+- mike.w@store.com (ID: 3)
+
+Customers:
+- alice.b@gmail.com (ID: 4)
+- bob.d@gmail.com (ID: 5)
+- carol.w@gmail.com (ID: 6)
+- david.l@gmail.com (ID: 7)
+- emma.g@gmail.com (ID: 8)
+- frank.m@gmail.com (ID: 9)
+- grace.t@gmail.com (ID: 10)
+
+===============================================================================
