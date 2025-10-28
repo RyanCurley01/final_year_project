@@ -17,7 +17,7 @@ public class ProductController {
 
     private final ProductService productService;
 
-    @GetMapping
+    @GetMapping("/getAllProducts")
     public ResponseEntity<List<Product>> getAllProducts(
             @RequestParam(required = false) String genre,
             @RequestParam(required = false) String artist,

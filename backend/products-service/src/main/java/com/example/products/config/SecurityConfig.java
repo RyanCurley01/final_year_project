@@ -34,7 +34,7 @@ public class SecurityConfig {
                 // Public endpoints - customers can browse products
                 .requestMatchers(HttpMethod.GET, "/api/products", "/api/products/{id}").permitAll()
                 
-                // Manager and Employee can create/update/delete products
+                // Manager and Employee can read,create/update/delete products
                 .requestMatchers(HttpMethod.POST, "/api/products").hasAnyRole("MANAGER", "EMPLOYEE")
                 .requestMatchers(HttpMethod.PUT, "/api/products/**").hasAnyRole("MANAGER", "EMPLOYEE")
                 .requestMatchers(HttpMethod.DELETE, "/api/products/**").hasRole("MANAGER")

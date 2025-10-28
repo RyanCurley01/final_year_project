@@ -17,7 +17,7 @@ public class PaymentController {
 
     private final PaymentService paymentService;
 
-    @GetMapping
+    @GetMapping("/getAllPayments")
     public ResponseEntity<List<Payment>> getAllPayments(
             @RequestParam(required = false) Long orderId,
             @RequestParam(required = false) Long customerId,

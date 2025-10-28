@@ -27,7 +27,7 @@ public class Product {
     private String albumTitle;
 
     @Column(name = "Platform", length = 10)
-    private String platform; // For games: PC, PS5, Xbox, etc.
+    private String platform; 
 
     @Column(name = "GamePrice", precision = 4, scale = 2)
     private BigDecimal gamePrice;
