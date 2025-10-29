@@ -29,10 +29,10 @@ mysql -u root -p"${MYSQL_ROOT_PASSWORD}" <<-'EOSQL'
         Platform VARCHAR(50),
         GamePrice DECIMAL(10, 2),
         AlbumPrice DECIMAL(10, 2),
-        artist VARCHAR(100),
-        genre VARCHAR(100),
-        file_url VARCHAR(500),
-        preview_url VARCHAR(500),
+        albumCoverImageUrl VARCHAR(255),
+        gameCoverImageUrl VARCHAR(255),
+        file_url VARCHAR(255),
+        preview_url VARCHAR(255),
         StockQuantity INT UNSIGNED DEFAULT 0
     );
 
@@ -135,24 +135,15 @@ mysql -u root -p"${MYSQL_ROOT_PASSWORD}" <<-'EOSQL'
     ('Grace Taylor', '5550123456', 'grace.t@gmail.com', '$2a$10$2.9guWus3aeN2wJSpK42KexyGnXDSnWl/do8L1A2CIQdLTCCe2ioa', 'Customer');
 
     -- Insert Products (Games and Music Albums)
-    INSERT INTO Products (GameTitle, AlbumTitle, Platform, GamePrice, AlbumPrice, artist, genre, file_url, preview_url, StockQuantity) VALUES
+    INSERT INTO Products (GameTitle, AlbumTitle, Platform, GamePrice, AlbumPrice, albumCoverImageUrl, gameCoverImageUrl, file_url, preview_url, StockQuantity) VALUES
     -- Games
-    ('The Last Quest', NULL, 'PS5', 59.99, NULL, NULL, 'RPG', 'https://cdn.store.com/games/lastquest.zip', 'https://cdn.store.com/games/lastquest_preview.mp4', 50),
-    ('Speed Racers', NULL, 'Xbox Series X', 49.99, NULL, NULL, 'Racing', 'https://cdn.store.com/games/speedracers.zip', 'https://cdn.store.com/games/speedracers_preview.mp4', 75),
-    ('Mystery Island', NULL, 'Nintendo Switch', 39.99, NULL, NULL, 'Adventure', 'https://cdn.store.com/games/mysteryisland.zip', 'https://cdn.store.com/games/mysteryisland_preview.mp4', 100),
-    ('Space Warriors', NULL, 'PC', 44.99, NULL, NULL, 'Shooter', 'https://cdn.store.com/games/spacewarriors.zip', 'https://cdn.store.com/games/spacewarriors_preview.mp4', 60),
-    ('Fantasy Realms', NULL, 'PS5', 69.99, NULL, NULL, 'RPG', 'https://cdn.store.com/games/fantasyrealms.zip', 'https://cdn.store.com/games/fantasyrealms_preview.mp4', 40),
-    ('Soccer Champions', NULL, 'Xbox Series X', 59.99, NULL, NULL, 'Sports', 'https://cdn.store.com/games/soccerchamps.zip', 'https://cdn.store.com/games/soccerchamps_preview.mp4', 80),
-    ('Horror Mansion', NULL, 'PC', 34.99, NULL, NULL, 'Horror', 'https://cdn.store.com/games/horrormansion.zip', 'https://cdn.store.com/games/horrormansion_preview.mp4', 45),
-    ('Battle Royale X', NULL, 'Multi-platform', 0.00, NULL, NULL, 'Shooter', 'https://cdn.store.com/games/battleroyalex.zip', 'https://cdn.store.com/games/battleroyalex_preview.mp4', 1000),
+    ('Jimmy Jungle', NULL, 'PC', 2.00, NULL, NULL, 'RPG', 'https://cdn.store.com/games/jimmyjungle.zip', 'https://cdn.store.com/games/jimmyjungle_preview.mp4', 50),
+    ('Midnight Haunt', NULL, 'PC', 2.00, NULL, NULL, 'Racing', 'https://cdn.store.com/games/midnightracers.zip', 'https://cdn.store.com/games/midnightracers_preview.mp4', 75),
+    ('Protectors', NULL, 'PC', 5.00, NULL, NULL, 'Adventure', 'https://cdn.store.com/games/protectors.zip', 'https://cdn.store.com/games/protectors_preview.mp4', 100),
+    ('Red Hood', NULL, 'PC', 1.50, NULL, NULL, 'Shooter', 'https://cdn.store.com/games/redhood.zip', 'https://cdn.store.com/games/redhood_preview.mp4', 60),
+
     -- Music Albums
-    (NULL, 'Greatest Hits', NULL, NULL, 12.99, 'The Rockers', 'Rock', 'https://cdn.store.com/music/greatesthits.zip', 'https://cdn.store.com/music/greatesthits_preview.mp3', 200),
-    (NULL, 'Summer Vibes', NULL, NULL, 9.99, 'DJ Cool', 'Electronic', 'https://cdn.store.com/music/summervibes.zip', 'https://cdn.store.com/music/summervibes_preview.mp3', 150),
-    (NULL, 'Classical Masters', NULL, NULL, 14.99, 'Orchestra Symphony', 'Classical', 'https://cdn.store.com/music/classicalmasters.zip', 'https://cdn.store.com/music/classicalmasters_preview.mp3', 100),
-    (NULL, 'Hip Hop Nation', NULL, NULL, 11.99, 'MC Flow', 'Hip Hop', 'https://cdn.store.com/music/hiphopnation.zip', 'https://cdn.store.com/music/hiphopnation_preview.mp3', 180),
-    (NULL, 'Country Roads', NULL, NULL, 10.99, 'Johnny Boots', 'Country', 'https://cdn.store.com/music/countryroads.zip', 'https://cdn.store.com/music/countryroads_preview.mp3', 120),
-    (NULL, 'Jazz Evenings', NULL, NULL, 13.99, 'Smooth Jazz Band', 'Jazz', 'https://cdn.store.com/music/jazzevenings.zip', 'https://cdn.store.com/music/jazzevenings_preview.mp3', 90),
-    (NULL, 'Pop Sensation', NULL, NULL, 11.99, 'Star Singer', 'Pop', 'https://cdn.store.com/music/popsensation.zip', 'https://cdn.store.com/music/popsensation_preview.mp3', 250);
+    (NULL, 'Selected Electronic Works', NULL, NULL, 5.00, 'INSERT URL TO ALBUM COVER IMAGE HERE', 'INSERT URL TO GAME COVER IMAGE HERE', 'https://cdn.store.com/music/selectedelectronicworks.zip', 'https://cdn.store.com/music/selectedelectronicworks_preview.mp3', 200),
 
     -- Insert Stock entries
     INSERT INTO Stock (StockQuantity, ProductID) VALUES

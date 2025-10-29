@@ -8,10 +8,10 @@ import java.util.List;
 
 @Repository
 public interface ProductRepository extends JpaRepository<Product, Long> {
-    
-    List<Product> findByGenre(String genre);
-    
-    List<Product> findByArtist(String artist);
-    
+
+    List<Product> findByGameCoverImageUrl(String gameCoverImageUrl);
+
+    List<Product> findByAlbumCoverImageUrl(String albumCoverImageUrl);
+
     List<Product> findByPlatform(String platform);
 }

@@ -35,11 +35,11 @@ public class Product {
     @Column(name = "AlbumPrice", precision = 4, scale = 2)
     private BigDecimal albumPrice;
 
-    @Column(name = "artist", length = 7)
-    private String artist; // For albums
+    @Column(name = "albumCoverImageUrl", length = 255)
+    private String albumCoverImageUrl; // For albums
 
-    @Column(name = "genre", length = 20)
-    private String genre;
+    @Column(name = "gameCoverImageUrl", length = 255)
+    private String gameCoverImageUrl;
 
     @Column(name = "file_url", length = 255)
     private String fileUrl; // URL to download full game/album

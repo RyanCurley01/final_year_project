@@ -19,15 +19,15 @@ public class ProductController {
 
     @GetMapping("/getAllProducts")
     public ResponseEntity<List<Product>> getAllProducts(
-            @RequestParam(required = false) String genre,
-            @RequestParam(required = false) String artist,
+            @RequestParam(required = false) String gameCoverImageUrl,
+            @RequestParam(required = false) String albumCoverImageUrl,
             @RequestParam(required = false) String platform) {
-        
-        if (genre != null) {
-            return ResponseEntity.ok(productService.getProductsByGenre(genre));
+
+        if (gameCoverImageUrl != null) {
+            return ResponseEntity.ok(productService.getProductsByGameCoverImageUrl(gameCoverImageUrl));
         }
-        if (artist != null) {
-            return ResponseEntity.ok(productService.getProductsByArtist(artist));
+        if (albumCoverImageUrl != null) {
+            return ResponseEntity.ok(productService.getProductsByAlbumCoverImageUrl(albumCoverImageUrl));
         }
         if (platform != null) {
             return ResponseEntity.ok(productService.getProductsByPlatform(platform));
