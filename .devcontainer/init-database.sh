@@ -137,13 +137,13 @@ mysql -u root -p"${MYSQL_ROOT_PASSWORD}" <<-'EOSQL'
     -- Insert Products (Games and Music Albums)
     INSERT INTO Products (GameTitle, AlbumTitle, Platform, GamePrice, AlbumPrice, albumCoverImageUrl, gameCoverImageUrl, file_url, preview_url, StockQuantity) VALUES
     -- Games
-    ('Jimmy Jungle', NULL, 'PC', 2.00, NULL, NULL, 'RPG', 'https://cdn.store.com/games/jimmyjungle.zip', 'https://cdn.store.com/games/jimmyjungle_preview.mp4', 50),
-    ('Midnight Haunt', NULL, 'PC', 2.00, NULL, NULL, 'Racing', 'https://cdn.store.com/games/midnightracers.zip', 'https://cdn.store.com/games/midnightracers_preview.mp4', 75),
-    ('Protectors', NULL, 'PC', 5.00, NULL, NULL, 'Adventure', 'https://cdn.store.com/games/protectors.zip', 'https://cdn.store.com/games/protectors_preview.mp4', 100),
-    ('Red Hood', NULL, 'PC', 1.50, NULL, NULL, 'Shooter', 'https://cdn.store.com/games/redhood.zip', 'https://cdn.store.com/games/redhood_preview.mp4', 60),
+    ('Jimmy Jungle', NULL, 'PC', 2.00, NULL, 'INSERT AWS S3 FILE KEY FOR GAME COVER IMAGE URL HERE', 'https://jimmywheezer.itch.io/jimmy-jungle', NULL, 100),
+    ('Midnight Haunt', NULL, 'PC', 2.00, NULL, 'INSERT AWS S3 FILE KEY FOR GAME COVER IMAGE URL HERE', 'https://jimmywheezer.itch.io/midnight-haunt', NULL, 100),
+    ('Protectors', NULL, 'PC', 5.00, NULL, 'INSERT AWS S3 FILE KEY FOR GAME COVER IMAGE URL HERE', 'https://jimmywheezer.itch.io/protectors', 'INSERT AWS S3 FILE KEY FOR VIDEO GAME TRAILER URL HERE', 100),
+    ('Red Hood', NULL, 'PC', 1.50, NULL, 'INSERT AWS S3 FILE KEY FOR GAME COVER IMAGE URL HERE', 'https://jimmywheezer.itch.io/red-hood', 'NULL', 100),
 
     -- Music Albums
-    (NULL, 'Selected Electronic Works', NULL, NULL, 5.00, 'INSERT URL TO ALBUM COVER IMAGE HERE', 'INSERT URL TO GAME COVER IMAGE HERE', 'https://cdn.store.com/music/selectedelectronicworks.zip', 'https://cdn.store.com/music/selectedelectronicworks_preview.mp3', 200),
+    (NULL, 'Selected Electronic Works', NULL, NULL, 5.00, 'INSERT AWS S3 FILE KEY URL FOR ALBUM COVER IMAGE HERE', NULL, 'INSERT AWS S3 FILE KEY FOR MUSIC FILE URL'S HERE', NULL, 200),
 
     -- Insert Stock entries
     INSERT INTO Stock (StockQuantity, ProductID) VALUES
