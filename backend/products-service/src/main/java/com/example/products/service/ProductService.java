@@ -23,12 +23,12 @@ public class ProductService {
         return productRepository.findById(id);
     }
 
-    public List<Product> getProductsByGenre(String genre) {
-        return productRepository.findByGenre(genre);
+    public List<Product> getProductsByGameCoverImageUrl(String gameImageUrlString) {
+        return productRepository.findByGameCoverImageUrl(gameImageUrlString);
     }
 
-    public List<Product> getProductsByArtist(String artist) {
-        return productRepository.findByArtist(artist);
+    public List<Product> getProductsByAlbumCoverImageUrl(String albumImageUrlString) {
+        return productRepository.findByAlbumCoverImageUrl(albumImageUrlString);
     }
 
     public List<Product> getProductsByPlatform(String platform) {
@@ -54,11 +54,11 @@ public class ProductService {
         if (productDetails.getPlatform() != null) {
             product.setPlatform(productDetails.getPlatform());
         }
-        if (productDetails.getArtist() != null) {
-            product.setArtist(productDetails.getArtist());
+        if (productDetails.getGameCoverImageUrl() != null) {
+            product.setGameCoverImageUrl(productDetails.getGameCoverImageUrl());
         }
-        if (productDetails.getGenre() != null) {
-            product.setGenre(productDetails.getGenre());
+        if (productDetails.getAlbumCoverImageUrl() != null) {
+            product.setAlbumCoverImageUrl(productDetails.getAlbumCoverImageUrl());
         }
         if (productDetails.getGamePrice() != null) {
             product.setGamePrice(productDetails.getGamePrice());
