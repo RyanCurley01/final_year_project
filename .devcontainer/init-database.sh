@@ -7,6 +7,11 @@ mysql -u root -p"${MYSQL_ROOT_PASSWORD}" <<-'EOSQL'
     CREATE DATABASE IF NOT EXISTS Game_Store_System;
     USE Game_Store_System;
 
+    -- DROP existing tables to ensure idempotent initialization
+    SET FOREIGN_KEY_CHECKS = 0;
+    DROP TABLE IF EXISTS GameWishlist, Purchased_Products, Sold_Products, CustomerSummary, Payments, Order_Items, Orders, Stock, Products, Accounts;
+    SET FOREIGN_KEY_CHECKS = 1;
+
     -- ============================================
     -- CREATE TABLES
     -- ============================================
