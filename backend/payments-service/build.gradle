@@ -37,8 +37,11 @@ dependencies {
 	// AWS SDK for S3 (file storage and delivery)
 	implementation 'software.amazon.awssdk:s3:2.20.26'
 	
-	// PayPal SDK for payments (optional - you can also use REST API directly)
-	implementation 'com.paypal.sdk:rest-api-sdk:1.14.0'
+	// PayPal Checkout SDK for payments
+	implementation 'com.paypal.sdk:checkout-sdk:2.0.0'
+	
+	// Spring WebFlux for PayPal REST API calls
+	implementation 'org.springframework.boot:spring-boot-starter-webflux'
 	
 	compileOnly 'org.projectlombok:lombok'
 	developmentOnly 'org.springframework.boot:spring-boot-devtools'

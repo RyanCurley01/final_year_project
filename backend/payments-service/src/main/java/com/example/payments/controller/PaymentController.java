@@ -70,4 +70,139 @@ public class PaymentController {
             return ResponseEntity.notFound().build();
         }
     }
+
+    // ===== PayPal REST Endpoints =====
+
+    @PostMapping("/paypal/create-order")
+    public ResponseEntity<?> createPayPalOrder(@RequestBody CreatePayPalOrderRequest request) {
+        try {
+            com.paypal.orders.Order order = paymentService.createPayPalOrder(
+                request.getAmount(), 
+                request.getCurrency()
+            );
+            
+            // Convert to simplified DTO for JSON response
+            com.example.payments.dto.PayPalOrderResponse response = new com.example.payments.dto.PayPalOrderResponse();
+            response.setId(order.id());
+            response.setStatus(order.status());
+            
+            // Convert links
+            if (order.links() != null) {
+                java.util.List<com.example.payments.dto.PayPalOrderResponse.Link> links = order.links().stream()
+                    .map(link -> new com.example.payments.dto.PayPalOrderResponse.Link(
+                        link.href(), 
+                        link.rel(), 
+                        link.method()
+                    ))
+                    .collect(java.util.stream.Collectors.toList());
+                response.setLinks(links);
+            }
+            
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body("Error creating PayPal order: " + e.getMessage());
+        }
+    }
+
+    @PostMapping("/paypal/capture-order/{orderId}")
+    public ResponseEntity<?> capturePayPalOrder(@PathVariable String orderId) {
+        try {
+            com.paypal.orders.Order order = paymentService.capturePayPalOrder(orderId);
+            
+            // Convert to simplified DTO for JSON response
+            com.example.payments.dto.PayPalOrderResponse response = new com.example.payments.dto.PayPalOrderResponse();
+            response.setId(order.id());
+            response.setStatus(order.status());
+            
+            // Convert links
+            if (order.links() != null) {
+                java.util.List<com.example.payments.dto.PayPalOrderResponse.Link> links = order.links().stream()
+                    .map(link -> new com.example.payments.dto.PayPalOrderResponse.Link(
+                        link.href(), 
+                        link.rel(), 
+                        link.method()
+                    ))
+                    .collect(java.util.stream.Collectors.toList());
+                response.setLinks(links);
+            }
+            
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body("Error capturing PayPal order: " + e.getMessage());
+        }
+    }
+
+    @GetMapping("/paypal/order/{orderId}")
+    public ResponseEntity<?> getPayPalOrderDetails(@PathVariable String orderId) {
+        try {
+            com.paypal.orders.Order order = paymentService.getPayPalOrderDetails(orderId);
+            
+            // Convert to simplified DTO for JSON response
+            com.example.payments.dto.PayPalOrderResponse response = new com.example.payments.dto.PayPalOrderResponse();
+            response.setId(order.id());
+            response.setStatus(order.status());
+            
+            // Convert links
+            if (order.links() != null) {
+                java.util.List<com.example.payments.dto.PayPalOrderResponse.Link> links = order.links().stream()
+                    .map(link -> new com.example.payments.dto.PayPalOrderResponse.Link(
+                        link.href(), 
+                        link.rel(), 
+                        link.method()
+                    ))
+                    .collect(java.util.stream.Collectors.toList());
+                response.setLinks(links);
+            }
+            
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body("PayPal order not found: " + e.getMessage());
+        }
+    }
+
+    @GetMapping("/paypal/success")
+    public ResponseEntity<String> paypalSuccess(@RequestParam(required = false) String token) {
+        return ResponseEntity.ok(
+            "<html><body>" +
+            "<h1>Payment Approved!</h1>" +
+            "<p>Order ID: " + (token != null ? token : "N/A") + "</p>" +
+            "<p>Now capture the payment using POST /api/payments/paypal/capture-order/" + token + "</p>" +
+            "</body></html>"
+        );
+    }
+
+    @GetMapping("/paypal/cancel")
+    public ResponseEntity<String> paypalCancel() {
+        return ResponseEntity.ok(
+            "<html><body>" +
+            "<h1>Payment Cancelled</h1>" +
+            "<p>You cancelled the PayPal payment.</p>" +
+            "</body></html>"
+        );
+    }
+
+    // DTO for create order request
+    public static class CreatePayPalOrderRequest {
+        private java.math.BigDecimal amount;
+        private String currency;
+
+        public java.math.BigDecimal getAmount() {
+            return amount;
+        }
+
+        public void setAmount(java.math.BigDecimal amount) {
+            this.amount = amount;
+        }
+
+        public String getCurrency() {
+            return currency;
+        }
+
+        public void setCurrency(String currency) {
+            this.currency = currency;
+        }
+    }
 }

@@ -7,7 +7,7 @@ spring:
     username: gamestore_user
     password: gamestore_pass
     driver-class-name: com.mysql.cj.jdbc.Driver
-  
+
   jpa:
     hibernate:
       ddl-auto: none
@@ -25,3 +25,9 @@ server:
 logging:
   level:
     com.example.payments: DEBUG
+
+paypal:
+  client:
+    id: ${PAYPAL_CLIENT_ID:AXdVCMyFcV5gBpkkWsbmY-H-grAdSXwf7iecD4wC6gkJeUjuNzvY6i_rUo1lKNErJoa-kAbwgFWkoUef}
+    secret: ${PAYPAL_CLIENT_SECRET:EHr6mfV1-ERsb-RzrdwqyK9P5fDrWkYjnrD8diDya9qb6Z-_18CiQEKX2XqDMtRQL2_uaYZDmLN2VdbT}
+  mode: ${PAYPAL_MODE:sandbox}

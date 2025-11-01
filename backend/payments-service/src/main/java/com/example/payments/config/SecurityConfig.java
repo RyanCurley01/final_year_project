@@ -31,6 +31,11 @@ public class SecurityConfig {
             .csrf(csrf -> csrf.disable())
             .cors(cors -> cors.disable())
             .authorizeHttpRequests(auth -> auth
+                // PayPal endpoints - authenticated customers can create/capture orders
+                .requestMatchers(HttpMethod.POST, "/api/payments/paypal/create-order").authenticated()
+                .requestMatchers(HttpMethod.POST, "/api/payments/paypal/capture-order/**").authenticated()
+                .requestMatchers(HttpMethod.GET, "/api/payments/paypal/order/**").authenticated()
+                
                 // Customers can create and view their own payments
                 .requestMatchers(HttpMethod.POST, "/api/payments").authenticated()
                 .requestMatchers(HttpMethod.GET, "/api/payments/{id}").authenticated()
