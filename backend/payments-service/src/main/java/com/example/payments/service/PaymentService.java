@@ -109,10 +109,9 @@ public class PaymentService {
         );
         orderRequest.purchaseUnits(purchaseUnits);
 
-        // Set up application context (return URLs)
         ApplicationContext applicationContext = new ApplicationContext()
-            .returnUrl("https://refactored-guacamole-j6w9j59p4g7hqp65-8085.app.github.dev/api/payments/paypal/success")
-            .cancelUrl("https://refactored-guacamole-j6w9j59p4g7hqp65-8085.app.github.dev/api/payments/paypal/cancel");
+            .returnUrl("https://www.example.com/payment/success")
+            .cancelUrl("https://www.example.com/payment/cancel");
         orderRequest.applicationContext(applicationContext);
 
         // Create order request
