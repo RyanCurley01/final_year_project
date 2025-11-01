@@ -19,6 +19,18 @@ done
 
 if mysql -h localhost -u gamestore_user -pgamestore_pass -e "SELECT 1" >/dev/null 2>&1; then
   echo "MySQL is ready!"
+  
+  # Run the database initialization script
+  echo "Initializing database schema and data..."
+  
+  # Extract and run the SQL from init-database.sh
+  # Use root credentials with TCP protocol since the script needs full privileges
+  sed 's/\r$//' /workspaces/final_year_project/.devcontainer/init-database.sh | \
+    sed -n '/<<-.*EOSQL/,/^EOSQL/p' | \
+    sed '1d;$d' | \
+    MYSQL_PWD=rootpassword mysql --protocol=TCP -h 127.0.0.1 -P 3306 -u root Game_Store_System
+  
+  echo "Database initialization complete!"
   echo "Verifying database setup..."
   mysql -h localhost -u gamestore_user -pgamestore_pass -e "USE Game_Store_System; SHOW TABLES;" || true
 else
