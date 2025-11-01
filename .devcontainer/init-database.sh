@@ -137,10 +137,11 @@ mysql -u root -p"${MYSQL_ROOT_PASSWORD}" <<-'EOSQL'
     -- Insert Products (Games and Music Albums)
     INSERT INTO Products (GameTitle, AlbumTitle, Platform, GamePrice, AlbumPrice, albumCoverImageUrl, gameCoverImageUrl, file_url, preview_url, StockQuantity) VALUES
     -- Games
-    ('Jimmy Jungle', NULL, 'PC', 2.00, NULL, 'INSERT AWS S3 FILE KEY FOR GAME COVER IMAGE URL HERE', 'https://jimmywheezer.itch.io/jimmy-jungle', NULL, NULL, 100),
-    ('Midnight Haunt', NULL, 'PC', 2.00, NULL, 'INSERT AWS S3 FILE KEY FOR GAME COVER IMAGE URL HERE', 'https://jimmywheezer.itch.io/midnight-haunt', NULL, NULL, 100),
-    ('Protectors', NULL, 'PC', 5.00, NULL, 'INSERT AWS S3 FILE KEY FOR GAME COVER IMAGE URL HERE', 'https://jimmywheezer.itch.io/protectors', 'INSERT AWS S3 FILE KEY FOR VIDEO GAME TRAILER URL HERE', NULL, 100),
-    ('Red Hood', NULL, 'PC', 1.50, NULL, 'INSERT AWS S3 FILE KEY FOR GAME COVER IMAGE URL HERE', 'https://jimmywheezer.itch.io/red-hood', 'NULL', NULL, 100),
+    ('Jimmy Jungle', NULL, 'PC', 2.00, NULL, NULL, 'INSERT AWS S3 FILE KEY FOR GAME COVER IMAGE URL HERE', 'https://jimmywheezer.itch.io/jimmy-jungle', NULL, 100),
+    ('Midnight Haunt', NULL, 'PC', 2.00, NULL, NULL, 'INSERT AWS S3 FILE KEY FOR GAME COVER IMAGE URL HERE', 'https://jimmywheezer.itch.io/midnight-haunt', NULL, 100),
+    ('Protectors', NULL, 'PC', 5.00, NULL, NULL, 'INSERT AWS S3 FILE KEY FOR GAME COVER IMAGE URL HERE', 'https://jimmywheezer.itch.io/protectors', 'INSERT AWS S3 FILE KEY FOR VIDEO GAME TRAILER URL HERE', 100),
+    ('Red Hood', NULL, 'PC', 1.50, NULL, NULL, 'INSERT AWS S3 FILE KEY FOR GAME COVER IMAGE URL HERE', 'https://jimmywheezer.itch.io/red-hood', NULL, 100),
+    
     -- Music Albums
     (NULL, 'Selected Electronic Works', NULL, NULL, 5.00, 'INSERT AWS S3 FILE KEY URL FOR ALBUM COVER IMAGE HERE', NULL, 'INSERT AWS S3 FILE KEY FOR MUSIC FILE URLS HERE', NULL, 200);
 
