@@ -7,6 +7,10 @@ import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+/*
+ * Entity classes for each service represent
+ * the class fields to be mapped to the database columns
+ */
 @Entity
 @Table(name = "Accounts")
 @Data
