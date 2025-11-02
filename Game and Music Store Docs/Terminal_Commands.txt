@@ -1,6 +1,9 @@
 Starts a Spring boot application for a particular service
 ./gradlew :customerSummary-service:bootRun
 
+Build the project to inifinite indexing
+cd /workspaces/final_year_project/backend && ./gradlew clean build --no-daemon 2>&1 | head -100
+
 Generates code coverage report
 ./gradlew :accounts-service:jacocoTestReport
 
