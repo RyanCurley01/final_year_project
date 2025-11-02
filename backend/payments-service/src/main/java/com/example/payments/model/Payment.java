@@ -22,16 +22,13 @@ public class Payment {
     @Column(name = "PaymentID")
     private Long id;
 
-    @NotNull(message = "Order ID is required")
-    @Column(name = "OrderID", nullable = false)
+    @Column(name = "OrderID")
     private Long orderId;
 
-    @NotNull(message = "Product ID is required")
-    @Column(name = "ProductID", nullable = false)
+    @Column(name = "ProductID")
     private Long productId;
 
-    @NotNull(message = "Account ID is required")
-    @Column(name = "AccountID", nullable = false)
+    @Column(name = "AccountID")
     private Long accountId;
 
     @NotNull(message = "Payment amount is required")
@@ -41,10 +38,13 @@ public class Payment {
 
     @NotNull(message = "Payment status is required")
     @Column(name = "PaymentStatus", nullable = false)
-    private String paymentStatus; // COMPLETED, UNCOMPLETED
+    private String paymentStatus; // COMPLETED, UNCOMPLETED, PENDING
 
     @Column(name = "PaymentDateAndTime")
     private LocalDateTime paymentDateAndTime;
+
+    @Column(name = "PayPalOrderID", unique = true)
+    private String paypalOrderId; // Store PayPal order ID for tracking
 
     @PrePersist
     protected void onCreate() {
@@ -52,7 +52,7 @@ public class Payment {
             paymentDateAndTime = LocalDateTime.now();
         }
         if (paymentStatus == null) {
-            paymentStatus = "UNCOMPLETED";
+            paymentStatus = "PENDING";
         }
     }
 }

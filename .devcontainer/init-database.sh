@@ -68,8 +68,9 @@ mysql -u root -p"${MYSQL_ROOT_PASSWORD}" <<-'EOSQL'
         ProductID INT,
         AccountID BIGINT,
         PaymentAmount DECIMAL(10, 2),
-        PaymentStatus ENUM('COMPLETED', 'UNCOMPLETED'),
+        PaymentStatus ENUM('COMPLETED', 'UNCOMPLETED', 'PENDING') DEFAULT 'PENDING',
         PaymentDateAndTime DATETIME DEFAULT CURRENT_TIMESTAMP,
+        PayPalOrderID VARCHAR(255) UNIQUE,
         FOREIGN KEY(OrderID) REFERENCES Orders(OrderID),
         FOREIGN KEY(ProductID) REFERENCES Products(ProductID),
         FOREIGN KEY(AccountID) REFERENCES Accounts(AccountID)
@@ -181,16 +182,6 @@ mysql -u root -p"${MYSQL_ROOT_PASSWORD}" <<-'EOSQL'
     (4, 3, 2, 5.00),    -- Protectors x2
     -- Order 5 (Emma Garcia)
     (5, 5, 1, 5.00);    -- Selected Electronic Works
-
-    -- Insert Payments 
-    INSERT INTO Payments (OrderID, ProductID, AccountID, PaymentAmount, PaymentStatus, PaymentDateAndTime) VALUES
-    (1, 1, 4, 4.00, 'COMPLETED', '2025-10-01 10:35:00'),
-    (2, 2, 5, 2.00, 'COMPLETED', '2025-10-02 14:20:00'),
-    (2, 3, 5, 5.00, 'COMPLETED', '2025-10-02 14:20:00'),
-    (3, 4, 6, 1.50, 'COMPLETED', '2025-10-03 16:50:00'),
-    (3, 1, 6, 2.00, 'COMPLETED', '2025-10-03 16:50:00'),
-    (4, 3, 7, 10.00, 'COMPLETED', '2025-10-05 11:25:00'),
-    (5, 5, 8, 5.00, 'COMPLETED', '2025-10-07 09:05:00');
 
     -- Insert CustomerSummary (matching the updated orders)
     INSERT INTO CustomerSummary (AccountID, ProductID, OrderID) VALUES

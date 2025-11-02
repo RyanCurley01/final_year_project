@@ -43,10 +43,11 @@ public class PaymentController {
                 .orElse(ResponseEntity.notFound().build());
     }
 
-    @PostMapping
-    public ResponseEntity<Payment> createPayment(@Valid @RequestBody Payment payment) {
-        Payment createdPayment = paymentService.createPayment(payment);
-        return ResponseEntity.status(HttpStatus.CREATED).body(createdPayment);
+    @GetMapping("/paypal/{paypalOrderId}")
+    public ResponseEntity<Payment> getPaymentByPaypalOrderId(@PathVariable String paypalOrderId) {
+        return paymentService.getPaymentByPaypalOrderId(paypalOrderId)
+                .map(ResponseEntity::ok)
+                .orElse(ResponseEntity.notFound().build());
     }
 
     @PutMapping("/{id}")
@@ -78,7 +79,10 @@ public class PaymentController {
         try {
             com.paypal.orders.Order order = paymentService.createPayPalOrder(
                 request.getAmount(), 
-                request.getCurrency()
+                request.getCurrency(),
+                request.getOrderId(),
+                request.getProductId(),
+                request.getAccountId()
             );
             
             // Convert to simplified DTO for JSON response
@@ -188,6 +192,9 @@ public class PaymentController {
     public static class CreatePayPalOrderRequest {
         private java.math.BigDecimal amount;
         private String currency;
+        private Long orderId;
+        private Long productId;   
+        private Long accountId;   
 
         public java.math.BigDecimal getAmount() {
             return amount;
@@ -203,6 +210,30 @@ public class PaymentController {
 
         public void setCurrency(String currency) {
             this.currency = currency;
+        }
+
+        public Long getOrderId() {
+            return orderId;
+        }
+
+        public void setOrderId(Long orderId) {
+            this.orderId = orderId;
+        }
+
+        public Long getProductId() {
+            return productId;
+        }
+
+        public void setProductId(Long productId) {
+            this.productId = productId;
+        }
+
+        public Long getAccountId() {
+            return accountId;
+        }
+
+        public void setAccountId(Long accountId) {
+            this.accountId = accountId;
         }
     }
 }

@@ -36,12 +36,13 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.POST, "/api/payments/paypal/capture-order/**").authenticated()
                 .requestMatchers(HttpMethod.GET, "/api/payments/paypal/order/**").authenticated()
                 
-                // Customers can create and view their own payments
-                .requestMatchers(HttpMethod.POST, "/api/payments").authenticated()
+                // View individual payment or PayPal payment by ID
                 .requestMatchers(HttpMethod.GET, "/api/payments/{id}").authenticated()
+                .requestMatchers(HttpMethod.GET, "/api/payments/paypal/**").authenticated()
                 
                 // Manager and Employee can view all payments
                 .requestMatchers(HttpMethod.GET, "/api/payments").hasAnyRole("MANAGER", "EMPLOYEE")
+                .requestMatchers(HttpMethod.GET, "/api/payments/getAllPayments").hasAnyRole("MANAGER", "EMPLOYEE")
                 
                 // Manager and Employee can update payments
                 .requestMatchers(HttpMethod.PUT, "/api/payments/**").hasAnyRole("MANAGER", "EMPLOYEE")

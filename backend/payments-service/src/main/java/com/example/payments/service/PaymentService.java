@@ -7,6 +7,7 @@ import com.paypal.http.HttpResponse;
 import com.paypal.orders.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -43,6 +44,10 @@ public class PaymentService {
 
     public List<Payment> getPaymentsByStatus(String paymentStatus) {
         return paymentRepository.findByPaymentStatus(paymentStatus);
+    }
+
+    public Optional<Payment> getPaymentByPaypalOrderId(String paypalOrderId) {
+        return paymentRepository.findByPaypalOrderId(paypalOrderId);
     }
 
     @Transactional
@@ -94,6 +99,20 @@ public class PaymentService {
      * @return PayPal Order with ID and approval URL
      */
     public Order createPayPalOrder(BigDecimal amount, String currency) throws IOException {
+        return createPayPalOrder(amount, currency, null, null, null);
+    }
+
+    /**
+     * Creates a PayPal order for checkout and stores it in the database
+     * @param amount The payment amount
+     * @param currency Currency code (e.g., "USD", "EUR")
+     * @param orderId Internal order ID (optional)
+     * @param productId Product ID (optional)
+     * @param accountId Account ID (optional)
+     * @return PayPal Order with ID and approval URL
+     */
+    @Transactional
+    public Order createPayPalOrder(BigDecimal amount, String currency, Long orderId, Long productId, Long accountId) throws IOException {
         OrderRequest orderRequest = new OrderRequest();
         orderRequest.checkoutPaymentIntent("CAPTURE");
 
@@ -121,8 +140,22 @@ public class PaymentService {
 
         try {
             HttpResponse<Order> response = payPalHttpClient.execute(request);
-            log.info("Created PayPal order: {}", response.result().id());
-            return response.result();
+            Order paypalOrder = response.result();
+            log.info("Created PayPal order: {}", paypalOrder.id());
+
+            // Store the PayPal order in our database
+            Payment payment = new Payment();
+            payment.setPaypalOrderId(paypalOrder.id());
+            payment.setPaymentAmount(amount);
+            payment.setPaymentStatus("PENDING");
+            payment.setOrderId(orderId);
+            payment.setProductId(productId);
+            payment.setAccountId(accountId);
+            
+            paymentRepository.save(payment);
+            log.info("Saved Payment record for PayPal order: {}", paypalOrder.id());
+
+            return paypalOrder;
         } catch (IOException e) {
             log.error("Error creating PayPal order", e);
             throw e;
@@ -130,20 +163,33 @@ public class PaymentService {
     }
 
     /**
-     * Captures payment for a PayPal order
-     * @param orderId The PayPal order ID to capture
+     * Captures payment for a PayPal order and updates the database record
+     * @param paypalOrderId The PayPal order ID to capture
      * @return Captured order details
      */
-    public Order capturePayPalOrder(String orderId) throws IOException {
-        OrdersCaptureRequest request = new OrdersCaptureRequest(orderId);
+    @Transactional
+    public Order capturePayPalOrder(String paypalOrderId) throws IOException {
+        OrdersCaptureRequest request = new OrdersCaptureRequest(paypalOrderId);
         request.prefer("return=representation");
 
         try {
             HttpResponse<Order> response = payPalHttpClient.execute(request);
-            log.info("Captured PayPal order: {}", orderId);
+            log.info("Captured PayPal order: {}", paypalOrderId);
+
+            // Update the Payment record status to COMPLETED
+            Optional<Payment> paymentOpt = paymentRepository.findByPaypalOrderId(paypalOrderId);
+            if (paymentOpt.isPresent()) {
+                Payment payment = paymentOpt.get();
+                payment.setPaymentStatus("COMPLETED");
+                paymentRepository.save(payment);
+                log.info("Updated Payment record to COMPLETED for PayPal order: {}", paypalOrderId);
+            } else {
+                log.warn("No Payment record found for PayPal order: {}", paypalOrderId);
+            }
+
             return response.result();
         } catch (IOException e) {
-            log.error("Error capturing PayPal order: {}", orderId, e);
+            log.error("Error capturing PayPal order: {}", paypalOrderId, e);
             throw e;
         }
     }
