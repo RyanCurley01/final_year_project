@@ -70,10 +70,7 @@ mysql -u root -p"${MYSQL_ROOT_PASSWORD}" <<-'EOSQL'
         PaymentAmount DECIMAL(10, 2),
         PaymentStatus ENUM('COMPLETED', 'UNCOMPLETED', 'PENDING') DEFAULT 'PENDING',
         PaymentDateAndTime DATETIME DEFAULT CURRENT_TIMESTAMP,
-        PayPalOrderID VARCHAR(255) UNIQUE,
-        FOREIGN KEY(OrderID) REFERENCES Orders(OrderID),
-        FOREIGN KEY(ProductID) REFERENCES Products(ProductID),
-        FOREIGN KEY(AccountID) REFERENCES Accounts(AccountID)
+        PayPalOrderID VARCHAR(255) UNIQUE
     );
 
     -- CustomerSummary Table
