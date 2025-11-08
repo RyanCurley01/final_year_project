@@ -4,6 +4,8 @@ import com.example.payments.model.Payment;
 import com.example.payments.service.PaymentService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import com.paypal.orders.Order;
+import com.paypal.orders.LinkDescription;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -14,9 +16,11 @@ import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
+import java.io.IOException;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Optional;
 
 import static org.hamcrest.Matchers.*;
@@ -172,5 +176,239 @@ class PaymentControllerTest {
 
         mockMvc.perform(delete("/api/payments/99"))
                 .andExpect(status().isNotFound());
+    }
+
+    // ===== PayPal Integration Tests =====
+
+    @Test
+    @DisplayName("POST /api/payments/paypal/create-order - Should create PayPal order successfully")
+    void testCreatePayPalOrder() throws Exception {
+        // Create mock PayPal Order
+        Order mockOrder = mock(Order.class);
+        when(mockOrder.id()).thenReturn("PAYPAL-ORDER-123");
+        when(mockOrder.status()).thenReturn("CREATED");
+        
+        // Create mock links
+        LinkDescription approveLink = mock(LinkDescription.class);
+        when(approveLink.href()).thenReturn("https://www.paypal.com/checkoutnow?token=PAYPAL-ORDER-123");
+        when(approveLink.rel()).thenReturn("approve");
+        when(approveLink.method()).thenReturn("GET");
+        
+        List<LinkDescription> links = Arrays.asList(approveLink);
+        when(mockOrder.links()).thenReturn(links);
+
+        // Mock service call
+        when(paymentService.createPayPalOrder(
+            any(BigDecimal.class), 
+            any(String.class), 
+            any(Long.class), 
+            any(Long.class), 
+            any(Long.class)
+        )).thenReturn(mockOrder);
+
+        // Create request body
+        PaymentController.CreatePayPalOrderRequest request = new PaymentController.CreatePayPalOrderRequest();
+        request.setAmount(new BigDecimal("49.99"));
+        request.setCurrency("USD");
+        request.setOrderId(1L);
+        request.setProductId(5L);
+        request.setAccountId(4L);
+
+        mockMvc.perform(post("/api/payments/paypal/create-order")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id", is("PAYPAL-ORDER-123")))
+                .andExpect(jsonPath("$.status", is("CREATED")))
+                .andExpect(jsonPath("$.links", hasSize(1)))
+                .andExpect(jsonPath("$.links[0].rel", is("approve")))
+                .andExpect(jsonPath("$.links[0].method", is("GET")));
+
+        verify(paymentService).createPayPalOrder(
+            eq(new BigDecimal("49.99")), 
+            eq("USD"), 
+            eq(1L), 
+            eq(5L), 
+            eq(4L)
+        );
+    }
+
+    @Test
+    @DisplayName("POST /api/payments/paypal/create-order - Should handle IOException")
+    void testCreatePayPalOrderError() throws Exception {
+        when(paymentService.createPayPalOrder(
+            any(BigDecimal.class), 
+            any(String.class), 
+            any(Long.class), 
+            any(Long.class), 
+            any(Long.class)
+        )).thenThrow(new IOException("PayPal API error"));
+
+        PaymentController.CreatePayPalOrderRequest request = new PaymentController.CreatePayPalOrderRequest();
+        request.setAmount(new BigDecimal("49.99"));
+        request.setCurrency("USD");
+        request.setOrderId(1L);
+        request.setProductId(5L);
+        request.setAccountId(4L);
+
+        mockMvc.perform(post("/api/payments/paypal/create-order")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isInternalServerError())
+                .andExpect(content().string(containsString("Error creating PayPal order")));
+    }
+
+    @Test
+    @DisplayName("POST /api/payments/paypal/capture-order/{orderId} - Should capture order successfully")
+    void testCapturePayPalOrder() throws Exception {
+        Order mockOrder = mock(Order.class);
+        when(mockOrder.id()).thenReturn("PAYPAL-ORDER-123");
+        when(mockOrder.status()).thenReturn("COMPLETED");
+        
+        LinkDescription selfLink = mock(LinkDescription.class);
+        when(selfLink.href()).thenReturn("https://api.paypal.com/v2/checkout/orders/PAYPAL-ORDER-123");
+        when(selfLink.rel()).thenReturn("self");
+        when(selfLink.method()).thenReturn("GET");
+        
+        List<LinkDescription> links = Arrays.asList(selfLink);
+        when(mockOrder.links()).thenReturn(links);
+
+        when(paymentService.capturePayPalOrder("PAYPAL-ORDER-123")).thenReturn(mockOrder);
+
+        mockMvc.perform(post("/api/payments/paypal/capture-order/PAYPAL-ORDER-123"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id", is("PAYPAL-ORDER-123")))
+                .andExpect(jsonPath("$.status", is("COMPLETED")))
+                .andExpect(jsonPath("$.links", hasSize(1)))
+                .andExpect(jsonPath("$.links[0].rel", is("self")));
+
+        verify(paymentService).capturePayPalOrder("PAYPAL-ORDER-123");
+    }
+
+    @Test
+    @DisplayName("POST /api/payments/paypal/capture-order/{orderId} - Should handle capture error")
+    void testCapturePayPalOrderError() throws Exception {
+        when(paymentService.capturePayPalOrder("INVALID-ORDER"))
+                .thenThrow(new IOException("Order not found"));
+
+        mockMvc.perform(post("/api/payments/paypal/capture-order/INVALID-ORDER"))
+                .andExpect(status().isInternalServerError())
+                .andExpect(content().string(containsString("Error capturing PayPal order")));
+    }
+
+    @Test
+    @DisplayName("GET /api/payments/paypal/order/{orderId} - Should get PayPal order details")
+    void testGetPayPalOrderDetails() throws Exception {
+        Order mockOrder = mock(Order.class);
+        when(mockOrder.id()).thenReturn("PAYPAL-ORDER-123");
+        when(mockOrder.status()).thenReturn("APPROVED");
+        
+        LinkDescription captureLink = mock(LinkDescription.class);
+        when(captureLink.href()).thenReturn("https://api.paypal.com/v2/checkout/orders/PAYPAL-ORDER-123/capture");
+        when(captureLink.rel()).thenReturn("capture");
+        when(captureLink.method()).thenReturn("POST");
+        
+        List<LinkDescription> links = Arrays.asList(captureLink);
+        when(mockOrder.links()).thenReturn(links);
+
+        when(paymentService.getPayPalOrderDetails("PAYPAL-ORDER-123")).thenReturn(mockOrder);
+
+        mockMvc.perform(get("/api/payments/paypal/order/PAYPAL-ORDER-123"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id", is("PAYPAL-ORDER-123")))
+                .andExpect(jsonPath("$.status", is("APPROVED")))
+                .andExpect(jsonPath("$.links", hasSize(1)))
+                .andExpect(jsonPath("$.links[0].rel", is("capture")))
+                .andExpect(jsonPath("$.links[0].method", is("POST")));
+
+        verify(paymentService).getPayPalOrderDetails("PAYPAL-ORDER-123");
+    }
+
+    @Test
+    @DisplayName("GET /api/payments/paypal/order/{orderId} - Should handle order not found")
+    void testGetPayPalOrderDetailsNotFound() throws Exception {
+        when(paymentService.getPayPalOrderDetails("NONEXISTENT"))
+                .thenThrow(new IOException("Order not found"));
+
+        mockMvc.perform(get("/api/payments/paypal/order/NONEXISTENT"))
+                .andExpect(status().isNotFound())
+                .andExpect(content().string(containsString("PayPal order not found")));
+    }
+
+    @Test
+    @DisplayName("GET /api/payments/paypal/success - Should return success HTML page")
+    void testPayPalSuccess() throws Exception {
+        mockMvc.perform(get("/api/payments/paypal/success").param("token", "PAYPAL-ORDER-123"))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString("Payment Approved!")))
+                .andExpect(content().string(containsString("PAYPAL-ORDER-123")))
+                .andExpect(content().string(containsString("capture the payment")));
+    }
+
+    @Test
+    @DisplayName("GET /api/payments/paypal/success - Should handle missing token")
+    void testPayPalSuccessNoToken() throws Exception {
+        mockMvc.perform(get("/api/payments/paypal/success"))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString("Payment Approved!")))
+                .andExpect(content().string(containsString("N/A")));
+    }
+
+    @Test
+    @DisplayName("GET /api/payments/paypal/cancel - Should return cancellation HTML page")
+    void testPayPalCancel() throws Exception {
+        mockMvc.perform(get("/api/payments/paypal/cancel"))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString("Payment Cancelled")))
+                .andExpect(content().string(containsString("cancelled the PayPal payment")));
+    }
+
+    @Test
+    @DisplayName("POST /api/payments/paypal/create-order - Should handle order with null links")
+    void testCreatePayPalOrderWithNullLinks() throws Exception {
+        Order mockOrder = mock(Order.class);
+        when(mockOrder.id()).thenReturn("PAYPAL-ORDER-456");
+        when(mockOrder.status()).thenReturn("CREATED");
+        when(mockOrder.links()).thenReturn(null);
+
+        when(paymentService.createPayPalOrder(
+            any(BigDecimal.class), 
+            any(String.class), 
+            any(Long.class), 
+            any(Long.class), 
+            any(Long.class)
+        )).thenReturn(mockOrder);
+
+        PaymentController.CreatePayPalOrderRequest request = new PaymentController.CreatePayPalOrderRequest();
+        request.setAmount(new BigDecimal("29.99"));
+        request.setCurrency("EUR");
+        request.setOrderId(2L);
+        request.setProductId(10L);
+        request.setAccountId(7L);
+
+        mockMvc.perform(post("/api/payments/paypal/create-order")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id", is("PAYPAL-ORDER-456")))
+                .andExpect(jsonPath("$.status", is("CREATED")))
+                .andExpect(jsonPath("$.links").doesNotExist());
+    }
+
+    @Test
+    @DisplayName("POST /api/payments/paypal/capture-order/{orderId} - Should handle order with empty links")
+    void testCapturePayPalOrderWithEmptyLinks() throws Exception {
+        Order mockOrder = mock(Order.class);
+        when(mockOrder.id()).thenReturn("PAYPAL-ORDER-789");
+        when(mockOrder.status()).thenReturn("COMPLETED");
+        when(mockOrder.links()).thenReturn(Arrays.asList());
+
+        when(paymentService.capturePayPalOrder("PAYPAL-ORDER-789")).thenReturn(mockOrder);
+
+        mockMvc.perform(post("/api/payments/paypal/capture-order/PAYPAL-ORDER-789"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id", is("PAYPAL-ORDER-789")))
+                .andExpect(jsonPath("$.status", is("COMPLETED")))
+                .andExpect(jsonPath("$.links", hasSize(0)));
     }
 }
