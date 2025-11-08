@@ -1,247 +1,487 @@
-// package com.example.products.controller;
+package com.example.products.controller;
 
-// import com.example.products.model.Product;
-// import com.example.products.service.ProductService;
-// import com.fasterxml.jackson.databind.ObjectMapper;
-// import org.junit.jupiter.api.BeforeEach;
-// import org.junit.jupiter.api.DisplayName;
-// import org.junit.jupiter.api.Test;
-// import org.springframework.beans.factory.annotation.Autowired;
-// import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
-// import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
-// import org.springframework.http.MediaType;
-// import org.springframework.test.context.bean.override.mockito.MockitoBean;
-// import org.springframework.test.web.servlet.MockMvc;
+import com.example.products.model.Product;
+import com.example.products.service.ProductService;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.context.annotation.Import;
+import org.springframework.http.MediaType;
+import org.springframework.security.test.context.support.WithMockUser;
+import org.springframework.test.context.ContextConfiguration;
+import org.springframework.test.web.servlet.MockMvc;
 
-// import java.math.BigDecimal;
-// import java.util.Arrays;
-// import java.util.List;
-// import java.util.Optional;
+import java.math.BigDecimal;
+import java.util.Arrays;
+import java.util.List;
 
-// import static org.hamcrest.Matchers.hasSize;
-// import static org.hamcrest.Matchers.is;
-// import static org.mockito.ArgumentMatchers.any;
-// import static org.mockito.Mockito.doThrow;
-// import static org.mockito.Mockito.when;
-// import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
-// import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
-// import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.hamcrest.Matchers.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.*;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
-// @WebMvcTest(ProductController.class)
-// @AutoConfigureMockMvc(addFilters = false)
-// @DisplayName("Product Controller Integration Tests")
-// class ProductControllerTest {
+@WebMvcTest(value = ProductController.class)
+@AutoConfigureMockMvc(addFilters = false)
+@DisplayName("ProductController Tests")
+class ProductControllerTest {
 
-//     @Autowired
-//     private MockMvc mockMvc;
+    @Autowired
+    private MockMvc mockMvc;
 
-//     @MockitoBean
-//     private ProductService productService;
+    @Autowired
+    private ObjectMapper objectMapper;
 
-//     @Autowired
-//     private ObjectMapper objectMapper;
+    @MockBean
+    private ProductService productService;
 
-//     private Product testProduct;
+    private Product jimmyJungle;
+    private Product midnightHaunt;
+    private Product protectors;
+    private Product redHood;
+    private Product selectedElectronicWorks;
+    private List<Product> allProducts;
+    private List<Product> pcGames;
+    private List<Product> albums;
 
-//     @BeforeEach
-//     void setUp() {
-//         testProduct = new Product();
-//         testProduct.setId(1L);
-//         testProduct.setGameTitle("Test Game");
-//         testProduct.setAlbumTitle("Test Album");
-//         testProduct.setPlatform("PC");
-//         testProduct.setArtist("Test Artist");
-//         testProduct.setGenre("Action");
-//         testProduct.setGamePrice(new BigDecimal("49.99"));
-//         testProduct.setAlbumPrice(new BigDecimal("9.99"));
-//         testProduct.setStockQuantity(100);
-//     }
+    @BeforeEach
+    void setUp() {
+        // Initialize test data based on init-database.sh
+        
+        // Game: Jimmy Jungle
+        jimmyJungle = new Product();
+        jimmyJungle.setId(1L);
+        jimmyJungle.setGameTitle("Jimmy Jungle");
+        jimmyJungle.setPlatform("PC");
+        jimmyJungle.setGamePrice(new BigDecimal("2.00"));
+        jimmyJungle.setGameCoverImageUrl("INSERT AWS S3 FILE KEY FOR GAME COVER IMAGE URL HERE");
+        jimmyJungle.setFileUrl("https://jimmywheezer.itch.io/jimmy-jungle");
+        jimmyJungle.setStockQuantity(100);
 
-//     @Test
-//     @DisplayName("GET /api/products/getAllProducts - Should return all products")
-//     void testGetAllProducts() throws Exception {
-//         // ARRANGE
-//         Product product2 = new Product();
-//         product2.setId(2L);
-//         product2.setGameTitle("Another Game");
-//         product2.setGenre("RPG");
+        // Game: Midnight Haunt
+        midnightHaunt = new Product();
+        midnightHaunt.setId(2L);
+        midnightHaunt.setGameTitle("Midnight Haunt");
+        midnightHaunt.setPlatform("PC");
+        midnightHaunt.setGamePrice(new BigDecimal("2.00"));
+        midnightHaunt.setGameCoverImageUrl("INSERT AWS S3 FILE KEY FOR GAME COVER IMAGE URL HERE");
+        midnightHaunt.setFileUrl("https://jimmywheezer.itch.io/midnight-haunt");
+        midnightHaunt.setStockQuantity(100);
 
-//         List<Product> products = Arrays.asList(testProduct, product2);
-//         when(productService.getAllProducts()).thenReturn(products);
+        // Game: Protectors
+        protectors = new Product();
+        protectors.setId(3L);
+        protectors.setGameTitle("Protectors");
+        protectors.setPlatform("PC");
+        protectors.setGamePrice(new BigDecimal("5.00"));
+        protectors.setGameCoverImageUrl("INSERT AWS S3 FILE KEY FOR GAME COVER IMAGE URL HERE");
+        protectors.setFileUrl("https://jimmywheezer.itch.io/protectors");
+        protectors.setPreviewUrl("INSERT AWS S3 FILE KEY FOR VIDEO GAME TRAILER URL HERE");
+        protectors.setStockQuantity(100);
 
-//         // ACT & ASSERT
-//         mockMvc.perform(get("/api/products/getAllProducts")
-//                 .contentType(MediaType.APPLICATION_JSON))
-//                 .andExpect(status().isOk())
-//                 .andExpect(jsonPath("$", hasSize(2)))
-//                 .andExpect(jsonPath("$[0].gameTitle", is("Test Game")))
-//                 .andExpect(jsonPath("$[1].gameTitle", is("Another Game")));
-//     }
+        // Game: Red Hood
+        redHood = new Product();
+        redHood.setId(4L);
+        redHood.setGameTitle("Red Hood");
+        redHood.setPlatform("PC");
+        redHood.setGamePrice(new BigDecimal("1.50"));
+        redHood.setGameCoverImageUrl("INSERT AWS S3 FILE KEY FOR GAME COVER IMAGE URL HERE");
+        redHood.setFileUrl("https://jimmywheezer.itch.io/red-hood");
+        redHood.setStockQuantity(100);
 
-//     @Test
-//     @DisplayName("GET /api/products/getAllProducts - Should filter by genre")
-//     void testGetAllProductsByGenre() throws Exception {
-//         // ARRANGE
-//         List<Product> products = Arrays.asList(testProduct);
-//         when(productService.getProductsByGenre("Action")).thenReturn(products);
+        // Album: Selected Electronic Works
+        selectedElectronicWorks = new Product();
+        selectedElectronicWorks.setId(5L);
+        selectedElectronicWorks.setAlbumTitle("Selected Electronic Works");
+        selectedElectronicWorks.setAlbumPrice(new BigDecimal("5.00"));
+        selectedElectronicWorks.setAlbumCoverImageUrl("INSERT AWS S3 FILE KEY URL FOR ALBUM COVER IMAGE HERE");
+        selectedElectronicWorks.setFileUrl("INSERT AWS S3 FILE KEY FOR MUSIC FILE URLS HERE");
+        selectedElectronicWorks.setStockQuantity(200);
 
-//         // ACT & ASSERT
-//         mockMvc.perform(get("/api/products/getAllProducts")
-//                 .param("genre", "Action")
-//                 .contentType(MediaType.APPLICATION_JSON))
-//                 .andExpect(status().isOk())
-//                 .andExpect(jsonPath("$", hasSize(1)))
-//                 .andExpect(jsonPath("$[0].genre", is("Action")));
-//     }
+        allProducts = Arrays.asList(jimmyJungle, midnightHaunt, protectors, redHood, selectedElectronicWorks);
+        pcGames = Arrays.asList(jimmyJungle, midnightHaunt, protectors, redHood);
+        albums = Arrays.asList(selectedElectronicWorks);
+    }
 
-//     @Test
-//     @DisplayName("GET /api/products/getAllProducts - Should filter by artist")
-//     void testGetAllProductsByArtist() throws Exception {
-//         // ARRANGE
-//         List<Product> products = Arrays.asList(testProduct);
-//         when(productService.getProductsByArtist("Test Artist")).thenReturn(products);
+    @Test
+    @DisplayName("GET /api/products/getAllProducts - Should return all products")
+    void getAllProducts_ReturnsAllProducts() throws Exception {
+        // Given
+        when(productService.getAllProducts()).thenReturn(allProducts);
 
-//         // ACT & ASSERT
-//         mockMvc.perform(get("/api/products/getAllProducts")
-//                 .param("artist", "Test Artist")
-//                 .contentType(MediaType.APPLICATION_JSON))
-//                 .andExpect(status().isOk())
-//                 .andExpect(jsonPath("$", hasSize(1)))
-//                 .andExpect(jsonPath("$[0].artist", is("Test Artist")));
-//     }
+        // When & Then
+        mockMvc.perform(get("/api/products/getAllProducts"))
+                .andExpect(status().isOk())
+                .andExpect(content().contentType(MediaType.APPLICATION_JSON))
+                .andExpect(jsonPath("$", hasSize(5)))
+                .andExpect(jsonPath("$[0].id").value(1))
+                .andExpect(jsonPath("$[0].gameTitle").value("Jimmy Jungle"))
+                .andExpect(jsonPath("$[0].platform").value("PC"))
+                .andExpect(jsonPath("$[0].gamePrice").value(2.00))
+                .andExpect(jsonPath("$[0].stockQuantity").value(100))
+                .andExpect(jsonPath("$[4].id").value(5))
+                .andExpect(jsonPath("$[4].albumTitle").value("Selected Electronic Works"))
+                .andExpect(jsonPath("$[4].albumPrice").value(5.00))
+                .andExpect(jsonPath("$[4].stockQuantity").value(200));
 
-//     @Test
-//     @DisplayName("GET /api/products/getAllProducts - Should filter by platform")
-//     void testGetAllProductsByPlatform() throws Exception {
-//         // ARRANGE
-//         List<Product> products = Arrays.asList(testProduct);
-//         when(productService.getProductsByPlatform("PC")).thenReturn(products);
+        verify(productService, times(1)).getAllProducts();
+    }
 
-//         // ACT & ASSERT
-//         mockMvc.perform(get("/api/products/getAllProducts")
-//                 .param("platform", "PC")
-//                 .contentType(MediaType.APPLICATION_JSON))
-//                 .andExpect(status().isOk())
-//                 .andExpect(jsonPath("$", hasSize(1)))
-//                 .andExpect(jsonPath("$[0].platform", is("PC")));
-//     }
+    @Test
+    @DisplayName("GET /api/products/getAllProducts?platform=PC - Should return PC games")
+    void getAllProducts_WithPlatformFilter_ReturnsPCGames() throws Exception {
+        // Given
+        when(productService.getProductsByPlatform("PC")).thenReturn(pcGames);
 
-//     @Test
-//     @DisplayName("GET /api/products/{id} - Should return product by id")
-//     void testGetProductById() throws Exception {
-//         // ARRANGE
-//         when(productService.getProductById(1L)).thenReturn(Optional.of(testProduct));
+        // When & Then
+        mockMvc.perform(get("/api/products/getAllProducts")
+                        .param("platform", "PC"))
+                .andExpect(status().isOk())
+                .andExpect(content().contentType(MediaType.APPLICATION_JSON))
+                .andExpect(jsonPath("$", hasSize(4)))
+                .andExpect(jsonPath("$[0].gameTitle").value("Jimmy Jungle"))
+                .andExpect(jsonPath("$[1].gameTitle").value("Midnight Haunt"))
+                .andExpect(jsonPath("$[2].gameTitle").value("Protectors"))
+                .andExpect(jsonPath("$[3].gameTitle").value("Red Hood"))
+                .andExpect(jsonPath("$[*].platform", everyItem(is("PC"))));
 
-//         // ACT & ASSERT
-//         mockMvc.perform(get("/api/products/1")
-//                 .contentType(MediaType.APPLICATION_JSON))
-//                 .andExpect(status().isOk())
-//                 .andExpect(jsonPath("$.id", is(1)))
-//                 .andExpect(jsonPath("$.gameTitle", is("Test Game")))
-//                 .andExpect(jsonPath("$.genre", is("Action")));
-//     }
+        verify(productService, times(1)).getProductsByPlatform("PC");
+        verify(productService, never()).getAllProducts();
+    }
 
-//     @Test
-//     @DisplayName("GET /api/products/{id} - Should return 404 when product not found")
-//     void testGetProductByIdNotFound() throws Exception {
-//         // ARRANGE
-//         when(productService.getProductById(99L)).thenReturn(Optional.empty());
+    @Test
+    @DisplayName("GET /api/products/getAllProducts?gameCoverImageUrl=... - Should return games with cover")
+    void getAllProducts_WithGameCoverImageUrlFilter_ReturnsMatchingGames() throws Exception {
+        // Given
+        String coverImageUrl = "INSERT AWS S3 FILE KEY FOR GAME COVER IMAGE URL HERE";
+        when(productService.getProductsByGameCoverImageUrl(coverImageUrl)).thenReturn(pcGames);
 
-//         // ACT & ASSERT
-//         mockMvc.perform(get("/api/products/99")
-//                 .contentType(MediaType.APPLICATION_JSON))
-//                 .andExpect(status().isNotFound());
-//     }
+        // When & Then
+        mockMvc.perform(get("/api/products/getAllProducts")
+                        .param("gameCoverImageUrl", coverImageUrl))
+                .andExpect(status().isOk())
+                .andExpect(content().contentType(MediaType.APPLICATION_JSON))
+                .andExpect(jsonPath("$", hasSize(4)))
+                .andExpect(jsonPath("$[*].gameTitle", hasItem("Jimmy Jungle")))
+                .andExpect(jsonPath("$[*].gameTitle", hasItem("Protectors")));
 
-//     @Test
-//     @DisplayName("POST /api/products - Should create new product")
-//     void testCreateProduct() throws Exception {
-//         // ARRANGE
-//         Product newProduct = new Product();
-//         newProduct.setGameTitle("New Game");
-//         newProduct.setPlatform("PS5");
-//         newProduct.setGenre("Adventure");
-//         newProduct.setGamePrice(new BigDecimal("59.99"));
-//         newProduct.setStockQuantity(50);
+        verify(productService, times(1)).getProductsByGameCoverImageUrl(coverImageUrl);
+        verify(productService, never()).getAllProducts();
+    }
 
-//         Product createdProduct = new Product();
-//         createdProduct.setId(3L);
-//         createdProduct.setGameTitle("New Game");
-//         createdProduct.setPlatform("PS5");
-//         createdProduct.setGenre("Adventure");
-//         createdProduct.setGamePrice(new BigDecimal("59.99"));
-//         createdProduct.setStockQuantity(50);
+    @Test
+    @DisplayName("GET /api/products/getAllProducts?albumCoverImageUrl=... - Should return albums with cover")
+    void getAllProducts_WithAlbumCoverImageUrlFilter_ReturnsMatchingAlbums() throws Exception {
+        // Given
+        String coverImageUrl = "INSERT AWS S3 FILE KEY URL FOR ALBUM COVER IMAGE HERE";
+        when(productService.getProductsByAlbumCoverImageUrl(coverImageUrl)).thenReturn(albums);
 
-//         when(productService.createProduct(any(Product.class))).thenReturn(createdProduct);
+        // When & Then
+        mockMvc.perform(get("/api/products/getAllProducts")
+                        .param("albumCoverImageUrl", coverImageUrl))
+                .andExpect(status().isOk())
+                .andExpect(content().contentType(MediaType.APPLICATION_JSON))
+                .andExpect(jsonPath("$", hasSize(1)))
+                .andExpect(jsonPath("$[0].albumTitle").value("Selected Electronic Works"))
+                .andExpect(jsonPath("$[0].albumPrice").value(5.00));
 
-//         // ACT & ASSERT
-//         mockMvc.perform(post("/api/products")
-//                 .contentType(MediaType.APPLICATION_JSON)
-//                 .content(objectMapper.writeValueAsString(newProduct)))
-//                 .andExpect(status().isCreated())
-//                 .andExpect(jsonPath("$.id", is(3)))
-//                 .andExpect(jsonPath("$.gameTitle", is("New Game")));
-//     }
+        verify(productService, times(1)).getProductsByAlbumCoverImageUrl(coverImageUrl);
+        verify(productService, never()).getAllProducts();
+    }
 
-//     @Test
-//     @DisplayName("PUT /api/products/{id} - Should update existing product")
-//     void testUpdateProduct() throws Exception {
-//         // ARRANGE
-//         Product updateDetails = new Product();
-//         updateDetails.setGameTitle("Updated Game");
-//         updateDetails.setGamePrice(new BigDecimal("39.99"));
+    @Test
+    @WithMockUser(roles = "MANAGER")
+    @DisplayName("POST /api/products - Should create new game product successfully")
+    void createProduct_WithValidGameData_ReturnsCreatedGame() throws Exception {
+        // Given
+        Product newGame = new Product();
+        newGame.setGameTitle("New Game");
+        newGame.setPlatform("PC");
+        newGame.setGamePrice(new BigDecimal("3.99"));
+        newGame.setStockQuantity(50);
 
-//         Product updatedProduct = new Product();
-//         updatedProduct.setId(1L);
-//         updatedProduct.setGameTitle("Updated Game");
-//         updatedProduct.setGamePrice(new BigDecimal("39.99"));
+        Product savedGame = new Product();
+        savedGame.setId(6L);
+        savedGame.setGameTitle("New Game");
+        savedGame.setPlatform("PC");
+        savedGame.setGamePrice(new BigDecimal("3.99"));
+        savedGame.setStockQuantity(50);
 
-//         when(productService.updateProduct(any(Long.class), any(Product.class))).thenReturn(updatedProduct);
+        when(productService.createProduct(any(Product.class))).thenReturn(savedGame);
 
-//         // ACT & ASSERT
-//         mockMvc.perform(put("/api/products/1")
-//                 .contentType(MediaType.APPLICATION_JSON)
-//                 .content(objectMapper.writeValueAsString(updateDetails)))
-//                 .andExpect(status().isOk())
-//                 .andExpect(jsonPath("$.gameTitle", is("Updated Game")));
-//     }
+        // When & Then
+        mockMvc.perform(post("/api/products")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(newGame)))
+                .andExpect(status().isCreated())
+                .andExpect(content().contentType(MediaType.APPLICATION_JSON))
+                .andExpect(jsonPath("$.id").value(6))
+                .andExpect(jsonPath("$.gameTitle").value("New Game"))
+                .andExpect(jsonPath("$.platform").value("PC"))
+                .andExpect(jsonPath("$.gamePrice").value(3.99))
+                .andExpect(jsonPath("$.stockQuantity").value(50));
 
-//     @Test
-//     @DisplayName("PUT /api/products/{id} - Should return 404 when product not found")
-//     void testUpdateProductNotFound() throws Exception {
-//         // ARRANGE
-//         Product updateDetails = new Product();
-//         updateDetails.setGameTitle("Updated Game");
+        verify(productService, times(1)).createProduct(any(Product.class));
+    }
 
-//         when(productService.updateProduct(any(Long.class), any(Product.class)))
-//                 .thenThrow(new IllegalArgumentException("Product not found"));
+    @Test
+    @WithMockUser(roles = "MANAGER")
+    @DisplayName("POST /api/products - Should create new album product successfully")
+    void createProduct_WithValidAlbumData_ReturnsCreatedAlbum() throws Exception {
+        // Given
+        Product newAlbum = new Product();
+        newAlbum.setAlbumTitle("New Album");
+        newAlbum.setAlbumPrice(new BigDecimal("7.99"));
+        newAlbum.setStockQuantity(150);
 
-//         // ACT & ASSERT
-//         mockMvc.perform(put("/api/products/99")
-//                 .contentType(MediaType.APPLICATION_JSON)
-//                 .content(objectMapper.writeValueAsString(updateDetails)))
-//                 .andExpect(status().isNotFound());
-//     }
+        Product savedAlbum = new Product();
+        savedAlbum.setId(6L);
+        savedAlbum.setAlbumTitle("New Album");
+        savedAlbum.setAlbumPrice(new BigDecimal("7.99"));
+        savedAlbum.setStockQuantity(150);
 
-//     @Test
-//     @DisplayName("DELETE /api/products/{id} - Should delete existing product")
-//     void testDeleteProduct() throws Exception {
-//         // ACT & ASSERT
-//         mockMvc.perform(delete("/api/products/1")
-//                 .contentType(MediaType.APPLICATION_JSON))
-//                 .andExpect(status().isNoContent());
-//     }
+        when(productService.createProduct(any(Product.class))).thenReturn(savedAlbum);
 
-//     @Test
-//     @DisplayName("DELETE /api/products/{id} - Should return 404 when product not found")
-//     void testDeleteProductNotFound() throws Exception {
-//         // ARRANGE
-//         doThrow(new IllegalArgumentException("Product not found"))
-//                 .when(productService).deleteProduct(99L);
+        // When & Then
+        mockMvc.perform(post("/api/products")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(newAlbum)))
+                .andExpect(status().isCreated())
+                .andExpect(content().contentType(MediaType.APPLICATION_JSON))
+                .andExpect(jsonPath("$.id").value(6))
+                .andExpect(jsonPath("$.albumTitle").value("New Album"))
+                .andExpect(jsonPath("$.albumPrice").value(7.99))
+                .andExpect(jsonPath("$.stockQuantity").value(150));
 
-//         // ACT & ASSERT
-//         mockMvc.perform(delete("/api/products/99")
-//                 .contentType(MediaType.APPLICATION_JSON))
-//                 .andExpect(status().isNotFound());
-//     }
-// }
+        verify(productService, times(1)).createProduct(any(Product.class));
+    }
+
+    @Test
+    @WithMockUser(roles = "EMPLOYEE")
+    @DisplayName("PUT /api/products/{id} - Should update Jimmy Jungle price successfully")
+    void updateProduct_WithValidId_ReturnsUpdatedProduct() throws Exception {
+        // Given
+        Product updatedJimmyJungle = new Product();
+        updatedJimmyJungle.setId(1L);
+        updatedJimmyJungle.setGameTitle("Jimmy Jungle");
+        updatedJimmyJungle.setPlatform("PC");
+        updatedJimmyJungle.setGamePrice(new BigDecimal("2.99")); // Price updated
+        updatedJimmyJungle.setGameCoverImageUrl("INSERT AWS S3 FILE KEY FOR GAME COVER IMAGE URL HERE");
+        updatedJimmyJungle.setFileUrl("https://jimmywheezer.itch.io/jimmy-jungle");
+        updatedJimmyJungle.setStockQuantity(100);
+
+        when(productService.updateProduct(eq(1L), any(Product.class))).thenReturn(updatedJimmyJungle);
+
+        // When & Then
+        mockMvc.perform(put("/api/products/1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(updatedJimmyJungle)))
+                .andExpect(status().isOk())
+                .andExpect(content().contentType(MediaType.APPLICATION_JSON))
+                .andExpect(jsonPath("$.id").value(1))
+                .andExpect(jsonPath("$.gameTitle").value("Jimmy Jungle"))
+                .andExpect(jsonPath("$.gamePrice").value(2.99));
+
+        verify(productService, times(1)).updateProduct(eq(1L), any(Product.class));
+    }
+
+    @Test
+    @WithMockUser(roles = "EMPLOYEE")
+    @DisplayName("PUT /api/products/{id} - Should update album stock quantity")
+    void updateProduct_UpdateAlbumStock_ReturnsUpdatedAlbum() throws Exception {
+        // Given
+        Product updatedAlbum = new Product();
+        updatedAlbum.setId(5L);
+        updatedAlbum.setAlbumTitle("Selected Electronic Works");
+        updatedAlbum.setAlbumPrice(new BigDecimal("5.00"));
+        updatedAlbum.setAlbumCoverImageUrl("INSERT AWS S3 FILE KEY URL FOR ALBUM COVER IMAGE HERE");
+        updatedAlbum.setFileUrl("INSERT AWS S3 FILE KEY FOR MUSIC FILE URLS HERE");
+        updatedAlbum.setStockQuantity(250); // Stock updated
+
+        when(productService.updateProduct(eq(5L), any(Product.class))).thenReturn(updatedAlbum);
+
+        // When & Then
+        mockMvc.perform(put("/api/products/5")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(updatedAlbum)))
+                .andExpect(status().isOk())
+                .andExpect(content().contentType(MediaType.APPLICATION_JSON))
+                .andExpect(jsonPath("$.id").value(5))
+                .andExpect(jsonPath("$.albumTitle").value("Selected Electronic Works"))
+                .andExpect(jsonPath("$.stockQuantity").value(250));
+
+        verify(productService, times(1)).updateProduct(eq(5L), any(Product.class));
+    }
+
+    @Test
+    @WithMockUser(roles = "EMPLOYEE")
+    @DisplayName("PUT /api/products/{id} - Should return 404 when product not found")
+    void updateProduct_WithInvalidId_ReturnsNotFound() throws Exception {
+        // Given
+        Product updateData = new Product();
+        updateData.setGameTitle("Non-existent Game");
+
+        when(productService.updateProduct(eq(999L), any(Product.class)))
+                .thenThrow(new IllegalArgumentException("Product not found"));
+
+        // When & Then
+        mockMvc.perform(put("/api/products/999")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(updateData)))
+                .andExpect(status().isNotFound());
+
+        verify(productService, times(1)).updateProduct(eq(999L), any(Product.class));
+    }
+
+    @Test
+    @WithMockUser(roles = "MANAGER")
+    @DisplayName("DELETE /api/products/{id} - Should delete product successfully")
+    void deleteProduct_WithValidId_ReturnsNoContent() throws Exception {
+        // Given
+        doNothing().when(productService).deleteProduct(1L);
+
+        // When & Then
+        mockMvc.perform(delete("/api/products/1"))
+                .andExpect(status().isNoContent());
+
+        verify(productService, times(1)).deleteProduct(1L);
+    }
+
+    @Test
+    @WithMockUser(roles = "MANAGER")
+    @DisplayName("DELETE /api/products/{id} - Should return 404 when product not found")
+    void deleteProduct_WithInvalidId_ReturnsNotFound() throws Exception {
+        // Given
+        doThrow(new IllegalArgumentException("Product not found"))
+                .when(productService).deleteProduct(999L);
+
+        // When & Then
+        mockMvc.perform(delete("/api/products/999"))
+                .andExpect(status().isNotFound());
+
+        verify(productService, times(1)).deleteProduct(999L);
+    }
+
+    @Test
+    @DisplayName("GET /api/products/getAllProducts - Should return empty list when no products")
+    void getAllProducts_WhenNoProducts_ReturnsEmptyList() throws Exception {
+        // Given
+        when(productService.getAllProducts()).thenReturn(Arrays.asList());
+
+        // When & Then
+        mockMvc.perform(get("/api/products/getAllProducts"))
+                .andExpect(status().isOk())
+                .andExpect(content().contentType(MediaType.APPLICATION_JSON))
+                .andExpect(jsonPath("$", hasSize(0)));
+
+        verify(productService, times(1)).getAllProducts();
+    }
+
+    @Test
+    @WithMockUser(roles = "MANAGER")
+    @DisplayName("POST /api/products - Should create product with minimum required fields")
+    void createProduct_WithMinimumFields_ReturnsCreatedProduct() throws Exception {
+        // Given
+        Product minimalProduct = new Product();
+        minimalProduct.setGameTitle("Minimal Game");
+        minimalProduct.setGamePrice(new BigDecimal("1.00"));
+
+        Product savedProduct = new Product();
+        savedProduct.setId(7L);
+        savedProduct.setGameTitle("Minimal Game");
+        savedProduct.setGamePrice(new BigDecimal("1.00"));
+
+        when(productService.createProduct(any(Product.class))).thenReturn(savedProduct);
+
+        // When & Then
+        mockMvc.perform(post("/api/products")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(minimalProduct)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.id").value(7))
+                .andExpect(jsonPath("$.gameTitle").value("Minimal Game"))
+                .andExpect(jsonPath("$.gamePrice").value(1.00));
+
+        verify(productService, times(1)).createProduct(any(Product.class));
+    }
+
+    @Test
+    @DisplayName("GET /api/products/getAllProducts?platform=PC - Verify all PC games are returned")
+    void getAllProducts_PCPlatform_VerifyAllGamesReturned() throws Exception {
+        // Given - All 4 games from init script are PC games
+        when(productService.getProductsByPlatform("PC")).thenReturn(pcGames);
+
+        // When & Then
+        mockMvc.perform(get("/api/products/getAllProducts")
+                        .param("platform", "PC"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(4)))
+                .andExpect(jsonPath("$[?(@.gameTitle == 'Jimmy Jungle')]").exists())
+                .andExpect(jsonPath("$[?(@.gameTitle == 'Midnight Haunt')]").exists())
+                .andExpect(jsonPath("$[?(@.gameTitle == 'Protectors')]").exists())
+                .andExpect(jsonPath("$[?(@.gameTitle == 'Red Hood')]").exists());
+
+        verify(productService, times(1)).getProductsByPlatform("PC");
+    }
+
+    @Test
+    @DisplayName("Verify Protectors has preview URL while other games don't")
+    void getAllProducts_VerifyProtectorsHasPreviewUrl() throws Exception {
+        // Given
+        when(productService.getAllProducts()).thenReturn(allProducts);
+
+        // When & Then
+        mockMvc.perform(get("/api/products/getAllProducts"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[2].gameTitle").value("Protectors"))
+                .andExpect(jsonPath("$[2].previewUrl").value("INSERT AWS S3 FILE KEY FOR VIDEO GAME TRAILER URL HERE"))
+                .andExpect(jsonPath("$[0].previewUrl").doesNotExist())
+                .andExpect(jsonPath("$[1].previewUrl").doesNotExist())
+                .andExpect(jsonPath("$[3].previewUrl").doesNotExist());
+
+        verify(productService, times(1)).getAllProducts();
+    }
+
+    @Test
+    @DisplayName("Verify game prices match init script data")
+    void getAllProducts_VerifyGamePrices() throws Exception {
+        // Given
+        when(productService.getAllProducts()).thenReturn(allProducts);
+
+        // When & Then - Verify prices from init script
+        mockMvc.perform(get("/api/products/getAllProducts"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].gamePrice").value(2.00))  // Jimmy Jungle
+                .andExpect(jsonPath("$[1].gamePrice").value(2.00))  // Midnight Haunt
+                .andExpect(jsonPath("$[2].gamePrice").value(5.00))  // Protectors (most expensive game)
+                .andExpect(jsonPath("$[3].gamePrice").value(1.50))  // Red Hood (cheapest game)
+                .andExpect(jsonPath("$[4].albumPrice").value(5.00)); // Selected Electronic Works
+
+        verify(productService, times(1)).getAllProducts();
+    }
+
+    @Test
+    @DisplayName("Verify stock quantities match init script data")
+    void getAllProducts_VerifyStockQuantities() throws Exception {
+        // Given
+        when(productService.getAllProducts()).thenReturn(allProducts);
+
+        // When & Then - All games have 100 stock, album has 200
+        mockMvc.perform(get("/api/products/getAllProducts"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].stockQuantity").value(100))  // Jimmy Jungle
+                .andExpect(jsonPath("$[1].stockQuantity").value(100))  // Midnight Haunt
+                .andExpect(jsonPath("$[2].stockQuantity").value(100))  // Protectors
+                .andExpect(jsonPath("$[3].stockQuantity").value(100))  // Red Hood
+                .andExpect(jsonPath("$[4].stockQuantity").value(200)); // Album (double stock)
+
+        verify(productService, times(1)).getAllProducts();
+    }
+}

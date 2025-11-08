@@ -94,6 +94,51 @@ class StockServiceTest {
     }
 
     @Test
+    @DisplayName("updateStock - Should throw exception when stock not found")
+    void testUpdateStockNotFound() {
+        Stock updates = new Stock();
+        updates.setStockQuantity(50);
+
+        when(stockRepository.findById(999L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> stockService.updateStock(999L, updates))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Stock not found with id: 999");
+    }
+
+    @Test
+    @DisplayName("updateStock - Should update productId when changed")
+    void testUpdateStockWithNewProductId() {
+        Stock updates = new Stock();
+        updates.setProductId(10L);
+        updates.setStockQuantity(75);
+
+        when(stockRepository.findById(1L)).thenReturn(Optional.of(testStock));
+        when(stockRepository.existsByProductId(10L)).thenReturn(false);
+        when(stockRepository.save(any(Stock.class))).thenReturn(testStock);
+
+        Stock result = stockService.updateStock(1L, updates);
+
+        verify(stockRepository).save(testStock);
+        assertThat(testStock.getProductId()).isEqualTo(10L);
+        assertThat(testStock.getStockQuantity()).isEqualTo(75);
+    }
+
+    @Test
+    @DisplayName("updateStock - Should throw exception when new productId already exists")
+    void testUpdateStockProductIdAlreadyExists() {
+        Stock updates = new Stock();
+        updates.setProductId(10L);
+
+        when(stockRepository.findById(1L)).thenReturn(Optional.of(testStock));
+        when(stockRepository.existsByProductId(10L)).thenReturn(true);
+
+        assertThatThrownBy(() -> stockService.updateStock(1L, updates))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Stock already exists for product ID: 10");
+    }
+
+    @Test
     @DisplayName("deleteStock - Should delete stock")
     void testDeleteStock() {
         when(stockRepository.existsById(1L)).thenReturn(true);
@@ -101,5 +146,17 @@ class StockServiceTest {
         stockService.deleteStock(1L);
 
         verify(stockRepository).deleteById(1L);
+    }
+
+    @Test
+    @DisplayName("deleteStock - Should throw exception when stock not found")
+    void testDeleteStockNotFound() {
+        when(stockRepository.existsById(999L)).thenReturn(false);
+
+        assertThatThrownBy(() -> stockService.deleteStock(999L))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Stock not found with id: 999");
+
+        verify(stockRepository, never()).deleteById(any());
     }
 }

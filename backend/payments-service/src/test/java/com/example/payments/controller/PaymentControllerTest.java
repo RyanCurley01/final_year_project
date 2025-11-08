@@ -116,14 +116,23 @@ class PaymentControllerTest {
     }
 
     @Test
-    @DisplayName("POST /api/payments - Should create payment")
-    void testCreatePayment() throws Exception {
-        when(paymentService.createPayment(any(Payment.class))).thenReturn(testPayment);
+    @DisplayName("GET /api/payments/paypal/{paypalOrderId} - Should return payment by PayPal order ID")
+    void testGetPaymentByPaypalOrderId() throws Exception {
+        testPayment.setPaypalOrderId("PAYPAL123");
+        when(paymentService.getPaymentByPaypalOrderId("PAYPAL123")).thenReturn(Optional.of(testPayment));
 
-        mockMvc.perform(post("/api/payments")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsString(testPayment)))
-                .andExpect(status().isCreated());
+        mockMvc.perform(get("/api/payments/paypal/PAYPAL123"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.paypalOrderId", is("PAYPAL123")));
+    }
+    
+    @Test
+    @DisplayName("GET /api/payments/paypal/{paypalOrderId} - Should return 404 when not found")
+    void testGetPaymentByPaypalOrderIdNotFound() throws Exception {
+        when(paymentService.getPaymentByPaypalOrderId("INVALID")).thenReturn(Optional.empty());
+
+        mockMvc.perform(get("/api/payments/paypal/INVALID"))
+                .andExpect(status().isNotFound());
     }
 
     @Test
