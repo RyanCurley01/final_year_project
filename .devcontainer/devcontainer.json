@@ -3,6 +3,9 @@
   "dockerComposeFile": "docker-compose.yml",
   "service": "app",
   "workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",
+
+  "userEnvProbe": "none",
+
   "customizations": {
     "vscode": {
       "settings": {
@@ -22,8 +25,11 @@
       ]
     }
   },
+
   "remoteUser": "vscode",
+
   "forwardPorts": [8080, 5173, 5000, 3306],
+
   "portsAttributes": {
     "8080": {
       "label": "Backend (Spring Boot)",
@@ -42,6 +48,8 @@
       "onAutoForward": "ignore"
     }
   },
+
   "postCreateCommand": "./.devcontainer/postCreate.sh || true",
+  
   "features": {}
 }
