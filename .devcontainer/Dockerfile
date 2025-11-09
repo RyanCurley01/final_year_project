@@ -83,4 +83,13 @@ RUN apt-get clean || true
 
 WORKDIR /workspace
 
+# Add a startup script to fix gradlew permissions if it exists
+RUN echo '#!/bin/bash\n\
+if [ -f /workspace/gradlew ]; then\n\
+    chmod +x /workspace/gradlew\n\
+fi\n\
+exec "$@"' > /usr/local/bin/docker-entrypoint.sh \
+    && chmod +x /usr/local/bin/docker-entrypoint.sh
+
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["sleep", "infinity"]
