@@ -9,12 +9,14 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.messaging.simp.SimpMessagingTemplate;
 
 import java.util.Arrays;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -23,6 +25,9 @@ class StockServiceTest {
 
     @Mock
     private StockRepository stockRepository;
+
+    @Mock
+    private SimpMessagingTemplate messagingTemplate;
 
     @InjectMocks
     private StockService stockService;
@@ -68,6 +73,9 @@ class StockServiceTest {
         when(stockRepository.save(any(Stock.class))).thenReturn(testStock);
 
         assertThat(stockService.createStock(testStock).getId()).isEqualTo(1L);
+        
+        // Verify WebSocket broadcast was called (2 times: global + product-specific)
+        verify(messagingTemplate, times(2)).convertAndSend(any(String.class), any(Object.class));
     }
 
     @Test
@@ -91,6 +99,8 @@ class StockServiceTest {
         stockService.updateStock(1L, updates);
 
         verify(stockRepository).save(testStock);
+        // Verify WebSocket broadcast was called (2 times: global + product-specific)
+        verify(messagingTemplate, times(2)).convertAndSend(any(String.class), any(Object.class));
     }
 
     @Test
@@ -142,10 +152,13 @@ class StockServiceTest {
     @DisplayName("deleteStock - Should delete stock")
     void testDeleteStock() {
         when(stockRepository.existsById(1L)).thenReturn(true);
+        when(stockRepository.findById(1L)).thenReturn(Optional.of(testStock));
 
         stockService.deleteStock(1L);
 
         verify(stockRepository).deleteById(1L);
+        // Verify WebSocket broadcast was called (2 times: global + product-specific)
+        verify(messagingTemplate, times(2)).convertAndSend(any(String.class), any(Object.class));
     }
 
     @Test

@@ -8,7 +8,7 @@ Generates code coverage report
 ./gradlew :accounts-service:jacocoTestReport
 
 To kill a port
-sudo kill -9 2740 2987 2>/dev/null && echo "✓ Killed products-service processes" && sleep 2
+lsof -i :8086 2>/dev/null | grep -v COMMAND | awk '{print $2}' | xargs kill -9 2>/dev/null && echo "✓ Killed port 8086" || echo "Port 8086 is already free"
 
 Runs MySql queryies in ther terminal with a remote host
 mysql --protocol=TCP -h 127.0.0.1 -P 3306 -u root -prootpassword Game_Store_System -e "SELECT * FROM Accounts;"
