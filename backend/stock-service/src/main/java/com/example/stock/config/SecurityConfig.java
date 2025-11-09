@@ -1,7 +1,5 @@
 package com.example.stock.config;
 
-import com.example.stock.service.CustomUserDetailsService;
-import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -15,10 +13,7 @@ import org.springframework.security.web.SecurityFilterChain;
 
 @Configuration
 @EnableWebSecurity
-@RequiredArgsConstructor
 public class SecurityConfig {
-
-    private final CustomUserDetailsService customUserDetailsService;
 
     @Bean
     public PasswordEncoder passwordEncoder() {
@@ -32,7 +27,7 @@ public class SecurityConfig {
             .cors(cors -> cors.disable())
             .authorizeHttpRequests(auth -> auth
                 // Customers can view stock levels
-                .requestMatchers(HttpMethod.GET, "/api/stock", "/api/stock/{id}").authenticated()
+                .requestMatchers(HttpMethod.GET, "/api/stock/**").authenticated()
                 
                 // Manager can manage stock
                 .requestMatchers(HttpMethod.POST, "/api/stock").hasRole("MANAGER")

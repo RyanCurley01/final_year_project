@@ -3,7 +3,8 @@ set -e
 
 echo "Initializing Game Store Database..."
 
-mysql -u root -p"${MYSQL_ROOT_PASSWORD}" <<-'EOSQL'
+#mysql -u root -p"${MYSQL_ROOT_PASSWORD}" <<-'EOSQL'
+mysql --protocol=TCP --host=127.0.0.1 -u root -p"${MYSQL_ROOT_PASSWORD}" <<-'EOSQL'
     CREATE DATABASE IF NOT EXISTS Game_Store_System;
     USE Game_Store_System;
 
@@ -124,18 +125,19 @@ mysql -u root -p"${MYSQL_ROOT_PASSWORD}" <<-'EOSQL'
     -- ============================================
 
     -- Insert Accounts (Managers, Employees, Customers)
-    -- All passwords are BCrypt hashed version of 'password123'
+    -- All passwords are BCrypt hashed version of 'password'
+    -- Using BCrypt hash: $2a$10$dXJ3SW6G7P50lGmMkkmwe.20cQQubK3.HZWzG3YB1tlRy.fqvM/BG
     INSERT INTO Accounts (AccountName, AccountPhoneNumber, AccountEmailAddress, AccountPassword, AccountType) VALUES
-    ('John Smith', '5551234567', 'john.smith@store.com', '$2a$10$2.9guWus3aeN2wJSpK42KexyGnXDSnWl/do8L1A2CIQdLTCCe2ioa', 'Manager'),
-    ('Sarah Johnson', '5552345678', 'sarah.j@store.com', '$2a$10$2.9guWus3aeN2wJSpK42KexyGnXDSnWl/do8L1A2CIQdLTCCe2ioa', 'Employee'),
-    ('Mike Wilson', '5553456789', 'mike.w@store.com', '$2a$10$2.9guWus3aeN2wJSpK42KexyGnXDSnWl/do8L1A2CIQdLTCCe2ioa', 'Employee'),
-    ('Alice Brown', '5554567890', 'alice.b@gmail.com', '$2a$10$2.9guWus3aeN2wJSpK42KexyGnXDSnWl/do8L1A2CIQdLTCCe2ioa', 'Customer'),
-    ('Bob Davis', '5555678901', 'bob.d@gmail.com', '$2a$10$2.9guWus3aeN2wJSpK42KexyGnXDSnWl/do8L1A2CIQdLTCCe2ioa', 'Customer'),
-    ('Carol White', '5556789012', 'carol.w@gmail.com', '$2a$10$2.9guWus3aeN2wJSpK42KexyGnXDSnWl/do8L1A2CIQdLTCCe2ioa', 'Customer'),
-    ('David Lee', '5557890123', 'david.l@gmail.com', '$2a$10$2.9guWus3aeN2wJSpK42KexyGnXDSnWl/do8L1A2CIQdLTCCe2ioa', 'Customer'),
-    ('Emma Garcia', '5558901234', 'emma.g@gmail.com', '$2a$10$2.9guWus3aeN2wJSpK42KexyGnXDSnWl/do8L1A2CIQdLTCCe2ioa', 'Customer'),
-    ('Frank Martinez', '5559012345', 'frank.m@gmail.com', '$2a$10$2.9guWus3aeN2wJSpK42KexyGnXDSnWl/do8L1A2CIQdLTCCe2ioa', 'Customer'),
-    ('Grace Taylor', '5550123456', 'grace.t@gmail.com', '$2a$10$2.9guWus3aeN2wJSpK42KexyGnXDSnWl/do8L1A2CIQdLTCCe2ioa', 'Customer');
+    ('John Smith', '5551234567', 'john.smith@store.com', '$2a$10$dXJ3SW6G7P50lGmMkkmwe.20cQQubK3.HZWzG3YB1tlRy.fqvM/BG', 'MANAGER'),
+    ('Sarah Johnson', '5552345678', 'sarah.j@store.com', '$2a$10$dXJ3SW6G7P50lGmMkkmwe.20cQQubK3.HZWzG3YB1tlRy.fqvM/BG', 'EMPLOYEE'),
+    ('Mike Wilson', '5553456789', 'mike.w@store.com', '$2a$10$dXJ3SW6G7P50lGmMkkmwe.20cQQubK3.HZWzG3YB1tlRy.fqvM/BG', 'EMPLOYEE'),
+    ('Alice Brown', '5554567890', 'alice.b@gmail.com', '$2a$10$dXJ3SW6G7P50lGmMkkmwe.20cQQubK3.HZWzG3YB1tlRy.fqvM/BG', 'CUSTOMER'),
+    ('Bob Davis', '5555678901', 'bob.d@gmail.com', '$2a$10$dXJ3SW6G7P50lGmMkkmwe.20cQQubK3.HZWzG3YB1tlRy.fqvM/BG', 'CUSTOMER'),
+    ('Carol White', '5556789012', 'carol.w@gmail.com', '$2a$10$dXJ3SW6G7P50lGmMkkmwe.20cQQubK3.HZWzG3YB1tlRy.fqvM/BG', 'CUSTOMER'),
+    ('David Lee', '5557890123', 'david.l@gmail.com', '$2a$10$dXJ3SW6G7P50lGmMkkmwe.20cQQubK3.HZWzG3YB1tlRy.fqvM/BG', 'CUSTOMER'),
+    ('Emma Garcia', '5558901234', 'emma.g@gmail.com', '$2a$10$dXJ3SW6G7P50lGmMkkmwe.20cQQubK3.HZWzG3YB1tlRy.fqvM/BG', 'CUSTOMER'),
+    ('Frank Martinez', '5559012345', 'frank.m@gmail.com', '$2a$10$dXJ3SW6G7P50lGmMkkmwe.20cQQubK3.HZWzG3YB1tlRy.fqvM/BG', 'CUSTOMER'),
+    ('Grace Taylor', '5550123456', 'grace.t@gmail.com', '$2a$10$dXJ3SW6G7P50lGmMkkmwe.20cQQubK3.HZWzG3YB1tlRy.fqvM/BG', 'CUSTOMER');
 
     -- Insert Products (Games and Music Albums)
     INSERT INTO Products (GameTitle, AlbumTitle, Platform, GamePrice, AlbumPrice, albumCoverImageUrl, gameCoverImageUrl, file_url, preview_url, StockQuantity) VALUES

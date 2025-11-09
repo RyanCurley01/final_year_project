@@ -25,3 +25,6 @@ server:
 logging:
   level:
     com.example.stock: DEBUG
+    org.springframework.security: TRACE
+    org.springframework.security.web: TRACE
+    org.springframework.security.authentication: TRACE
