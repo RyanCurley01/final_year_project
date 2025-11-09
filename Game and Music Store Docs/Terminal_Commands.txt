@@ -13,5 +13,5 @@ lsof -i :8086 2>/dev/null | grep -v COMMAND | awk '{print $2}' | xargs kill -9 2
 Runs MySql queryies in ther terminal with a remote host
 mysql --protocol=TCP -h 127.0.0.1 -P 3306 -u root -prootpassword Game_Store_System -e "SELECT * FROM Accounts;"
 
-To open the workspace from the Linux path
-code /workspaces/final_year_project
+To run the dev server
+npm run dev
