@@ -7,7 +7,7 @@ Use these examples when testing with Postman or other API clients.
 
 All endpoints require Basic Authentication:
 - Username: john.smith@store.com (Manager)
-- Password: password123
+- Password: password
 
 ===============================================================================
 
@@ -19,12 +19,12 @@ All endpoints require Basic Authentication:
 -------------------------------------------------------------------------------
 {
   "email": "john.smith@store.com",
-  "password": "password123"
+  "password": "password"
 }
 
 {
   "email": "alice.b@gmail.com",
-  "password": "password123"
+  "password": "password"
 }
 
 -------------------------------------------------------------------------------
@@ -378,7 +378,7 @@ PORT REFERENCE:
 
 ===============================================================================
 
-EXISTING TEST ACCOUNTS (All use password: "password123"):
+EXISTING TEST ACCOUNTS (All use password: "password"):
 
 Managers:
 - john.smith@store.com (ID: 1)

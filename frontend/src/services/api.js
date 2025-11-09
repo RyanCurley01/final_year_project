@@ -1,17 +1,17 @@
 // Base API configuration
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost';
 
-// Service ports
+// Service ports (must match backend application.yml configurations)
 export const PORTS = {
   ACCOUNTS: 8080,
-  PRODUCTS: 8081,
-  ORDERS: 8082,
-  ORDER_ITEMS: 8083,
-  PAYMENTS: 8084,
-  WISHLIST: 8085,
+  PRODUCTS: 8082,  
+  ORDERS: 8083,    
+  ORDER_ITEMS: 8084,  
+  PAYMENTS: 8085,     
+  WISHLIST: 8087,     
   STOCK: 8086,
-  CUSTOMER_SUMMARY: 8087,
-  PURCHASED_PRODUCTS: 8088,
+  CUSTOMER_SUMMARY: 8088,  
+  PURCHASED_PRODUCTS: 8090,  
   SOLD_PRODUCTS: 8089,
 };
 
