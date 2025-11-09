@@ -90,3 +90,12 @@ hs_err_pid*
 /.idea/
 /.vscode/
 /*.iml
+
+# Python virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Windows Zone Identifier files
+*:Zone.Identifier
