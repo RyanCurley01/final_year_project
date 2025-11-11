@@ -19,7 +19,7 @@ RUN apt-get update \
        gnupg \
        software-properties-common \
        iputils-ping \
-       openjdk-17-jdk \
+       openjdk-21-jdk \
        python3-dev \
        python3-venv \
        python3-pip \
@@ -63,8 +63,11 @@ RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/awsc
     && rm -rf /tmp/aws /tmp/awscliv2.zip
 
 # Set Java alternatives (ensure JAVA_HOME)
-ENV JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+ENV JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
 ENV PATH="$JAVA_HOME/bin:$PATH"
+
+# Verify Java installation
+RUN java -version && javac -version
 
 # Create a non-root vscode user (devcontainers base already creates 'vscode', ensure packages owned)
 ARG USERNAME=vscode
