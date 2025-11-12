@@ -7,10 +7,8 @@ services:
       dockerfile: Dockerfile
     volumes:
       - ..:/workspaces/final_year_project:cached
-      #- vscode-extensions:/root/.vscode-server/extensions
-      #- vscode-extensions-insiders:/root/.vscode-server-insiders/extensions
-      - vscode-extensions:/vscode/.vscode-server/extensions
-      - vscode-extensions-insiders:/vscode/.vscode-server-insiders/extensions
+      - vscode-extensions:/root/.vscode-server/extensions
+      - vscode-extensions-insiders:/root/.vscode-server-insiders/extensions
     command: sleep infinity
     network_mode: service:db
     environment:
