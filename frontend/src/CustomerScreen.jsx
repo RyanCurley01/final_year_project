@@ -49,7 +49,7 @@ const CustomerScreen = () => {
     <div className="flex flex-wrap sm:justify-start justify-center gap-8">
       {products.map((product, i) => (
         <SongCard
-          key={product.productID}
+          key={product.id}
           product={product}
           i={i}
         />

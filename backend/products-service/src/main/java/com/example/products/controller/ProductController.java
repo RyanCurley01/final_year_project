@@ -1,5 +1,6 @@
 package com.example.products.controller;
 
+import com.example.products.dto.ProductResponse;
 import com.example.products.model.Product;
 import com.example.products.service.ProductService;
 import jakarta.validation.Valid;
@@ -19,22 +20,16 @@ public class ProductController {
     private final ProductService productService;
 
     @GetMapping("/getAllProducts")
-    public ResponseEntity<List<Product>> getAllProducts(
+    public ResponseEntity<List<ProductResponse>> getAllProducts(
             @RequestParam(required = false) String gameCoverImageUrl,
             @RequestParam(required = false) String albumCoverImageUrl,
             @RequestParam(required = false) String platform) {
 
-        if (gameCoverImageUrl != null) {
-            return ResponseEntity.ok(productService.getProductsByGameCoverImageUrl(gameCoverImageUrl));
-        }
-        if (albumCoverImageUrl != null) {
-            return ResponseEntity.ok(productService.getProductsByAlbumCoverImageUrl(albumCoverImageUrl));
-        }
-        if (platform != null) {
-            return ResponseEntity.ok(productService.getProductsByPlatform(platform));
+        if (gameCoverImageUrl != null || albumCoverImageUrl != null || platform != null) {
+            return ResponseEntity.ok(productService.getAllProductsWithSignedUrls());
         }
         
-        return ResponseEntity.ok(productService.getAllProducts());
+        return ResponseEntity.ok(productService.getAllProductsWithSignedUrls());
     }
 
     @PostMapping

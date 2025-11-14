@@ -1,5 +1,6 @@
 package com.example.products.service;
 
+import com.example.products.dto.ProductResponse;
 import com.example.products.model.Product;
 import com.example.products.repository.ProductRepository;
 import lombok.RequiredArgsConstructor;
@@ -8,15 +9,23 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
 public class ProductService {
 
     private final ProductRepository productRepository;
+    private final S3Service s3Service;
 
     public List<Product> getAllProducts() {
         return productRepository.findAll();
+    }
+
+    public List<ProductResponse> getAllProductsWithSignedUrls() {
+        return productRepository.findAll().stream()
+                .map(this::toProductResponse)
+                .collect(Collectors.toList());
     }
 
     public List<Product> getProductsByGameCoverImageUrl(String gameImageUrlString) {
@@ -29,6 +38,16 @@ public class ProductService {
 
     public List<Product> getProductsByPlatform(String platform) {
         return productRepository.findByPlatform(platform);
+    }
+
+    private ProductResponse toProductResponse(Product product) {
+        String signedGameCoverUrl = s3Service.generatePresignedUrl(product.getGameCoverImageUrl());
+        String signedAlbumCoverUrl = s3Service.generatePresignedUrl(product.getAlbumCoverImageUrl());
+        String signedFileUrl = s3Service.generatePresignedUrl(product.getFileUrl());
+        String signedPreviewUrl = s3Service.generatePresignedUrl(product.getPreviewUrl());
+
+        return ProductResponse.fromProduct(product, signedGameCoverUrl, signedAlbumCoverUrl, 
+                                          signedFileUrl, signedPreviewUrl);
     }
 
     @Transactional
