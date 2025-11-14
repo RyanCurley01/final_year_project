@@ -29,7 +29,7 @@ public class SecurityConfig {
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         http
             .csrf(csrf -> csrf.disable())
-            .cors(cors -> cors.disable())
+            .cors(Customizer.withDefaults())
             .authorizeHttpRequests(auth -> auth
                 // Public endpoints - customers can browse products
                 .requestMatchers(HttpMethod.GET, "/api/products", "/api/products/getAllProducts", "/api/products/{id}").permitAll()

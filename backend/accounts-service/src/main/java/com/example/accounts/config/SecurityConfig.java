@@ -35,7 +35,7 @@ public class SecurityConfig
     {
         http
             .csrf(csrf -> csrf.disable())
-            .cors(cors -> cors.disable())
+            .cors(Customizer.withDefaults())
             .authorizeHttpRequests(auth -> auth
                 // Public endpoints
                 .requestMatchers(HttpMethod.POST, "/api/accounts/login").permitAll()

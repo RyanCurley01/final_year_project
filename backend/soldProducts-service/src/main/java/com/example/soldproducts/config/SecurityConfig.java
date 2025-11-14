@@ -29,7 +29,7 @@ public class SecurityConfig {
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         http
             .csrf(csrf -> csrf.disable())
-            .cors(cors -> cors.disable())
+            .cors(Customizer.withDefaults())
             .authorizeHttpRequests(auth -> auth
                 // Manager and Employee can view sold products
                 .requestMatchers(HttpMethod.GET, "/api/sold-products", "/api/sold-products/{id}").hasAnyRole("MANAGER", "EMPLOYEE")
