@@ -46,14 +46,17 @@ const CustomerScreen = () => {
   }
 
   return (
-    <div className="flex flex-wrap sm:justify-start justify-center gap-8">
-      {products.map((product, i) => (
-        <SongCard
-          key={product.id}
-          product={product}
-          i={i}
-        />
-      ))}
+    <div className="w-full min-h-screen p-4">
+      <div className="flex flex-row gap-4 overflow-x-auto w-full pb-4">
+        {products.map((product, i) => (
+          <div key={product.id} className="flex-shrink-0">
+            <SongCard
+              product={product}
+              i={i}
+            />
+          </div>
+        ))}
+      </div>
     </div>
   );
 };

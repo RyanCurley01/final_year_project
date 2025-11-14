@@ -3,16 +3,15 @@ const SongCard = ({ product, i }) => {
   const isMusic = product.albumTitle !== null && product.albumTitle !== undefined;
   const isGame = product.gameTitle !== null && product.gameTitle !== undefined;
   
-  const icon = isMusic ? '🎵' : '🎮';
   const productName = isMusic ? product.albumTitle : product.gameTitle;
   const price = isMusic ? product.albumPrice : product.gamePrice;
   const coverImage = isMusic ? product.albumCoverImageUrl : product.gameCoverImageUrl;
 
   return (
-    <div className="flex flex-col w-[150px] p-2 bg-white/5 bg-opacity-80 backdrop-blur-sm animate-slideup rounded-lg cursor-pointer hover:bg-white/10 transition-all duration-300">
-      <div className="relative w-[150px] h-[150px] overflow-hidden group">
+    <div className="flex flex-col gap-2 p-4 bg-gray-400 rounded-lg w-[200px]">
+      <div className="relative w-full h-[150px] flex-shrink-0 overflow-hidden group rounded-lg">
         {isMusic && (
-          <div className={`absolute inset-0 flex justify-center items-center bg-black bg-opacity-70 group-hover:flex hidden rounded-lg`}>
+          <div className={"absolute inset-0 flex justify-center items-center bg-black bg-opacity-70 group-hover:flex hidden rounded-lg"}>
             <button
               type="button"
               className="text-3xl hover:scale-110 transition-transform"
@@ -24,11 +23,11 @@ const SongCard = ({ product, i }) => {
         )}
         <img
           src={coverImage || 'https://via.placeholder.com/150x150?text=No+Image'}
-          className="w-[150px] h-[150px] rounded-lg object-cover"
+          className="w-full h-full rounded-lg object-cover"
         />
       </div>
 
-      <div className="mt-2 flex flex-col bg-gray-900 bg-opacity-80 p-2 rounded">
+      <div className="flex flex-col bg-gray-900 bg-opacity-80 p-2 rounded">
         <p className="font-semibold text-sm text-black">
           {productName || 'Unknown'}
         </p>
