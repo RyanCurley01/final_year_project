@@ -45,18 +45,33 @@ const CustomerScreen = () => {
     );
   }
 
+  // Separate Selected Electronic Works from other products
+  const selectedElectronic = products.find(p => p.albumTitle === "Selected Electronic Works");
+  const otherProducts = products.filter(p => p.albumTitle !== "Selected Electronic Works");
+
   return (
     <div className="w-full min-h-screen p-4">
-      <div className="flex flex-row gap-4 overflow-x-auto w-full pb-4">
-        {products.map((product, i) => (
-          <div key={product.id} className="flex-shrink-0">
-            <SongCard
-              product={product}
-              i={i}
-            />
-          </div>
+      {/* First row - all products except Selected Electronic Works */}
+      <div className="flex flex-wrap gap-4 w-full mb-4">
+        {otherProducts.map((product, i) => (
+          <SongCard
+            key={product.id}
+            product={product}
+            i={i}
+          />
         ))}
       </div>
+      
+      {/* Second row - Selected Electronic Works */}
+      {selectedElectronic && (
+        <div className="flex flex-wrap gap-4 w-fullpx">
+          <SongCard
+            key={selectedElectronic.id}
+            product={selectedElectronic}
+            i={products.length - 1}
+          />
+        </div>
+      )}
     </div>
   );
 };
