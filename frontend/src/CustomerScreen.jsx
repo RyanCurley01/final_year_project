@@ -52,8 +52,8 @@ const CustomerScreen = () => {
   return (
     <div className="w-full min-h-screen p-4">
       <div className="flex flex-col items-center w-full">
-        {/* All products in one flex container */}
-        <div className="flex flex-wrap gap-4 justify-center" style={{ maxWidth: '1264px', width: '100%' }}>
+        {/* First row - horizontal layout */}
+        <div className="flex gap-4 mb-4" style={{ maxWidth: '1264px', width: '100%' }}>
           {otherProducts.map((product, i) => (
             <SongCard
               key={product.id}
@@ -61,19 +61,18 @@ const CustomerScreen = () => {
               i={i}
             />
           ))}
-          
-          {/* Force line break before Selected Electronic Works */}
-          {selectedElectronic && (
-            <>
-              <div className="w-full h-0"></div>
-              <SongCard
-                key={selectedElectronic.id}
-                product={selectedElectronic}
-                i={products.length - 1}
-              />
-            </>
-          )}
         </div>
+        
+        {/* Second row - Selected Electronic Works below Jimmy Jungle */}
+        {selectedElectronic && (
+          <div className="flex gap-4 ml-[7px]" style={{ maxWidth: '1264px', width: '100%' }}>
+            <SongCard
+              key={selectedElectronic.id}
+              product={selectedElectronic}
+              i={products.length - 1}
+            />
+          </div>
+        )}
       </div>
     </div>
   );
