@@ -1,4 +1,6 @@
 import { useState, useEffect } from 'react';
+import { useDispatch, useSelector } from 'react-redux';
+
 import { productService } from '../services';
 import SongCard from '../components/SongCard';
 import Loader from '../components/Loader';
@@ -10,6 +12,9 @@ const CustomerScreen = () => {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+
+  const dispatch = useDispatch();
+  const { activeSong, isPlaying } = useSelector((state) => state.player);
 
   // Your auth credentials - in production, get these from login/auth context
   const email = 'john.smith@store.com';
@@ -46,6 +51,9 @@ const CustomerScreen = () => {
           <SongCard
             key={product.productId || `product-${i}`}
             product={product}
+            isPlaying={isPlaying}
+            activeSong={activeSong}
+            //data={data}
             i={i}
           />
         ))}
