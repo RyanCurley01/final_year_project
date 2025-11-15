@@ -8,7 +8,7 @@ const SongCard = ({ product, i }) => {
   const coverImage = isMusic ? product.albumCoverImageUrl : product.gameCoverImageUrl;
 
   return (
-    <div className="flex flex-col gap-2 p-4 bg-gray-400 rounded-lg flex-1 min-w-[400px] max-w-[800px]">
+    <div className="flex flex-col gap-2 p-4 bg-gray-400 rounded-lg w-[600px]">
       <div className="relative w-full h-auto flex-shrink-0 overflow-hidden group rounded-lg">
         {isMusic && (
           <div className={"absolute inset-0 flex justify-center items-center bg-black bg-opacity-70 group-hover:flex hidden rounded-lg"}>
