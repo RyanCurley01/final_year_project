@@ -51,9 +51,7 @@ const CustomerScreen = () => {
           <SongCard
             key={product.productId || `product-${i}`}
             product={product}
-            isPlaying={isPlaying}
-            activeSong={activeSong}
-            //data={data}
+            data={products}
             i={i}
           />
         ))}

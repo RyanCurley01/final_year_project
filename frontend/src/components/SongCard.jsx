@@ -1,10 +1,10 @@
 import {Link } from 'react-router-dom';
-import {useDispatch } from 'react-redux';
+import {useDispatch, useSelector } from 'react-redux';
 
 import PlayPause from './PlayPause';
 import { playPause, setActiveSong } from '../redux/features/playerSlice';
 
-const SongCard = ({ product, isPlaying, activeSong, i, data }) => {
+const SongCard = ({ product, i, data }) => {
   // Determine if it's a game or music based on which fields are populated
   const isMusic = product.albumTitle !== null && product.albumTitle !== undefined;
   const isGame = product.gameTitle !== null && product.gameTitle !== undefined;
@@ -15,16 +15,17 @@ const SongCard = ({ product, isPlaying, activeSong, i, data }) => {
 
 
   const dispatch = useDispatch();
+  const { activeSong, isPlaying } = useSelector((state) => state.player);
 
   const handlePauseClick = () => {
     dispatch(playPause(false));
   };
 
   const handlePlayClick = () => {
-    dispatch(setActiveSong({ song, data, i }));
+    dispatch(setActiveSong({ song: product, data, i }));
     dispatch(playPause(true));
   };
-  
+
 
   return (
     /**
@@ -37,10 +38,10 @@ const SongCard = ({ product, isPlaying, activeSong, i, data }) => {
         <div className={`absolute inset-0 justify-center items-center bg-black bg-opacity-50 group-hover:flex ${isMusic ? 'flex bg-black bg-opacity-70' : 'hidden'}`}>
           {isMusic && (
             <PlayPause
-              isPlaying = {isPlaying}
-              activeSong={product}
-              handlePauseClick={handlePauseClick}
-              handlePlayClick={handlePlayClick}
+              isPlaying={isPlaying && activeSong?.albumTitle === product.albumTitle}
+              activeSong={activeSong}
+              handlePause={handlePauseClick}
+              handlePlay={handlePlayClick}
               song={product}
             />
           )}
