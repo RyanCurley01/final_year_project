@@ -148,7 +148,57 @@ mysql -u root -p"${MYSQL_ROOT_PASSWORD}" <<-'EOSQL'
     ('Red Hood', NULL, 'PC', 1.50, NULL, NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Game Cover Images/Red Hood Cover Image.png', 'https://jimmywheezer.itch.io/red-hood', NULL, 100),
 
     -- Music Albums
-    (NULL, 'Selected Electronic Works', NULL, NULL, 5.00, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Music Cover Image and cloud movement script/z4AnyQN.webp', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Song_WAV_Files_For_Final_Year_Project.zip', NULL, 200);
+    (NULL, 'Selected Electronic Works', NULL, NULL, 5.00, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Music Cover Image and cloud movement script/z4AnyQN.webp', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Song_WAV_Files_For_Final_Year_Project.zip', NULL, 200),
+    
+    -- Individual Songs from Selected Electronic Works
+    (NULL, 'Electronic Works - Alien Acid', NULL, NULL, 0.50, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Music Cover Image and cloud movement script/z4AnyQN.webp', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien Acid.wav', NULL, 200),
+    (NULL, 'Electronic Works - Alien Action', NULL, NULL, 0.50, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Music Cover Image and cloud movement script/z4AnyQN.webp', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien Action.wav', NULL, 200),
+    (NULL, 'Electronic Works - Alien Amp Up', NULL, NULL, 0.50, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Music Cover Image and cloud movement script/z4AnyQN.webp', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien Amp Up.wav', NULL, 200),
+    (NULL, 'Electronic Works - Alien Bars', NULL, NULL, 0.50, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Music Cover Image and cloud movement script/z4AnyQN.webp', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien Bars.wav', NULL, 200),
+    (NULL, 'Electronic Works - Alien Business', NULL, NULL, 0.50, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Music Cover Image and cloud movement script/z4AnyQN.webp', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien Business.wav', NULL, 200),
+    (NULL, 'Electronic Works - Alien Chilling', NULL, NULL, 0.50, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Music Cover Image and cloud movement script/z4AnyQN.webp', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien Chilling.wav', NULL, 200),
+    (NULL, 'Electronic Works - Alien Essence', NULL, NULL, 0.50, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Music Cover Image and cloud movement script/z4AnyQN.webp', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien Essence.wav', NULL, 200),
+    (NULL, 'Electronic Works - Alien Euphoria', NULL, NULL, 0.50, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Music Cover Image and cloud movement script/z4AnyQN.webp', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien Euphoria.wav', NULL, 200),
+    (NULL, 'Electronic Works - Alien Feels', NULL, NULL, 0.50, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Music Cover Image and cloud movement script/z4AnyQN.webp', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien Feels.wav', NULL, 200),
+    (NULL, 'Electronic Works - Alien Flow State', NULL, NULL, 0.50, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Music Cover Image and cloud movement script/z4AnyQN.webp', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien Flow State.wav', NULL, 200),
+    (NULL, 'Electronic Works - Alien Grind', NULL, NULL, 0.50, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Music Cover Image and cloud movement script/z4AnyQN.webp', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien Grind.wav', NULL, 200),
+    (NULL, 'Electronic Works - Alien Harmony', NULL, NULL, 0.50, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Music Cover Image and cloud movement script/z4AnyQN.webp', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien Harmony.wav', NULL, 200),
+    (NULL, 'Electronic Works - Alien Hyperness', NULL, NULL, 0.50, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Music Cover Image and cloud movement script/z4AnyQN.webp', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien Hyperness.wav', NULL, 200),
+    (NULL, 'Electronic Works - Alien Joy', NULL, NULL, 0.50, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Music Cover Image and cloud movement script/z4AnyQN.webp', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien Joy.wav', NULL, 200),
+    (NULL, 'Electronic Works - Alien Memories', NULL, NULL, 0.50, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Music Cover Image and cloud movement script/z4AnyQN.webp', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien Memories.wav', NULL, 200),
+    (NULL, 'Electronic Works - Alien Mode', NULL, NULL, 0.50, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Music Cover Image and cloud movement script/z4AnyQN.webp', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien Mode.wav', NULL, 200),
+    (NULL, 'Electronic Works - Alien Nature', NULL, NULL, 0.50, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Music Cover Image and cloud movement script/z4AnyQN.webp', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien Nature.wav', NULL, 200),
+    (NULL, 'Electronic Works - Alien Ragebait', NULL, NULL, 0.50, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Music Cover Image and cloud movement script/z4AnyQN.webp', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien Ragebait.wav', NULL, 200),
+    (NULL, 'Electronic Works - Alien Realm', NULL, NULL, 0.50, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Music Cover Image and cloud movement script/z4AnyQN.webp', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien Realm.wav', NULL, 200),
+    (NULL, 'Electronic Works - Alien Sense', NULL, NULL, 0.50, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Music Cover Image and cloud movement script/z4AnyQN.webp', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien Sense.wav', NULL, 200),
+    (NULL, 'Electronic Works - Alien Singing', NULL, NULL, 0.50, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Music Cover Image and cloud movement script/z4AnyQN.webp', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien Singing.wav', NULL, 200),
+    (NULL, 'Electronic Works - Alien Soul', NULL, NULL, 0.50, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Music Cover Image and cloud movement script/z4AnyQN.webp', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien Soul.wav', NULL, 200),
+    (NULL, 'Electronic Works - Alien Translation', NULL, NULL, 0.50, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Music Cover Image and cloud movement script/z4AnyQN.webp', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien Translation.wav', NULL, 200),
+    (NULL, 'Electronic Works - Alien Turn Up', NULL, NULL, 0.50, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Music Cover Image and cloud movement script/z4AnyQN.webp', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien Turn Up.wav', NULL, 200),
+    (NULL, 'Electronic Works - Alien Upgrade', NULL, NULL, 0.50, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Music Cover Image and cloud movement script/z4AnyQN.webp', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien Upgrade.wav', NULL, 200),
+    (NULL, 'Electronic Works - Alien Utopia', NULL, NULL, 0.50, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Music Cover Image and cloud movement script/z4AnyQN.webp', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien Utopia.wav', NULL, 200),
+    (NULL, 'Electronic Works - Alien Wonder', NULL, NULL, 0.50, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Music Cover Image and cloud movement script/z4AnyQN.webp', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien Wonder.wav', NULL, 200),
+    (NULL, 'Electronic Works - Extraterrestrial Rave', NULL, NULL, 0.50, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Music Cover Image and cloud movement script/z4AnyQN.webp', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Extraterrestrial Rave.wav', NULL, 200),
+    (NULL, 'Electronic Works - Find The Light', NULL, NULL, 0.50, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Music Cover Image and cloud movement script/z4AnyQN.webp', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Find The Light.wav', NULL, 200),
+    (NULL, 'Electronic Works - Green Bear', NULL, NULL, 0.50, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Music Cover Image and cloud movement script/z4AnyQN.webp', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Green Bear.wav', NULL, 200),
+    (NULL, 'Electronic Works - Green God', NULL, NULL, 0.50, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Music Cover Image and cloud movement script/z4AnyQN.webp', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Green God.wav', NULL, 200),
+    (NULL, 'Electronic Works - Intergalactic Rave', NULL, NULL, 0.50, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Music Cover Image and cloud movement script/z4AnyQN.webp', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Intergalactic Rave.wav', NULL, 200),
+    (NULL, 'Electronic Works - Mike Mix 1 (Giggity Mix)', NULL, NULL, 0.50, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Music Cover Image and cloud movement script/z4AnyQN.webp', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Mike Mix 1 (Giggity Mix).wav', NULL, 200),
+    (NULL, 'Electronic Works - Mike''s Rave', NULL, NULL, 0.50, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Music Cover Image and cloud movement script/z4AnyQN.webp', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Mike''s Rave.wav', NULL, 200),
+    (NULL, 'Electronic Works - Mike''s Utopia', NULL, NULL, 0.50, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Music Cover Image and cloud movement script/z4AnyQN.webp', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Mike''s Utopia.wav', NULL, 200),
+    (NULL, 'Electronic Works - Soft Chaos', NULL, NULL, 0.50, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Music Cover Image and cloud movement script/z4AnyQN.webp', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Soft Chaos.wav', NULL, 200),
+    (NULL, 'Electronic Works - Ted Chilling', NULL, NULL, 0.50, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Music Cover Image and cloud movement script/z4AnyQN.webp', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted Chilling.wav', NULL, 200),
+    (NULL, 'Electronic Works - Teddy Emotion', NULL, NULL, 0.50, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Music Cover Image and cloud movement script/z4AnyQN.webp', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Teddy Emotion.wav', NULL, 200),
+    (NULL, 'Electronic Works - Ted''s Adventure', NULL, NULL, 0.50, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Music Cover Image and cloud movement script/z4AnyQN.webp', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted''s Adventure.wav', NULL, 200),
+    (NULL, 'Electronic Works - Ted''s Awakening', NULL, NULL, 0.50, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Music Cover Image and cloud movement script/z4AnyQN.webp', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted''s Awakening.wav', NULL, 200),
+    (NULL, 'Electronic Works - Ted''s Beautiful Anger', NULL, NULL, 0.50, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Music Cover Image and cloud movement script/z4AnyQN.webp', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted''s Beautiful Anger.wav', NULL, 200),
+    (NULL, 'Electronic Works - Ted''s Chillness', NULL, NULL, 0.50, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Music Cover Image and cloud movement script/z4AnyQN.webp', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted''s Chillness.wav', NULL, 200),
+    (NULL, 'Electronic Works - Ted''s Deepness', NULL, NULL, 0.50, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Music Cover Image and cloud movement script/z4AnyQN.webp', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted''s Deepness.wav', NULL, 200),
+    (NULL, 'Electronic Works - Ted''s Dream', NULL, NULL, 0.50, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Music Cover Image and cloud movement script/z4AnyQN.webp', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted''s Dream.wav', NULL, 200),
+    (NULL, 'Electronic Works - Ted''s Energy', NULL, NULL, 0.50, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Music Cover Image and cloud movement script/z4AnyQN.webp', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted''s Energy.wav', NULL, 200),
+    (NULL, 'Electronic Works - Ted''s Green Machine', NULL, NULL, 0.50, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Music Cover Image and cloud movement script/z4AnyQN.webp', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted''s Green Machine.wav', NULL, 200),
+    (NULL, 'Electronic Works - Ted''s Rush Up', NULL, NULL, 0.50, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Music Cover Image and cloud movement script/z4AnyQN.webp', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted''s Rush Up.wav', NULL, 200),
+    (NULL, 'Electronic Works - Ted''s Utopia', NULL, NULL, 0.50, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Music Cover Image and cloud movement script/z4AnyQN.webp', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted''s Utopia.wav', NULL, 200);
 
     -- Insert Stock entries 
     INSERT INTO Stock (StockQuantity, ProductID) VALUES
@@ -156,7 +206,18 @@ mysql -u root -p"${MYSQL_ROOT_PASSWORD}" <<-'EOSQL'
     (100, 2),  -- Midnight Haunt
     (100, 3),  -- Protectors
     (100, 4),  -- Red Hood
-    (200, 5);  -- Selected Electronic Works
+    (200, 5),  -- Selected Electronic Works (full album ZIP)
+    -- Individual songs (Product IDs 6-53)
+    (200, 6), (200, 7), (200, 8), (200, 9), (200, 10),
+    (200, 11), (200, 12), (200, 13), (200, 14), (200, 15),
+    (200, 16), (200, 17), (200, 18), (200, 19), (200, 20),
+    (200, 21), (200, 22), (200, 23), (200, 24), (200, 25),
+    (200, 26), (200, 27), (200, 28), (200, 29), (200, 30),
+    (200, 31), (200, 32), (200, 33), (200, 34), (200, 35),
+    (200, 36), (200, 37), (200, 38), (200, 39), (200, 40),
+    (200, 41), (200, 42), (200, 43), (200, 44), (200, 45),
+    (200, 46), (200, 47), (200, 48), (200, 49), (200, 50),
+    (200, 51), (200, 52), (200, 53);
 
     -- Insert Orders
     INSERT INTO Orders (AccountID, orderDate, TotalAmount) VALUES
