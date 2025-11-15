@@ -1,6 +1,10 @@
 import { useState, useEffect } from 'react';
-import { productService } from './services';
-import SongCard from './components/SongCard';
+import { productService } from '../services';
+import SongCard from '../components/SongCard';
+import Loader from '../components/Loader';
+import Error from '../components/Error';
+
+
 
 const CustomerScreen = () => {
   const [products, setProducts] = useState([]);
@@ -29,34 +33,23 @@ const CustomerScreen = () => {
     fetchProducts();
   }, []);
 
-  if (loading) {
-    return (
-      <div className="flex justify-center items-center h-screen">
-        <p className="text-xl text-white">Loading products...</p>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="flex justify-center items-center h-screen">
-        <p className="text-xl text-red-500">Error: {error}</p>
-      </div>
-    );
-  }
-
-  const allProducts = products.find(p => p.albumTitle && p.gameTitle);
+  if (loading) return <Loader title="Loading products..." />;
+  if (error) return <Error />;
 
   return (
-    <div className="flex flex-wrap sm:justify-start
-    justify-center gap-8">
-      {allProducts.map((product, i) => (
-        <SongCard
-          key={product.id}
-          product={product}
-          i={i}
-        />
-      ))}
+    <div className="flex flex-col">
+      <h2 className="font-bold text-3xl text-white text-left mt-4 mb-10">
+        All Products
+      </h2>
+      <div className="flex flex-wrap sm:justify-start justify-center gap-8">
+        {products.map((product, i) => (
+          <SongCard
+            key={product.productId || `product-${i}`}
+            product={product}
+            i={i}
+          />
+        ))}
+      </div>
     </div>
   );
 };

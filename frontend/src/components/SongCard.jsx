@@ -17,39 +17,42 @@ const SongCard = ({ product, i }) => {
     <div className="flex flex-col w-[250px] p-4 bg-white/5 
     bg-opacity-80 backdrop-blur-sm animate-slideup
     rounded-lg cursor-pointer">
-      <div className="relative w-full h-auto flex-shrink-0 overflow-hidden group rounded-lg">
-        {isMusic && (
-          <div className={"absolute inset-0 flex justify-center items-center bg-black bg-opacity-70 group-hover:flex hidden rounded-lg"}>
-            <button
-              type="button"
-              className="text-3xl hover:scale-110 transition-transform"
-              aria-label="Play"
-            >
-              ▶️
-            </button>
-          </div>
-        )}
+      <div className="relative w-full h-56 group">
+        <div className={`absolute inset-0 justify-center items-center bg-black bg-opacity-50 group-hover:flex ${isMusic ? 'flex bg-black bg-opacity-70' : 'hidden'}`}>
+          {isMusic && (
+            <PlayPause
+              isPlaying={false}
+              activeSong={product}
+              song={product}
+            />
+          )}
+        </div>
         <img
-          src={coverImage || 'https://via.placeholder.com/150x150?text=No+Image'}
-          className="w-full h-auto rounded-lg object-contain"
+          src={coverImage || 'https://via.placeholder.com/250x224?text=No+Image'}
+          alt={productName}
+          className="w-full h-full rounded-lg object-cover"
         />
       </div>
 
-      <div className="flex flex-col bg-gray-900 bg-opacity-80 p-2 rounded">
-        <p className="font-semibold text-sm text-black">
-          {productName || 'Unknown'}
+      <div className="flex flex-col mt-4">
+        <p className="font-semibold text-lg text-black truncate">
+          <Link to={isMusic ? `/songs/${product.productId}` : `/games/${product.productId}`}>
+            {productName || 'Unknown'}
+          </Link>
         </p>
-        <div className="flex justify-between items-center mt-1">
-          <p className="text-xs text-gray-300">
+        <div className="flex justify-between items-center mt-2">
+          <p className="text-sm text-black-300">
             {isMusic ? 'Music' : 'Game'}
           </p>
           <p className="text-sm font-bold text-black">
             ${price?.toFixed(2) || '0.00'}
           </p>
         </div>
-        <p className="text-xs text-gray-300 mt-1">
-          {isGame && product.platform ? 'Platform: ' + product.platform : 'Platform: N/A'}
-        </p>
+        {isGame && product.platform && (
+          <p className="text-xs text-black-400 mt-1">
+            Platform: {product.platform}
+          </p>
+        )}
       </div>
     </div>
   );
