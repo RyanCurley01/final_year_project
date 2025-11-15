@@ -45,35 +45,18 @@ const CustomerScreen = () => {
     );
   }
 
-  // Separate Selected Electronic Works from other products
-  const selectedElectronic = products.find(p => p.albumTitle === "Selected Electronic Works");
-  const otherProducts = products.filter(p => p.albumTitle !== "Selected Electronic Works");
+  const allProducts = products.find(p => p.albumTitle && p.gameTitle);
 
   return (
-    <div className="w-full min-h-screen p-4">
-      <div className="flex flex-col items-center w-full">
-        {/* First row - horizontal layout */}
-        <div className="flex gap-4 mb-4" style={{ maxWidth: '1264px', width: '100%' }}>
-          {otherProducts.map((product, i) => (
-            <SongCard
-              key={product.id}
-              product={product}
-              i={i}
-            />
-          ))}
-        </div>
-        
-        {/* Second row - Selected Electronic Works below Jimmy Jungle */}
-        {selectedElectronic && (
-          <div className="flex gap-4 ml-[7px]" style={{ maxWidth: '1264px', width: '100%' }}>
-            <SongCard
-              key={selectedElectronic.id}
-              product={selectedElectronic}
-              i={products.length - 1}
-            />
-          </div>
-        )}
-      </div>
+    <div className="flex flex-wrap sm:justify-start
+    justify-center gap-8">
+      {allProducts.map((product, i) => (
+        <SongCard
+          key={product.id}
+          product={product}
+          i={i}
+        />
+      ))}
     </div>
   );
 };

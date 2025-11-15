@@ -1,3 +1,9 @@
+import {Link } from 'react-router-dom';
+import {useDispatch } from 'react-redux';
+
+import PlayPause from './PlayPause';
+import { playPause, setActiveSong } from '../redux/features/playerSlice';
+
 const SongCard = ({ product, i }) => {
   // Determine if it's a game or music based on which fields are populated
   const isMusic = product.albumTitle !== null && product.albumTitle !== undefined;
@@ -8,7 +14,9 @@ const SongCard = ({ product, i }) => {
   const coverImage = isMusic ? product.albumCoverImageUrl : product.gameCoverImageUrl;
 
   return (
-    <div className="flex flex-col gap-2 p-4 bg-gray-400 rounded-lg w-[600px]">
+    <div className="flex flex-col w-[250px] p-4 bg-white/5 
+    bg-opacity-80 backdrop-blur-sm animate-slideup
+    rounded-lg cursor-pointer">
       <div className="relative w-full h-auto flex-shrink-0 overflow-hidden group rounded-lg">
         {isMusic && (
           <div className={"absolute inset-0 flex justify-center items-center bg-black bg-opacity-70 group-hover:flex hidden rounded-lg"}>

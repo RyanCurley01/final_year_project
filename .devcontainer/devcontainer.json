@@ -21,7 +21,8 @@
       "ms-python.python",
       "esbenp.prettier-vscode",
       "ms-vscode.cpptools",
-      "msjsdiag.debugger-for-chrome"
+      "msjsdiag.debugger-for-chrome",
+      "bradlc.vscode-tailwindcss"
     ]
     }
   },
