@@ -13,6 +13,9 @@ const SongCard = ({ product, i, data }) => {
   const price = isMusic ? product.albumPrice : product.gamePrice;
   const coverImage = isMusic ? product.albumCoverImageUrl : product.gameCoverImageUrl;
 
+  // Check if this is a playable song (individual song, not full album)
+  // Individual songs have "Electronic Works - " prefix, album is just "Selected Electronic Works"
+  const isPlayableSong = isMusic && product.albumTitle?.includes(' - ');
 
   const dispatch = useDispatch();
   const { activeSong, isPlaying } = useSelector((state) => state.player);
@@ -35,8 +38,8 @@ const SongCard = ({ product, i, data }) => {
     bg-opacity-80 backdrop-blur-sm animate-slideup
     rounded-lg cursor-pointer">
       <div className="relative w-full h-56 group">
-        <div className={`absolute inset-0 justify-center items-center bg-black bg-opacity-50 group-hover:flex ${isMusic ? 'flex bg-black bg-opacity-70' : 'hidden'}`}>
-          {isMusic && (
+        <div className={`absolute inset-0 justify-center items-center bg-black bg-opacity-50 group-hover:flex ${isPlayableSong ? 'flex bg-black bg-opacity-70' : 'hidden'}`}>
+          {isPlayableSong && (
             <PlayPause
               isPlaying={isPlaying && activeSong?.albumTitle === product.albumTitle}
               activeSong={activeSong}
