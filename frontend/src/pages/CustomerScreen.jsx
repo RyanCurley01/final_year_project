@@ -44,17 +44,37 @@ const CustomerScreen = () => {
   if (loading) return <Loader title="Loading products..." />;
   if (error) return <Error />;
 
+
+  const games = products.filter(product => product.gameTitle);
+  const music = products.filter(product => product.albumTitle);
+
   return (
     <div className="flex flex-col">
-      <h2 className="font-bold text-3xl text-white text-left mt-4 mb-10">
-        All Products
+      {/* Games Section */}
+      <h2 className="font-bold text-3xl text-white text-left mt-4 ml-30 mb-10">
+        Games
       </h2>
-      <div className="flex flex-wrap sm:justify-start justify-center gap-8">
-        {products.map((product, i) => (
+      <div className="flex flex-wrap sm:justify-start justify-center ml-30 gap-8 mb-16">
+        {games.map((product, i) => (
           <SongCard
-            key={product.productId || `product-${i}`}
+            key={product.productId || `game-${i}`}
             product={product}
-            data={products}
+            data={games}
+            i={i}
+          />
+        ))}
+      </div>
+
+      {/* Music Section */}
+      <h2 className="font-bold text-3xl text-white text-left mt-4 ml-30 mb-10">
+        Music
+      </h2>
+      <div className="flex flex-wrap sm:justify-start justify-center ml-30 gap-8">
+        {music.map((product, i) => (
+          <SongCard
+            key={product.productId || `music-${i}`}
+            product={product}
+            data={music}
             i={i}
           />
         ))}

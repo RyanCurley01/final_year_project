@@ -21,11 +21,9 @@ const TopChartCard = ({ song, i, isPlaying, activeSong, handlePauseClick, handle
     <h3 className="font-bold text-base text-white mr-3">{i + 1}.</h3>
     <div className="flex-1 flex flex-row justify-between items-center">
       <div className="flex-1 flex flex-col justify-center mx-3">
-        <Link to={song.productId ? `/songs/${song.productId}` : '#'}>
-          <p className="text-xl font-bold text-white">
-            {song.albumTitle || song.title}
-          </p>
-        </Link>
+        <p className="text-xl font-bold text-white">
+          {song.albumTitle || song.title}
+        </p>
       </div>
     </div>
     {song.fileUrl && (
@@ -48,10 +46,13 @@ const TopPlay = () => {
   const [error, setError] = useState(null);
   const divRef = useRef(null);
 
-  // Fetch top songs from YouTube
+  // Fetch's my top songs from YouTube
   const { data: youtubeData, isFetching: youtubeFetching, error: youtubeError } = useGetTopSongsQuery();
 
-  // Your auth credentials - in production, get these from login/auth context
+  /*
+  * Change this store these login detail in local storage 
+  * after the login screen is implemented
+  */ 
   const email = 'john.smith@store.com';
   const password = 'password';
 
@@ -120,14 +121,14 @@ const TopPlay = () => {
   };
 
   return (
-    <div ref={divRef} className="xl:ml-6 ml-0 xl:mb-0 mb-6 
+    <div ref={divRef} className="xl:ml-6 mr-50 xl:mb-0 mb-6 
     flex-1 xl:max-w-[500px] max-w-full flex flex-col">
       <div className="w-full flex flex-col">
         <div className="flex flex-row justify-between items-center">
           <h2 className="text-white font-bold text-2xl">Popular Songs</h2>
-          <Link to="/top-charts">
+          {/* <Link to="/top-charts">
             <p className="text-gray-300 text-base cursor-pointer">See More</p>
-          </Link>
+          </Link> */}
         </div>
 
         <div className="mt-4 flex flex-col gap-1">

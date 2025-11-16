@@ -14,8 +14,8 @@ const NavLinks = ({ handleClick }) => (
       to={item.to}
       className="flex flex-row
       justify-start items-center my-8 text-sm
-      font-medium test-gray-400
-      hover:text-cyan-400"
+      font-medium text-gray-300
+      hover:text-primary-light"
       onClick={() => handleClick && handleClick()}
       >
         <item.icon className="w-6 h-6 mr-2" />
@@ -31,7 +31,7 @@ const Sidebar = () => {
   return (
     <>
     <div className="md:flex hidden flex-col w-[240px] bg-gradient-to-br
-    py-10 px-4 bg-[#1e1e40]">
+    py-10 px-4 bg-[#252246]">
       <img src={logo} alt="logo" className="w-full h-[100px] 
       object-contain" />
       < NavLinks />

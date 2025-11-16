@@ -9,8 +9,7 @@ export const youtubeApi = createApi({
   endpoints: (builder) => ({
     getTopSongs: builder.query({ 
       query: () => '/youtube/top-songs',
-      // Optional: add polling for real-time updates
-      // pollingInterval: 60000, // Refresh every minute
+      pollingInterval: 60000, // Poll every 60 seconds
     }),
   }),
 });

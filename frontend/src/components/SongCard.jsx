@@ -57,13 +57,19 @@ const SongCard = ({ product, i, data }) => {
 
       <div className="flex flex-col mt-4">
         <p className="font-semibold text-lg text-white">
-          <Link
-            to={isMusic ? `/songs/${product.productId}` : `/games/${product.productId}`}
-            title={productName || 'Unknown'}
-            className="block break-words"
-          >
-            {productName || 'Unknown'}
-          </Link>
+          {isGame ? (
+            <Link
+              to={`/games/${product.productId}`}
+              title={productName || 'Unknown'}
+              className="block break-words"
+            >
+              {productName || 'Unknown'}
+            </Link>
+          ) : (
+            <span className="block break-words">
+              {productName || 'Unknown'}
+            </span>
+          )}
         </p>
         <div className="flex justify-between items-center mt-2">
           <p className="text-sm text-white">
