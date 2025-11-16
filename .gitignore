@@ -114,3 +114,7 @@ extracted_songs/
 # SQL backup files
 scripts/insert_songs.sql
 scripts/add_individual_songs*.sql
+
+.env
+.env.local
+.env.production

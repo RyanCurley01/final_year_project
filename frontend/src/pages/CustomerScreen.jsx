@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 
-import { productService } from '../services';
+import { productService } from '../redux/services';
 import SongCard from '../components/SongCard';
 import Loader from '../components/Loader';
 import Error from '../components/Error';
