@@ -13,9 +13,8 @@ const SongCard = ({ product, i, data }) => {
   const price = isMusic ? product.albumPrice : product.gamePrice;
   const coverImage = isMusic ? product.albumCoverImageUrl : product.gameCoverImageUrl;
 
-  // Check if this is a playable song (individual song, not full album)
-  // Individual songs have "Electronic Works - " prefix, album is just "Selected Electronic Works"
-  const isPlayableSong = isMusic && product.albumTitle?.includes(' - ');
+  // Check if current song is a playable song 
+  const isPlayableSong = isMusic && product.albumTitle !== 'Selected Electronic Works';
 
   const dispatch = useDispatch();
   const { activeSong, isPlaying } = useSelector((state) => state.player);
@@ -32,13 +31,18 @@ const SongCard = ({ product, i, data }) => {
 
   return (
     /**
-     * Shows the cover image and and song and game details
+     * Shows the cover image with song and game details
      */
     <div className="flex flex-col w-[250px] p-4 bg-white/5 
     bg-opacity-80 backdrop-blur-sm animate-slideup
     rounded-lg cursor-pointer">
-      <div className="relative w-full h-56 group">
-        <div className={`absolute inset-0 justify-center items-center bg-black bg-opacity-50 group-hover:flex ${isPlayableSong ? 'flex bg-black bg-opacity-70' : 'hidden'}`}>
+      <div className="relative w-full h-[160px] group">
+        <img
+          src={coverImage || 'https://via.placeholder.com/250x224?text=No+Image'}
+          alt={productName}
+          className="w-full h-full rounded-lg object-cover"
+        />
+        <div className={`group-hover:flex absolute inset-0 justify-center items-center bg-black bg-opacity-50 ${isPlayableSong ? 'flex bg-black bg-opacity-15' : 'hidden'}`}>
           {isPlayableSong && (
             <PlayPause
               isPlaying={isPlaying && activeSong?.albumTitle === product.albumTitle}
@@ -49,16 +53,15 @@ const SongCard = ({ product, i, data }) => {
             />
           )}
         </div>
-        <img
-          src={coverImage || 'https://via.placeholder.com/250x224?text=No+Image'}
-          alt={productName}
-          className="w-full h-full rounded-lg object-cover"
-        />
       </div>
 
       <div className="flex flex-col mt-4">
-        <p className="font-semibold text-lg text-white truncate">
-          <Link to={isMusic ? `/songs/${product.productId}` : `/games/${product.productId}`}>
+        <p className="font-semibold text-lg text-white">
+          <Link
+            to={isMusic ? `/songs/${product.productId}` : `/games/${product.productId}`}
+            title={productName || 'Unknown'}
+            className="block break-words"
+          >
             {productName || 'Unknown'}
           </Link>
         </p>
