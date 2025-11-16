@@ -6,12 +6,12 @@ import { store } from './redux/store'
 import './index.css'
 import App from './App.jsx'
 import 'bootstrap/dist/css/bootstrap.min.css';
-import { accountService } from './services/accountService';
-import { productService } from './services/productService';
-import { orderService } from './services/orderService';
-import { paymentService } from './services/paymentService';
-import { wishlistService } from './services/wishlistService';
-import { stockService } from './services/stockService';
+import { accountService } from './redux/services/accountService';
+import { productService } from './redux/services/productService';
+import { orderService } from './redux/services/orderService';
+import { paymentService } from './redux/services/paymentService';
+import { wishlistService } from './redux/services/wishlistService';
+import { stockService } from './redux/services/stockService';
 
 // Expose services to window for console testing (development only)
 if (import.meta.env.DEV) {

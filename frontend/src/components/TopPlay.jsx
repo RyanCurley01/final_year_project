@@ -1,12 +1,16 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useSelector, useDispatch } from 'react-redux';
 import { Swiper, SwiperSlide } from 'swiper/react';
-import { FreeMode } from 'swiper';
+import { FreeMode } from 'swiper/modules';
 
 import PlayPause from './PlayPause';  
 import { playPause, setActiveSong } from '../redux/features/playerSlice';
-import { useGetTopChartsQuery } from '../redux/services/youtubeApi';
+import { productService } from '../redux/services';
+import { useGetTopSongsQuery } from '../redux/services/youtubeApi';
+
+import Loader from './Loader';
+import Error from './Error';
 
 import 'swiper/css';
 import 'swiper/css/free-mode';
@@ -16,51 +20,103 @@ const TopChartCard = ({ song, i, isPlaying, activeSong, handlePauseClick, handle
   hover:bg-[#4c426e] py-2 p-4 rounded-lg cursor-pointer mb-2">
     <h3 className="font-bold text-base text-white mr-3">{i + 1}.</h3>
     <div className="flex-1 flex flex-row justify-between items-center">
-      <img 
-        className="w-20 h-20 rounded-lg" 
-        src={song.thumbnail} 
-        alt={song.title}
-      />
       <div className="flex-1 flex flex-col justify-center mx-3">
-        <Link to={`/songs/${song.id}`}>
+        <Link to={song.productId ? `/songs/${song.productId}` : '#'}>
           <p className="text-xl font-bold text-white">
-            {song.title}
+            {song.albumTitle || song.title}
           </p>
         </Link>
-        <p className="text-base text-gray-300 mt-1">
-          {song.viewCount?.toLocaleString()} views
-        </p>
       </div>
     </div>
-    <PlayPause 
-      isPlaying={isPlaying}
-      activeSong={activeSong}
-      song={song}
-      handlePause={handlePauseClick}
-      handlePlay={() => handlePlayClick(song, i)}
-    />
+    {song.fileUrl && (
+      <PlayPause
+        isPlaying={isPlaying && activeSong?.albumTitle === song.albumTitle}
+        activeSong={activeSong}
+        handlePause={handlePauseClick}
+        handlePlay={() => handlePlayClick(song, i)}
+        song={song}
+      />
+    )}
   </div>
 )
 
 const TopPlay = () => {
   const dispatch = useDispatch();
   const { activeSong, isPlaying } = useSelector((state) => state.player);
-  const { data } = useGetTopChartsQuery();
+  const [matchedSongs, setMatchedSongs] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const divRef = useRef(null);
 
+  // Fetch top songs from YouTube
+  const { data: youtubeData, isFetching: youtubeFetching, error: youtubeError } = useGetTopSongsQuery();
+
+  // Your auth credentials - in production, get these from login/auth context
+  const email = 'john.smith@store.com';
+  const password = 'password';
+
   useEffect(() => {
-    divRef.current.scrollIntoView({ behavior: 'smooth' });
+    if (divRef.current) {
+      divRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
   });
 
-  const topPlays = data?.slice(0, 5);
+  useEffect(() => {
+    const matchSongsWithDatabase = async () => {
+      if (!youtubeData) return;
+
+      try {
+        setLoading(true);
+        // Fetch all products from database
+        const products = await productService.getAllProducts(email, password);
+        
+        // Filter for songs with fileUrl
+        const songProducts = products.filter(product => 
+          product.albumTitle && 
+          product.fileUrl && 
+          product.albumTitle !== 'Selected Electronic Works'
+        );
+
+        // Match YouTube songs with database songs by title
+        const matched = youtubeData.slice(0, 5).map(ytSong => {
+          // Try to find matching song in database by comparing titles
+          const dbSong = songProducts.find(product => 
+            product.albumTitle.toLowerCase() === ytSong.title.toLowerCase()
+          );
+
+          // If match found, return database song with YouTube ranking
+          // If not found, return YouTube song without playback capability
+          return dbSong || { ...ytSong, albumTitle: ytSong.title };
+        });
+
+        setMatchedSongs(matched);
+        setError(null);
+      } catch (err) {
+        setError(err);
+        console.error('Error matching songs:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    matchSongsWithDatabase();
+  }, [youtubeData]);
+
+  if (youtubeFetching || loading) return <Loader title="Loading top songs..." />;
+  if (error || youtubeError) return <Error />;
+
+  const topPlays = matchedSongs;
   
   const handlePauseClick = () => {
     dispatch(playPause(false));
   };
 
-  const handlePlayClick = () => {
-    dispatch(setActiveSong({ song: product, data, i }));
-    dispatch(playPause(true));
+  const handlePlayClick = (song, i) => {
+    // Only play if the song has a fileUrl (matched with database)
+    if (song.fileUrl) {
+      dispatch(setActiveSong({ song, data: matchedSongs, i }));
+      dispatch(playPause(true));
+    }
   };
 
   return (
@@ -68,7 +124,7 @@ const TopPlay = () => {
     flex-1 xl:max-w-[500px] max-w-full flex flex-col">
       <div className="w-full flex flex-col">
         <div className="flex flex-row justify-between items-center">
-          <h2 className="text-white font-bold text-2xl">Top Charts</h2>
+          <h2 className="text-white font-bold text-2xl">Popular Songs</h2>
           <Link to="/top-charts">
             <p className="text-gray-300 text-base cursor-pointer">See More</p>
           </Link>
@@ -77,7 +133,7 @@ const TopPlay = () => {
         <div className="mt-4 flex flex-col gap-1">
           {topPlays?.map((song, i) => (
             <TopChartCard 
-              key={song.key}
+              key={song.productId}
               song={song}
               i={i}
               isPlaying={isPlaying}

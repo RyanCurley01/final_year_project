@@ -16,3 +16,6 @@ mysql --protocol=TCP -h 127.0.0.1 -P 3306 -u root -prootpassword Game_Store_Syst
 install all dependencies first, then run the dev server
 npm install 
 npm run dev
+
+To kill AI service port
+lsof -ti:5000 | xargs kill -9

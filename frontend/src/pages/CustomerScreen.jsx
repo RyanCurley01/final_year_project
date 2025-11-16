@@ -16,7 +16,10 @@ const CustomerScreen = () => {
   const dispatch = useDispatch();
   const { activeSong, isPlaying } = useSelector((state) => state.player);
 
-  // Your auth credentials - in production, get these from login/auth context
+  /*
+  * Change this store these login detail in local storage 
+  * after the login screen is implemented
+  */ 
   const email = 'john.smith@store.com';
   const password = 'password';
 
