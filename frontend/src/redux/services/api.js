@@ -1,22 +1,41 @@
-// Base API configuration
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost';
+// Base API configuration with dynamic environment support
+import envConfig from '../config/environment.js';
+
+// Get backend base URL using our environment configuration
+const BACKEND_BASE_URL = envConfig.getBackendApiUrl();
+
+console.log('🔧 Backend API Configuration:', {
+  baseUrl: BACKEND_BASE_URL,
+  environment: envConfig.getEnvironment(),
+  isCodespaces: envConfig.isCodespaces()
+});
 
 // Service ports (must match backend application.yml configurations)
 export const PORTS = {
   ACCOUNTS: 8080,
-  PRODUCTS: 8082,  
-  ORDERS: 8083,    
-  ORDER_ITEMS: 8084,  
-  PAYMENTS: 8085,     
-  WISHLIST: 8087,     
-  STOCK: 8086,
-  CUSTOMER_SUMMARY: 8088,  
-  PURCHASED_PRODUCTS: 8090,  
-  SOLD_PRODUCTS: 8089,
+  PRODUCTS: 8081,  // Fixed port order
+  ORDERS: 8082,    
+  PAYMENTS: 8083,     
+  STOCK: 8084,
+  WISHLIST: 8085,     
+  ORDER_ITEMS: 8086,  
+  CUSTOMER_SUMMARY: 8087,  
+  SOLD_PRODUCTS: 8088,
+  PURCHASED_PRODUCTS: 8089,  
 };
 
 // Helper function to get full URL
-export const getServiceUrl = (service) => `${API_BASE_URL}:${PORTS[service]}`;
+export const getServiceUrl = (service) => {
+  if (envConfig.isCodespaces()) {
+    // In Codespaces, each service has its own forwarded port
+    const port = PORTS[service];
+    const config = envConfig.getConfig();
+    return `https://${config.codespaceName}-${port}.${config.codespacesDomain}`;
+  } else {
+    // In localhost, services might be on different ports
+    return `${BACKEND_BASE_URL.replace(':8080', '')}:${PORTS[service]}`;
+  }
+};
 
 // Helper function for authenticated requests
 export const getAuthHeaders = (token) => {
