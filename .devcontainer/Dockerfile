@@ -85,6 +85,9 @@ RUN if id -u $USERNAME >/dev/null 2>&1; then echo "user exists"; else \
     echo "$USERNAME ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/$USERNAME && \
     chmod 0440 /etc/sudoers.d/$USERNAME
 
+# Change ownership of venv to vscode user
+RUN chown -R $USERNAME:$USERNAME $VENV_PATH
+
 # Cleanup
 RUN apt-get clean || true
 

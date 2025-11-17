@@ -1,13 +1,11 @@
 spring:
   application:
     name: soldproducts-service
-  
   datasource:
     url: jdbc:mysql://localhost:3306/Game_Store_System?createDatabaseIfNotExist=true
     username: gamestore_user
     password: gamestore_pass
     driver-class-name: com.mysql.cj.jdbc.Driver
-  
   jpa:
     hibernate:
       ddl-auto: none
@@ -18,10 +16,10 @@ spring:
       hibernate:
         dialect: org.hibernate.dialect.MySQLDialect
         format_sql: true
-
+  profiles:
+    active: local
 server:
-  port: 8089
-
+  port: 8088
 logging:
   level:
     com.example.soldproducts: DEBUG

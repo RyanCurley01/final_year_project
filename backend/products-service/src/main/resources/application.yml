@@ -1,13 +1,11 @@
 spring:
   application:
     name: products-service
-  
   datasource:
     url: jdbc:mysql://localhost:3306/Game_Store_System?createDatabaseIfNotExist=true
     username: gamestore_user
     password: gamestore_pass
     driver-class-name: com.mysql.cj.jdbc.Driver
-  
   jpa:
     hibernate:
       ddl-auto: none
@@ -18,18 +16,16 @@ spring:
       hibernate:
         dialect: org.hibernate.dialect.MySQLDialect
         format_sql: true
-
+  profiles:
+    active: local
 server:
-  port: 8082
-
-# AWS Configuration for S3
+  port: 8081
 aws:
   region: eu-west-1
   access-key-id: AKIA35JZMVQNLCI2ZQCE
   secret-access-key: qWiaTf6xn+DfoIQkl9DBySM0BelyhROBOMMg1G5A
   s3:
     bucket-name: game-and-music-files
-
 logging:
   level:
     com.example.products: DEBUG

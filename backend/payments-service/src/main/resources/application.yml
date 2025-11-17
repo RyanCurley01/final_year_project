@@ -1,13 +1,11 @@
 spring:
   application:
     name: payments-service
-  
   datasource:
     url: jdbc:mysql://localhost:3306/Game_Store_System?createDatabaseIfNotExist=true
     username: gamestore_user
     password: gamestore_pass
     driver-class-name: com.mysql.cj.jdbc.Driver
-
   jpa:
     hibernate:
       ddl-auto: none
@@ -18,18 +16,16 @@ spring:
       hibernate:
         dialect: org.hibernate.dialect.MySQLDialect
         format_sql: true
-
+  profiles:
+    active: local
 server:
-  port: 8085
-
+  port: 8083
 app:
   frontend:
     base-url: ${FRONTEND_BASE_URL:http://localhost:5173}
-
 logging:
   level:
     com.example.payments: DEBUG
-
 paypal:
   client:
     id: ${PAYPAL_CLIENT_ID:AXdVCMyFcV5gBpkkWsbmY-H-grAdSXwf7iecD4wC6gkJeUjuNzvY6i_rUo1lKNErJoa-kAbwgFWkoUef}

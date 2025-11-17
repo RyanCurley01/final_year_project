@@ -1,31 +1,25 @@
 spring:
   application:
     name: accounts-service
-  
   datasource:
-    # Connect to MySQL in the devcontainer
     url: jdbc:mysql://localhost:3306/Game_Store_System?createDatabaseIfNotExist=true
     username: gamestore_user
     password: gamestore_pass
     driver-class-name: com.mysql.cj.jdbc.Driver
-  
   jpa:
     hibernate:
       ddl-auto: none
       naming:
         physical-strategy: org.hibernate.boot.model.naming.PhysicalNamingStrategyStandardImpl
-  
-  # Disable Spring Session 
   session:
     store-type: none
-  
   h2:
     console:
       enabled: true
-
+  profiles:
+    active: local
 server:
   port: 8080
-
 logging:
   level:
     com.example.accounts: DEBUG

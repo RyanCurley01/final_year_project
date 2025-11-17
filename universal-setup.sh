@@ -1,135 +1,135 @@
-#!/bin/bash
+set -e  # Exit on error
 
-# Universal startup script for both Codespaces and localhost
-# This script automatically detects the environment and configures accordingly
+echo "=========================================="
+echo "🚀 Universal Setup Script Starting..."
+echo "=========================================="
+
+# Fix venv permissions if needed
+VENV_PATH=${VENV_PATH:-/opt/venv}
+if [ ! -w "$VENV_PATH" ]; then
+    echo "🔧 Fixing venv permissions..."
+    sudo chown -R vscode:vscode "$VENV_PATH" 2>/dev/null || true
+fi
 
 # Detect environment
 if [ "$CODESPACES" = "true" ]; then
-    echo "🚀 Configuring GitHub Codespaces environment..."
+    echo "🚀 Environment: GitHub Codespaces"
     ENVIRONMENT="codespaces"
 else
-    echo "🏠 Configuring localhost devcontainer environment..."
+    echo "🏠 Environment: Local devcontainer"
     ENVIRONMENT="localhost"
 fi
 
+# Ensure we're using the venv
+VENV_PATH=${VENV_PATH:-/opt/venv}
+export PATH="$VENV_PATH/bin:$PATH"
+echo "✅ Using Python from: $(which python3)"
+
 # Wait for database to be ready
+echo ""
 echo "⏳ Waiting for database to be ready..."
 max_attempts=30
 attempt=0
+db_ready=false
 
-while ! mysqladmin ping -h db -u gamestore_user -pgamestore_pass --silent 2>/dev/null; do
-    attempt=$((attempt + 1))
-    if [ $attempt -ge $max_attempts ]; then
-        echo "❌ Database connection failed after $max_attempts attempts"
-        echo "   Trying alternative connection methods..."
-        
-        # Try localhost connection for local development
-        if mysqladmin ping -h localhost -u gamestore_user -pgamestore_pass --silent 2>/dev/null; then
-            echo "✅ Database connected via localhost!"
-            break
-        elif mysqladmin ping -h 127.0.0.1 -u gamestore_user -pgamestore_pass --silent 2>/dev/null; then
-            echo "✅ Database connected via 127.0.0.1!"
-            break
-        else
-            echo "❌ Could not connect to database. Please check if MySQL is running."
-            exit 1
-        fi
+while [ $attempt -lt $max_attempts ]; do
+    if mysqladmin ping -h db -u gamestore_user -pgamestore_pass --silent 2>/dev/null; then
+        echo "✅ Database is ready! (connected via db service)"
+        db_ready=true
+        break
+    elif mysqladmin ping -h localhost -u gamestore_user -pgamestore_pass --silent 2>/dev/null; then
+        echo "✅ Database is ready! (connected via localhost)"
+        db_ready=true
+        break
+    elif mysqladmin ping -h 127.0.0.1 -u gamestore_user -pgamestore_pass --silent 2>/dev/null; then
+        echo "✅ Database is ready! (connected via 127.0.0.1)"
+        db_ready=true
+        break
     fi
+    
+    attempt=$((attempt + 1))
+    echo "  Waiting for database... (attempt $attempt/$max_attempts)"
     sleep 2
-    echo "  Database not ready yet, waiting... (attempt $attempt/$max_attempts)"
 done
 
-if [ $attempt -lt $max_attempts ]; then
-    echo "✅ Database is ready! (connected via db service)"
+if [ "$db_ready" = false ]; then
+    echo "⚠️  Warning: Could not connect to database after $max_attempts attempts"
+    echo "   Continuing with setup, but database operations may fail"
 fi
 
-# Run all environment setup scripts
-echo "🔧 Setting up all services for $ENVIRONMENT environment..."
-
-# Setup AI Service
-if [ -d "ai_service" ]; then
-    echo "📝 Configuring AI Service..."
-    cd ai_service
-    python setup_env.py
-    cd ..
-fi
-
-# Setup Backend Services
-if [ -d "backend" ]; then
-    echo "📝 Configuring Backend Services..."
-    cd backend
-    python setup_backend_env.py
-    cd ..
-fi
-
-# Setup Frontend
-if [ -d "frontend" ]; then
-    echo "📝 Configuring Frontend..."
-    cd frontend
-    python setup_frontend_env.py
-    cd ..
-fi
-
-# Install dependencies if needed
+# Install dependencies
+echo ""
 echo "📦 Installing dependencies..."
 
 # AI Service dependencies
 if [ -f "ai_service/requirements.txt" ]; then
     echo "  Installing AI Service dependencies..."
-    cd ai_service
-    pip install -r requirements.txt
-    cd ..
+    "$VENV_PATH/bin/pip" install -q -r ai_service/requirements.txt || {
+        echo "⚠️  AI Service dependencies installation had issues (non-fatal)"
+    }
 fi
 
 # Frontend dependencies
 if [ -f "frontend/package.json" ]; then
     echo "  Installing Frontend dependencies..."
     cd frontend
-    npm install
+    npm install || {
+        echo "⚠️  Frontend dependencies installation had issues (non-fatal)"
+    }
     cd ..
 fi
 
-# Backend - Gradle wrapper permissions
+# Backend - Gradle wrapper permissions and cache dependencies
 if [ -f "backend/gradlew" ]; then
-    echo "  Setting up Backend Gradle permissions..."
+    echo "  Setting up Backend..."
     chmod +x backend/gradlew
+    cd backend
+    ./gradlew dependencies --no-daemon || {
+        echo "⚠️  Gradle dependency caching had issues (non-fatal)"
+    }
+    cd ..
 fi
 
-echo "✅ Environment setup complete for $ENVIRONMENT!"
+# Setup environment files (only if setup scripts exist)
 echo ""
-echo "🌐 Your services will be available at:"
+echo "🔧 Configuring environment files..."
 
-if [ "$ENVIRONMENT" = "codespaces" ] && [ -n "$CODESPACE_NAME" ]; then
-    echo "  • AI Service: https://${CODESPACE_NAME}-5000.preview.app.github.dev"
-    echo "  • Backend: https://${CODESPACE_NAME}-8080.preview.app.github.dev"
-    echo "  • Frontend: https://${CODESPACE_NAME}-5173.preview.app.github.dev"
-    echo "  • Database: Internal Docker network (db:3306)"
+if [ -f "ai_service/setup_env.py" ]; then
+    echo "  Configuring AI Service environment..."
+    cd ai_service
+    python3 setup_env.py || echo "⚠️  AI Service env setup failed (non-fatal)"
+    cd ..
 else
-    echo "  • AI Service: http://localhost:5000"
-    echo "  • Backend: http://localhost:8080"
-    echo "  • Frontend: http://localhost:5173 or http://localhost:3000"
-    echo "  • Database: localhost:3306 or Docker network (db:3306)"
+    echo "  ℹ️  No AI Service setup script found (skipping)"
 fi
-echo ""
-echo "🚀 To start services:"
-echo "  • AI Service: cd ai_service && python main.py"
-echo "  • Backend: cd backend && ./gradlew bootRun"
-echo "  • Frontend: cd frontend && npm run dev"
-echo ""
-echo "🔍 To test connections:"
-if [ "$ENVIRONMENT" = "codespaces" ]; then
-    echo "  • Database: mysql -h db -u gamestore_user -pgamestore_pass Game_Store_System"
-    echo "  • AI Service: curl http://localhost:5000/health"
-    echo "  • Backend: curl http://localhost:8080/actuator/health"
+
+if [ -f "backend/setup_backend_env.py" ]; then
+    echo "  Configuring Backend environment..."
+    cd backend
+    python3 setup_backend_env.py || echo "⚠️  Backend env setup failed (non-fatal)"
+    cd ..
 else
-    echo "  • Database: mysql -h db -u gamestore_user -pgamestore_pass Game_Store_System"
-    echo "  • Database (alt): mysql -h localhost -u gamestore_user -pgamestore_pass Game_Store_System"
-    echo "  • AI Service: curl http://localhost:5000/health"
-    echo "  • Backend: curl http://localhost:8080/actuator/health"
+    echo "  ℹ️  No Backend setup script found (skipping)"
+fi
+
+if [ -f "frontend/setup_frontend_env.py" ]; then
+    echo "  Configuring Frontend environment..."
+    cd frontend
+    python3 setup_frontend_env.py || echo "⚠️  Frontend env setup failed (non-fatal)"
+    cd ..
+else
+    echo "  ℹ️  No Frontend setup script found (skipping)"
+fi
+
+# Initialize Git LFS if available
+if command -v git-lfs >/dev/null 2>&1; then
+    echo ""
+    echo "📦 Initializing Git LFS..."
+    git lfs install --skip-repo || true
+    git lfs pull || true
 fi
 
 echo ""
-echo "💡 Environment Details:"
-echo "  • Container: $(if [ -f /.dockerenv ]; then echo "Yes (Docker)"; else echo "No (Native)"; fi)"
-echo "  • Codespaces: $(if [ "$CODESPACES" = "true" ]; then echo "Yes"; else echo "No"; fi)"
-echo "  • Remote Containers: $(if [ -n "$REMOTE_CONTAINERS" ]; then echo "Yes"; else echo "No"; fi)"
+echo "=========================================="
+echo "✅ Universal Setup Complete!"
+echo "=========================================="
