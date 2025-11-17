@@ -8,12 +8,27 @@ class EnvironmentConfig {
 
   detectEnvironment() {
     const hostname = window.location.hostname;
-    const isCodespaces = hostname.includes('preview.app.github.dev');
+    const isCodespaces = hostname.includes('app.github.dev');
     const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1';
     
     // Extract codespace name if in Codespaces
-    const codespaceName = isCodespaces ? hostname.split('-')[0] : null;
-    const codespacesDomain = 'preview.app.github.dev';
+    // Format: didactic-funicular-v47w6vwjq96fwjgg-5173.app.github.dev
+    // We need: didactic-funicular-v47w6vwjq96fwjgg
+    let codespaceName = null;
+    if (isCodespaces) {
+      const parts = hostname.split('.');
+      const firstPart = parts[0]; // didactic-funicular-v47w6vwjq96fwjgg-5173
+      const lastDashIndex = firstPart.lastIndexOf('-');
+      codespaceName = firstPart.substring(0, lastDashIndex); // didactic-funicular-v47w6vwjq96fwjgg
+    }
+    const codespacesDomain = 'app.github.dev';
+    
+    console.log('🔍 Environment Detection:', {
+      hostname,
+      isCodespaces,
+      codespaceName,
+      codespacesDomain
+    });
     
     // Get environment variables from different sources
     const viteEnv = import.meta.env || {};

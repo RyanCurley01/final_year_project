@@ -26,14 +26,19 @@ export const PORTS = {
 
 // Helper function to get full URL
 export const getServiceUrl = (service) => {
+  const port = PORTS[service];
+  
   if (envConfig.isCodespaces()) {
     // In Codespaces, each service has its own forwarded port
-    const port = PORTS[service];
     const config = envConfig.getConfig();
-    return `https://${config.codespaceName}-${port}.${config.codespacesDomain}`;
+    const url = `https://${config.codespaceName}-${port}.${config.codespacesDomain}`;
+    console.log(`🌐 Service URL for ${service}:`, url);
+    return url;
   } else {
     // In localhost, services might be on different ports
-    return `${BACKEND_BASE_URL.replace(':8080', '')}:${PORTS[service]}`;
+    const url = `http://localhost:${port}`;
+    console.log(`🌐 Service URL for ${service}:`, url);
+    return url;
   }
 };
 

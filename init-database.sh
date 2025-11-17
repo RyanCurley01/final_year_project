@@ -3,8 +3,8 @@ set -e
 
 echo "Initializing Game Store Database..."
 
-mysql -u root -p"${MYSQL_ROOT_PASSWORD}" <<-'EOSQL'
-#mysql --protocol=TCP --host=127.0.0.1 -u root -p"${MYSQL_ROOT_PASSWORD}" <<-'EOSQL'
+# Try localhost first, then remote host
+mysql -u root -p"${MYSQL_ROOT_PASSWORD}" <<-'EOSQL' || mysql --protocol=TCP --host=db -u root -p"${MYSQL_ROOT_PASSWORD}" <<-'EOSQL'
     CREATE DATABASE IF NOT EXISTS Game_Store_System;
     USE Game_Store_System;
 
@@ -289,8 +289,7 @@ mysql -u root -p"${MYSQL_ROOT_PASSWORD}" <<-'EOSQL'
 
     -- Grant privileges to gamestore_user
     GRANT ALL PRIVILEGES ON Game_Store_System.* TO 'gamestore_user'@'%';
-    FLUSH PRIVILEGES;
-
+    FLUSH PRIVILEGES;   
 EOSQL
 
 echo "Database initialization complete!"
