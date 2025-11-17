@@ -10,18 +10,32 @@ services:
       - vscode-extensions:/root/.vscode-server/extensions
       - vscode-extensions-insiders:/root/.vscode-server-insiders/extensions
     command: sleep infinity
-    network_mode: service:db
+    # Remove network_mode to allow proper port forwarding in Codespaces
+    ports:
+      - "5000:5000"   # AI Service
+      - "8080:8080"   # Backend Services
+      - "8081:8081"
+      - "8082:8082"
+      - "8083:8083"
+      - "8084:8084"
+      - "5173:5173"   # Frontend
+      - "3000:3000"   # Alternative frontend port
     environment:
-      #MYSQL_HOST: localhost
       MYSQL_HOST: db
       MYSQL_PORT: 3306
       MYSQL_DATABASE: Game_Store_System
       MYSQL_USER: gamestore_user
       MYSQL_PASSWORD: gamestore_pass
       MYSQL_ROOT_PASSWORD: rootpassword
+      # Codespaces environment variables
+      CODESPACES: ${CODESPACES:-false}
+      CODESPACE_NAME: ${CODESPACE_NAME:-}
+      GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN: ${GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN:-}
     depends_on:
       db:
         condition: service_healthy
+    networks:
+      - app-network
 
   db:
     image: mysql:8.0
@@ -34,16 +48,22 @@ services:
     volumes:
       - mysql-data:/var/lib/mysql
       - ../init-database.sh:/docker-entrypoint-initdb.d/init-database.sh
-    #ports:
-    #  - "3306:3306"
+    ports:
+      - "3306:3306"  # Enable database port for Codespaces
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-prootpassword"]
       interval: 5s
       timeout: 5s
       retries: 20
       start_period: 10s
+    networks:
+      - app-network
 
 volumes:
   mysql-data:
   vscode-extensions:
   vscode-extensions-insiders:
+
+networks:
+  app-network:
+    driver: bridge

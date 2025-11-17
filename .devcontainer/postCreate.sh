@@ -7,8 +7,9 @@ echo "Running devcontainer post-create steps..."
 echo "Waiting for MySQL to be ready..."
 max_attempts=30
 attempt=0
-#until mysql -h localhost -u gamestore_user -pgamestore_pass -e "SELECT 1" >/dev/null 2>&1; do
-until mysql --protocol=TCP -h 127.0.0.1 -P 3306 -u gamestore_user -pgamestore_pass -e "SELECT 1" >/dev/null 2>&1; do
+# Try different connection methods for Codespaces compatibility
+until mysql -h db -u gamestore_user -pgamestore_pass -e "SELECT 1" >/dev/null 2>&1 || \
+      mysql --protocol=TCP -h 127.0.0.1 -P 3306 -u gamestore_user -pgamestore_pass -e "SELECT 1" >/dev/null 2>&1; do
   attempt=$((attempt + 1))
   if [ $attempt -ge $max_attempts ]; then
     echo "MySQL did not become ready in time"

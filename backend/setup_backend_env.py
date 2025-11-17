@@ -35,9 +35,16 @@ def create_backend_env_file(is_codespaces, codespace_name, github_domain):
     if is_codespaces and codespace_name:
         print(f"🚀 Configuring backend for GitHub Codespaces: {codespace_name}")
         
-        # Database URLs for Codespaces
-        env_vars['DB_HOST'] = f"{codespace_name}-3306.{github_domain}"
-        env_vars['DB_URL'] = f"jdbc:mysql://{codespace_name}-3306.{github_domain}/Game_Store_System?createDatabaseIfNotExist=true"
+        # Check if we're in a devcontainer (database available as 'db' service)
+        if os.getenv('REMOTE_CONTAINERS') or os.path.exists('/.dockerenv'):
+            print("📦 Detected devcontainer environment - using internal database connection")
+            env_vars['DB_HOST'] = 'db:3306'
+            env_vars['DB_URL'] = 'jdbc:mysql://db:3306/Game_Store_System?createDatabaseIfNotExist=true'
+        else:
+            # External Codespaces connection
+            env_vars['DB_HOST'] = f"{codespace_name}-3306.{github_domain}"
+            env_vars['DB_URL'] = f"jdbc:mysql://{codespace_name}-3306.{github_domain}/Game_Store_System?createDatabaseIfNotExist=true"
+        
         env_vars['ENVIRONMENT'] = 'codespaces'
         
         # Service discovery URLs
@@ -50,9 +57,16 @@ def create_backend_env_file(is_codespaces, codespace_name, github_domain):
     else:
         print("🏠 Configuring backend for local development")
         
-        # Local database
-        env_vars['DB_HOST'] = 'localhost:3306'
-        env_vars['DB_URL'] = 'jdbc:mysql://localhost:3306/Game_Store_System?createDatabaseIfNotExist=true'
+        # Check if we're in a devcontainer locally
+        if os.getenv('REMOTE_CONTAINERS') or os.path.exists('/.dockerenv'):
+            print("📦 Detected local devcontainer environment")
+            env_vars['DB_HOST'] = 'db:3306'
+            env_vars['DB_URL'] = 'jdbc:mysql://db:3306/Game_Store_System?createDatabaseIfNotExist=true'
+        else:
+            # Direct local development
+            env_vars['DB_HOST'] = 'localhost:3306'
+            env_vars['DB_URL'] = 'jdbc:mysql://localhost:3306/Game_Store_System?createDatabaseIfNotExist=true'
+        
         env_vars['ENVIRONMENT'] = 'local'
         
         # Local service URLs
