@@ -12,9 +12,9 @@ services:
     command: sleep infinity
     network_mode: service:db
     environment:
-      MYSQL_HOST: localhost
+      #MYSQL_HOST: localhost
       MYSQL_HOST: db
-      #MYSQL_PORT: 3306
+      MYSQL_PORT: 3306
       MYSQL_DATABASE: Game_Store_System
       MYSQL_USER: gamestore_user
       MYSQL_PASSWORD: gamestore_pass
