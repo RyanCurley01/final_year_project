@@ -4,7 +4,7 @@ import { createApi, fetchBaseQuery } from '@reduxjs/toolkit/query/react';
 export const youtubeApi = createApi({
   reducerPath: 'youtubeApi',
   baseQuery: fetchBaseQuery({
-    baseUrl: 'http://localhost:5000/api', // Your backend URL
+    baseUrl: API_BASE_URL,
   }),
   endpoints: (builder) => ({
     getTopSongs: builder.query({ 
