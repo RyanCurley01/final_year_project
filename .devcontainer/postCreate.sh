@@ -7,8 +7,9 @@ echo "Running devcontainer post-create steps..."
 echo "Waiting for MySQL to be ready..."
 max_attempts=30
 attempt=0
-# Try different connection methods for Codespaces compatibility
+# Try different connection methods for Codespaces and local devcontainer compatibility
 until mysql -h db -u gamestore_user -pgamestore_pass -e "SELECT 1" >/dev/null 2>&1 || \
+      mysql -h localhost -u gamestore_user -pgamestore_pass -e "SELECT 1" >/dev/null 2>&1 || \
       mysql --protocol=TCP -h 127.0.0.1 -P 3306 -u gamestore_user -pgamestore_pass -e "SELECT 1" >/dev/null 2>&1; do
   attempt=$((attempt + 1))
   if [ $attempt -ge $max_attempts ]; then
@@ -20,22 +21,35 @@ until mysql -h db -u gamestore_user -pgamestore_pass -e "SELECT 1" >/dev/null 2>
 done
 
 #if mysql -h localhost -u gamestore_user -pgamestore_pass -e "SELECT 1" >/dev/null 2>&1; then
-if mysql --protocol=TCP -h 127.0.0.1 -P 3306 -u gamestore_user -pgamestore_pass -e "SELECT 1" >/dev/null 2>&1; then
+# Try db service first, then localhost, then TCP 127.0.0.1
+if mysql -h db -u gamestore_user -pgamestore_pass -e "SELECT 1" >/dev/null 2>&1 || \
+   mysql -h localhost -u gamestore_user -pgamestore_pass -e "SELECT 1" >/dev/null 2>&1 || \
+   mysql --protocol=TCP -h 127.0.0.1 -P 3306 -u gamestore_user -pgamestore_pass -e "SELECT 1" >/dev/null 2>&1; then
   echo "MySQL is ready!"
   
   # Run the database initialization script
   echo "Initializing database schema and data..."
   
-  # Extract and run the SQL from init-database.sh
-  # Use root credentials with TCP protocol since the script needs full privileges
-  sed 's/\r$//' /workspaces/final_year_project/.devcontainer/init-database.sh | \
+  # Determine which connection method works
+  if mysql -h db -u root -prootpassword -e "SELECT 1" >/dev/null 2>&1; then
+    DB_HOST="db"
+  elif mysql -h localhost -u root -prootpassword -e "SELECT 1" >/dev/null 2>&1; then
+    DB_HOST="localhost"
+  else
+    DB_HOST="127.0.0.1"
+  fi
+  
+  echo "Using database host: $DB_HOST"
+  
+  # Extract and run the SQL from init-database.sh using root credentials
+  sed 's/\r$//' /workspaces/final_year_project/init-database.sh | \
     sed -n '/<<-.*EOSQL/,/^EOSQL/p' | \
     sed '1d;$d' | \
-    MYSQL_PWD=rootpassword mysql --protocol=TCP -h 127.0.0.1 -P 3306 -u root Game_Store_System
+    MYSQL_PWD=rootpassword mysql -h "$DB_HOST" -u root Game_Store_System
   
   echo "Database initialization complete!"
   echo "Verifying database setup..."
-  mysql -h localhost -u gamestore_user -pgamestore_pass -e "USE Game_Store_System; SHOW TABLES;" || true
+  mysql -h "$DB_HOST" -u gamestore_user -pgamestore_pass -e "USE Game_Store_System; SHOW TABLES;" || true
 else
   echo "Warning: Could not connect to MySQL"
 fi

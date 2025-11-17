@@ -32,15 +32,19 @@ max_attempts=30
 attempt=0
 db_ready=false
 
+# Try different connection methods in order of preference
 while [ $attempt -lt $max_attempts ]; do
+    # First try 'db' service name (devcontainer)
     if mysqladmin ping -h db -u gamestore_user -pgamestore_pass --silent 2>/dev/null; then
-        echo "✅ Database is ready! (connected via db service)"
+        echo "✅ Database is ready! (connected via 'db' service)"
         db_ready=true
         break
+    # Then try localhost
     elif mysqladmin ping -h localhost -u gamestore_user -pgamestore_pass --silent 2>/dev/null; then
         echo "✅ Database is ready! (connected via localhost)"
         db_ready=true
         break
+    # Finally try 127.0.0.1
     elif mysqladmin ping -h 127.0.0.1 -u gamestore_user -pgamestore_pass --silent 2>/dev/null; then
         echo "✅ Database is ready! (connected via 127.0.0.1)"
         db_ready=true

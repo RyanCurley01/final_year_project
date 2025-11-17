@@ -2,7 +2,7 @@ spring:
   application:
     name: purchasedproducts-service
   datasource:
-    url: jdbc:mysql://localhost:3306/Game_Store_System?createDatabaseIfNotExist=true
+    url: jdbc:mysql://db:3306/Game_Store_System?createDatabaseIfNotExist=true
     username: gamestore_user
     password: gamestore_pass
     driver-class-name: com.mysql.cj.jdbc.Driver

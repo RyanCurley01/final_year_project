@@ -37,9 +37,10 @@ if os.getenv('CODESPACES') == 'true':
             f"https://{codespace_name}-3000.{domain}"
         ])
 
+# Allow all origins in development (be more restrictive in production)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=allowed_origins,
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -102,6 +103,7 @@ async def get_top_songs(max_results: int = 10):
     """
     # Validate API key
     if not YOUTUBE_API_KEY or YOUTUBE_API_KEY == "your_youtube_api_key_here":
+        print(f"ERROR: YouTube API key not configured properly")
         return {
             "error": "YouTube API key not configured properly",
             "fallback_data": [
@@ -111,8 +113,9 @@ async def get_top_songs(max_results: int = 10):
             ]
         }
     
-    # Validate channel ID
-    if not YOUTUBE_CHANNEL_ID or YOUTUBE_CHANNEL_ID == "@Ritrix252":
+    # Validate channel ID exists (removed incorrect check that rejected valid channel)
+    if not YOUTUBE_CHANNEL_ID:
+        print(f"ERROR: YouTube channel ID not configured")
         return {
             "error": "YouTube channel ID not configured",
             "fallback_data": [

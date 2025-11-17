@@ -32,22 +32,26 @@ def create_backend_env_file(is_codespaces, codespace_name, github_domain):
     
     env_vars = {}
     
+    # Always use 'db' hostname when inside devcontainer (both local and Codespaces)
+    in_devcontainer = os.getenv('REMOTE_CONTAINERS') or os.path.exists('/.dockerenv')
+    
+    if in_devcontainer:
+        # Inside devcontainer - always use 'db' service name for database
+        print("📦 Detected devcontainer environment - using 'db' service for database")
+        env_vars['DB_HOST'] = 'db:3306'
+        env_vars['DB_URL'] = 'jdbc:mysql://db:3306/Game_Store_System?createDatabaseIfNotExist=true'
+    else:
+        # Outside devcontainer - use localhost
+        print("🏠 Outside devcontainer - using localhost for database")
+        env_vars['DB_HOST'] = 'localhost:3306'
+        env_vars['DB_URL'] = 'jdbc:mysql://localhost:3306/Game_Store_System?createDatabaseIfNotExist=true'
+    
+    # Configure service URLs based on Codespaces or local
     if is_codespaces and codespace_name:
-        print(f"🚀 Configuring backend for GitHub Codespaces: {codespace_name}")
-        
-        # Check if we're in a devcontainer (database available as 'db' service)
-        if os.getenv('REMOTE_CONTAINERS') or os.path.exists('/.dockerenv'):
-            print("📦 Detected devcontainer environment - using internal database connection")
-            env_vars['DB_HOST'] = 'db:3306'
-            env_vars['DB_URL'] = 'jdbc:mysql://db:3306/Game_Store_System?createDatabaseIfNotExist=true'
-        else:
-            # External Codespaces connection
-            env_vars['DB_HOST'] = f"{codespace_name}-3306.{github_domain}"
-            env_vars['DB_URL'] = f"jdbc:mysql://{codespace_name}-3306.{github_domain}/Game_Store_System?createDatabaseIfNotExist=true"
-        
+        print(f"🚀 Configuring for GitHub Codespaces: {codespace_name}")
         env_vars['ENVIRONMENT'] = 'codespaces'
         
-        # Service discovery URLs
+        # Service discovery URLs (external access)
         env_vars['ACCOUNTS_SERVICE_URL'] = f"https://{codespace_name}-8080.{github_domain}"
         env_vars['PRODUCTS_SERVICE_URL'] = f"https://{codespace_name}-8081.{github_domain}"
         env_vars['ORDERS_SERVICE_URL'] = f"https://{codespace_name}-8082.{github_domain}"
@@ -55,18 +59,7 @@ def create_backend_env_file(is_codespaces, codespace_name, github_domain):
         env_vars['STOCK_SERVICE_URL'] = f"https://{codespace_name}-8084.{github_domain}"
         
     else:
-        print("🏠 Configuring backend for local development")
-        
-        # Check if we're in a devcontainer locally
-        if os.getenv('REMOTE_CONTAINERS') or os.path.exists('/.dockerenv'):
-            print("📦 Detected local devcontainer environment")
-            env_vars['DB_HOST'] = 'db:3306'
-            env_vars['DB_URL'] = 'jdbc:mysql://db:3306/Game_Store_System?createDatabaseIfNotExist=true'
-        else:
-            # Direct local development
-            env_vars['DB_HOST'] = 'localhost:3306'
-            env_vars['DB_URL'] = 'jdbc:mysql://localhost:3306/Game_Store_System?createDatabaseIfNotExist=true'
-        
+        print("🏠 Configuring for local development")
         env_vars['ENVIRONMENT'] = 'local'
         
         # Local service URLs
@@ -156,10 +149,14 @@ def update_application_yml(file_path, is_codespaces, codespace_name, github_doma
     if 'server' not in config:
         config['server'] = {}
     
-    # Set database configuration
-    if is_codespaces and codespace_name:
-        db_url = f"jdbc:mysql://{codespace_name}-3306.{github_domain}/Game_Store_System?createDatabaseIfNotExist=true"
+    # Always use 'db' hostname when inside devcontainer
+    in_devcontainer = os.getenv('REMOTE_CONTAINERS') or os.path.exists('/.dockerenv')
+    
+    if in_devcontainer:
+        # Inside devcontainer - use 'db' service name
+        db_url = "jdbc:mysql://db:3306/Game_Store_System?createDatabaseIfNotExist=true"
     else:
+        # Outside devcontainer - use localhost
         db_url = "jdbc:mysql://localhost:3306/Game_Store_System?createDatabaseIfNotExist=true"
     
     config['spring']['datasource'].update({

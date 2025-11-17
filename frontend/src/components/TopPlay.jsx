@@ -68,6 +68,18 @@ const TopPlay = () => {
 
       try {
         setLoading(true);
+        
+        // Extract the actual data array from YouTube API response
+        // The API returns { data: [...] } or { error: "...", fallback_data: [...] }
+        const ytSongs = youtubeData.data || youtubeData.fallback_data || [];
+        
+        if (!Array.isArray(ytSongs)) {
+          console.error('YouTube data is not an array:', youtubeData);
+          setError(new Error('Invalid YouTube data format'));
+          setLoading(false);
+          return;
+        }
+        
         // Fetch all products from database
         const products = await productService.getAllProducts(email, password);
         
@@ -79,7 +91,7 @@ const TopPlay = () => {
         );
 
         // Match YouTube songs with database songs by title
-        const matched = youtubeData.slice(0, 5).map(ytSong => {
+        const matched = ytSongs.slice(0, 5).map(ytSong => {
           // Try to find matching song in database by comparing titles
           const dbSong = songProducts.find(product => 
             product.albumTitle.toLowerCase() === ytSong.title.toLowerCase()
@@ -134,7 +146,7 @@ const TopPlay = () => {
         <div className="mt-4 flex flex-col gap-1">
           {topPlays?.map((song, i) => (
             <TopChartCard 
-              key={song.productId}
+              key={song.productId || song.id || `song-${i}`}
               song={song}
               i={i}
               isPlaying={isPlaying}

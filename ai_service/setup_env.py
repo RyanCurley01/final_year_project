@@ -13,7 +13,10 @@ def setup_environment():
     # Check if we're in GitHub Codespaces
     is_codespaces = os.getenv('CODESPACES') == 'true'
     codespace_name = os.getenv('CODESPACE_NAME')
-    github_codespaces_port_forwarding_domain = os.getenv('GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN')
+    github_codespaces_port_forwarding_domain = os.getenv('GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN', 'preview.app.github.dev')
+    
+    # Check if we're inside a devcontainer
+    in_devcontainer = os.getenv('REMOTE_CONTAINERS') or os.path.exists('/.dockerenv')
     
     # Copy .env.example to .env if .env doesn't exist
     if not os.path.exists('.env'):
@@ -34,38 +37,40 @@ def setup_environment():
                     key, value = line.split('=', 1)
                     env_vars[key.strip()] = value.strip()
     
-    # Set dynamic URLs based on environment
-    if is_codespaces and codespace_name and github_codespaces_port_forwarding_domain:
+    # Set database URL based on environment
+    if in_devcontainer:
+        # Inside devcontainer - always use 'db' service name
+        print("📦 Detected devcontainer environment - using 'db' service for database")
+        database_host = "db"
+        database_url = f"mysql+pymysql://gamestore_user:gamestore_pass@{database_host}:3306/Game_Store_System"
+    else:
+        # Outside devcontainer - use localhost
+        print("🏠 Outside devcontainer - using localhost for database")
+        database_host = "localhost"
+        database_url = f"mysql+pymysql://gamestore_user:gamestore_pass@{database_host}:3306/Game_Store_System"
+    
+    # Set backend URL based on Codespaces or local
+    if is_codespaces and codespace_name:
         # GitHub Codespaces environment
         backend_url = f"https://{codespace_name}-8080.{github_codespaces_port_forwarding_domain}"
-        database_host = f"{codespace_name}-3306.{github_codespaces_port_forwarding_domain}"
-        
-        print(f"Detected GitHub Codespaces environment: {codespace_name}")
+        print(f"🚀 Detected GitHub Codespaces environment: {codespace_name}")
         print(f"Backend URL: {backend_url}")
-        
-        # Update environment variables
-        env_vars['BACKEND_API_URL'] = backend_url
-        env_vars['DATABASE_URL'] = f"mysql+pymysql://user:password@{database_host}/game_music_store"
         env_vars['ENVIRONMENT'] = 'codespaces'
-        
-        # Preserve existing API keys if they exist
-        if 'YOUTUBE_API_KEY' not in env_vars or env_vars['YOUTUBE_API_KEY'] == 'your_youtube_api_key_here':
-            env_vars['YOUTUBE_API_KEY'] = 'AIzaSyA_cOSojH1AVc4phKoP14cYPkGUpdWhpuQ'
-        if 'YOUTUBE_CHANNEL_ID' not in env_vars:
-            env_vars['YOUTUBE_CHANNEL_ID'] = '@Ritrix252'
-        
     else:
         # Local development environment
-        print("Detected local development environment")
-        env_vars['BACKEND_API_URL'] = env_vars.get('BACKEND_API_URL', 'http://localhost:8080')
-        env_vars['DATABASE_URL'] = env_vars.get('DATABASE_URL', 'mysql+pymysql://user:password@localhost:3306/game_music_store')
+        backend_url = 'http://localhost:8080'
+        print(f"Backend URL: {backend_url}")
         env_vars['ENVIRONMENT'] = 'local'
-        
-        # Preserve existing API keys if they exist
-        if 'YOUTUBE_API_KEY' not in env_vars or env_vars['YOUTUBE_API_KEY'] == 'your_youtube_api_key_here':
-            env_vars['YOUTUBE_API_KEY'] = 'AIzaSyA_cOSojH1AVc4phKoP14cYPkGUpdWhpuQ'
-        if 'YOUTUBE_CHANNEL_ID' not in env_vars:
-            env_vars['YOUTUBE_CHANNEL_ID'] = '@Ritrix252'
+    
+    # Update environment variables
+    env_vars['BACKEND_API_URL'] = backend_url
+    env_vars['DATABASE_URL'] = database_url
+    
+    # Preserve/set API keys with correct values
+    if 'YOUTUBE_API_KEY' not in env_vars or env_vars['YOUTUBE_API_KEY'] == 'your_youtube_api_key_here':
+        env_vars['YOUTUBE_API_KEY'] = 'AIzaSyA_cOSojH1AVc4phKoP14cYPkGUpdWhpuQ'
+    if 'YOUTUBE_CHANNEL_ID' not in env_vars or not env_vars['YOUTUBE_CHANNEL_ID'].startswith('@'):
+        env_vars['YOUTUBE_CHANNEL_ID'] = '@Ritrix252'
     
     # Write updated .env file
     with open('.env', 'w') as f:
