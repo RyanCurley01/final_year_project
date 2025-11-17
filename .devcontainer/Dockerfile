@@ -51,7 +51,11 @@ RUN python3 -m venv $VENV_PATH \
         sqlalchemy \
         python-dotenv \
         pyyaml \
-        pytest
+        pytest \
+        google-api-python-client \
+        google-auth \
+        google-auth-oauthlib \
+        google-auth-httplib2
 
 # Make the venv's python the default for interactive shells in the container
 ENV PATH="$VENV_PATH/bin:$PATH"
