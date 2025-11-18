@@ -42,9 +42,11 @@ const SongCard = ({ product, i, data }) => {
           alt={productName}
           className="w-full h-full rounded-lg object-cover"
         />
-        <div className={`group-hover:flex absolute inset-0 justify-center items-center bg-black bg-opacity-50 ${isPlayableSong ? 'flex bg-black bg-opacity-15' : 'hidden'}`}>
+        <div className={`group-hover:flex absolute rounded-lg inset-0 justify-center items-center
+           bg-black bg-opacity-50 ${isPlayableSong ? 'flex bg-black bg-opacity-50' : 'hidden'}
+            ${isPlayableSong ? 'hidden' : 'flex bg-black bg-opacity-50'}`}>
           {isPlayableSong && (
-            <PlayPause
+            <PlayPause 
               isPlaying={isPlaying && activeSong?.albumTitle === product.albumTitle}
               activeSong={activeSong}
               handlePause={handlePauseClick}

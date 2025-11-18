@@ -91,11 +91,10 @@ const TopPlay = () => {
         );
 
         // Match YouTube songs with database songs by title
-        const matched = ytSongs.slice(0, 5).map(ytSong => {
-          // Try to find matching song in database by comparing titles
-          const dbSong = songProducts.find(product => 
-            product.albumTitle.toLowerCase() === ytSong.title.toLowerCase()
-          );
+        const matched = ytSongs.slice(0, 3).map(ytSong => {
+         
+          // Try to find matching song in database by comparing normalized titles
+          const dbSong = songProducts.find(product => product.albumTitle === ytSong.title);
 
           // If match found, return database song with YouTube ranking
           // If not found, return YouTube song without playback capability
@@ -137,7 +136,7 @@ const TopPlay = () => {
     flex-1 xl:max-w-[500px] max-w-full flex flex-col">
       <div className="w-full flex flex-col">
         <div className="flex flex-row justify-between items-center">
-          <h2 className="text-white font-bold text-2xl">Popular Songs</h2>
+          <h2 className="text-white font-bold text-2xl ml-5">Popular Songs</h2>
           {/* <Link to="/top-charts">
             <p className="text-gray-300 text-base cursor-pointer">See More</p>
           </Link> */}

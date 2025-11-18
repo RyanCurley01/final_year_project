@@ -49,12 +49,12 @@ const CustomerScreen = () => {
   const music = products.filter(product => product.albumTitle);
 
   return (
-    <div className="flex flex-col">
+    <div className="flex flex-col ">
       {/* Games Section */}
-      <h2 className="font-bold text-3xl text-white text-left mt-4 ml-30 mb-10">
+      <h2 className="font-bold text-3xl text-white">
         Games
       </h2>
-      <div className="flex flex-wrap sm:justify-start justify-center ml-30 gap-8 mb-16">
+      <div className="flex flex-wrap sm:justify-start justify-center gap-6 mb-12">
         {games.map((product, i) => (
           <SongCard
             key={product.productId || `game-${i}`}
@@ -66,10 +66,10 @@ const CustomerScreen = () => {
       </div>
 
       {/* Music Section */}
-      <h2 className="font-bold text-3xl text-white text-left mt-4 ml-30 mb-10">
+      <h2 className="font-bold text-3xl text-white">
         Music
       </h2>
-      <div className="flex flex-wrap sm:justify-start justify-center ml-30 gap-8">
+      <div className="flex flex-wrap sm:justify-start justify-center gap-6 mb-12">
         {music.map((product, i) => (
           <SongCard
             key={product.productId || `music-${i}`}

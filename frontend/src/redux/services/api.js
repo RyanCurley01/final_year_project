@@ -10,10 +10,10 @@ console.log('🔧 Backend API Configuration:', {
   isCodespaces: envConfig.isCodespaces()
 });
 
-// Service ports (must match backend application.yml configurations)
+// Service ports 
 export const PORTS = {
   ACCOUNTS: 8080,
-  PRODUCTS: 8081,  // Fixed port order
+  PRODUCTS: 8081,  
   ORDERS: 8082,    
   PAYMENTS: 8083,     
   STOCK: 8084,

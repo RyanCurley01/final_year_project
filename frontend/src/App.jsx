@@ -28,7 +28,7 @@ const App = () => {
           </div>
           <div className="relative top-0 h-fit py-10">
             <TopPlay />
-              <div className="w-full px-6 py-44">
+              <div className="w-full px-6 py-64">
                 <PersonalRecommendations />
               </div>
           </div>
