@@ -69,7 +69,7 @@ def setup_environment():
     # Preserve/set API keys with correct values
     if 'YOUTUBE_API_KEY' not in env_vars or env_vars['YOUTUBE_API_KEY'] == 'your_youtube_api_key_here':
         env_vars['YOUTUBE_API_KEY'] = 'AIzaSyA_cOSojH1AVc4phKoP14cYPkGUpdWhpuQ'
-    if 'YOUTUBE_CHANNEL_ID' not in env_vars or not env_vars['YOUTUBE_CHANNEL_ID'].startswith('@'):
+    if 'YOUTUBE_CHANNEL_ID' not in env_vars or env_vars['YOUTUBE_CHANNEL_ID'] in ['@YourChannelHandle', 'your_channel_handle_here', '']:
         env_vars['YOUTUBE_CHANNEL_ID'] = '@Ritrix252'
     
     # Write updated .env file
