@@ -10,6 +10,8 @@ import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 import software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignRequest;
 import software.amazon.awssdk.services.s3.presigner.model.PresignedGetObjectRequest;
 
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 
 @Service
@@ -112,7 +114,17 @@ public class S3Service {
                 return null;
             }
             
-            return afterDomain.substring(startIndex + 1);
+            String key = afterDomain.substring(startIndex + 1);
+            
+            // URL decode the key to handle encoded characters (spaces, apostrophes, etc.)
+            try {
+                key = URLDecoder.decode(key, StandardCharsets.UTF_8.toString());
+            } catch (Exception e) {
+                // If decoding fails, use the key as-is
+                System.err.println("Failed to decode key: " + e.getMessage());
+            }
+            
+            return key;
         } catch (Exception e) {
             return null;
         }
