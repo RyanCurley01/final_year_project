@@ -3,18 +3,18 @@ version: '3.8'
 services:
   accounts-service:
     environment:
-      - SPRING_PROFILES_ACTIVE=local
+      - SPRING_PROFILES_ACTIVE=codespaces
     ports:
       - "8080:8080"
   
   products-service:
     environment:
-      - SPRING_PROFILES_ACTIVE=local
+      - SPRING_PROFILES_ACTIVE=codespaces
     ports:
       - "8081:8081"
   
   orders-service:
     environment:
-      - SPRING_PROFILES_ACTIVE=local
+      - SPRING_PROFILES_ACTIVE=codespaces
     ports:
       - "8082:8082"
