@@ -91,7 +91,7 @@ const TopPlay = () => {
         );
 
         // Match YouTube songs with database songs by title
-        const matched = ytSongs.slice(0, 3).map(ytSong => {
+        const matched = ytSongs.slice(0, 5).map(ytSong => {
          
           // Try to find matching song in database by comparing normalized titles
           const dbSong = songProducts.find(product => product.albumTitle === ytSong.title);
