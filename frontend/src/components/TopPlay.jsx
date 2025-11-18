@@ -93,8 +93,18 @@ const TopPlay = () => {
         // Match YouTube songs with database songs by title
         const matched = ytSongs.slice(0, 5).map(ytSong => {
          
+          // Normalize function to handle different apostrophe characters
+          const normalizeTitle = (title) => {
+            if (!title) return '';
+            // Replace smart quotes (U+2019) and other apostrophe variants with standard apostrophe
+            return title.replace(/[\u2018\u2019\u201A\u201B]/g, "'");
+          };
+
           // Try to find matching song in database by comparing normalized titles
-          const dbSong = songProducts.find(product => product.albumTitle === ytSong.title);
+          const normalizedYtTitle = normalizeTitle(ytSong.title);
+          const dbSong = songProducts.find(product => 
+            normalizeTitle(product.albumTitle) === normalizedYtTitle
+          );
 
           // If match found, return database song with YouTube ranking
           // If not found, return YouTube song without playback capability

@@ -15,6 +15,7 @@ import yaml
 import boto3
 from pathlib import Path
 from botocore.exceptions import ClientError, NoCredentialsError
+from urllib.parse import quote
 
 # Configuration
 ALBUM_COVER_URL = 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Music Cover Image and cloud movement script/z4AnyQN.webp'
@@ -146,8 +147,10 @@ def insert_songs_to_database(songs):
             song_name = Path(song_filename).stem  # Remove extension
             song_title = f"Electronic Works - {song_name}"
             
-            # Create S3 URL for the song
-            file_url = f"{S3_SONGS_BASE_URL}{song_filename}"
+            # Create S3 URL for the song with proper URL encoding for special characters
+            # URL encode the filename to handle apostrophes, spaces, and other special characters
+            encoded_filename = quote(song_filename, safe='')
+            file_url = f"{S3_SONGS_BASE_URL}{encoded_filename}"
             
             # Insert into database
             values = (song_title, PRICE_PER_SONG, ALBUM_COVER_URL, file_url, STOCK_QUANTITY)
@@ -188,7 +191,10 @@ def generate_sql_file(songs, output_file="insert_songs.sql"):
     for song_filename in sorted(songs):
         song_name = Path(song_filename).stem
         song_title = f"Electronic Works - {song_name}"
-        file_url = f"{S3_SONGS_BASE_URL}{song_filename}"
+        
+        # URL encode the filename to handle apostrophes, spaces, and other special characters
+        encoded_filename = quote(song_filename, safe='')
+        file_url = f"{S3_SONGS_BASE_URL}{encoded_filename}"
         
         value = f"(NULL, '{song_title}', NULL, NULL, {PRICE_PER_SONG}, '{ALBUM_COVER_URL}', NULL, '{file_url}', NULL, {STOCK_QUANTITY})"
         values.append(value)

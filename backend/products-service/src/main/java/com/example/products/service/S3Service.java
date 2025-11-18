@@ -70,8 +70,11 @@ public class S3Service {
             String key = extractKeyFromUrl(s3Url);
             
             if (key == null) {
+                System.err.println("Failed to extract key from URL: " + s3Url);
                 return s3Url; // Return original if we can't parse it
             }
+
+            System.out.println("Generating presigned URL for key: " + key + " (from URL: " + s3Url + ")");
 
             GetObjectRequest getObjectRequest = GetObjectRequest.builder()
                     .bucket(bucketName)
@@ -116,7 +119,9 @@ public class S3Service {
             
             String key = afterDomain.substring(startIndex + 1);
             
-            // URL decode the key to handle encoded characters (spaces, apostrophes, etc.)
+            // URL decode the key since the database stores URL-encoded paths
+            // The actual S3 object keys have literal apostrophes and spaces
+            // e.g., database has "Ted%27s%20Energy.wav", S3 object is "Ted's Energy.wav"
             try {
                 key = URLDecoder.decode(key, StandardCharsets.UTF_8.toString());
             } catch (Exception e) {
