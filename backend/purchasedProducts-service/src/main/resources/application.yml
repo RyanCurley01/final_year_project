@@ -17,7 +17,7 @@ spring:
         dialect: org.hibernate.dialect.MySQLDialect
         format_sql: true
   profiles:
-    active: codespaces
+    active: local
 server:
   port: 8089
 logging:
