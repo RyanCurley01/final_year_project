@@ -9,10 +9,10 @@ const App = () => {
   const { activeSong } = useSelector((state) => state.player);
 
   return (
-    <div className="relative flex h-screen">
+    <div className="relative flex h-screen overflow-hidden">
       <Sidebar />
       <div className="flex-1 flex flex-col bg-gradient-to-br from-[#041529] to-[#2970c2]">
-        <div className="px-6 h-full overflow-y-scroll hide-scrollbar flex xl:flex-row flex-col-reverse">
+        <div className="px-6 h-full overflow-y-scroll flex xl:flex-row flex-col-reverse">
           <div className="flex-1 h-fit pb-40">
             <Searchbar />
 

@@ -57,12 +57,6 @@ const TopPlay = () => {
   const password = 'password';
 
   useEffect(() => {
-    if (divRef.current) {
-      divRef.current.scrollIntoView({ behavior: 'smooth' });
-    }
-  });
-
-  useEffect(() => {
     const matchSongsWithDatabase = async () => {
       if (!youtubeData) return;
 
