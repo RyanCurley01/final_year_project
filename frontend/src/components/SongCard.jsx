@@ -81,10 +81,20 @@ const SongCard = ({ product, i, data }) => {
             ${price?.toFixed(2) || '0.00'}
           </p>
         </div>
-        {isGame && product.platform && (
-          <p className="text-xs text-white mt-1">
-            Platform: {product.platform}
-          </p>
+        {isGame && (
+          <div className="flex justify-between items-center mt-2">
+            <p className="text-xs text-white">
+              {product.platform ? `Platform: ${product.platform}` : ''}
+            </p>
+            <button className="px-2 py-1 bg-blue-700 hover:bg-blue-800 rounded font-semibold text-white text-[15px] leading-none flex items-center justify-center">
+              Add to Cart
+            </button>
+          </div>
+        )}
+        {isMusic && (
+            <button className="px-2 py-1 bg-blue-700 hover:bg-blue-800 rounded font-semibold text-white text-[15px] leading-none flex items-center justify-center">
+              Add to Cart
+            </button>
         )}
       </div>
     </div>
