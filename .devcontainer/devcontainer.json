@@ -74,7 +74,7 @@
     }
   },
 
-  "postCreateCommand": "chmod +x ./universal-setup.sh && ./universal-setup.sh",
+  "postCreateCommand": "chmod +x ./universal-setup.sh && ./universal-setup.sh && chmod +x ./init-database.sh && bash ./init-database.sh",
   
   "features": {}
 }

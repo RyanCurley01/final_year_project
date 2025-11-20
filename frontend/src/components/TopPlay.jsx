@@ -53,8 +53,8 @@ const TopPlay = () => {
   * Change this store these login detail in local storage 
   * after the login screen is implemented
   */ 
-  // const email = 'john.smith@store.com';
-  // const password = 'password';
+  const email = 'john.smith@store.com';
+  const password = 'password';
 
   useEffect(() => {
     const matchSongsWithDatabase = async () => {
@@ -75,7 +75,7 @@ const TopPlay = () => {
         }
         
         // Fetch all products from database
-        const products = await productService.getAllProducts(/*email, password*/);
+        const products = await productService.getAllProducts(email, password);
         
         // Filter for songs with fileUrl
         const songProducts = products.filter(product => 
