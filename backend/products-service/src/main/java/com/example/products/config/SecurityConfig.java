@@ -51,7 +51,7 @@ public class SecurityConfig {
             .authorizeHttpRequests(auth -> auth
                 // Public endpoints - customers can browse products
                 .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
-                .requestMatchers(HttpMethod.GET, "/api/products", "/api/products/getAllProducts", "/api/products/{id}").permitAll()
+                .requestMatchers(HttpMethod.GET, "/api/products/**").permitAll()
                 
                 // Manager and Employee can create/update/delete products
                 .requestMatchers(HttpMethod.POST, "/api/products").hasAnyRole("MANAGER", "EMPLOYEE")
