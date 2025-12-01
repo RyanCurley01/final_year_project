@@ -18,4 +18,8 @@
 
 10. Week 10 - Missing google packages for YouTube API setup added to Docker file. Environment variable setup scripts added and YouTube API service script updated so YouTube API service can fetch data through local and remote host URLs dynamically. Environment variable scripts added for frontend, backend and YouTube API services to retrieve YouTube API data from all services and check channel id and YouTube API key for validation. Devcontainer files updated for container to set up container in either local or remote host depending on the environment detected. Front-end API service updated and environment scripts added to retrieve local and remote host URLs from backend. Updated venv username for permission error fix when trying to run YouTube API service scripts. Updated devcontainer scripts to use DB host name for database setup in either local or remote host connections. Database initialization script updated to use DB host name for database connections and CORS configured for REST requests. Cards repositioned and mouse hover changed for song cards like other game cards. URL decoder added for handling encoded apostrophes causing songs not to play to try and fix YouTube API data not loading. Updated database S3 file URLs to have smart quote encoding to fix YouTube API data not being retrieved from URLs with a apostrophe in them. "Add to Cart" buttons added and vite configuration fixed for page not refreshing change. Devcontainer file updated to always initialize database on startup instead of only initializing table if database data volume persists. Music cover images added to TopPlay component songs.
 
+11. Week 11 - No work completed
+
+12. Week 12 - 
+
 
