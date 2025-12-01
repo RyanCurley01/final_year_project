@@ -55,7 +55,10 @@ RUN python3 -m venv $VENV_PATH \
         google-api-python-client \
         google-auth \
         google-auth-oauthlib \
-        google-auth-httplib2
+        google-auth-httplib2 \
+        moviepy \
+        Pillow \
+        opencv-python
 
 # Make the venv's python the default for interactive shells in the container
 ENV PATH="$VENV_PATH/bin:$PATH"
