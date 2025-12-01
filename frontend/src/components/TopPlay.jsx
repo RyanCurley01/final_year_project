@@ -141,7 +141,7 @@ const TopPlay = () => {
   };
 
   return (
-    <div ref={divRef} className="xl:ml-6 mr-50 xl:mb-0 mb-6 
+    <div ref={divRef} className="xl:ml-6 mr-30 xl:mb-0 mb-6 
     flex-1 xl:max-w-[500px] max-w-full flex flex-col">
       <div className="w-full flex flex-col">
         <div className="flex flex-row justify-between items-center">
