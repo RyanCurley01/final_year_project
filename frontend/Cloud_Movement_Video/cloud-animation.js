@@ -72,7 +72,7 @@ class CloudAnimator {
                     planeWidth = containerHeight * imgAspect;
                 }
                 
-                // Create clean background (ground + sky gradient, no clouds)
+                // Create clean background (sky gradient only)
                 const bgTexture = this.createCleanBackground(img);
                 this.createBackgroundLayer(bgTexture, planeWidth, planeHeight);
                 
@@ -85,6 +85,14 @@ class CloudAnimator {
                 cloudTexture.needsUpdate = true;
                 
                 this.createCloudLayer(cloudTexture, planeWidth, planeHeight);
+                
+                // Create grass overlay layer (on top of clouds, hides mountains)
+                const grassTexture = new THREE.Texture(img);
+                grassTexture.minFilter = THREE.LinearFilter;
+                grassTexture.magFilter = THREE.LinearFilter;
+                grassTexture.needsUpdate = true;
+                
+                this.createGrassLayer(grassTexture, planeWidth, planeHeight);
                 
                 resolve();
             };
@@ -104,44 +112,39 @@ class CloudAnimator {
         canvas.width = img.width;
         canvas.height = img.height;
         
-        // Draw original image
+        // Draw original image first
         ctx.drawImage(img, 0, 0);
         
         const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
         const data = imageData.data;
         
-        // Find the horizon line (where green starts)
-        let horizonY = canvas.height;
-        for (let y = canvas.height - 1; y >= 0; y--) {
-            let greenCount = 0;
-            for (let x = 0; x < canvas.width; x += 10) {
-                const i = (y * canvas.width + x) * 4;
-                const r = data[i], g = data[i+1], b = data[i+2];
-                if (g > r && g > b * 0.9) greenCount++;
-            }
-            if (greenCount < canvas.width / 30) {
-                horizonY = y;
-                break;
-            }
-        }
+        // Use a fixed horizon ratio for sky gradient
+        // This is where we cut off the sky in the background
+        const horizonRatio = 0.90;
+        const horizonY = Math.floor(canvas.height * horizonRatio);
         
-        console.log('Detected horizon at y:', horizonY, '/', canvas.height);
+        // Grass ratio - how much of the original grass to show on top
+        // Higher value = more grass visible, covering more of the clouds/mountains
+        this.grassRatio = 3; // Show bottom 25% as grass overlay
         
-        // Replace everything above horizon with sky gradient
+        console.log('Using horizon at y:', horizonY, '/', canvas.height);
+        
+        // Replace EVERYTHING above horizon with sky gradient - no exceptions
         for (let y = 0; y < horizonY; y++) {
-            // Calculate gradient (0 at horizon, 1 at top)
-            const t = 1 - (y / horizonY);
+            // Calculate gradient (0 at top, 1 at horizon)
+            const t = y / horizonY;
             
-            // Sky gradient colors
-            const r = Math.floor(135 + (64 - 135) * t);  // 135 -> 64
-            const g = Math.floor(184 + (120 - 184) * t); // 184 -> 120
-            const b = Math.floor(235 + (210 - 235) * t); // 235 -> 210
+            // Sky gradient colors (top = darker blue, horizon = lighter blue)
+            const r = Math.floor(64 + (135 - 64) * t);   // 64 -> 135
+            const g = Math.floor(120 + (184 - 120) * t); // 120 -> 184
+            const b = Math.floor(210 + (235 - 210) * t); // 210 -> 235
             
             for (let x = 0; x < canvas.width; x++) {
                 const i = (y * canvas.width + x) * 4;
                 data[i] = r;
                 data[i + 1] = g;
                 data[i + 2] = b;
+                // Alpha stays 255
             }
         }
         
@@ -152,7 +155,10 @@ class CloudAnimator {
         texture.magFilter = THREE.LinearFilter;
         texture.needsUpdate = true;
         
-        console.log('Clean background created');
+        // Store horizon ratio for cloud layer
+        this.horizonRatio = horizonRatio;
+        
+        console.log('Clean background created with pure sky gradient');
         return texture;
     }
 
@@ -166,12 +172,15 @@ class CloudAnimator {
     }
 
     createCloudLayer(texture, width, height) {
+        // Use the horizon ratio from background processing
+        const horizonUv = 1.0 - (this.horizonRatio || 0.62); // Convert to UV space (flipped)
+        
         // Shader that scrolls the texture and only shows bright cloud pixels
         const material = new THREE.ShaderMaterial({
             uniforms: {
                 uTexture: { value: texture },
                 uOffset: { value: 0 },
-                uHorizon: { value: 0.38 } // Normalized horizon position
+                uHorizon: { value: horizonUv }
             },
             vertexShader: `
                 varying vec2 vUv;
@@ -199,7 +208,7 @@ class CloudAnimator {
                     // Calculate brightness
                     float brightness = (texColor.r + texColor.g + texColor.b) / 3.0;
                     
-                    // Calculate "whiteness" - clouds are white (r≈g≈b and bright)
+                    // Calculate saturation - clouds are low saturation (whitish)
                     float maxC = max(max(texColor.r, texColor.g), texColor.b);
                     float minC = min(min(texColor.r, texColor.g), texColor.b);
                     float saturation = (maxC - minC) / (maxC + 0.001);
@@ -232,6 +241,69 @@ class CloudAnimator {
         console.log('Cloud layer added');
     }
 
+    createGrassLayer(texture, width, height) {
+        // This layer shows only the green grass from the bottom of the original image
+        // It sits on top of the clouds to hide the blue mountains
+        const grassCutoff = 1.0 - (this.grassRatio || 0.75); // Convert to UV space
+        
+        const material = new THREE.ShaderMaterial({
+            uniforms: {
+                uTexture: { value: texture },
+                uGrassCutoff: { value: grassCutoff }
+            },
+            vertexShader: `
+                varying vec2 vUv;
+                void main() {
+                    vUv = uv;
+                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                }
+            `,
+            fragmentShader: `
+                uniform sampler2D uTexture;
+                uniform float uGrassCutoff;
+                varying vec2 vUv;
+                
+                void main() {
+                    // Only render below grass cutoff line (bottom part of image)
+                    if (vUv.y > uGrassCutoff) {
+                        discard;
+                    }
+                    
+                    vec4 texColor = texture2D(uTexture, vUv);
+                    
+                    // Detect green grass: green channel significantly higher than red and blue
+                    float greenness = texColor.g - max(texColor.r, texColor.b);
+                    
+                    // Detect blue-ish pixels (mountains) to exclude
+                    float blueness = texColor.b - max(texColor.r, texColor.g * 0.9);
+                    float isBluish = smoothstep(-0.02, 0.05, blueness);
+                    
+                    // Only show clearly green pixels, not blue
+                    float isGrass = smoothstep(-0.05, 0.08, greenness) * (1.0 - isBluish);
+                    
+                    // Also include dark green / shadowed grass areas
+                    float isDark = 1.0 - smoothstep(0.15, 0.35, (texColor.r + texColor.g + texColor.b) / 3.0);
+                    float isDarkGreen = isDark * step(texColor.b, texColor.g);
+                    isGrass = max(isGrass, isDarkGreen);
+                    
+                    // Fade near the cutoff line for smooth transition
+                    float edgeFade = smoothstep(uGrassCutoff, uGrassCutoff - 0.05, vUv.y);
+                    isGrass *= edgeFade;
+                    
+                    gl_FragColor = vec4(texColor.rgb, isGrass);
+                }
+            `,
+            transparent: true,
+            depthWrite: false
+        });
+        
+        const geometry = new THREE.PlaneGeometry(width, height);
+        this.grassMesh = new THREE.Mesh(geometry, material);
+        this.grassMesh.position.z = 2; // On top of clouds
+        this.scene.add(this.grassMesh);
+        console.log('Grass layer added with cutoff at UV:', grassCutoff);
+    }
+
     onWindowResize() {
         const width = this.container.clientWidth || window.innerWidth;
         const height = this.container.clientHeight || window.innerHeight;
@@ -260,6 +332,14 @@ class CloudAnimator {
 
     setCloudSpeed(speed) {
         this.cloudSpeed = speed;
+    }
+
+    setGrassRatio(ratio) {
+        this.grassRatio = ratio;
+        // Update the grass layer shader uniform if it exists
+        if (this.grassMesh) {
+            this.grassMesh.material.uniforms.uGrassCutoff.value = 1.0 - ratio;
+        }
     }
 
     dispose() {

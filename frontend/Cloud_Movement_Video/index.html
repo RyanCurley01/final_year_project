@@ -92,6 +92,11 @@
             <input type="range" id="speed-slider" min="0" max="0.1" step="0.001" value="0.02">
             <span id="speed-value">0.02</span>
         </label>
+        <label>
+            Grass Height:
+            <input type="range" id="grass-slider" min="0.5" max="0.9" step="0.01" value="0.75">
+            <span id="grass-value">0.75</span>
+        </label>
     </div>
 
     <!-- Three.js from CDN -->
@@ -116,6 +121,16 @@
             const speed = parseFloat(e.target.value);
             speedValue.textContent = speed.toFixed(3);
             animator.setCloudSpeed(speed);
+        });
+
+        // Grass height control
+        const grassSlider = document.getElementById('grass-slider');
+        const grassValue = document.getElementById('grass-value');
+        
+        grassSlider.addEventListener('input', (e) => {
+            const ratio = parseFloat(e.target.value);
+            grassValue.textContent = ratio.toFixed(2);
+            animator.setGrassRatio(ratio);
         });
     </script>
 </body>
