@@ -22,7 +22,10 @@
       "esbenp.prettier-vscode",
       "ms-vscode.cpptools",
       "msjsdiag.debugger-for-chrome",
-      "bradlc.vscode-tailwindcss"
+      "bradlc.vscode-tailwindcss",
+      "slevesque.shader",
+      "nickmcintyre.p5-javascript",
+      "AlanWalk.webgl-glsl-editor"
     ]
     }
   },
