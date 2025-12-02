@@ -22,82 +22,10 @@
             height: 100vh;
             position: relative;
         }
-        
-        #controls {
-            position: fixed;
-            bottom: 20px;
-            left: 20px;
-            background: rgba(0, 0, 0, 0.7);
-            padding: 15px 20px;
-            border-radius: 10px;
-            color: white;
-            z-index: 100;
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-        }
-        
-        #controls label {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            font-size: 14px;
-        }
-        
-        #controls input[type="range"] {
-            width: 150px;
-            cursor: pointer;
-        }
-        
-        #speed-value {
-            min-width: 40px;
-            text-align: right;
-        }
-
-        #info {
-            position: fixed;
-            top: 20px;
-            left: 20px;
-            background: rgba(0, 0, 0, 0.7);
-            padding: 15px 20px;
-            border-radius: 10px;
-            color: white;
-            z-index: 100;
-            max-width: 300px;
-        }
-
-        #info h2 {
-            margin-bottom: 10px;
-            font-size: 16px;
-        }
-
-        #info p {
-            font-size: 12px;
-            line-height: 1.5;
-            opacity: 0.8;
-        }
     </style>
 </head>
 <body>
     <div id="animation-container"></div>
-    
-    <div id="info">
-        <h2>☁️ Cloud Animation</h2>
-        <p>This animation uses Three.js with WebGL shaders to animate only the clouds in the image. The ground/hills remain static while clouds move left continuously.</p>
-    </div>
-    
-    <div id="controls">
-        <label>
-            Cloud Speed:
-            <input type="range" id="speed-slider" min="0" max="0.1" step="0.001" value="0.02">
-            <span id="speed-value">0.02</span>
-        </label>
-        <label>
-            Grass Height:
-            <input type="range" id="grass-slider" min="0.5" max="0.9" step="0.01" value="0.75">
-            <span id="grass-value">0.75</span>
-        </label>
-    </div>
 
     <!-- Three.js from CDN -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -107,31 +35,10 @@
     
     <script>
         // Initialize the cloud animator with the Windows XP image
-        // URL encode the filename to handle spaces properly
         const animator = new CloudAnimator(
             'animation-container',
             './Windows%20Xp%20Cover%20Image.webp'
         );
-        
-        // Speed control
-        const speedSlider = document.getElementById('speed-slider');
-        const speedValue = document.getElementById('speed-value');
-        
-        speedSlider.addEventListener('input', (e) => {
-            const speed = parseFloat(e.target.value);
-            speedValue.textContent = speed.toFixed(3);
-            animator.setCloudSpeed(speed);
-        });
-
-        // Grass height control
-        const grassSlider = document.getElementById('grass-slider');
-        const grassValue = document.getElementById('grass-value');
-        
-        grassSlider.addEventListener('input', (e) => {
-            const ratio = parseFloat(e.target.value);
-            grassValue.textContent = ratio.toFixed(2);
-            animator.setGrassRatio(ratio);
-        });
     </script>
 </body>
 </html>

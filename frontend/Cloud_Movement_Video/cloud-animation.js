@@ -120,12 +120,12 @@ class CloudAnimator {
         
         // Use a fixed horizon ratio for sky gradient
         // This is where we cut off the sky in the background
-        const horizonRatio = 0.90;
+        const horizonRatio = 0.75;
         const horizonY = Math.floor(canvas.height * horizonRatio);
         
-        // Grass ratio - how much of the original grass to show on top
-        // Higher value = more grass visible, covering more of the clouds/mountains
-        this.grassRatio = 3; // Show bottom 25% as grass overlay
+        // Grass ratio - how much of the image height the grass layer covers
+        // 0.66 = grass layer extends to match the exact height in the reference
+        this.grassRatio = 0.66; // Fixed grass height matching the screenshot
         
         console.log('Using horizon at y:', horizonY, '/', canvas.height);
         
@@ -242,14 +242,21 @@ class CloudAnimator {
     }
 
     createGrassLayer(texture, width, height) {
-        // This layer shows only the green grass from the bottom of the original image
-        // It sits on top of the clouds to hide the blue mountains
-        const grassCutoff = 1.0 - (this.grassRatio || 0.75); // Convert to UV space
+        // This layer duplicates the grass from the bottom of the original image
+        // and tiles it upward to cover the mountains in both original and scrolling images
+        const grassCutoff = 1.0 - (this.grassRatio || 0.5); // Convert to UV space (0.5 = halfway up)
+        
+        // The original grass in the image is in the bottom ~15% (UV 0 to 0.15)
+        // We sample from within this area, avoiding the very edge to prevent seams
+        const originalGrassHeight = 0.12; // Height of original grass area to sample from
+        const grassOffset = 0.02; // Offset from bottom to avoid edge artifacts
         
         const material = new THREE.ShaderMaterial({
             uniforms: {
                 uTexture: { value: texture },
-                uGrassCutoff: { value: grassCutoff }
+                uGrassCutoff: { value: grassCutoff },
+                uOriginalGrassHeight: { value: originalGrassHeight },
+                uGrassOffset: { value: grassOffset }
             },
             vertexShader: `
                 varying vec2 vUv;
@@ -261,36 +268,51 @@ class CloudAnimator {
             fragmentShader: `
                 uniform sampler2D uTexture;
                 uniform float uGrassCutoff;
+                uniform float uOriginalGrassHeight;
+                uniform float uGrassOffset;
                 varying vec2 vUv;
                 
                 void main() {
-                    // Only render below grass cutoff line (bottom part of image)
+                    // Only render below grass cutoff line (bottom half of image)
                     if (vUv.y > uGrassCutoff) {
                         discard;
                     }
                     
-                    vec4 texColor = texture2D(uTexture, vUv);
+                    // Sample from the original grass area at the bottom
+                    // Use a mirrored/ping-pong pattern to avoid seams when tiling
+                    float normalizedY = vUv.y / uOriginalGrassHeight;
+                    float tileIndex = floor(normalizedY);
+                    float withinTile = fract(normalizedY);
                     
-                    // Detect green grass: green channel significantly higher than red and blue
-                    float greenness = texColor.g - max(texColor.r, texColor.b);
+                    // Mirror every other tile to hide seams
+                    if (mod(tileIndex, 2.0) >= 1.0) {
+                        withinTile = 1.0 - withinTile;
+                    }
                     
-                    // Detect blue-ish pixels (mountains) to exclude
-                    float blueness = texColor.b - max(texColor.r, texColor.g * 0.9);
-                    float isBluish = smoothstep(-0.02, 0.05, blueness);
+                    // Map back to the grass sample area, with offset to avoid bottom edge
+                    float sampleY = uGrassOffset + withinTile * uOriginalGrassHeight;
+                    vec2 grassUv = vec2(vUv.x, sampleY);
                     
-                    // Only show clearly green pixels, not blue
-                    float isGrass = smoothstep(-0.05, 0.08, greenness) * (1.0 - isBluish);
+                    vec4 texColor = texture2D(uTexture, grassUv);
                     
-                    // Also include dark green / shadowed grass areas
-                    float isDark = 1.0 - smoothstep(0.15, 0.35, (texColor.r + texColor.g + texColor.b) / 3.0);
-                    float isDarkGreen = isDark * step(texColor.b, texColor.g);
-                    isGrass = max(isGrass, isDarkGreen);
+                    // Full opacity for the duplicated grass
+                    float alpha = 1.0;
                     
-                    // Fade near the cutoff line for smooth transition
-                    float edgeFade = smoothstep(uGrassCutoff, uGrassCutoff - 0.05, vUv.y);
-                    isGrass *= edgeFade;
+                    // Add dark border line at the top of grass (like YouTube reference)
+                    float borderWidth = 0.008;
+                    float borderStart = uGrassCutoff - borderWidth;
+                    if (vUv.y > borderStart && vUv.y <= uGrassCutoff) {
+                        // Dark green/black border line
+                        float borderBlend = smoothstep(borderStart, uGrassCutoff, vUv.y);
+                        vec3 borderColor = vec3(0.05, 0.15, 0.05); // Dark green border
+                        texColor.rgb = mix(texColor.rgb, borderColor, borderBlend * 0.9);
+                    }
                     
-                    gl_FragColor = vec4(texColor.rgb, isGrass);
+                    // Very slight fade at top edge for smoother transition
+                    float edgeFade = smoothstep(uGrassCutoff, uGrassCutoff - 0.02, vUv.y);
+                    alpha *= edgeFade;
+                    
+                    gl_FragColor = vec4(texColor.rgb, alpha);
                 }
             `,
             transparent: true,
@@ -301,7 +323,7 @@ class CloudAnimator {
         this.grassMesh = new THREE.Mesh(geometry, material);
         this.grassMesh.position.z = 2; // On top of clouds
         this.scene.add(this.grassMesh);
-        console.log('Grass layer added with cutoff at UV:', grassCutoff);
+        console.log('Grass layer added - duplicating bottom grass up to UV:', grassCutoff);
     }
 
     onWindowResize() {
