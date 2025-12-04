@@ -79,5 +79,8 @@
 
   "postCreateCommand": "chmod +x ./universal-setup.sh && ./universal-setup.sh && chmod +x ./init-database.sh && bash ./init-database.sh",
   
-  "features": {}
+  "features": {
+    "ghcr.io/devcontainers-contrib/features/ffmpeg-apt-get:1": {},
+    "ghcr.io/devcontainers-contrib/features/puppeteer-headless:1": {}
+  }
 }
