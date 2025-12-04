@@ -11,7 +11,10 @@ const SongCard = ({ product, i, data }) => {
   
   const productName = isMusic ? product.albumTitle : product.gameTitle;
   const price = isMusic ? product.albumPrice : product.gamePrice;
-  const coverImage = isMusic ? product.albumCoverImageUrl : product.gameCoverImageUrl;
+  const coverMedia = isMusic ? product.albumCoverImageUrl : product.gameCoverImageUrl;
+
+  // Check if the cover media is a video (mp4)
+  const isVideo = coverMedia && coverMedia.toLowerCase().endsWith('.mp4');
 
   // Check if current song is a playable song 
   const isPlayableSong = isMusic && product.albumTitle !== 'Selected Electronic Works';
@@ -37,11 +40,23 @@ const SongCard = ({ product, i, data }) => {
     bg-opacity-80 backdrop-blur-sm animate-slideup
     rounded-lg cursor-pointer">
       <div className="relative w-full h-[160px] group">
-        <img
-          src={coverImage || 'https://via.placeholder.com/250x224?text=No+Image'}
-          alt={productName}
-          className="w-full h-full rounded-lg object-cover"
-        />
+        {isVideo ? (
+          <video
+            src={coverMedia}
+            alt={productName}
+            className="w-full h-full rounded-lg object-cover"
+            autoPlay
+            loop
+            muted
+            playsInline
+          />
+        ) : (
+          <img
+            src={coverMedia || 'https://via.placeholder.com/250x224?text=No+Image'}
+            alt={productName}
+            className="w-full h-full rounded-lg object-cover"
+          />
+        )}
         <div className={`group-hover:flex absolute rounded-lg inset-0 justify-center items-center
            bg-black bg-opacity-50 ${isPlayableSong ? 'flex bg-black bg-opacity-50' : 'hidden'}
             ${isPlayableSong ? 'hidden' : 'flex bg-black bg-opacity-50'}`}>

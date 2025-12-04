@@ -10,7 +10,7 @@ class CloudAnimator {
         this.imagePath = imagePath;
         this.cloudMesh = null;
         this.clock = new THREE.Clock();
-        this.cloudSpeed = 0.015; // Speed of cloud movement
+        this.cloudSpeed = 0.003; // Speed of cloud movement
         
         this.init();
     }
