@@ -45,6 +45,7 @@ const Track = ({ isPlaying, isActive, activeSong }) => {
         <video
           ref={videoRef}
           src={coverMedia}
+          crossOrigin="anonymous"
           alt="cover art"
           className="rounded-full object-cover w-full h-full"
           muted
