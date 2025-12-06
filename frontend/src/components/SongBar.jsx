@@ -42,7 +42,7 @@ const SongBar = ({ song, i, artistId, isPlaying, activeSong, handlePauseClick, h
             muted
             playsInline
             preload="auto"
-            crossOrigin="anonymous"
+
             style={{ willChange: 'transform' }}
             onEnded={() => {
               if (!isThisSongActive || !isPlaying) {
@@ -62,10 +62,12 @@ const SongBar = ({ song, i, artistId, isPlaying, activeSong, handlePauseClick, h
         {!isVideo || true ? (
           <img
             className={`w-full h-full rounded-lg object-cover ${isVideo ? 'hidden' : ''}`}
-            src={coverMedia || 'https://via.placeholder.com/80x80?text=No+Image'}
+            src={coverMedia || placeholders.small}
             alt={song?.title}
             onError={(e) => {
-              e.target.src = 'https://via.placeholder.com/80x80?text=No+Image';
+              if (e.target.src !== placeholders.small) {
+                e.target.src = placeholders.small;
+              }
             }}
           />
         ) : null}

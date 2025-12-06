@@ -3,11 +3,11 @@ import {useDispatch, useSelector } from 'react-redux';
 import { useRef, useEffect } from 'react';
 
 import PlayPause from './PlayPause';
+import AudioReactiveVideo from './AudioReactiveVideo';
 import { playPause, setActiveSong } from '../redux/features/playerSlice';
+import placeholders from '../utils/placeholderImage';
 
 const SongCard = ({ product, i, data }) => {
-  const videoRef = useRef(null);
-  
   // Determine if it's a game or music based on which fields are populated
   const isMusic = product.albumTitle !== null && product.albumTitle !== undefined;
   const isGame = product.gameTitle !== null && product.gameTitle !== undefined;
@@ -32,40 +32,14 @@ const SongCard = ({ product, i, data }) => {
   
   // Check if this card's song is currently active
   const isThisSongActive = activeSong?.albumTitle === product.albumTitle;
-  
-  // Sync video playback with audio player
-  useEffect(() => {
-    if (videoRef.current && isVideo) {
-      if (isThisSongActive && isPlaying) {
-        // Song is playing - video should loop continuously
-        videoRef.current.loop = true;
-        videoRef.current.play().catch(e => console.error('Video play error:', e));
-      } else if (isThisSongActive && !isPlaying) {
-        // Song is paused
-        videoRef.current.pause();
-      } else {
-        // Not the active song - just let it loop on its own
-        videoRef.current.loop = true;
-        if (videoRef.current.paused) {
-          videoRef.current.play().catch(e => console.error('Video play error:', e));
-        }
-      }
-    }
-  }, [isThisSongActive, isPlaying, isVideo]);
-  
-  // Restart video when song ends
-  useEffect(() => {
-    if (videoRef.current && isVideo && isThisSongActive && songEnded) {
-      videoRef.current.currentTime = 0;
-      videoRef.current.play().catch(e => console.error('Video restart error:', e));
-    }
-  }, [songEnded, isThisSongActive, isVideo]);
 
   const handlePauseClick = () => {
+    console.log('🔴 Pause clicked for:', product.albumTitle);
     dispatch(playPause(false));
   };
 
   const handlePlayClick = () => {
+    console.log('▶️ Play clicked for:', product.albumTitle, 'fileUrl:', product.fileUrl);
     dispatch(setActiveSong({ song: product, data, i }));
     dispatch(playPause(true));
   };
@@ -80,30 +54,26 @@ const SongCard = ({ product, i, data }) => {
     rounded-lg cursor-pointer">
       <div className="relative w-full h-[160px] group">
         {isVideo ? (
-          <video
-            ref={videoRef}
+          <AudioReactiveVideo
             src={coverMedia}
             alt={productName}
             className="w-full h-full rounded-lg object-cover"
-            muted
-            playsInline
-            preload="auto"
-            crossOrigin="anonymous"
-            style={{ willChange: 'transform' }}
+            isPlaying={isPlaying}
+            isActive={isThisSongActive}
             onError={(e) => {
               console.error('Video failed to load:', coverMedia, e);
-              e.target.style.display = 'none';
-              e.target.nextElementSibling?.classList.remove('hidden');
             }}
           />
         ) : null}
         {!isVideo || true ? (
           <img
-            src={coverMedia || 'https://via.placeholder.com/250x224?text=No+Image'}
+            src={coverMedia || placeholders.large}
             alt={productName}
             className={`w-full h-full rounded-lg object-cover ${isVideo ? 'hidden' : ''}`}
             onError={(e) => {
-              e.target.src = 'https://via.placeholder.com/250x224?text=No+Image';
+              if (e.target.src !== placeholders.large) {
+                e.target.src = placeholders.large;
+              }
             }}
           />
         ) : null}

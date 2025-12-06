@@ -56,7 +56,6 @@ const Player = ({ activeSong, isPlaying, volume, seekTime, onEnded, onTimeUpdate
       onError={(e) => {
         console.error('Audio loading error:', e.target.error);
       }}
-      crossOrigin="anonymous"
     />
   );
 };

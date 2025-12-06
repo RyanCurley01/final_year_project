@@ -1,36 +1,47 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 import { useSelector } from 'react-redux';
+import placeholders from '../../utils/placeholderImage';
 
 const Track = ({ isPlaying, isActive, activeSong }) => {
   const videoRef = useRef(null);
+  const [videoError, setVideoError] = useState(false);
   const { songEnded } = useSelector((state) => state.player);
   const coverMedia = activeSong?.albumCoverImageUrl || activeSong?.gameCoverImageUrl;
   const isVideo = coverMedia && coverMedia.toLowerCase().includes('.mp4');
   
+  // Reset video error when song changes
+  useEffect(() => {
+    setVideoError(false);
+  }, [coverMedia]);
+
   // Sync video with player state
   useEffect(() => {
-    if (videoRef.current && isVideo) {
+    if (videoRef.current && isVideo && !videoError) {
       if (isPlaying && isActive) {
         videoRef.current.loop = true;
-        videoRef.current.play().catch(e => console.error('Track video play error:', e));
+        videoRef.current.play().catch(e => {
+          console.error('Track video play error:', e);
+          // If play fails (e.g. not loaded), we might want to fallback? 
+          // But usually play() fails due to interruption or permissions.
+        });
       } else {
         videoRef.current.pause();
       }
     }
-  }, [isPlaying, isActive, isVideo]);
+  }, [isPlaying, isActive, isVideo, videoError]);
   
   // Restart video when song ends
   useEffect(() => {
-    if (videoRef.current && isVideo && songEnded && isActive) {
+    if (videoRef.current && isVideo && songEnded && isActive && !videoError) {
       videoRef.current.currentTime = 0;
       videoRef.current.play().catch(e => console.error('Video restart error:', e));
     }
-  }, [songEnded, isActive, isVideo]);
+  }, [songEnded, isActive, isVideo, videoError]);
 
   return (
   <div className="flex-1 flex items-center justify-start">
     <div className={`${isPlaying && isActive ? 'animate-[spin_3s_linear_infinite]' : ''} hidden sm:block h-16 w-16 mr-4`}>
-      {isVideo ? (
+      {isVideo && !videoError ? (
         <video
           ref={videoRef}
           src={coverMedia}
@@ -39,22 +50,22 @@ const Track = ({ isPlaying, isActive, activeSong }) => {
           muted
           playsInline
           preload="auto"
-          crossOrigin="anonymous"
           style={{ willChange: 'transform' }}
           onError={(e) => {
             console.error('Track video failed to load:', coverMedia, e);
-            e.target.style.display = 'none';
-            e.target.nextElementSibling?.classList.remove('hidden');
+            setVideoError(true);
           }}
         />
       ) : null}
-      {!isVideo || true ? (
+      {!isVideo || videoError ? (
         <img 
-          src={coverMedia || 'https://via.placeholder.com/64'} 
+          src={coverMedia || placeholders.small} 
           alt="cover art" 
-          className={`rounded-full object-cover w-full h-full ${isVideo ? 'hidden' : ''}`}
+          className={`rounded-full object-cover w-full h-full`}
           onError={(e) => {
-            e.target.src = 'https://via.placeholder.com/64';
+            if (e.target.src !== placeholders.small) {
+              e.target.src = placeholders.small;
+            }
           }}
         />
       ) : null}

@@ -5,9 +5,11 @@ import { Swiper, SwiperSlide } from 'swiper/react';
 import { FreeMode } from 'swiper/modules';
 
 import PlayPause from './PlayPause';  
+import AudioReactiveVideo from './AudioReactiveVideo';
 import { playPause, setActiveSong } from '../redux/features/playerSlice';
 import { productService } from '../redux/services';
 import { useGetTopSongsQuery } from '../redux/services/youtubeApi';
+import placeholders from '../utils/placeholderImage';
 
 import Loader from './Loader';
 import Error from './Error';
@@ -16,35 +18,9 @@ import 'swiper/css';
 import 'swiper/css/free-mode';
 
 const TopChartCard = ({ song, i, isPlaying, activeSong, handlePauseClick, handlePlayClick, songEnded }) => {
-  const videoRef = useRef(null);
   const coverMedia = song?.albumCoverImageUrl || song?.images?.coverart;
   const isVideo = coverMedia && coverMedia.toLowerCase().includes('.mp4');
   const isThisSongActive = activeSong?.albumTitle === song?.albumTitle;
-  
-  // Sync video playback with audio player
-  useEffect(() => {
-    if (videoRef.current && isVideo) {
-      if (isThisSongActive && isPlaying) {
-        videoRef.current.loop = true;
-        videoRef.current.play().catch(e => console.error('Video play error:', e));
-      } else if (isThisSongActive && !isPlaying) {
-        videoRef.current.pause();
-      } else {
-        videoRef.current.loop = true;
-        if (videoRef.current.paused) {
-          videoRef.current.play().catch(e => console.error('Video play error:', e));
-        }
-      }
-    }
-  }, [isThisSongActive, isPlaying, isVideo]);
-  
-  // Restart video when song ends
-  useEffect(() => {
-    if (videoRef.current && isVideo && isThisSongActive && songEnded) {
-      videoRef.current.currentTime = 0;
-      videoRef.current.play().catch(e => console.error('Video restart error:', e));
-    }
-  }, [songEnded, isThisSongActive, isVideo]);
 
   return (
   <div className="w-full flex flex-row items-center 
@@ -53,30 +29,26 @@ const TopChartCard = ({ song, i, isPlaying, activeSong, handlePauseClick, handle
     <div className="flex-1 flex flex-row justify-between items-center">
       <div className="relative w-20 h-20">
         {isVideo ? (
-          <video
-            ref={videoRef}
+          <AudioReactiveVideo
             src={coverMedia}
             alt={song?.albumTitle || song?.title}
             className="w-full h-full rounded-lg object-cover"
-            muted
-            playsInline
-            preload="auto"
-            crossOrigin="anonymous"
-            style={{ willChange: 'transform' }}
+            isPlaying={isPlaying}
+            isActive={isThisSongActive}
             onError={(e) => {
               console.error('Video failed to load:', coverMedia, e);
-              e.target.style.display = 'none';
-              e.target.nextElementSibling?.classList.remove('hidden');
             }}
           />
         ) : null}
         {!isVideo || true ? (
           <img
-            src={coverMedia || 'https://via.placeholder.com/80x80?text=No+Image'}
+            src={coverMedia || placeholders.small}
             alt={song?.albumTitle || song?.title}
             className={`w-full h-full rounded-lg object-cover ${isVideo ? 'hidden' : ''}`}
             onError={(e) => {
-              e.target.src = 'https://via.placeholder.com/80x80?text=No+Image';
+              if (e.target.src !== placeholders.small) {
+                e.target.src = placeholders.small;
+              }
             }}
           />
         ) : null}
@@ -186,14 +158,18 @@ const TopPlay = () => {
   const topPlays = matchedSongs;
   
   const handlePauseClick = () => {
+    console.log('🔴 TopPlay pause clicked');
     dispatch(playPause(false));
   };
 
   const handlePlayClick = (song, i) => {
+    console.log('▶️ TopPlay play clicked for:', song.albumTitle, 'fileUrl:', song.fileUrl);
     // Only play if the song has a fileUrl (matched with database)
     if (song.fileUrl) {
       dispatch(setActiveSong({ song, data: matchedSongs, i }));
       dispatch(playPause(true));
+    } else {
+      console.warn('⚠️ No fileUrl available for song:', song.albumTitle);
     }
   };
 
