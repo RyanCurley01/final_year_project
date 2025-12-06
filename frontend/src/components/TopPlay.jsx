@@ -15,16 +15,72 @@ import Error from './Error';
 import 'swiper/css';
 import 'swiper/css/free-mode';
 
-const TopChartCard = ({ song, i, isPlaying, activeSong, handlePauseClick, handlePlayClick }) => (
+const TopChartCard = ({ song, i, isPlaying, activeSong, handlePauseClick, handlePlayClick, songEnded }) => {
+  const videoRef = useRef(null);
+  const coverMedia = song?.albumCoverImageUrl || song?.images?.coverart;
+  const isVideo = coverMedia && coverMedia.toLowerCase().includes('.mp4');
+  const isThisSongActive = activeSong?.albumTitle === song?.albumTitle;
+  
+  // Sync video playback with audio player
+  useEffect(() => {
+    if (videoRef.current && isVideo) {
+      if (isThisSongActive && isPlaying) {
+        videoRef.current.loop = true;
+        videoRef.current.play().catch(e => console.error('Video play error:', e));
+      } else if (isThisSongActive && !isPlaying) {
+        videoRef.current.pause();
+      } else {
+        videoRef.current.loop = true;
+        if (videoRef.current.paused) {
+          videoRef.current.play().catch(e => console.error('Video play error:', e));
+        }
+      }
+    }
+  }, [isThisSongActive, isPlaying, isVideo]);
+  
+  // Restart video when song ends
+  useEffect(() => {
+    if (videoRef.current && isVideo && isThisSongActive && songEnded) {
+      videoRef.current.currentTime = 0;
+      videoRef.current.play().catch(e => console.error('Video restart error:', e));
+    }
+  }, [songEnded, isThisSongActive, isVideo]);
+
+  return (
   <div className="w-full flex flex-row items-center 
   hover:bg-[#4c426e] py-2 p-4 rounded-lg cursor-pointer mb-2">
     <h3 className="font-bold text-base text-white mr-3">{i + 1}.</h3>
     <div className="flex-1 flex flex-row justify-between items-center">
-      <img
-        src={song?.albumCoverImageUrl || song?.images?.coverart}
-        alt={song?.albumTitle || song?.title}
-        className="w-20 h-20 rounded-lg"
-      />
+      <div className="relative w-20 h-20">
+        {isVideo ? (
+          <video
+            ref={videoRef}
+            src={coverMedia}
+            alt={song?.albumTitle || song?.title}
+            className="w-full h-full rounded-lg object-cover"
+            muted
+            playsInline
+            preload="auto"
+            crossOrigin="anonymous"
+            style={{ willChange: 'transform' }}
+            onError={(e) => {
+              console.error('Video failed to load:', coverMedia, e);
+              e.target.style.display = 'none';
+              e.target.nextElementSibling?.classList.remove('hidden');
+            }}
+          />
+        ) : null}
+        {!isVideo || true ? (
+          <img
+            src={coverMedia || 'https://via.placeholder.com/80x80?text=No+Image'}
+            alt={song?.albumTitle || song?.title}
+            className={`w-full h-full rounded-lg object-cover ${isVideo ? 'hidden' : ''}`}
+            onError={(e) => {
+              e.target.src = 'https://via.placeholder.com/80x80?text=No+Image';
+            }}
+          />
+        ) : null}
+      </div>
       <div className="flex-1 flex flex-col justify-center mx-3">
         <p className="text-xl font-bold text-white">
           {song.albumTitle || song.title}
@@ -41,11 +97,12 @@ const TopChartCard = ({ song, i, isPlaying, activeSong, handlePauseClick, handle
       />
     )}
   </div>
-)
+  );
+};
 
 const TopPlay = () => {
   const dispatch = useDispatch();
-  const { activeSong, isPlaying } = useSelector((state) => state.player);
+  const { activeSong, isPlaying, songEnded } = useSelector((state) => state.player);
   const [matchedSongs, setMatchedSongs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -159,6 +216,7 @@ const TopPlay = () => {
               i={i}
               isPlaying={isPlaying}
               activeSong={activeSong}
+              songEnded={songEnded}
               handlePauseClick={handlePauseClick}
               handlePlayClick={handlePlayClick}
             />

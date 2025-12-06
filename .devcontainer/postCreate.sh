@@ -71,6 +71,19 @@ if [ -f ./frontend/package.json ]; then
   cd ..
 fi
 
+# Install Puppeteer and FFmpeg dependencies if package.json exists in root
+if [ -f ./package.json ]; then
+  echo "Found root package.json — installing npm dependencies (including Puppeteer)..."
+  npm install || true
+  
+  # Set Puppeteer environment variables for the user
+  echo "Configuring Puppeteer to use system Chrome..."
+  if ! grep -q "PUPPETEER_SKIP_CHROMIUM_DOWNLOAD" /home/vscode/.bashrc; then
+    echo 'export PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true' >> /home/vscode/.bashrc
+    echo 'export PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome-stable' >> /home/vscode/.bashrc
+  fi
+fi
+
 # Install python deps if requirements.txt exists (for AI service)
 if [ -f ./ai_service/requirements.txt ]; then
   echo "Found ai_service/requirements.txt — installing Python dependencies into venv..."

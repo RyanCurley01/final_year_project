@@ -25,6 +25,14 @@ RUN apt-get update \
        python3-pip \
        mysql-client \
        git-lfs \
+       ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Google Chrome for Puppeteer
+RUN wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | gpg --dearmor -o /usr/share/keyrings/google-chrome-keyring.gpg \
+    && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome-keyring.gpg] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list \
+    && apt-get update \
+    && apt-get install -y google-chrome-stable \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Node.js 22 (Latest LTS)
@@ -62,6 +70,10 @@ RUN python3 -m venv $VENV_PATH \
 
 # Make the venv's python the default for interactive shells in the container
 ENV PATH="$VENV_PATH/bin:$PATH"
+
+# Configure Puppeteer to use system Chrome
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome-stable
 
 # Install AWS CLI v2
 RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/awscliv2.zip \

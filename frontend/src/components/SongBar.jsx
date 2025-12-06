@@ -1,17 +1,75 @@
-import React from 'react';
+import React, { useRef, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 
 import PlayPause from './PlayPause';
 
-const SongBar = ({ song, i, artistId, isPlaying, activeSong, handlePauseClick, handlePlayClick }) => (
+const SongBar = ({ song, i, artistId, isPlaying, activeSong, handlePauseClick, handlePlayClick }) => {
+  const videoRef = useRef(null);
+  const coverMedia = artistId 
+    ? song?.attributes?.artwork?.url.replace('{w}', '125').replace('{h}', '125') 
+    : (song?.albumCoverImageUrl || song?.images?.coverart);
+  const isVideo = coverMedia && coverMedia.toLowerCase().includes('.mp4');
+  const isThisSongActive = activeSong?.albumTitle === song?.albumTitle || activeSong?.title === song?.title;
+  
+  // Sync video playback with audio player
+  useEffect(() => {
+    if (videoRef.current && isVideo) {
+      if (isThisSongActive && isPlaying) {
+        videoRef.current.loop = true;
+        videoRef.current.play().catch(e => console.error('Video play error:', e));
+      } else if (isThisSongActive && !isPlaying) {
+        videoRef.current.pause();
+      } else {
+        videoRef.current.loop = false;
+        if (videoRef.current.paused) {
+          videoRef.current.play().catch(e => console.error('Video play error:', e));
+        }
+      }
+    }
+  }, [isThisSongActive, isPlaying, isVideo]);
+
+  return (
   <div className={`w-full flex flex-row items-center hover:bg-[#4c426e] ${activeSong?.title === song?.title ? 'bg-[#4c426e]' : 'bg-transparent'} py-2 p-4 rounded-lg cursor-pointer mb-2`}>
     <h3 className="font-bold text-base text-white mr-3">{i + 1}.</h3>
     <div className="flex-1 flex flex-row justify-between items-center">
-      <img
-        className="w-20 h-20 rounded-lg"
-        src={artistId ? song?.attributes?.artwork?.url.replace('{w}', '125').replace('{h}', '125') : song?.images?.coverart}
-        alt={song?.title}
-      />
+      <div className="relative w-20 h-20">
+        {isVideo ? (
+          <video
+            ref={videoRef}
+            src={coverMedia}
+            alt={song?.title}
+            className="w-full h-full rounded-lg object-cover"
+            muted
+            playsInline
+            preload="auto"
+            crossOrigin="anonymous"
+            style={{ willChange: 'transform' }}
+            onEnded={() => {
+              if (!isThisSongActive || !isPlaying) {
+                if (videoRef.current) {
+                  videoRef.current.currentTime = 0;
+                  videoRef.current.play().catch(e => console.error('Video restart error:', e));
+                }
+              }
+            }}
+            onError={(e) => {
+              console.error('Video failed to load:', coverMedia, e);
+              e.target.style.display = 'none';
+              e.target.nextElementSibling?.classList.remove('hidden');
+            }}
+          />
+        ) : null}
+        {!isVideo || true ? (
+          <img
+            className={`w-full h-full rounded-lg object-cover ${isVideo ? 'hidden' : ''}`}
+            src={coverMedia || 'https://via.placeholder.com/80x80?text=No+Image'}
+            alt={song?.title}
+            onError={(e) => {
+              e.target.src = 'https://via.placeholder.com/80x80?text=No+Image';
+            }}
+          />
+        ) : null}
+      </div>
       <div className="flex-1 flex flex-col justify-center mx-3">
         {!artistId ? (
           <Link to={`/songs/${song.key}`}>
@@ -41,6 +99,7 @@ const SongBar = ({ song, i, artistId, isPlaying, activeSong, handlePauseClick, h
       )
       : null}
   </div>
-);
+  );
+};
 
 export default SongBar;

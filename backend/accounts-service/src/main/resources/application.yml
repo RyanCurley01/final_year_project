@@ -17,7 +17,7 @@ spring:
     console:
       enabled: true
   profiles:
-    active: codespaces
+    active: local
 server:
   port: 8080
 logging:
