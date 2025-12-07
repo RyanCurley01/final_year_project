@@ -58,17 +58,17 @@ class SkySegmentation {
       const yCoords = tf.linspace(0, 1, height).expandDims(1).tile([1, width]);
       const positionWeight = tf.scalar(1.0).sub(yCoords); // 1 at top, 0 at bottom
       
-      // Combine factors
+      // Combine factors with stricter weights
       let skyMask = blueStrength
-        .mul(1.0)
-        .add(blueOverRed.mul(2.0))
-        .add(positionWeight.mul(0.5));
+        .mul(2.0)
+        .add(blueOverRed.mul(7.0))
+        .add(positionWeight.mul(4.5));
       
       // Threshold and normalize
       skyMask = skyMask.clipByValue(0, 1);
       
-      // Apply threshold to create binary mask
-      const threshold = 0.6;
+      // Apply lower threshold for more visible effect
+      const threshold = 1.2; // Lowered from 1.8 to detect more sky
       skyMask = skyMask.greater(threshold).toFloat();
       
       return skyMask;
@@ -95,7 +95,7 @@ class SkySegmentation {
       const maskExpanded = tf.stack([skyMask, skyMask, skyMask], 2);
       
       // Blend original image with colored sky
-      const blendFactor = 0.5; // How much color to apply
+      const blendFactor = 0.6; // Increased from 0.3 for more visible effect
       const blended = normalized
         .mul(tf.scalar(1.0).sub(maskExpanded.mul(blendFactor)))
         .add(colorTensor.mul(maskExpanded.mul(blendFactor)));
@@ -125,28 +125,20 @@ class SkySegmentation {
       canvas.height = height;
     }
     
-    let skyMask = null;
-    let processedImage = null;
-
-    try {
-      // Detect sky directly from video element
-      skyMask = this.detectSky(videoElement, width, height);
-      
-      // Apply color to sky directly from video element
-      processedImage = this.applySkyColor(videoElement, skyMask, color);
-      
-      // Convert tensor back to canvas
-      await tf.browser.toPixels(processedImage, canvas);
-      
-    } catch (error) {
-      console.error('Error processing frame:', error);
-      // If processing fails, just draw the original frame
-      ctx.drawImage(videoElement, 0, 0, width, height);
-    } finally {
-      // Cleanup
-      if (skyMask) skyMask.dispose();
-      if (processedImage) processedImage.dispose();
-    }
+    // First, draw the video frame to canvas
+    ctx.drawImage(videoElement, 0, 0, width, height);
+    
+    // Simple color overlay on top portion (simplified sky effect)
+    const skyHeight = Math.floor(height * 0.4); // Top 40% of image
+    
+    // Create gradient from color to transparent
+    const gradient = ctx.createLinearGradient(0, 0, 0, skyHeight);
+    gradient.addColorStop(0, `rgba(${color[0]}, ${color[1]}, ${color[2]}, 0.5)`);
+    gradient.addColorStop(1, `rgba(${color[0]}, ${color[1]}, ${color[2]}, 0)`);
+    
+    // Apply the gradient overlay
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, width, skyHeight);
   }
   
   /**

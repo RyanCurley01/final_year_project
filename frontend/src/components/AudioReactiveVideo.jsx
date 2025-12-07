@@ -1,12 +1,12 @@
 /**
  * Audio-Reactive Video Component
- * Combines onset detection with sky segmentation for reactive visuals
+ * Combines sky segmentation with onset detection for reactive visuals
  */
 
 import { useRef, useEffect, useState, useCallback } from 'react';
 import { useSelector } from 'react-redux';
-import OnsetDetector from '../utils/onsetDetection';
 import SkySegmentation from '../utils/skySegmentation';
+import globalAudioContext from '../utils/globalAudioContext';
 
 // Vibrant color palette for sky changes (defined outside to avoid re-creation)
 const SKY_COLORS = [
@@ -34,120 +34,46 @@ const AudioReactiveVideo = ({
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const [skySegmentation] = useState(() => new SkySegmentation());
-  const [onsetDetector, setOnsetDetector] = useState(null);
-  const [audioContext, setAudioContext] = useState(null);
   const [currentSkyColor, setCurrentSkyColor] = useState([135, 206, 235]); // Default sky blue
+  const currentSkyColorRef = useRef([135, 206, 235]); // Ref for animation loop
   const animationFrameRef = useRef(null);
-  const audioInitializedRef = useRef(false); // Track if audio is already initialized
-  const audioContextRef = useRef(null);
-  const onsetDetectorRef = useRef(null);
   const { volume } = useSelector((state) => state.player);
   
-  // Initialize audio context and onset detector
+  // Update ref when color changes
   useEffect(() => {
-    // Only initialize if active and playing
-    if (!isActive || !isPlaying) return;
-    if (!videoRef.current || audioInitializedRef.current) return;
-    
-    const initAudio = async () => {
-      // Double-check to prevent race conditions
-      if (audioInitializedRef.current || !videoRef.current) return;
-      
-      try {
-        // Mark as initialized immediately to prevent duplicate calls
-        audioInitializedRef.current = true;
-        
-        // Create audio context
-        const ctx = new (window.AudioContext || window.webkitAudioContext)();
-        audioContextRef.current = ctx;
-        
-        // Create media element source (can only be created once per element)
-        // Note: createMediaElementSource can throw if the element is already connected to another context
-        // or if CORS restrictions prevent it
-        let source;
-        try {
-           source = ctx.createMediaElementSource(videoRef.current);
-        } catch (e) {
-           console.warn("⚠️ Could not create MediaElementSource (CORS or already connected):", e.message);
-           // Clean up and reset flag so video can still play
-           ctx.close();
-           audioContextRef.current = null;
-           audioInitializedRef.current = false;
-           return;
-        }
-        
-        // Create onset detector
-        const detector = new OnsetDetector(ctx, {
-          threshold: 0.25,
-          fftSize: 2048,
-        });
-        onsetDetectorRef.current = detector;
-        
-        // Connect audio graph: source -> detector -> destination
-        source.connect(detector.analyser);
-        detector.analyser.connect(ctx.destination);
-        
-        // Listen for onsets (drum hits)
-        detector.onOnset((onset) => {
-          // Change sky color on drum hit
-          const randomColor = SKY_COLORS[Math.floor(Math.random() * SKY_COLORS.length)];
-          console.log('🎵 Drum hit detected! Changing sky color to:', randomColor);
-          setCurrentSkyColor(randomColor);
-        });
-        
-        detector.start();
-        setOnsetDetector(detector);
-        setAudioContext(ctx);
-        
-        console.log('✅ Audio-reactive system initialized');
-      } catch (error) {
-        console.error('Failed to initialize audio system:', error);
-        // Reset flag on error so it can be retried
-        audioInitializedRef.current = false;
-      }
-    };
-    
-    // Initialize when video is ready
-    const handleLoadedMetadata = () => {
-      initAudio();
-    };
-    
-    // Check if already loaded
-    if (videoRef.current.readyState >= 1) {
-      initAudio();
-    } else {
-      videoRef.current.addEventListener('loadedmetadata', handleLoadedMetadata, { once: true });
+    currentSkyColorRef.current = currentSkyColor;
+  }, [currentSkyColor]);
+  
+  // Reset to default color when video becomes inactive
+  useEffect(() => {
+    if (!isActive) {
+      setCurrentSkyColor([135, 206, 235]); // Reset to sky blue
+    }
+  }, [isActive]);
+  
+  // Listen for drum hits from global audio context (ONLY when this video is active)
+  useEffect(() => {
+    // Only register callback if this video is the currently playing one
+    if (!isActive || !isPlaying) {
+      return;
     }
     
-    return () => {
-      if (videoRef.current) {
-        videoRef.current.removeEventListener('loadedmetadata', handleLoadedMetadata);
-      }
-      
-      // Only cleanup when source changes, not when play state changes
-      // This prevents tearing down and recreating the AudioContext unnecessarily
+    const handleOnset = (onset) => {
+      const randomColor = SKY_COLORS[Math.floor(Math.random() * SKY_COLORS.length)];
+      console.log('🎨 AudioReactiveVideo: Changing sky color on drum hit:', randomColor);
+      setCurrentSkyColor(randomColor);
     };
-  }, [src, isActive, isPlaying]);
-  
-  // Separate cleanup effect for component unmount
-  useEffect(() => {
+    
+    console.log('🔌 AudioReactiveVideo: Registering onset callback for ACTIVE video');
+    // Register callback with global audio context
+    globalAudioContext.onOnset(handleOnset);
+    
+    // Cleanup: unregister when component unmounts or becomes inactive
     return () => {
-      // Cleanup AudioContext and Detector on unmount
-      if (onsetDetectorRef.current) {
-        onsetDetectorRef.current.stop();
-        onsetDetectorRef.current = null;
-      }
-      
-      if (audioContextRef.current) {
-        if (audioContextRef.current.state !== 'closed') {
-          audioContextRef.current.close();
-        }
-        audioContextRef.current = null;
-      }
-      
-      audioInitializedRef.current = false;
+      console.log('🔌 AudioReactiveVideo: Unregistering onset callback');
+      globalAudioContext.offOnset(handleOnset);
     };
-  }, []);
+  }, [isActive, isPlaying]); // Re-register when active state changes
   
   // Render initial frame when video loads (so we see a preview even when not playing)
   useEffect(() => {
@@ -181,23 +107,40 @@ const AudioReactiveVideo = ({
     };
   }, [src, skySegmentation, currentSkyColor]);
   
-  // Process video frames with sky segmentation
+  // Process video frames with sky segmentation (throttled to ~30fps)
   useEffect(() => {
-    const processFrames = async () => {
+    let lastFrameTime = 0;
+    let lastVideoTime = -1;
+    const targetFrameRate = 30; // Target 30fps for better performance
+    const frameInterval = 1000 / targetFrameRate;
+    
+    const processFrames = async (timestamp) => {
       if (!videoRef.current || !canvasRef.current) return;
       if (!isPlaying || !isActive) return;
       
-      await skySegmentation.processFrame(
-        videoRef.current,
-        canvasRef.current,
-        currentSkyColor
-      );
+      // Throttle to target frame rate
+      if (timestamp - lastFrameTime < frameInterval) {
+        animationFrameRef.current = requestAnimationFrame(processFrames);
+        return;
+      }
       
+      // Only update if video time has changed (video is actually playing)
+      const currentVideoTime = videoRef.current.currentTime;
+      if (currentVideoTime !== lastVideoTime) {
+        await skySegmentation.processFrame(
+          videoRef.current,
+          canvasRef.current,
+          currentSkyColorRef.current
+        );
+        lastVideoTime = currentVideoTime;
+      }
+      
+      lastFrameTime = timestamp;
       animationFrameRef.current = requestAnimationFrame(processFrames);
     };
     
     if (isPlaying && isActive) {
-      processFrames();
+      animationFrameRef.current = requestAnimationFrame(processFrames);
     }
     
     return () => {
@@ -205,7 +148,7 @@ const AudioReactiveVideo = ({
         cancelAnimationFrame(animationFrameRef.current);
       }
     };
-  }, [isPlaying, isActive, currentSkyColor, skySegmentation]);
+  }, [isPlaying, isActive, skySegmentation]);
   
   // Sync volume
   useEffect(() => {
@@ -217,27 +160,9 @@ const AudioReactiveVideo = ({
     }
   }, [volume]);
   
-  // Resume audio context on user interaction
-  useEffect(() => {
-    const resumeAudio = () => {
-      if (audioContext && audioContext.state === 'suspended') {
-        audioContext.resume();
-      }
-    };
-    
-    document.addEventListener('click', resumeAudio);
-    return () => document.removeEventListener('click', resumeAudio);
-  }, [audioContext]);
-  
   // Cleanup
   useEffect(() => {
     return () => {
-      if (onsetDetector) {
-        onsetDetector.disconnect();
-      }
-      if (audioContext) {
-        audioContext.close();
-      }
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current);
       }

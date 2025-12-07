@@ -9,7 +9,7 @@ class OnsetDetector {
     this.audioContext = audioContext;
     this.fftSize = options.fftSize || 2048;
     this.hopSize = options.hopSize || 512;
-    this.threshold = options.threshold || 0.3;
+    this.threshold = options.threshold || 5.0; // Adjusted for byte-based calculation
     this.sampleRate = audioContext.sampleRate;
     
     // Create analyzer
@@ -17,8 +17,8 @@ class OnsetDetector {
     this.analyser.fftSize = this.fftSize;
     this.analyser.smoothingTimeConstant = 0;
     
-    this.frequencyData = new Float32Array(this.analyser.frequencyBinCount);
-    this.previousSpectrum = new Float32Array(this.analyser.frequencyBinCount);
+    this.frequencyData = new Uint8Array(this.analyser.frequencyBinCount);
+    this.previousSpectrum = new Uint8Array(this.analyser.frequencyBinCount);
     this.previousOnsetFunction = 0;
     
     // Onset detection state
@@ -52,7 +52,7 @@ class OnsetDetector {
   calculateHFC(spectrum) {
     let hfc = 0;
     for (let k = 0; k < spectrum.length; k++) {
-      const magnitude = Math.pow(10, spectrum[k] / 20); // Convert from dB
+      const magnitude = spectrum[k] / 255.0; // Normalize 0-255 to 0-1
       hfc += k * magnitude * magnitude;
     }
     return hfc;
@@ -65,8 +65,8 @@ class OnsetDetector {
   calculateSpectralFlux(currentSpectrum, previousSpectrum) {
     let flux = 0;
     for (let k = 0; k < currentSpectrum.length; k++) {
-      const current = Math.pow(10, currentSpectrum[k] / 20);
-      const previous = Math.pow(10, previousSpectrum[k] / 20);
+      const current = currentSpectrum[k] / 255.0; // Normalize to 0-1
+      const previous = previousSpectrum[k] / 255.0;
       const diff = current - previous;
       // Half-wave rectification (only positive differences)
       flux += Math.max(0, diff);
@@ -83,6 +83,11 @@ class OnsetDetector {
     // Check if enough time has passed since last onset
     if (now - this.lastOnsetTime < this.minTimeBetweenOnsets) {
       return false;
+    }
+    
+    // Debug: Log when we're close to threshold
+    if (onsetFunction > this.threshold * 0.5) {
+      console.log('📊 Close to threshold:', onsetFunction.toFixed(4), 'vs', this.threshold);
     }
     
     // Simple peak detection: current value is higher than previous and above threshold
@@ -103,8 +108,29 @@ class OnsetDetector {
   processFrame() {
     if (!this.isRunning) return;
     
-    // Get frequency data
-    this.analyser.getFloatFrequencyData(this.frequencyData);
+    // Get frequency data as bytes (0-255)
+    this.analyser.getByteFrequencyData(this.frequencyData);
+    
+    // Debug: Log stats occasionally (every ~500 frames = ~8s at 60fps)
+    if (Math.random() < 0.002) {
+      const max = Math.max(...this.frequencyData);
+      const avg = this.frequencyData.reduce((a, b) => a + b, 0) / this.frequencyData.length;
+      const nonZero = this.frequencyData.filter(v => v > 0).length;
+      console.log('🎵 Frequency data stats:', {
+        max: max,
+        avg: avg.toFixed(1),
+        nonZero: nonZero,
+        total: this.frequencyData.length,
+        contextState: this.audioContext.state
+      });
+    }
+    
+    // Skip processing if we have no audio data (all zeros)
+    const hasAudio = this.frequencyData.some(v => v > 0);
+    if (!hasAudio) {
+      requestAnimationFrame(() => this.processFrame());
+      return;
+    }
     
     // Calculate onset detection function (HFC for drums)
     const hfc = this.calculateHFC(this.frequencyData);
@@ -112,8 +138,13 @@ class OnsetDetector {
     // Alternative: Spectral Flux
     const flux = this.calculateSpectralFlux(this.frequencyData, this.previousSpectrum);
     
-    // Combine both methods (weighted)
-    const onsetFunction = (0.7 * hfc / 1000000) + (0.3 * flux / 1000);
+    // Combine both methods (NO huge divisors that kill the signal!)
+    const onsetFunction = (0.7 * hfc / 1000) + (0.3 * flux / 10);
+    
+    // Debug: Log onset function value occasionally (reduced frequency)
+    if (Math.random() < 0.005) {
+      console.log('Onset function value:', onsetFunction.toFixed(4), 'threshold:', this.threshold);
+    }
     
     // Detect onset
     if (this.detectOnset(onsetFunction)) {
@@ -137,6 +168,7 @@ class OnsetDetector {
    */
   start() {
     if (!this.isRunning) {
+      console.log('🎬 OnsetDetector: Starting detection loop');
       this.isRunning = true;
       this.processFrame();
     }

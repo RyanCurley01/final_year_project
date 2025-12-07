@@ -1,8 +1,10 @@
 /* eslint-disable jsx-a11y/media-has-caption */
 import React, { useRef, useEffect } from 'react';
+import globalAudioContext from '../../utils/globalAudioContext';
 
 const Player = ({ activeSong, isPlaying, volume, seekTime, onEnded, onTimeUpdate, onLoadedData, repeat }) => {
   const ref = useRef(null);
+  const audioContextInitialized = useRef(false);
   
   useEffect(() => {
     if (ref.current) {
@@ -14,6 +16,18 @@ const Player = ({ activeSong, isPlaying, volume, seekTime, onEnded, onTimeUpdate
           playPromise
             .then(() => {
               console.log('Audio playing successfully');
+              
+              // Initialize audio context ONLY on very first play ever
+              if (!audioContextInitialized.current) {
+                console.log('🎤 Initializing audio context for the first time');
+                globalAudioContext.initialize(ref.current).catch(err => {
+                  console.warn('Could not initialize onset detection:', err);
+                });
+                audioContextInitialized.current = true;
+              } else {
+                console.log('🔊 Resuming existing audio context');
+                globalAudioContext.resume();
+              }
             })
             .catch(error => {
               console.error('Error playing audio:', error);
@@ -46,6 +60,7 @@ const Player = ({ activeSong, isPlaying, volume, seekTime, onEnded, onTimeUpdate
     <audio
       src={activeSong.fileUrl}
       ref={ref}
+      crossOrigin="anonymous"
       loop={repeat}
       onEnded={onEnded}
       onTimeUpdate={onTimeUpdate}
