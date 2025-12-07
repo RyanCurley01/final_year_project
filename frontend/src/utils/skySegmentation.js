@@ -106,7 +106,7 @@ class SkySegmentation {
   }
   
   /**
-   * Process video frame with sky color change
+   * Process video frame with sky color change (detects blue sky, excludes clouds)
    */
   async processFrame(videoElement, canvas, color) {
     if (!this.isInitialized) {
@@ -125,20 +125,46 @@ class SkySegmentation {
       canvas.height = height;
     }
     
-    // First, draw the video frame to canvas
+    // Draw video frame to canvas
     ctx.drawImage(videoElement, 0, 0, width, height);
     
-    // Simple color overlay on top portion (simplified sky effect)
-    const skyHeight = Math.floor(height * 0.4); // Top 40% of image
+    // Get pixel data for sky detection
+    const imageData = ctx.getImageData(0, 0, width, height);
+    const data = imageData.data;
     
-    // Create gradient from color to transparent
-    const gradient = ctx.createLinearGradient(0, 0, 0, skyHeight);
-    gradient.addColorStop(0, `rgba(${color[0]}, ${color[1]}, ${color[2]}, 0.5)`);
-    gradient.addColorStop(1, `rgba(${color[0]}, ${color[1]}, ${color[2]}, 0)`);
+    // Create overlay for sky pixels only
+    for (let i = 0; i < data.length; i += 4) {
+      const r = data[i];
+      const g = data[i + 1];
+      const b = data[i + 2];
+      
+      // Detect blue sky pixels (excluding white clouds)
+      // Sky characteristics:
+      // 1. Blue channel is highest
+      // 2. Blue > Red and Blue > Green
+      // 3. Not too bright (clouds are near white with RGB all high)
+      // 4. Has color saturation (not gray/white)
+      
+      const isBlueDominant = b > r && b > g;
+      const blueStrength = b - Math.max(r, g); // How much more blue than others
+      const brightness = (r + g + b) / 3;
+      const isNotTooWhite = brightness < 220; // Exclude bright clouds
+      const hasSaturation = Math.max(r, g, b) - Math.min(r, g, b) > 30; // Not gray
+      
+      // Check if this pixel is blue sky (not cloud)
+      const isSky = isBlueDominant && blueStrength > 20 && isNotTooWhite && hasSaturation;
+      
+      if (isSky) {
+        // Blend the sky pixel with the target color
+        const blendFactor = 0.6;
+        data[i] = Math.round(r * (1 - blendFactor) + color[0] * blendFactor);
+        data[i + 1] = Math.round(g * (1 - blendFactor) + color[1] * blendFactor);
+        data[i + 2] = Math.round(b * (1 - blendFactor) + color[2] * blendFactor);
+      }
+    }
     
-    // Apply the gradient overlay
-    ctx.fillStyle = gradient;
-    ctx.fillRect(0, 0, width, skyHeight);
+    // Put the modified image data back
+    ctx.putImageData(imageData, 0, 0);
   }
   
   /**

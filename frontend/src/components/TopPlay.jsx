@@ -3,9 +3,11 @@ import { Link } from 'react-router-dom';
 import { useSelector, useDispatch } from 'react-redux';
 import { Swiper, SwiperSlide } from 'swiper/react';
 import { FreeMode } from 'swiper/modules';
+import { MdFullscreen } from 'react-icons/md';
 
 import PlayPause from './PlayPause';  
 import AudioReactiveVideo from './AudioReactiveVideo';
+import { useVideoModal } from '../context/VideoModalContext';
 import { playPause, setActiveSong } from '../redux/features/playerSlice';
 import { productService } from '../redux/services';
 import { useGetTopSongsQuery } from '../redux/services/youtubeApi';
@@ -21,24 +23,47 @@ const TopChartCard = ({ song, i, isPlaying, activeSong, handlePauseClick, handle
   const coverMedia = song?.albumCoverImageUrl || song?.images?.coverart;
   const isVideo = coverMedia && coverMedia.toLowerCase().includes('.mp4');
   const isThisSongActive = activeSong?.albumTitle === song?.albumTitle;
+  const { openModal } = useVideoModal();
+
+  const handleMaximizeClick = (e) => {
+    e.stopPropagation();
+    openModal({
+      videoSrc: coverMedia,
+      title: song?.albumTitle || song?.title,
+      isPlaying,
+      isActive: isThisSongActive
+    });
+  };
 
   return (
-  <div className="w-full flex flex-row items-center 
-  hover:bg-[#4c426e] py-2 p-4 rounded-lg cursor-pointer mb-2">
-    <h3 className="font-bold text-base text-white mr-3">{i + 1}.</h3>
-    <div className="flex-1 flex flex-row justify-between items-center">
-      <div className="relative w-20 h-20">
+  <>
+    <div className="w-full flex flex-row items-center 
+    hover:bg-[#4c426e] py-2 p-4 rounded-lg cursor-pointer mb-2">
+      <h3 className="font-bold text-base text-white mr-3">{i + 1}.</h3>
+      <div className="flex-1 flex flex-row justify-between items-center">
+        <div className="relative w-20 h-20 group">
         {isVideo ? (
-          <AudioReactiveVideo
-            src={coverMedia}
-            alt={song?.albumTitle || song?.title}
-            className="w-full h-full rounded-lg object-cover"
-            isPlaying={isPlaying}
-            isActive={isThisSongActive}
-            onError={(e) => {
-              console.error('Video failed to load:', coverMedia, e);
-            }}
-          />
+          <>
+            <AudioReactiveVideo
+              src={coverMedia}
+              alt={song?.albumTitle || song?.title}
+              className="w-full h-full rounded-lg object-cover"
+              isPlaying={isPlaying}
+              isActive={isThisSongActive}
+              onError={(e) => {
+                console.error('Video failed to load:', coverMedia, e);
+              }}
+            />
+            {/* Maximize button - always visible for videos */}
+            <button
+              onClick={handleMaximizeClick}
+              className="absolute top-1 right-1 p-1 bg-black/70 hover:bg-black/90 rounded-md 
+                       transition-all duration-200 z-50 shadow-lg"
+              title="Fullscreen"
+            >
+              <MdFullscreen className="text-white text-lg" />
+            </button>
+          </>
         ) : null}
         {!isVideo || true ? (
           <img
@@ -69,6 +94,7 @@ const TopChartCard = ({ song, i, isPlaying, activeSong, handlePauseClick, handle
       />
     )}
   </div>
+  </>
   );
 };
 

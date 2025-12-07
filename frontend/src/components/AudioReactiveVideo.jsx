@@ -7,6 +7,7 @@ import { useRef, useEffect, useState, useCallback } from 'react';
 import { useSelector } from 'react-redux';
 import SkySegmentation from '../utils/skySegmentation';
 import globalAudioContext from '../utils/globalAudioContext';
+import { useVideoModal } from '../context/VideoModalContext';
 
 // Vibrant color palette for sky changes (defined outside to avoid re-creation)
 const SKY_COLORS = [
@@ -34,10 +35,14 @@ const AudioReactiveVideo = ({
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const [skySegmentation] = useState(() => new SkySegmentation());
-  const [currentSkyColor, setCurrentSkyColor] = useState([135, 206, 235]); // Default sky blue
+  const [localSkyColor, setLocalSkyColor] = useState([135, 206, 235]); // Local color for inactive videos
   const currentSkyColorRef = useRef([135, 206, 235]); // Ref for animation loop
   const animationFrameRef = useRef(null);
   const { volume } = useSelector((state) => state.player);
+  const { currentSkyColor: globalSkyColor, setCurrentSkyColor: setGlobalSkyColor } = useVideoModal();
+  
+  // Determine which color to use: global if active (regardless of playing state), local if not
+  const currentSkyColor = isActive ? globalSkyColor : localSkyColor;
   
   // Update ref when color changes
   useEffect(() => {
@@ -47,7 +52,7 @@ const AudioReactiveVideo = ({
   // Reset to default color when video becomes inactive
   useEffect(() => {
     if (!isActive) {
-      setCurrentSkyColor([135, 206, 235]); // Reset to sky blue
+      setLocalSkyColor([135, 206, 235]); // Reset to sky blue
     }
   }, [isActive]);
   
@@ -61,7 +66,8 @@ const AudioReactiveVideo = ({
     const handleOnset = (onset) => {
       const randomColor = SKY_COLORS[Math.floor(Math.random() * SKY_COLORS.length)];
       console.log('🎨 AudioReactiveVideo: Changing sky color on drum hit:', randomColor);
-      setCurrentSkyColor(randomColor);
+      // Always update global color when active
+      setGlobalSkyColor(randomColor);
     };
     
     console.log('🔌 AudioReactiveVideo: Registering onset callback for ACTIVE video');
@@ -73,7 +79,7 @@ const AudioReactiveVideo = ({
       console.log('🔌 AudioReactiveVideo: Unregistering onset callback');
       globalAudioContext.offOnset(handleOnset);
     };
-  }, [isActive, isPlaying]); // Re-register when active state changes
+  }, [isActive, isPlaying, setGlobalSkyColor]); // Re-register when active state changes
   
   // Render initial frame when video loads (so we see a preview even when not playing)
   useEffect(() => {

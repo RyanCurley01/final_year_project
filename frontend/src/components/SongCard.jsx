@@ -1,9 +1,11 @@
 import {Link } from 'react-router-dom';
 import {useDispatch, useSelector } from 'react-redux';
-import { useRef, useEffect } from 'react';
+import { useRef, useEffect, useState } from 'react';
+import { MdFullscreen } from 'react-icons/md';
 
 import PlayPause from './PlayPause';
 import AudioReactiveVideo from './AudioReactiveVideo';
+import { useVideoModal } from '../context/VideoModalContext';
 import { playPause, setActiveSong } from '../redux/features/playerSlice';
 import placeholders from '../utils/placeholderImage';
 
@@ -29,9 +31,20 @@ const SongCard = ({ product, i, data }) => {
 
   const dispatch = useDispatch();
   const { activeSong, isPlaying, songEnded } = useSelector((state) => state.player);
+  const { openModal } = useVideoModal();
   
   // Check if this card's song is currently active
   const isThisSongActive = activeSong?.albumTitle === product.albumTitle;
+
+  const handleMaximizeClick = (e) => {
+    e.stopPropagation();
+    openModal({
+      videoSrc: coverMedia,
+      title: productName,
+      isPlaying,
+      isActive: isThisSongActive
+    });
+  };
 
   const handlePauseClick = () => {
     console.log('🔴 Pause clicked for:', product.albumTitle);
@@ -54,16 +67,27 @@ const SongCard = ({ product, i, data }) => {
     rounded-lg cursor-pointer">
       <div className="relative w-full h-[160px] group">
         {isVideo ? (
-          <AudioReactiveVideo
-            src={coverMedia}
-            alt={productName}
-            className="w-full h-full rounded-lg object-cover"
-            isPlaying={isPlaying}
-            isActive={isThisSongActive}
-            onError={(e) => {
-              console.error('Video failed to load:', coverMedia, e);
-            }}
-          />
+          <>
+            <AudioReactiveVideo
+              src={coverMedia}
+              alt={productName}
+              className="w-full h-full rounded-lg object-cover"
+              isPlaying={isPlaying}
+              isActive={isThisSongActive}
+              onError={(e) => {
+                console.error('Video failed to load:', coverMedia, e);
+              }}
+            />
+            {/* Maximize button - always visible for videos */}
+            <button
+              onClick={handleMaximizeClick}
+              className="absolute top-2 right-2 p-1.5 bg-black/70 hover:bg-black/90 rounded-md 
+                       transition-all duration-200 z-50 shadow-lg"
+              title="Fullscreen"
+            >
+              <MdFullscreen className="text-white text-2xl" />
+            </button>
+          </>
         ) : null}
         {!isVideo || true ? (
           <img
@@ -78,7 +102,7 @@ const SongCard = ({ product, i, data }) => {
           />
         ) : null}
         <div className={`group-hover:flex absolute rounded-lg inset-0 justify-center items-center
-           bg-black bg-opacity-50 ${isPlayableSong ? 'flex bg-black bg-opacity-50' : 'hidden'}
+           bg-black bg-opacity-50 z-10 ${isPlayableSong ? 'flex bg-black bg-opacity-50' : 'hidden'}
             ${isPlayableSong ? 'hidden' : 'flex bg-black bg-opacity-50'}`}>
           {isPlayableSong && (
             <PlayPause 

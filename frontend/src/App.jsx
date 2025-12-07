@@ -4,9 +4,12 @@ import { Route, Routes } from 'react-router-dom';
 import { Searchbar, Sidebar, MusicPlayer, TopPlay } from './components';
 import { ArtistDetails, TopArtists, AroundYou, CustomerScreen, Search, SongDetails, TopCharts } from './pages';
 import PersonalRecommendations from './components/PersonalRecommendations';
+import { VideoModalProvider, useVideoModal } from './context/VideoModalContext';
+import VideoModal from './components/VideoModal';
 
-const App = () => {
+const AppContent = () => {
   const { activeSong } = useSelector((state) => state.player);
+  const { modalState, closeModal } = useVideoModal();
 
   return (
     <div className="relative flex h-screen overflow-hidden">
@@ -40,8 +43,24 @@ const App = () => {
           <MusicPlayer />
         </div>
       )}
+      
+      {/* Global Video Modal */}
+      <VideoModal
+        isOpen={modalState.isOpen}
+        onClose={closeModal}
+        videoSrc={modalState.videoSrc}
+        title={modalState.title}
+        isPlaying={modalState.isPlaying}
+        isActive={modalState.isActive}
+      />
     </div>
   );
 };
+
+const App = () => (
+  <VideoModalProvider>
+    <AppContent />
+  </VideoModalProvider>
+);
 
 export default App;
