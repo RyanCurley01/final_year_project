@@ -22,3 +22,18 @@ lsof -ti:5000 | xargs kill -9
 
 To run the cloud movement video
 python3 -m http.server 8080
+
+
+Commands for management script to microservices simulatanously without crashing
+# Start core services (accounts, products, orders, payments)
+./manage-services.sh start-core
+
+# Or start individual services
+./manage-services.sh start accounts-service
+./manage-services.sh start products-service
+
+# Check status
+./manage-services.sh status
+
+# View logs
+./manage-services.sh logs accounts-service
