@@ -20,6 +20,6 @@
 
 11. Week 11 - No work completed
 
-12. Week 12 - 
+12. Week 12 - Right margin updated for TopChartCard component for better display. Cloud animation video created for cover image in music cards. Cloud masking improved for cloud animation and python packages added to docker-file. Cloud animation script updated to render clouds over sky properly and grass overlay added to remove the grass from the sky layer. Cloud animation recorder script implemented. puppeteer and ffmpeg added to devcontainer file. Cloud animation for video integrated into SongCard and TopPlay components and puppeteer and ffmpeg errors with container load up failing fixed. Audio-reactive object detection logic implemented and S3 CORS configured to fix S3 Bucket CORS error. Cloud animation speed increased and video loading in spinning track cover art with cross origin fix. Object detection enhanced to detect full sky instead of just the top of sky by retrieving pixel data from the image to create overlay for sky pixels, detecting only blue pixels for the blue sky in the image and maximise video window implemented, syncing color changes with video cards in SongCard and TopPlay components. Duplicated songs removed from database Products table.
 
 
