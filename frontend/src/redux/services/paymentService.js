@@ -50,6 +50,23 @@ export const paymentService = {
     });
   },
 
+    // Create PayPal Order
+  createPayPalOrder: async (orderData, email, password) => {
+    return apiCall(`${BASE_URL}/paypal/create-order`, {
+      method: 'POST',
+      headers: getBasicAuthHeaders(email, password),
+      body: JSON.stringify(orderData),
+    });
+  },
+
+  // Capture PayPal Order
+  capturePayPalOrder: async (paypalOrderId, email, password) => {
+    return apiCall(`${BASE_URL}/paypal/capture-order/${paypalOrderId}`, {
+      method: 'POST',
+      headers: getBasicAuthHeaders(email, password),
+    });
+  },
+  
   // Process PayPal payment
   processPayPalPayment: async (orderId, paymentData, email, password) => {
     return apiCall(`${BASE_URL}/paypal/${orderId}`, {
