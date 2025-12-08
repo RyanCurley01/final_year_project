@@ -1,0 +1,44 @@
+# Gradle
+.gradle/
+build/
+!gradle-wrapper.jar
+*.log
+
+# IDE
+.idea/
+*.iml
+*.iws
+.vscode/
+.settings/
+.project
+.classpath
+
+# Build outputs
+bin/
+out/
+target/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
+.gitignore
+
+# Documentation
+*.md
+!README.md
+
+# Test outputs
+*.tmp
+*.bak
+*.swp
+*~.nib
+
+# Node modules (if any)
+node_modules/
+
+# Environment files
+.env
+.env.local
