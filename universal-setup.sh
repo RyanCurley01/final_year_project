@@ -27,15 +27,20 @@ echo "✅ Using Python from: $(which python3)"
 
 # Wait for database to be ready
 echo ""
-echo "⏳ Waiting for database to be ready..."
-max_attempts=30
+echo "⏳ Checking for database connection..."
+max_attempts=10
 attempt=0
 db_ready=false
 
 # Try different connection methods in order of preference
 while [ $attempt -lt $max_attempts ]; do
-    # First try 'db' service name (devcontainer)
-    if mysqladmin ping -h db -u gamestore_user -pgamestore_pass --silent 2>/dev/null; then
+    # First try host.docker.internal (external services)
+    if mysqladmin ping -h host.docker.internal -u gamestore_user -pgamestore_pass --silent 2>/dev/null; then
+        echo "✅ Database is ready! (connected via external services)"
+        db_ready=true
+        break
+    # Then try 'db' service name (old devcontainer setup)
+    elif mysqladmin ping -h db -u gamestore_user -pgamestore_pass --silent 2>/dev/null; then
         echo "✅ Database is ready! (connected via 'db' service)"
         db_ready=true
         break
