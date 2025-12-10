@@ -15,6 +15,8 @@ import org.springframework.security.config.Customizer;
 // import org.springframework.web.cors.CorsConfigurationSource;
 // import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
 import lombok.RequiredArgsConstructor;
 
 @Configuration
@@ -22,13 +24,18 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class SecurityConfig
 {
-    // CustomUserDetailsService is not currently used but kept as dependency for future authentication needs
+    private final CustomUserDetailsService customUserDetailsService;
     
     // To return hashed password
     @Bean
     public PasswordEncoder passwordEncoder()
     {
         return new BCryptPasswordEncoder();
+    }
+
+    @Bean
+    public AuthenticationManager authenticationManager(AuthenticationConfiguration authConfig) throws Exception {
+        return authConfig.getAuthenticationManager();
     }
 
     // @Bean

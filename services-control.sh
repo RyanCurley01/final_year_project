@@ -33,10 +33,21 @@ show_usage() {
 }
 
 start_services() {
+    # Check if services are already running
+    if docker compose -f "$COMPOSE_FILE" -p "$PROJECT_NAME" ps -q 2>/dev/null | grep -q .; then
+        echo "⚠️  Services are already running. Use 'restart' to restart them."
+        show_status
+        exit 0
+    fi
+    
     if [ -z "$1" ]; then
         echo "🚀 Starting all microservices..."
+        echo "📦 This will start: database, accounts, products, orders, payments, and ai services"
         docker compose -f "$COMPOSE_FILE" -p "$PROJECT_NAME" up -d
         echo "✅ All services started"
+        echo ""
+        echo "📝 Note: These services run OUTSIDE your dev container"
+        echo "   Frontend dev server should run INSIDE VS Code terminal"
     else
         echo "🚀 Starting $1..."
         docker compose -f "$COMPOSE_FILE" -p "$PROJECT_NAME" up -d "$1"

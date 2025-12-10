@@ -14,19 +14,19 @@
         "python.defaultInterpreterPath": "/opt/venv/bin/python",
         "python.venvPath": "/opt"
       },
-    "extensions": [
-      "vscjava.vscode-java-pack",
-      "vscjava.vscode-gradle",
-      "ms-azuretools.vscode-docker",
-      "ms-python.python",
-      "esbenp.prettier-vscode",
-      "ms-vscode.cpptools",
-      "msjsdiag.debugger-for-chrome",
-      "bradlc.vscode-tailwindcss",
-      "slevesque.shader",
-      "nickmcintyre.p5-javascript",
-      "AlanWalk.webgl-glsl-editor"
-    ]
+      "extensions": [
+        "vscjava.vscode-java-pack",
+        "vscjava.vscode-gradle",
+        "ms-azuretools.vscode-docker",
+        "ms-python.python",
+        "esbenp.prettier-vscode",
+        "ms-vscode.cpptools",
+        "msjsdiag.debugger-for-chrome",
+        "bradlc.vscode-tailwindcss",
+        "slevesque.shader",
+        "nickmcintyre.p5-javascript",
+        "AlanWalk.webgl-glsl-editor"
+      ]
     }
   },
 
