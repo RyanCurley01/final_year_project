@@ -22,4 +22,4 @@ server:
   port: 8089
 logging:
   level:
-    com.example.purchasedproducts: DEBUG
+    com.example.purchasedproducts: WARN

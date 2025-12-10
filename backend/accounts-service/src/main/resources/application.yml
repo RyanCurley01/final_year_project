@@ -22,5 +22,5 @@ server:
   port: 8080
 logging:
   level:
-    com.example.accounts: DEBUG
-    org.springframework.web: DEBUG
+    com.example.accounts: WARN
+    org.springframework.web: WARN

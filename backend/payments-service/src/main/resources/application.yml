@@ -25,7 +25,7 @@ app:
     base-url: ${FRONTEND_BASE_URL:http://localhost:5173}
 logging:
   level:
-    com.example.payments: DEBUG
+    com.example.payments: WARN
 paypal:
   client:
     id: ${PAYPAL_CLIENT_ID:AXdVCMyFcV5gBpkkWsbmY-H-grAdSXwf7iecD4wC6gkJeUjuNzvY6i_rUo1lKNErJoa-kAbwgFWkoUef}

@@ -22,4 +22,4 @@ server:
   port: 8088
 logging:
   level:
-    com.example.soldproducts: DEBUG
+    com.example.soldproducts: WARN

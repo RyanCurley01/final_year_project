@@ -22,4 +22,4 @@ server:
   port: 8085
 logging:
   level:
-    com.example.wishlist: DEBUG
+    com.example.wishlist: WARN

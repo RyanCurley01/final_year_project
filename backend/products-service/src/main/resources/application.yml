@@ -28,4 +28,4 @@ aws:
     bucket-name: game-and-music-files
 logging:
   level:
-    com.example.products: DEBUG
+    com.example.products: WARN

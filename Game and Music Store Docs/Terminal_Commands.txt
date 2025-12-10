@@ -37,3 +37,6 @@ Commands for management script to microservices simulatanously without crashing
 
 # View logs
 ./manage-services.sh logs accounts-service
+
+To kill frontend port
+lsof -ti:5173 | xargs kill -9 2>/dev/null && echo "✓ Killed port 5173" || echo "Port 5173 is already free"

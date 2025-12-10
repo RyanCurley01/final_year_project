@@ -22,7 +22,7 @@ server:
   port: 8084
 logging:
   level:
-    com.example.stock: DEBUG
-    org.springframework.security: TRACE
-    org.springframework.security.web: TRACE
-    org.springframework.security.authentication: TRACE
+    com.example.stock: WARN
+    org.springframework.security: WARN
+    org.springframework.security.web: WARN
+    org.springframework.security.authentication: WARN

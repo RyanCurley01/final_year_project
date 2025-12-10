@@ -22,4 +22,4 @@ server:
   port: 8086
 logging:
   level:
-    com.example.orderitems: DEBUG
+    com.example.orderitems: WARN
