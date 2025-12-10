@@ -1,0 +1,145 @@
+version: '3.8'
+
+# Microservices that run OUTSIDE the dev container
+# Use this to run services independently while keeping VS Code lightweight
+# Usage: docker compose -f docker-compose.services.yml up -d
+
+services:
+  # Database (shared with dev container)
+  db:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: Game_Store_System
+      MYSQL_USER: gamestore_user
+      MYSQL_PASSWORD: gamestore_pass
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./init-database.sh:/docker-entrypoint-initdb.d/init-database.sh
+    ports:
+      - "3306:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-prootpassword"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    networks:
+      - services-network
+
+  accounts-service:
+    build:
+      context: ./backend
+      dockerfile: ./accounts-service/Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://db:3306/Game_Store_System?createDatabaseIfNotExist=true
+      SPRING_DATASOURCE_USERNAME: gamestore_user
+      SPRING_DATASOURCE_PASSWORD: gamestore_pass
+      JAVA_OPTS: "-Xmx256m -Xms128m -XX:MaxMetaspaceSize=128m -XX:+UseSerialGC"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - services-network
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    restart: unless-stopped
+
+  products-service:
+    build:
+      context: ./backend
+      dockerfile: ./products-service/Dockerfile
+    ports:
+      - "8081:8081"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://db:3306/Game_Store_System?createDatabaseIfNotExist=true
+      SPRING_DATASOURCE_USERNAME: gamestore_user
+      SPRING_DATASOURCE_PASSWORD: gamestore_pass
+      JAVA_OPTS: "-Xmx256m -Xms128m -XX:MaxMetaspaceSize=128m -XX:+UseSerialGC"
+      AWS_REGION: eu-west-1
+      AWS_ACCESS_KEY_ID: AKIA35JZMVQNLCI2ZQCE
+      AWS_SECRET_ACCESS_KEY: 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
+      AWS_S3_BUCKET_NAME: game-and-music-files
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - services-network
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    restart: unless-stopped
+
+  orders-service:
+    build:
+      context: ./backend
+      dockerfile: ./orders-service/Dockerfile
+    ports:
+      - "8082:8082"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://db:3306/Game_Store_System?createDatabaseIfNotExist=true
+      SPRING_DATASOURCE_USERNAME: gamestore_user
+      SPRING_DATASOURCE_PASSWORD: gamestore_pass
+      JAVA_OPTS: "-Xmx256m -Xms128m -XX:MaxMetaspaceSize=128m -XX:+UseSerialGC"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - services-network
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    restart: unless-stopped
+
+  payments-service:
+    build:
+      context: ./backend
+      dockerfile: ./payments-service/Dockerfile
+    ports:
+      - "8083:8083"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://db:3306/Game_Store_System?createDatabaseIfNotExist=true
+      SPRING_DATASOURCE_USERNAME: gamestore_user
+      SPRING_DATASOURCE_PASSWORD: gamestore_pass
+      JAVA_OPTS: "-Xmx256m -Xms128m -XX:MaxMetaspaceSize=128m -XX:+UseSerialGC"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - services-network
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    restart: unless-stopped
+
+  ai-service:
+    build:
+      context: ./ai_service
+      dockerfile: Dockerfile
+    ports:
+      - "5000:5000"
+    environment:
+      YOUTUBE_API_KEY: ${YOUTUBE_API_KEY}
+      YOUTUBE_CHANNEL_ID: ${YOUTUBE_CHANNEL_ID}
+      MODEL_PATH: /app/models/recommendation_model.onnx
+    volumes:
+      - ./ai_service:/app
+    networks:
+      - services-network
+    restart: unless-stopped
+
+volumes:
+  mysql-data:
+
+networks:
+  services-network:
+    name: final_year_project_network
+    driver: bridge

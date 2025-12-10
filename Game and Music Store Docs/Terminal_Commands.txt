@@ -24,19 +24,37 @@ To run the cloud movement video
 python3 -m http.server 8080
 
 
-Commands for management script to microservices simulatanously without crashing
-# Start core services (accounts, products, orders, payments)
-./manage-services.sh start-core
+Commands for running microservices WITHOUT crashing VS Code
 
-# Or start individual services
-./manage-services.sh start accounts-service
-./manage-services.sh start products-service
+🎯 RECOMMENDED: Run microservices in separate Docker containers
+This keeps VS Code lightweight! Services run independently. Works everywhere (local + Codespaces)!
 
-# Check status
-./manage-services.sh status
+# Build service images (first time only)
+./services-control.sh build
+
+# Start all services
+./services-control.sh start
+
+# Start individual services
+./services-control.sh start accounts-service
+./services-control.sh start products-service
+
+# Check status and resource usage
+./services-control.sh status
 
 # View logs
-./manage-services.sh logs accounts-service
+./services-control.sh logs accounts-service
+
+# Stop services
+./services-control.sh stop
+
+# Complete shutdown
+./services-control.sh down
+
+Benefits: ✅ No VS Code freezing ✅ Works on any machine ✅ Proper resource isolation
+
+LEGACY (may freeze with 3+ services):
+./service-manager.sh start  # Runs inside dev container
 
 To kill frontend port
 lsof -ti:5173 | xargs kill -9 2>/dev/null && echo "✓ Killed port 5173" || echo "Port 5173 is already free"

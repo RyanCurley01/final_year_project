@@ -2,6 +2,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { Provider } from 'react-redux'
 import { BrowserRouter } from 'react-router-dom'
+import { PayPalScriptProvider } from "@paypal/react-paypal-js";
 import { store } from './redux/store'
 import './index.css'
 import App from './App.jsx'
@@ -25,11 +26,20 @@ if (import.meta.env.DEV) {
   console.log('Test with: await window.accountService.login("email", "password")');
 }
 
+// PayPal configuration
+const paypalOptions = {
+  "client-id": import.meta.env.VITE_PAYPAL_CLIENT_ID || "test",
+  currency: "EUR",
+  intent: "capture",
+};
+
 createRoot(document.getElementById('root')).render(
   <StrictMode>
     <Provider store={store}>
       <BrowserRouter>
-        <App />
+        <PayPalScriptProvider options={paypalOptions}>
+          <App />
+        </PayPalScriptProvider>
       </BrowserRouter>
     </Provider>
   </StrictMode>,
