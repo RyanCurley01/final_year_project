@@ -9,6 +9,7 @@ import AudioReactiveVideo from './AudioReactiveVideo';
 import { useVideoModal } from '../context/VideoModalContext';
 import { playPause, setActiveSong } from '../redux/features/playerSlice';
 import { paymentService } from '../redux/services/paymentService';
+import { orderService } from '../redux/services/orderService';
 import placeholders from '../utils/placeholderImage';
 
 const SongCard = ({ product, payment, i, data, user, email, password }) => {
@@ -63,14 +64,24 @@ const SongCard = ({ product, payment, i, data, user, email, password }) => {
 
   const handleCreateOrder = async (data, actions) => {
     try {
+      // First create an Order record
       const orderData = {
-        amount: isMusic ? product.albumPrice : product.gamePrice,
-        currency: 'USD',
-        productId: product.productId,
         accountId: user?.accountId,
+        totalAmount: isMusic ? product.albumPrice : product.gamePrice,
       };
       
-      const response = await paymentService.createPayPalOrder(orderData, email, password);
+      const order = await orderService.createOrder(orderData, email, password);
+      
+      // Then create the PayPal order with the orderId
+      const paypalOrderData = {
+        amount: isMusic ? product.albumPrice : product.gamePrice,
+        currency: 'EUR',
+        productId: product.id,
+        accountId: user?.accountId,
+        orderId: order.id,
+      };
+      
+      const response = await paymentService.createPayPalOrder(paypalOrderData, email, password);
       return response.id;
     } catch (error) {
       console.error("Error creating PayPal order:", error);
@@ -153,7 +164,7 @@ const SongCard = ({ product, payment, i, data, user, email, password }) => {
         <p className="font-semibold text-lg text-white">
           {isGame ? (
             <Link
-              to={`/games/${product.productId}`}
+              to={`/games/${product.id}`}
               title={productName || 'Unknown'}
               className="block break-words"
             >
