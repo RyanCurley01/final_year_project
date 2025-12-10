@@ -60,23 +60,11 @@ To kill frontend port
 lsof -ti:5173 | xargs kill -9 2>/dev/null && echo "✓ Killed port 5173" || echo "Port 5173 is already free"
 
 commands to stop all containers from running
-./services-control.sh down
-docker compose -f .devcontainer/docker-compose.yml down
-docker ps
+# Stop all running containers
+docker stop $(docker ps -aq)
 
-Stop all the dev container services
-docker stop final_year_project_devcontainer-accounts-service-1 \
-            final_year_project_devcontainer-orders-service-1 \
-            final_year_project_devcontainer-wishlist-service-1 \
-            final_year_project_devcontainer-stock-service-1 \
-            final_year_project_devcontainer-products-service-1 \
-            final_year_project_devcontainer-payments-service-1 \
-            final_year_project_devcontainer-db-1
+# Remove all containers
+docker rm $(docker ps -aq)
 
-docker rm final_year_project_devcontainer-accounts-service-1 \
-          final_year_project_devcontainer-orders-service-1 \
-          final_year_project_devcontainer-wishlist-service-1 \
-          final_year_project_devcontainer-stock-service-1 \
-          final_year_project_devcontainer-products-service-1 \
-          final_year_project_devcontainer-payments-service-1 \
-          final_year_project_devcontainer-db-1
+# Verify all are gone
+docker ps -a
