@@ -10,7 +10,7 @@ USE Game_Store_System;
 
     -- DROP existing tables to ensure idempotent initialization
     SET FOREIGN_KEY_CHECKS = 0;
-    DROP TABLE IF EXISTS GameWishlist, Purchased_Products, Sold_Products, CustomerSummary, Payments, Order_Items, Orders, Stock, Products, Accounts;
+    DROP TABLE IF EXISTS UserInteractions, AudioFeatures, UserRecommendations, GameWishlist, Purchased_Products, Sold_Products, CustomerSummary, Payments, Order_Items, Orders, Stock, Products, Accounts;
     SET FOREIGN_KEY_CHECKS = 1;
 
     -- ============================================
@@ -118,6 +118,108 @@ USE Game_Store_System;
         ProductID INT,
         FOREIGN KEY(AccountID) REFERENCES Accounts(AccountID),
         FOREIGN KEY(ProductID) REFERENCES Products(ProductID)
+    );
+
+    -- ============================================
+    -- AI RECOMMENDATION TABLES
+    -- ============================================
+
+    -- AudioFeatures: Store extracted audio features for music products
+    CREATE TABLE IF NOT EXISTS AudioFeatures (
+        FeatureID INT AUTO_INCREMENT PRIMARY KEY,
+        ProductID INT NOT NULL,
+        Tempo FLOAT,                    -- Beats per minute
+        Energy FLOAT,                   -- Energy level 0-1
+        Danceability FLOAT,             -- How danceable 0-1
+        Valence FLOAT,                  -- Musical positiveness 0-1
+        Acousticness FLOAT,             -- Confidence of acoustic 0-1
+        Instrumentalness FLOAT,         -- Predicts no vocals 0-1
+        Loudness FLOAT,                 -- Overall loudness in dB
+        Speechiness FLOAT,              -- Presence of spoken words 0-1
+        Genre VARCHAR(100),             -- Detected genre
+        Mood VARCHAR(100),              -- Detected mood (happy, sad, energetic, calm)
+        Key_Signature VARCHAR(10),      -- Musical key (C, D, E, etc.)
+        TimeSignature VARCHAR(10),      -- Time signature (4/4, 3/4, etc.)
+        Duration INT,                   -- Duration in seconds
+        SpectralCentroid FLOAT,         -- Brightness of sound
+        SpectralRolloff FLOAT,          -- Shape of signal
+        ZeroCrossingRate FLOAT,         -- Noisiness indicator
+        MfccMean TEXT,                  -- JSON array of MFCC means
+        ChromaMean TEXT,                -- JSON array of chroma features
+        CreatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UpdatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        FOREIGN KEY(ProductID) REFERENCES Products(ProductID),
+        UNIQUE KEY unique_product_features (ProductID),
+        INDEX idx_tempo (Tempo),
+        INDEX idx_energy (Energy),
+        INDEX idx_valence (Valence),
+        INDEX idx_mood (Mood),
+        INDEX idx_genre (Genre)
+    );
+
+    -- UserInteractions: Track all user interactions with products
+    CREATE TABLE IF NOT EXISTS UserInteractions (
+        InteractionID BIGINT AUTO_INCREMENT PRIMARY KEY,
+        AccountID BIGINT NOT NULL,
+        ProductID INT NOT NULL,
+        InteractionType ENUM('play', 'preview', 'pause', 'purchase', 'wishlist', 'view', 'click') NOT NULL,
+        InteractionTimestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        DurationSeconds INT,            -- How long they listened/viewed
+        CompletionPercentage FLOAT,     -- What % of preview they watched (0-100)
+        EngagementScore FLOAT,          -- Calculated engagement score
+        DeviceType VARCHAR(50),         -- mobile, desktop, tablet
+        SessionID VARCHAR(255),         -- To track session-based behavior
+        FOREIGN KEY(AccountID) REFERENCES Accounts(AccountID),
+        FOREIGN KEY(ProductID) REFERENCES Products(ProductID),
+        INDEX idx_account_product (AccountID, ProductID),
+        INDEX idx_interaction_type (InteractionType),
+        INDEX idx_timestamp (InteractionTimestamp)
+    );
+
+    -- UserRecommendations: Store personalized recommendations for users
+    CREATE TABLE IF NOT EXISTS UserRecommendations (
+        RecommendationID BIGINT AUTO_INCREMENT PRIMARY KEY,
+        AccountID BIGINT NOT NULL,
+        ProductID INT NOT NULL,
+        RecommendationScore FLOAT NOT NULL,     -- Confidence score 0-1
+        RecommendationType VARCHAR(50),         -- collaborative, content-based, hybrid, trending, audio-similarity
+        ReasonCode VARCHAR(255),                -- Why recommended (e.g., "similar to X", "users like you enjoyed")
+        GeneratedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        ExpiresAt TIMESTAMP,                    -- When recommendation becomes stale
+        WasShown BOOLEAN DEFAULT FALSE,         -- Track if shown to user
+        WasClicked BOOLEAN DEFAULT FALSE,       -- Track if user clicked
+        WasPurchased BOOLEAN DEFAULT FALSE,     -- Track if resulted in purchase
+        FOREIGN KEY(AccountID) REFERENCES Accounts(AccountID),
+        FOREIGN KEY(ProductID) REFERENCES Products(ProductID),
+        INDEX idx_account_score (AccountID, RecommendationScore DESC),
+        INDEX idx_generated_at (GeneratedAt),
+        INDEX idx_recommendation_type (RecommendationType),
+        UNIQUE KEY unique_active_recommendation (AccountID, ProductID, GeneratedAt)
+    );
+
+    -- RealTimeRecommendations: Store live audio-based recommendations during playback
+    CREATE TABLE IF NOT EXISTS RealTimeRecommendations (
+        RealTimeID BIGINT AUTO_INCREMENT PRIMARY KEY,
+        SessionID VARCHAR(255) NOT NULL,        -- User session identifier
+        AccountID BIGINT,                       -- Optional if user is logged in
+        CurrentProductID INT NOT NULL,          -- Product currently being played
+        RecommendedProductID INT NOT NULL,      -- Recommended product
+        SimilarityScore FLOAT NOT NULL,         -- Audio similarity score 0-1
+        TempoMatch FLOAT,                       -- How close tempo values are
+        EnergyMatch FLOAT,                      -- How close energy values are
+        MoodMatch FLOAT,                        -- How close mood/valence values are
+        GenreMatch BOOLEAN,                     -- Same genre or not
+        FeatureVector TEXT,                     -- JSON of compared features
+        DisplayedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UserAction VARCHAR(50),                 -- clicked, ignored, purchased, skipped
+        ResponseTime INT,                       -- Seconds until user action
+        FOREIGN KEY(CurrentProductID) REFERENCES Products(ProductID),
+        FOREIGN KEY(RecommendedProductID) REFERENCES Products(ProductID),
+        FOREIGN KEY(AccountID) REFERENCES Accounts(AccountID),
+        INDEX idx_session (SessionID),
+        INDEX idx_current_product (CurrentProductID),
+        INDEX idx_similarity (SimilarityScore DESC),
+        INDEX idx_displayed_at (DisplayedAt)
     );
 
     -- ============================================
@@ -285,6 +387,62 @@ USE Game_Store_System;
     (8, 5),   -- Emma wants Selected Electronic Works
     (9, 3),   -- Frank wants Protectors
     (10, 2);  -- Grace wants Midnight Haunt
+
+    -- Insert Sample UserInteractions (simulate user behavior)
+    INSERT INTO UserInteractions (AccountID, ProductID, InteractionType, DurationSeconds, CompletionPercentage, EngagementScore, DeviceType, SessionID) VALUES
+    -- John Smith (Manager) exploring music
+    (1, 6, 'play', 120, 75.5, 0.85, 'desktop', 'sess_001'),
+    (1, 7, 'preview', 45, 90.0, 0.92, 'desktop', 'sess_001'),
+    (1, 8, 'play', 180, 100.0, 0.98, 'desktop', 'sess_001'),
+    -- Alice Brown (Customer) - likes energetic music
+    (4, 10, 'play', 150, 95.0, 0.95, 'mobile', 'sess_002'),
+    (4, 15, 'play', 200, 100.0, 0.99, 'mobile', 'sess_002'),
+    (4, 20, 'preview', 30, 50.0, 0.65, 'mobile', 'sess_002'),
+    (4, 1, 'view', 10, 100.0, 0.40, 'mobile', 'sess_002'),
+    (4, 1, 'purchase', NULL, NULL, 1.0, 'mobile', 'sess_002'),
+    -- Bob Davis - exploring various genres
+    (5, 25, 'play', 90, 60.0, 0.70, 'tablet', 'sess_003'),
+    (5, 30, 'play', 160, 85.0, 0.88, 'tablet', 'sess_003'),
+    (5, 35, 'preview', 20, 40.0, 0.55, 'tablet', 'sess_003'),
+    -- Carol White - chill music listener
+    (6, 11, 'play', 210, 100.0, 0.96, 'desktop', 'sess_004'),
+    (6, 16, 'play', 190, 95.0, 0.94, 'desktop', 'sess_004'),
+    (6, 40, 'play', 180, 100.0, 0.97, 'desktop', 'sess_004'),
+    -- David Lee - game browser
+    (7, 1, 'view', 25, 100.0, 0.75, 'desktop', 'sess_005'),
+    (7, 2, 'view', 30, 100.0, 0.80, 'desktop', 'sess_005'),
+    (7, 3, 'view', 45, 100.0, 0.90, 'desktop', 'sess_005'),
+    (7, 3, 'purchase', NULL, NULL, 1.0, 'desktop', 'sess_005');
+
+    -- Insert Sample AudioFeatures (placeholder data - will be populated by AI service)
+    -- Features for a few songs to demonstrate the structure
+    INSERT INTO AudioFeatures (ProductID, Tempo, Energy, Danceability, Valence, Acousticness, Instrumentalness, Loudness, Speechiness, Genre, Mood, Duration, SpectralCentroid, SpectralRolloff, ZeroCrossingRate) VALUES
+    -- Alien Acid - High energy electronic
+    (6, 128.0, 0.92, 0.88, 0.75, 0.05, 0.95, -5.5, 0.03, 'Electronic', 'Energetic', 240, 2500.0, 8000.0, 0.15),
+    -- Alien Action - Fast paced
+    (7, 140.0, 0.95, 0.85, 0.80, 0.03, 0.98, -4.8, 0.02, 'Electronic', 'Energetic', 210, 2800.0, 8500.0, 0.18),
+    -- Alien Chilling - Relaxed ambient
+    (11, 90.0, 0.45, 0.50, 0.65, 0.20, 0.90, -12.0, 0.01, 'Ambient', 'Calm', 300, 1500.0, 5000.0, 0.08),
+    -- Alien Euphoria - Happy uplifting
+    (13, 125.0, 0.88, 0.90, 0.95, 0.08, 0.85, -6.2, 0.04, 'Electronic', 'Happy', 220, 2600.0, 7800.0, 0.14),
+    -- Ted Chilling - Relaxed downtempo
+    (36, 85.0, 0.40, 0.55, 0.70, 0.25, 0.88, -13.5, 0.02, 'Downtempo', 'Calm', 280, 1400.0, 4800.0, 0.07);
+
+    -- Insert Sample Recommendations (AI-generated recommendations)
+    INSERT INTO UserRecommendations (AccountID, ProductID, RecommendationScore, RecommendationType, ReasonCode, ExpiresAt, WasShown, WasClicked) VALUES
+    -- Recommendations for Alice (likes energetic music)
+    (4, 7, 0.95, 'content-based', 'Similar tempo and energy to Alien Hyperness', DATE_ADD(NOW(), INTERVAL 7 DAY), TRUE, TRUE),
+    (4, 13, 0.92, 'content-based', 'High valence and energy match your preferences', DATE_ADD(NOW(), INTERVAL 7 DAY), TRUE, FALSE),
+    (4, 22, 0.88, 'collaborative', 'Users with similar taste enjoyed this', DATE_ADD(NOW(), INTERVAL 7 DAY), FALSE, FALSE),
+    -- Recommendations for Bob
+    (5, 40, 0.90, 'collaborative', 'Popular among users who liked Alien Sense', DATE_ADD(NOW(), INTERVAL 7 DAY), TRUE, FALSE),
+    (5, 16, 0.85, 'content-based', 'Similar audio features to your recent listens', DATE_ADD(NOW(), INTERVAL 7 DAY), FALSE, FALSE),
+    -- Recommendations for Carol (likes chill music)
+    (6, 36, 0.93, 'content-based', 'Low tempo and calm mood match your preferences', DATE_ADD(NOW(), INTERVAL 7 DAY), TRUE, TRUE),
+    (6, 45, 0.89, 'content-based', 'Similar spectral features to Ted Chilling', DATE_ADD(NOW(), INTERVAL 7 DAY), FALSE, FALSE),
+    -- Game recommendations for David
+    (7, 2, 0.87, 'collaborative', 'Users who bought Protectors also enjoyed this', DATE_ADD(NOW(), INTERVAL 7 DAY), TRUE, FALSE),
+    (7, 4, 0.82, 'trending', 'Popular this week', DATE_ADD(NOW(), INTERVAL 7 DAY), FALSE, FALSE);
 
     -- Grant privileges to gamestore_user
     GRANT ALL PRIVILEGES ON Game_Store_System.* TO 'gamestore_user'@'%';

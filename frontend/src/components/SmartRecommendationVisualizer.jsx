@@ -77,21 +77,21 @@ const SmartRecommendationVisualizer = ({
   }
 
   return (
-    <div className="bg-gradient-to-br from-gray-900 to-black p-8 rounded-xl border border-gray-800 shadow-2xl ml-auto max-w-2xl">
+    <div className="bg-gradient-to-br from-gray-900 to-black p-6 rounded-lg border border-gray-800 shadow-xl">
       {/* Header */}
       <div className="mb-6">
-        <h2 className="text-2xl font-bold text-white mb-2 text-center">
+        <h2 className="text-2xl font-bold text-white mb-2">
           🎵 Smart Audio Recommendations
         </h2>
-        <p className="text-sm text-gray-400 text-center">
+        <p className="text-sm text-gray-400">
           Real-time suggestions based on <span className="text-cyan-400 font-semibold">{currentProduct.albumTitle}</span>'s audio features
         </p>
       </div>
 
       {/* Audio Features Display */}
       {audioFeatures && (
-        <div className="mb-6 p-5 bg-gray-800/50 rounded-lg border border-gray-700">
-          <h3 className="text-sm font-semibold text-gray-300 mb-3 text-center">Current Track Analysis</h3>
+        <div className="mb-6 p-4 bg-gray-800/50 rounded-lg border border-gray-700">
+          <h3 className="text-sm font-semibold text-gray-300 mb-3">Current Track Analysis</h3>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <FeatureBadge label="Tempo" value={`${audioFeatures.tempo} BPM`} />
             <FeatureBadge label="Energy" value={`${(audioFeatures.energy * 100).toFixed(0)}%`} />

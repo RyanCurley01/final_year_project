@@ -5,6 +5,7 @@ import { productService, accountService } from '../redux/services';
 import SongCard from '../components/SongCard';
 import Loader from '../components/Loader';
 import Error from '../components/Error';
+import { setActiveSong, playPause } from '../redux/features/playerSlice';
 
 
 
@@ -56,41 +57,45 @@ const CustomerScreen = () => {
   const music = products.filter(product => product.albumTitle);
 
   return (
-    <div className="flex flex-col ">
+    <div className="flex flex-col">
       {/* Games Section */}
-      <h2 className="font-bold text-3xl text-white">
-        Games
-      </h2>
-      <div className="flex flex-wrap sm:justify-start justify-center gap-6 mb-12">
-        {games.map((product, i) => (
-          <SongCard
-            key={product.id || `game-${i}`}
-            product={product}
-            data={games}
-            i={i}
-            user={user}
-            email={email}
-            password={password}
-          />
-        ))}
+      <div className="mb-8">
+        <h2 className="font-bold text-3xl text-white mb-6">
+          Games
+        </h2>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+          {games.map((product, i) => (
+            <SongCard
+              key={product.id || `game-${i}`}
+              product={product}
+              data={games}
+              i={i}
+              user={user}
+              email={email}
+              password={password}
+            />
+          ))}
+        </div>
       </div>
 
       {/* Music Section */}
-      <h2 className="font-bold text-3xl text-white">
-        Music
-      </h2>
-      <div className="flex flex-wrap sm:justify-start justify-center gap-6 mb-12">
-        {music.map((product, i) => (
-          <SongCard
-            key={product.id || `music-${i}`}
-            product={product}
-            data={music}
-            i={i}
-            user={user}
-            email={email}
-            password={password}
-          />
-        ))}
+      <div>
+        <h2 className="font-bold text-3xl text-white mb-6">
+          Music
+        </h2>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+          {music.map((product, i) => (
+            <SongCard
+              key={product.id || `music-${i}`}
+              product={product}
+              data={music}
+              i={i}
+              user={user}
+              email={email}
+              password={password}
+            />
+          ))}
+        </div>
       </div>
     </div>
   );
