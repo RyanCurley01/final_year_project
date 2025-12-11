@@ -7,11 +7,14 @@ import numpy as np
 import os
 import sys
 from datetime import datetime
+from pathlib import Path
 from dotenv import load_dotenv
 
 # Add parent directory to path to import YouTubeAPI module
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from YouTubeAPI.youtube_service import YouTubeService
+project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(project_root))
+
+from YouTubeAPI import YouTubeService
 
 # Load environment variables
 load_dotenv()
