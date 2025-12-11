@@ -1,6 +1,6 @@
 import { getServiceUrl, apiCall, getBasicAuthHeaders } from './api';
 
-const BASE_URL = `${getServiceUrl('ORDER_ITEMS')}/api/orderItems`;
+const BASE_URL = `${getServiceUrl('ORDER_ITEMS')}/api/order-items`;
 
 export const orderItemService = {
   // Get all order items
