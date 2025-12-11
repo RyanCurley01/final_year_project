@@ -23,7 +23,9 @@ pydantic>=2.0.0
 requests>=2.31.0
 httpx>=0.25.0
 
-# Google API Client for YouTube
+# Note: YouTube API functionality has been moved to ../YouTubeAPI/
+# The YouTubeAPI module is imported directly, so google-api-python-client
+# must still be available in the environment
 google-api-python-client>=2.108.0
 google-auth>=2.25.0
 google-auth-oauthlib>=1.2.0
