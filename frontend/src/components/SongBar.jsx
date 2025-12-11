@@ -58,10 +58,9 @@ const SongBar = ({ song, i, artistId, isPlaying, activeSong, handlePauseClick, h
               e.target.nextElementSibling?.classList.remove('hidden');
             }}
           />
-        ) : null}
-        {!isVideo || true ? (
+        ) : (
           <img
-            className={`w-full h-full rounded-lg object-cover ${isVideo ? 'hidden' : ''}`}
+            className="w-full h-full rounded-lg object-cover"
             src={coverMedia || placeholders.small}
             alt={song?.title}
             onError={(e) => {
@@ -70,7 +69,7 @@ const SongBar = ({ song, i, artistId, isPlaying, activeSong, handlePauseClick, h
               }
             }}
           />
-        ) : null}
+        )}
       </div>
       <div className="flex-1 flex flex-col justify-center mx-3">
         {!artistId ? (

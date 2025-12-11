@@ -64,19 +64,18 @@ const TopChartCard = ({ song, i, isPlaying, activeSong, handlePauseClick, handle
               <MdFullscreen className="text-white text-lg" />
             </button>
           </>
-        ) : null}
-        {!isVideo || true ? (
+        ) : (
           <img
             src={coverMedia || placeholders.small}
             alt={song?.albumTitle || song?.title}
-            className={`w-full h-full rounded-lg object-cover ${isVideo ? 'hidden' : ''}`}
+            className="w-full h-full rounded-lg object-cover"
             onError={(e) => {
               if (e.target.src !== placeholders.small) {
                 e.target.src = placeholders.small;
               }
             }}
           />
-        ) : null}
+        )}
       </div>
       <div className="flex-1 flex flex-col justify-center mx-3">
         <p className="text-xl font-bold text-white">

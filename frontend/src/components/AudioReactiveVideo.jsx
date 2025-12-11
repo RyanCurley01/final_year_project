@@ -215,7 +215,8 @@ const AudioReactiveVideo = ({
           width: '100%', 
           height: '100%', 
           objectFit: 'cover',
-          borderRadius: 'inherit'
+          borderRadius: 'inherit',
+          pointerEvents: 'none'
         }}
       />
     </div>

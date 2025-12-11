@@ -114,8 +114,11 @@ const AppContent = () => {
       {/* Video Modal */}
       {modalState.isOpen && (
         <VideoModal 
-          url={modalState.url}
+          isOpen={modalState.isOpen}
+          videoSrc={modalState.videoSrc}
           title={modalState.title}
+          isPlaying={modalState.isPlaying}
+          isActive={modalState.isActive}
           onClose={closeModal}
         />
       )}

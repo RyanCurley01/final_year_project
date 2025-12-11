@@ -132,19 +132,18 @@ const SongCard = ({ product, payment, i, data, user, email, password }) => {
               <MdFullscreen className="text-white text-2xl" />
             </button>
           </>
-        ) : null}
-        {!isVideo || true ? (
+        ) : (
           <img
             src={coverMedia || placeholders.large}
             alt={productName}
-            className={`w-full h-full rounded-lg object-cover ${isVideo ? 'hidden' : ''}`}
+            className="w-full h-full rounded-lg object-cover"
             onError={(e) => {
               if (e.target.src !== placeholders.large) {
                 e.target.src = placeholders.large;
               }
             }}
           />
-        ) : null}
+        )}
         <div className={`group-hover:flex absolute rounded-lg inset-0 justify-center items-center
            bg-black bg-opacity-50 z-10 ${isPlayableSong ? 'flex bg-black bg-opacity-50' : 'hidden'}
             ${isPlayableSong ? 'hidden' : 'flex bg-black bg-opacity-50'}`}>
