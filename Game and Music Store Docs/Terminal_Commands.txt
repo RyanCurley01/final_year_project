@@ -68,3 +68,24 @@ docker rm $(docker ps -aq)
 
 # Verify all are gone
 docker ps -a
+
+
+# To fix database not initializing in external container
+
+# Convert line endings to Unix format
+dos2unix init-database.sh || sed -i 's/\r$//' init-database.sh
+
+# Now recreate the database from scratch
+./services-control.sh down
+docker volume rm gamestore_services_mysql-data
+./services-control.sh start
+
+# Wait 30 seconds for database to initialize
+sleep 30
+
+# Verify it worked
+docker exec gamestore_services-db-1 mysql -u root -prootpassword Game_Store_System -e "SHOW TABLES;"
+
+
+To stop AI service in docker container
+docker stop gamestore_services-ai-service-1
