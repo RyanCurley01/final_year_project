@@ -4,6 +4,8 @@ import { useState, useEffect } from 'react';
 
 import { Searchbar, Sidebar, MusicPlayer, TopPlay } from './components';
 import { ArtistDetails, TopArtists, AroundYou, CustomerScreen, Search, SongDetails, TopCharts } from './pages';
+import Cart from './pages/Cart';
+import PurchaseHistory from './pages/PurchaseHistory';
 import SmartRecommendationVisualizer from './components/SmartRecommendationVisualizer';
 import AudioAnalyzer from './components/AudioAnalyzer';
 import { VideoModalProvider, useVideoModal } from './context/VideoModalContext';
@@ -18,13 +20,16 @@ const AppContent = () => {
   const [audioFeatures, setAudioFeatures] = useState(null);
   const [sessionId] = useState(`session_${Date.now()}`);
   const [products, setProducts] = useState([]);
+  
+  // Authentication credentials (hardcoded for demo)
+  const email = 'john.smith@store.com';
+  const password = 'password';
+  const user = { accountId: 1, email }; // Mock user object
 
   // Fetch products for recommendations
   useEffect(() => {
     const fetchProducts = async () => {
       try {
-        const email = 'john.smith@store.com';
-        const password = 'password';
         const productData = await productService.getAllProducts(email, password);
         setProducts(productData);
       } catch (error) {
@@ -79,6 +84,8 @@ const AppContent = () => {
               <Route path="/artists/:id" element={<ArtistDetails />} />
               <Route path="/songs/:songid" element={<SongDetails />} />
               <Route path="/search/:searchTerm" element={<Search />} />
+              <Route path="/cart" element={<Cart />} />
+              <Route path="/purchase-history" element={<PurchaseHistory />} />
             </Routes>
           </div>
           {/* Right sidebar with increased width and right alignment */}

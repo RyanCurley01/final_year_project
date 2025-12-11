@@ -30,7 +30,7 @@ services:
 
   accounts-service:
     build:
-      context: ./backend
+      context: ../backend
       dockerfile: ./accounts-service/Dockerfile
     ports:
       - "8080:8080"
@@ -52,7 +52,7 @@ services:
 
   products-service:
     build:
-      context: ./backend
+      context: ../backend
       dockerfile: ./products-service/Dockerfile
     ports:
       - "8081:8081"
@@ -78,7 +78,7 @@ services:
 
   orders-service:
     build:
-      context: ./backend
+      context: ../backend
       dockerfile: ./orders-service/Dockerfile
     ports:
       - "8082:8082"
@@ -100,7 +100,7 @@ services:
 
   payments-service:
     build:
-      context: ./backend
+      context: ../backend
       dockerfile: ./payments-service/Dockerfile
     ports:
       - "8083:8083"
@@ -120,9 +120,141 @@ services:
           memory: 512M
     restart: unless-stopped
 
+  stock-service:
+    build:
+      context: ../backend
+      dockerfile: ./stock-service/Dockerfile
+    ports:
+      - "8084:8084"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://db:3306/Game_Store_System?createDatabaseIfNotExist=true
+      SPRING_DATASOURCE_USERNAME: gamestore_user
+      SPRING_DATASOURCE_PASSWORD: gamestore_pass
+      JAVA_OPTS: "-Xmx256m -Xms128m -XX:MaxMetaspaceSize=128m -XX:+UseSerialGC"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - services-network
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    restart: unless-stopped
+
+  wishlist-service:
+    build:
+      context: ../backend
+      dockerfile: ./wishlist-service/Dockerfile
+    ports:
+      - "8085:8085"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://db:3306/Game_Store_System?createDatabaseIfNotExist=true
+      SPRING_DATASOURCE_USERNAME: gamestore_user
+      SPRING_DATASOURCE_PASSWORD: gamestore_pass
+      JAVA_OPTS: "-Xmx256m -Xms128m -XX:MaxMetaspaceSize=128m -XX:+UseSerialGC"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - services-network
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    restart: unless-stopped
+
+  order-items-service:
+    build:
+      context: ../backend
+      dockerfile: ./orderItems-service/Dockerfile
+    ports:
+      - "8086:8086"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://db:3306/Game_Store_System?createDatabaseIfNotExist=true
+      SPRING_DATASOURCE_USERNAME: gamestore_user
+      SPRING_DATASOURCE_PASSWORD: gamestore_pass
+      JAVA_OPTS: "-Xmx256m -Xms128m -XX:MaxMetaspaceSize=128m -XX:+UseSerialGC"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - services-network
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    restart: unless-stopped
+
+  customer-summary-service:
+    build:
+      context: ../backend
+      dockerfile: ./customerSummary-service/Dockerfile
+    ports:
+      - "8087:8087"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://db:3306/Game_Store_System?createDatabaseIfNotExist=true
+      SPRING_DATASOURCE_USERNAME: gamestore_user
+      SPRING_DATASOURCE_PASSWORD: gamestore_pass
+      JAVA_OPTS: "-Xmx256m -Xms128m -XX:MaxMetaspaceSize=128m -XX:+UseSerialGC"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - services-network
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    restart: unless-stopped
+
+  # purchased-products-service:
+  #   build:
+  #     context: ../backend
+  #     dockerfile: ./purchasedProducts-service/Dockerfile
+  #   ports:
+  #     - "8088:8088"
+  #   environment:
+  #     SPRING_DATASOURCE_URL: jdbc:mysql://db:3306/Game_Store_System?createDatabaseIfNotExist=true
+  #     SPRING_DATASOURCE_USERNAME: gamestore_user
+  #     SPRING_DATASOURCE_PASSWORD: gamestore_pass
+  #     JAVA_OPTS: "-Xmx256m -Xms128m -XX:MaxMetaspaceSize=128m -XX:+UseSerialGC"
+  #   depends_on:
+  #     db:
+  #       condition: service_healthy
+  #   networks:
+  #     - services-network
+  #   deploy:
+  #     resources:
+  #       limits:
+  #         memory: 512M
+  #   restart: unless-stopped
+
+  sold-products-service:
+    build:
+      context: ../backend
+      dockerfile: ./soldProducts-service/Dockerfile
+    ports:
+      - "8089:8089"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://db:3306/Game_Store_System?createDatabaseIfNotExist=true
+      SPRING_DATASOURCE_USERNAME: gamestore_user
+      SPRING_DATASOURCE_PASSWORD: gamestore_pass
+      JAVA_OPTS: "-Xmx256m -Xms128m -XX:MaxMetaspaceSize=128m -XX:+UseSerialGC"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - services-network
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    restart: unless-stopped
+
   ai-service:
     build:
-      context: ./ai_service
+      context: ../ai_service
       dockerfile: Dockerfile
     ports:
       - "5000:5000"

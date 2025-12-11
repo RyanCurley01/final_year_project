@@ -2,9 +2,11 @@ import { useState } from 'react';
 import { NavLink } from 'react-router-dom'; 
 import { HiOutlineMenu } from 'react-icons/hi';
 import { RiCloseLine } from 'react-icons/ri';
+import { FaReceipt } from 'react-icons/fa';
 
 import { logo } from '../assets';
 import { links } from '../assets/constants';
+import CartIcon from './CartIcon';
 
 const NavLinks = ({ handleClick }) => (
   <div className="mt-10">
@@ -22,6 +24,26 @@ const NavLinks = ({ handleClick }) => (
         {item.name}
       </NavLink>
     ))}
+    
+    {/* Cart Link */}
+    <NavLink
+      to="/cart"
+      className="flex flex-row justify-start items-center my-8 text-sm font-medium text-gray-300 hover:text-primary-light"
+      onClick={() => handleClick && handleClick()}
+    >
+      <CartIcon />
+      <span className="ml-4">Cart</span>
+    </NavLink>
+    
+    {/* Purchase History Link */}
+    <NavLink
+      to="/purchase-history"
+      className="flex flex-row justify-start items-center my-8 text-sm font-medium text-gray-300 hover:text-primary-light"
+      onClick={() => handleClick && handleClick()}
+    >
+      <FaReceipt className="w-6 h-6 mr-2" />
+      Purchase History
+    </NavLink>
   </div>
 );
 

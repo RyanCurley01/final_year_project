@@ -87,5 +87,40 @@ sleep 30
 docker exec gamestore_services-db-1 mysql -u root -prootpassword Game_Store_System -e "SHOW TABLES;"
 
 
+# 📊 Better formatted MySQL queries for readability
+
+# Option 1: Use --table flag with column for perfect alignment
+docker exec gamestore_services-db-1 mysql -u root -prootpassword Game_Store_System --table -e "SELECT * FROM Accounts;" | column -t -s $'\t'
+
+# Option 2: Use less -S for horizontal scrolling on wide tables (recommended for many columns)
+docker exec gamestore_services-db-1 mysql -u root -prootpassword Game_Store_System --table -e "SELECT * FROM Accounts;" | less -S
+
+# Option 3: Format with specific columns for better control
+docker exec gamestore_services-db-1 mysql -u root -prootpassword Game_Store_System --table -e "SELECT AccountID, AccountName, AccountEmail FROM Accounts;"
+
+# Option 4: Pretty print with vertical bars (best for narrow terminals)
+docker exec gamestore_services-db-1 mysql -u root -prootpassword Game_Store_System -e "SELECT * FROM Accounts;" | sed 's/\t/  |  /g'
+
+# Show tables with better formatting
+docker exec gamestore_services-db-1 mysql -u root -prootpassword Game_Store_System --table -e "SHOW TABLES;"
+
+# Query Order_Items table (shows which products are in each order)
+docker exec gamestore_services-db-1 mysql -u root -prootpassword Game_Store_System --table -e "SELECT * FROM Order_Items;"
+
+# Query Order_Items with joined product info
+docker exec gamestore_services-db-1 mysql -u root -prootpassword Game_Store_System --table -e "SELECT oi.*, p.GameTitle, p.AlbumTitle FROM Order_Items oi LEFT JOIN Products p ON oi.ProductID = p.ProductID;"
+
+# Query Payments with Order_Items relationship
+docker exec gamestore_services-db-1 mysql -u root -prootpassword Game_Store_System --table -e "SELECT p.PaymentID, p.OrderID, p.PaymentAmount, p.PaymentStatus, COUNT(oi.OrderItemID) as ItemCount FROM Payments p LEFT JOIN Order_Items oi ON p.OrderID = oi.OrderID GROUP BY p.PaymentID;"
+
+# Interactive mode for best experience (allows scrolling and formatting)
+docker exec -it gamestore_services-db-1 mysql -u root -prootpassword Game_Store_System
+
+# Tips:
+# - In less: Use arrow keys to scroll, 'q' to quit, Left/Right for horizontal scroll
+# - --table flag enforces box-drawing characters around tables
+# - For CSV export: Add --batch --skip-column-names flags
+
+
 To stop AI service in docker container
 docker stop gamestore_services-ai-service-1

@@ -2,17 +2,16 @@ import {Link } from 'react-router-dom';
 import {useDispatch, useSelector } from 'react-redux';
 import { useRef, useEffect, useState } from 'react';
 import { MdFullscreen } from 'react-icons/md';
-import { PayPalButtons } from "@paypal/react-paypal-js";
+import { FiShoppingCart } from 'react-icons/fi';
 
 import PlayPause from './PlayPause';
 import AudioReactiveVideo from './AudioReactiveVideo';
 import { useVideoModal } from '../context/VideoModalContext';
 import { playPause, setActiveSong } from '../redux/features/playerSlice';
-import { paymentService } from '../redux/services/paymentService';
-import { orderService } from '../redux/services/orderService';
+import { addToCart } from '../redux/features/cartSlice';
 import placeholders from '../utils/placeholderImage';
 
-const SongCard = ({ product, payment, i, data, user, email, password }) => {
+const SongCard = ({ product, payment, i, data }) => {
   // Determine if it's a game or music based on which fields are populated
   const isMusic = product.albumTitle !== null && product.albumTitle !== undefined;
   const isGame = product.gameTitle !== null && product.gameTitle !== undefined;
@@ -36,7 +35,6 @@ const SongCard = ({ product, payment, i, data, user, email, password }) => {
   const dispatch = useDispatch();
   const { activeSong, isPlaying, songEnded } = useSelector((state) => state.player);
   const { openModal } = useVideoModal();
-  const [showPayPal, setShowPayPal] = useState(false);
   
   // Check if this card's song is currently active
   const isThisSongActive = activeSong?.albumTitle === product.albumTitle;
@@ -62,43 +60,10 @@ const SongCard = ({ product, payment, i, data, user, email, password }) => {
     dispatch(playPause(true));
   };
 
-  const handleCreateOrder = async (data, actions) => {
-    try {
-      // First create an Order record
-      const orderData = {
-        accountId: user?.accountId,
-        totalAmount: isMusic ? product.albumPrice : product.gamePrice,
-      };
-      
-      const order = await orderService.createOrder(orderData, email, password);
-      
-      // Then create the PayPal order with the orderId
-      const paypalOrderData = {
-        amount: isMusic ? product.albumPrice : product.gamePrice,
-        currency: 'EUR',
-        productId: product.id,
-        accountId: user?.accountId,
-        orderId: order.id,
-      };
-      
-      const response = await paymentService.createPayPalOrder(paypalOrderData, email, password);
-      return response.id;
-    } catch (error) {
-      console.error("Error creating PayPal order:", error);
-      throw error;
-    }
-  };
-
-  const handleApprove = async (data, actions) => {
-    try {
-      const response = await paymentService.capturePayPalOrder(data.orderID, email, password);
-      console.log("Payment successful:", response);
-      alert("Payment successful!");
-      setShowPayPal(false);
-    } catch (error) {
-      console.error("Error capturing PayPal order:", error);
-      alert("Payment failed!");
-    }
+  const handleAddToCart = () => {
+    dispatch(addToCart(product));
+    // Optional: Show a toast notification
+    console.log('Added to cart:', productName);
   };
 
 
@@ -188,43 +153,23 @@ const SongCard = ({ product, payment, i, data, user, email, password }) => {
             <p className="text-xs text-white">
               {product.platform ? `Platform: ${product.platform}` : ''}
             </p>
-            {!showPayPal ? (
-              <button 
-                onClick={() => setShowPayPal(true)}
-                className="px-2 py-1 bg-blue-700 hover:bg-blue-800 rounded font-semibold text-white text-[15px] leading-none flex items-center justify-center"
-              >
-                Add to Cart
-              </button>
-            ) : (
-              <div className="w-[120px] relative z-20">
-                <PayPalButtons
-                  style={{ layout: "horizontal", height: 35, tagline: false }}
-                  createOrder={handleCreateOrder}
-                  onApprove={handleApprove}
-                  onCancel={() => setShowPayPal(false)}
-                />
-              </div>
-            )}
+            <button 
+              onClick={handleAddToCart}
+              className="px-3 py-2 bg-blue-700 hover:bg-blue-800 rounded font-semibold text-white text-sm leading-none flex items-center justify-center gap-2"
+            >
+              <FiShoppingCart />
+              Add to Cart
+            </button>
           </div>
         )}
         {isMusic && (
-            !showPayPal ? (
-              <button 
-                onClick={() => setShowPayPal(true)}
-                className="px-2 py-1 bg-blue-700 hover:bg-blue-800 rounded font-semibold text-white text-[15px] leading-none flex items-center justify-center"
-              >
-                Add to Cart
-              </button>
-            ) : (
-              <div className="w-[120px] relative z-20 mt-2">
-                <PayPalButtons
-                  style={{ layout: "horizontal", height: 35, tagline: false }}
-                  createOrder={handleCreateOrder}
-                  onApprove={handleApprove}
-                  onCancel={() => setShowPayPal(false)}
-                />
-              </div>
-            )
+          <button 
+            onClick={handleAddToCart}
+            className="mt-2 w-full px-3 py-2 bg-blue-700 hover:bg-blue-800 rounded font-semibold text-white text-sm leading-none flex items-center justify-center gap-2"
+          >
+            <FiShoppingCart />
+            Add to Cart
+          </button>
         )}
       </div>
     </div>
