@@ -9,6 +9,8 @@ import sys
 from datetime import datetime
 from pathlib import Path
 from dotenv import load_dotenv
+import pymysql
+from contextlib import contextmanager
 
 # Add parent directory to path to import YouTubeAPI module
 project_root = Path(__file__).parent.parent
@@ -71,6 +73,34 @@ MODEL_PATH = os.getenv("MODEL_PATH", "./models/recommendation_model.onnx")
 # Initialize YouTube service
 youtube_service = YouTubeService()
 
+# Database configuration
+DB_CONFIG = {
+    'host': os.getenv('MYSQL_HOST', os.getenv('DB_HOST', 'host.docker.internal')),
+    'port': int(os.getenv('MYSQL_PORT', os.getenv('DB_PORT', '3306'))),
+    'user': os.getenv('MYSQL_USER', os.getenv('DB_USER', 'root')),
+    'password': os.getenv('MYSQL_ROOT_PASSWORD', os.getenv('DB_PASSWORD', 'rootpassword')),
+    'database': os.getenv('MYSQL_DATABASE', os.getenv('DB_NAME', 'Game_Store_System')),
+    'charset': 'utf8mb4',
+    'cursorclass': pymysql.cursors.DictCursor,
+    'connect_timeout': 3,  # Fast timeout to avoid blocking
+    'read_timeout': 5,
+    'write_timeout': 5
+}
+
+@contextmanager
+def get_db_connection():
+    """Context manager for database connections with automatic cleanup"""
+    connection = None
+    try:
+        connection = pymysql.connect(**DB_CONFIG)
+        yield connection
+    except pymysql.Error as e:
+        print(f"Database connection error: {e}")
+        yield None
+    finally:
+        if connection:
+            connection.close()
+
 @app.on_event("startup")
 async def load_model():
     """Load the ONNX model on startup"""
@@ -96,10 +126,27 @@ async def root():
 @app.get("/health")
 async def health_check():
     youtube_config = youtube_service.check_config()
+    
+    # Check database connectivity
+    db_status = "disconnected"
+    audio_features_count = 0
+    with get_db_connection() as conn:
+        if conn:
+            try:
+                with conn.cursor() as cursor:
+                    cursor.execute("SELECT COUNT(*) as count FROM AudioFeatures")
+                    result = cursor.fetchone()
+                    audio_features_count = result['count'] if result else 0
+                    db_status = "connected"
+            except Exception as e:
+                db_status = f"error: {str(e)}"
+    
     return {
         "status": "healthy",
         "model_loaded": model_session is not None,
-        "youtube_configured": youtube_config["youtube_api_configured"]
+        "youtube_configured": youtube_config["youtube_api_configured"],
+        "database_status": db_status,
+        "audio_features_in_db": audio_features_count
     }
 
 # ============================================
@@ -187,20 +234,50 @@ async def get_realtime_recommendations(request: RealtimeRecommendationRequest):
     try:
         recommendations = []
         
-        # Extended product database with comprehensive audio features
-        # In production: Query from AudioFeatures table
-        mock_products = [
-            {"id": 6, "tempo": 128, "energy": 0.92, "valence": 0.75, "danceability": 0.88, "acousticness": 0.05, "genre": "Electronic"},
-            {"id": 7, "tempo": 140, "energy": 0.95, "valence": 0.80, "danceability": 0.85, "acousticness": 0.03, "genre": "Electronic"},
-            {"id": 10, "tempo": 150, "energy": 0.92, "valence": 0.75, "danceability": 0.90, "acousticness": 0.04, "genre": "Electronic"},
-            {"id": 11, "tempo": 90, "energy": 0.45, "valence": 0.65, "danceability": 0.50, "acousticness": 0.20, "genre": "Ambient"},
-            {"id": 13, "tempo": 125, "energy": 0.88, "valence": 0.95, "danceability": 0.90, "acousticness": 0.08, "genre": "Electronic"},
-            {"id": 15, "tempo": 128, "energy": 0.92, "valence": 0.75, "danceability": 0.85, "acousticness": 0.06, "genre": "Electronic"},
-            {"id": 16, "tempo": 95, "energy": 0.48, "valence": 0.68, "danceability": 0.52, "acousticness": 0.18, "genre": "Ambient"},
-            {"id": 20, "tempo": 135, "energy": 0.85, "valence": 0.70, "danceability": 0.82, "acousticness": 0.07, "genre": "Electronic"},
-            {"id": 22, "tempo": 130, "energy": 0.88, "valence": 0.78, "danceability": 0.87, "acousticness": 0.05, "genre": "Electronic"},
-            {"id": 25, "tempo": 142, "energy": 0.94, "valence": 0.82, "danceability": 0.92, "acousticness": 0.04, "genre": "Electronic"},
-        ]
+        # Query audio features from database
+        products = []
+        db_connected = False
+        with get_db_connection() as conn:
+            if conn:
+                try:
+                    with conn.cursor() as cursor:
+                        # Query all products with audio features except the current one
+                        sql = """
+                            SELECT 
+                                ProductID as id,
+                                Tempo as tempo,
+                                Energy as energy,
+                                Valence as valence,
+                                Danceability as danceability,
+                                Acousticness as acousticness,
+                                Genre as genre
+                            FROM AudioFeatures
+                            WHERE ProductID != %s
+                            AND Tempo IS NOT NULL
+                            AND Energy IS NOT NULL
+                        """
+                        cursor.execute(sql, (request.current_product_id,))
+                        products = cursor.fetchall()
+                        db_connected = True
+                        print(f"✅ Loaded {len(products)} products from AudioFeatures table")
+                except Exception as db_error:
+                    print(f"⚠️ Database query failed: {db_error}")
+        
+        # Fallback to mock data if database unavailable or empty
+        if not products:
+            print("⚠️ Using mock data - database unavailable or empty")
+            products = [
+                {"id": 6, "tempo": 117.45, "energy": 0.17, "valence": 0.45, "danceability": 0.55, "acousticness": 0.3, "genre": "Pop"},
+                {"id": 7, "tempo": 80.75, "energy": 0.32, "valence": 0.50, "danceability": 0.48, "acousticness": 0.4, "genre": "Ambient"},
+                {"id": 8, "tempo": 136.0, "energy": 0.21, "valence": 0.60, "danceability": 0.65, "acousticness": 0.2, "genre": "Pop"},
+                {"id": 11, "tempo": 92.29, "energy": 0.24, "valence": 0.55, "danceability": 0.50, "acousticness": 0.5, "genre": "Ambient"},
+                {"id": 13, "tempo": 136.0, "energy": 0.18, "valence": 0.52, "danceability": 0.60, "acousticness": 0.25, "genre": "Pop"},
+                {"id": 15, "tempo": 129.2, "energy": 0.27, "valence": 0.58, "danceability": 0.62, "acousticness": 0.3, "genre": "Pop"},
+                {"id": 17, "tempo": 92.29, "energy": 0.27, "valence": 0.56, "danceability": 0.52, "acousticness": 0.45, "genre": "Ambient"},
+                {"id": 35, "tempo": 92.29, "energy": 0.31, "valence": 0.60, "danceability": 0.55, "acousticness": 0.4, "genre": "Ambient"},
+                {"id": 40, "tempo": 112.35, "energy": 0.18, "valence": 0.48, "danceability": 0.50, "acousticness": 0.35, "genre": "Pop"},
+                {"id": 44, "tempo": 143.55, "energy": 0.42, "valence": 0.65, "danceability": 0.70, "acousticness": 0.2, "genre": "Pop"},
+            ]
         
         # Extract features with defaults
         current_tempo = request.audio_features.tempo or 120
@@ -209,7 +286,7 @@ async def get_realtime_recommendations(request: RealtimeRecommendationRequest):
         current_danceability = request.audio_features.danceability or 0.5
         current_acousticness = request.audio_features.acousticness or 0.1
         
-        for product in mock_products:
+        for product in products:
             if product["id"] == request.current_product_id:
                 continue
             
@@ -356,10 +433,48 @@ async def get_product_audio_features(product_id: int):
     Production-ready endpoint with comprehensive feature retrieval
     """
     try:
-        # Production database query
-        # In actual deployment: SELECT * FROM AudioFeatures WHERE ProductID = product_id
+        # Query from AudioFeatures table
+        with get_db_connection() as conn:
+            if conn:
+                try:
+                    with conn.cursor() as cursor:
+                        sql = """
+                            SELECT 
+                                ProductID,
+                                Tempo as tempo,
+                                Energy as energy,
+                                Valence as valence,
+                                Danceability as danceability,
+                                Acousticness as acousticness,
+                                Instrumentalness as instrumentalness,
+                                Loudness as loudness,
+                                Speechiness as speechiness,
+                                Mood as mood,
+                                Genre as genre,
+                                Key_Signature as key,
+                                TimeSignature as mode,
+                                SpectralCentroid as spectral_centroid
+                            FROM AudioFeatures
+                            WHERE ProductID = %s
+                        """
+                        cursor.execute(sql, (product_id,))
+                        features_data = cursor.fetchone()
+                        
+                        if features_data:
+                            # Remove ProductID from the dict
+                            features_data.pop('ProductID', None)
+                            return {
+                                "product_id": product_id,
+                                "features": features_data,
+                                "status": "success",
+                                "data_source": "AudioFeatures table (database)",
+                                "last_updated": datetime.now().isoformat()
+                            }
+                except Exception as db_error:
+                    print(f"⚠️ Database query failed: {db_error}")
         
-        # Expanded mock database with realistic feature distributions
+        # Fallback to mock database with realistic feature distributions
+        print(f"⚠️ Using fallback mock data for product {product_id}")
         mock_features = {
             6: {
                 "tempo": 128, "energy": 0.92, "valence": 0.75, "danceability": 0.88,

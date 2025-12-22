@@ -1,55 +1,73 @@
 import { useEffect, useRef, useState } from 'react';
+import globalAudioContext from '../utils/globalAudioContext';
 
 /**
  * AudioAnalyzer - Extracts real-time audio features using Web Audio API
  * This component analyzes the currently playing audio and extracts features
  * similar to what Spotify's audio analysis provides
+ * 
+ * IMPORTANT: Uses the global audio context to avoid "already connected" errors
+ * since an HTMLMediaElement can only have one MediaElementSourceNode
  */
 const AudioAnalyzer = ({ audioElement, onFeaturesExtracted, isPlaying }) => {
-  const [audioContext, setAudioContext] = useState(null);
   const [analyser, setAnalyser] = useState(null);
   const [features, setFeatures] = useState(null);
   const animationFrameRef = useRef(null);
-  const sourceNodeRef = useRef(null);
+  const onFeaturesExtractedRef = useRef(onFeaturesExtracted);
 
-  // Initialize Web Audio API
+  // Keep the callback ref updated
   useEffect(() => {
-    if (!audioElement || audioContext) return;
+    onFeaturesExtractedRef.current = onFeaturesExtracted;
+  }, [onFeaturesExtracted]);
 
-    try {
-      const context = new (window.AudioContext || window.webkitAudioContext)();
-      const analyserNode = context.createAnalyser();
-      
-      // Configure analyser
-      analyserNode.fftSize = 2048;
-      analyserNode.smoothingTimeConstant = 0.8;
+  // Initialize by getting analyser from global audio context
+  useEffect(() => {
+    if (!audioElement || analyser) return;
 
-      setAudioContext(context);
-      setAnalyser(analyserNode);
-
-      // Connect audio element to analyser
-      if (!sourceNodeRef.current) {
-        const source = context.createMediaElementSource(audioElement);
-        source.connect(analyserNode);
-        analyserNode.connect(context.destination);
-        sourceNodeRef.current = source;
+    // Wait for global audio context to be initialized, then create our own analyser
+    // that branches off from the existing media source
+    const initAnalyser = async () => {
+      try {
+        // Check if global context is initialized
+        if (globalAudioContext.isInitialized && globalAudioContext.mediaSource) {
+          // Create a new analyser and connect it to the existing media source
+          const analyserNode = globalAudioContext.audioContext.createAnalyser();
+          analyserNode.fftSize = 2048;
+          analyserNode.smoothingTimeConstant = 0.8;
+          
+          // Connect from the media source (branching the signal)
+          globalAudioContext.mediaSource.connect(analyserNode);
+          // Don't connect to destination - the global context already does that
+          
+          setAnalyser(analyserNode);
+          console.log('✅ AudioAnalyzer connected to global audio context');
+        } else {
+          // Global context not ready yet, try again shortly
+          console.log('⏳ Waiting for global audio context...');
+          setTimeout(initAnalyser, 100);
+        }
+      } catch (error) {
+        console.error('Error initializing AudioAnalyzer:', error);
       }
-    } catch (error) {
-      console.error('Error initializing audio context:', error);
-    }
+    };
+
+    initAnalyser();
 
     return () => {
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current);
       }
     };
-  }, [audioElement]);
+  }, [audioElement, analyser]);
 
   // Extract audio features in real-time
   useEffect(() => {
     if (!analyser || !isPlaying) return;
 
-    const extractFeatures = () => {
+    let lastCallbackTime = 0;
+    const CALLBACK_THROTTLE_MS = 3000; // Only send features every 3 seconds
+
+    const extractFeatures = (timestamp) => {
       const bufferLength = analyser.frequencyBinCount;
       const dataArray = new Uint8Array(bufferLength);
       const timeDataArray = new Uint8Array(bufferLength);
@@ -61,24 +79,27 @@ const AudioAnalyzer = ({ audioElement, onFeaturesExtracted, isPlaying }) => {
       // Calculate features
       const extractedFeatures = calculateAudioFeatures(dataArray, timeDataArray, bufferLength);
       
+      // Always update local state for smooth UI
       setFeatures(extractedFeatures);
       
-      if (onFeaturesExtracted) {
-        onFeaturesExtracted(extractedFeatures);
+      // Throttle the callback to avoid overwhelming the recommendation API
+      if (onFeaturesExtractedRef.current && timestamp - lastCallbackTime >= CALLBACK_THROTTLE_MS) {
+        onFeaturesExtractedRef.current(extractedFeatures);
+        lastCallbackTime = timestamp;
       }
 
       // Continue analysis loop
       animationFrameRef.current = requestAnimationFrame(extractFeatures);
     };
 
-    extractFeatures();
+    animationFrameRef.current = requestAnimationFrame(extractFeatures);
 
     return () => {
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current);
       }
     };
-  }, [analyser, isPlaying, onFeaturesExtracted]);
+  }, [analyser, isPlaying]);
 
   return null; // This is a headless component
 };

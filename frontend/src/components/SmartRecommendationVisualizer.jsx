@@ -16,25 +16,31 @@ const SmartRecommendationVisualizer = ({
   const [recommendations, setRecommendations] = useState([]);
   const [loading, setLoading] = useState(false);
   const [hoveredRec, setHoveredRec] = useState(null);
-  const lastFetchRef = useRef(null);
+  const lastFetchRef = useRef(0);
+  const isInitialLoad = useRef(true);
 
-  // Fetch recommendations when audio features change
+  // Fetch recommendations every 5 seconds while playing
   useEffect(() => {
     if (!currentProduct || !audioFeatures || !sessionId) return;
 
-    // Debounce: only fetch if features changed significantly
+    // Throttle: minimum 5 seconds between fetches
     const now = Date.now();
-    if (lastFetchRef.current && now - lastFetchRef.current < 2000) {
+    if (now - lastFetchRef.current < 5000) {
       return;
     }
 
     fetchRecommendations();
     lastFetchRef.current = now;
-  }, [currentProduct, audioFeatures, sessionId]);
+  }, [currentProduct?.id, audioFeatures, sessionId]);
 
   const fetchRecommendations = async () => {
+    if (!currentProduct || !audioFeatures) return;
+    
     try {
-      setLoading(true);
+      // Only show loading spinner on initial load, not refreshes
+      if (isInitialLoad.current || recommendations.length === 0) {
+        setLoading(true);
+      }
       
       const response = await axios.post('http://localhost:5000/api/audio/realtime-recommendations', {
         current_product_id: currentProduct.id,
@@ -44,6 +50,7 @@ const SmartRecommendationVisualizer = ({
       });
 
       setRecommendations(response.data.recommendations);
+      isInitialLoad.current = false;
     } catch (error) {
       console.error('Error fetching recommendations:', error);
     } finally {
@@ -51,8 +58,30 @@ const SmartRecommendationVisualizer = ({
     }
   };
 
+  // Calculate real-time match values based on current audio features
+  const calculateLiveMatch = (recProductId) => {
+    if (!audioFeatures) return null;
+    
+    // Find product's stored features from recommendations or estimate
+    const rec = recommendations.find(r => r.product_id === recProductId);
+    if (!rec) return null;
+
+    // The rec already has match scores from the API, but we can show live features
+    return {
+      tempo_match: rec.tempo_match,
+      energy_match: rec.energy_match,
+      mood_match: rec.mood_match,
+      similarity_score: rec.similarity_score
+    };
+  };
+
   const getRecommendedProduct = (productId) => {
-    return products?.find(p => p.id === productId);
+    // Products might use 'id' or 'productId' depending on source
+    const product = products?.find(p => p.id === productId || p.productId === productId);
+    if (!product) {
+      console.warn(`Product not found for ID: ${productId}. Available IDs:`, products?.slice(0, 5).map(p => p.id || p.productId));
+    }
+    return product;
   };
 
   const getMoodColor = (moodMatch) => {
@@ -81,7 +110,7 @@ const SmartRecommendationVisualizer = ({
       {/* Header */}
       <div className="mb-6">
         <h2 className="text-2xl font-bold text-white mb-2">
-          🎵 Smart Audio Recommendations
+          Smart Audio Recommendations
         </h2>
         <p className="text-sm text-gray-400">
           Real-time suggestions based on <span className="text-cyan-400 font-semibold">{currentProduct.albumTitle}</span>'s audio features
@@ -91,7 +120,7 @@ const SmartRecommendationVisualizer = ({
       {/* Audio Features Display */}
       {audioFeatures && (
         <div className="mb-6 p-4 bg-gray-800/50 rounded-lg border border-gray-700">
-          <h3 className="text-sm font-semibold text-gray-300 mb-3">Current Track Analysis</h3>
+          <h3 className="text-base font-medium text-white mb-3">Current Track Analysis</h3>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <FeatureBadge label="Tempo" value={`${audioFeatures.tempo} BPM`} />
             <FeatureBadge label="Energy" value={`${(audioFeatures.energy * 100).toFixed(0)}%`} />
@@ -101,20 +130,19 @@ const SmartRecommendationVisualizer = ({
         </div>
       )}
 
-      {/* Loading State */}
-      {loading && (
+      {/* Loading State - Only show spinner if no recommendations yet */}
+      {loading && recommendations.length === 0 && (
         <div className="flex items-center justify-center py-8">
           <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-cyan-500"></div>
         </div>
       )}
 
-      {/* Recommendations List */}
-      <AnimatePresence mode="wait">
-        {!loading && recommendations.length > 0 && (
+      {/* Recommendations List - Show even while refreshing */}
+      <AnimatePresence mode="sync">
+        {recommendations.length > 0 && (
           <motion.div 
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -20 }}
             className="space-y-3"
           >
             {recommendations.map((rec, index) => {
@@ -148,22 +176,7 @@ const SmartRecommendationVisualizer = ({
                   <div className="flex items-start gap-4">
                     {/* Album Cover */}
                     <div className="w-16 h-16 rounded-lg overflow-hidden flex-shrink-0 border-2 border-gray-600 group-hover:border-cyan-500 transition-colors">
-                      {product.albumCoverImageUrl?.includes('.mp4') ? (
-                        <video 
-                          src={product.albumCoverImageUrl} 
-                          className="w-full h-full object-cover"
-                          muted 
-                          loop 
-                          autoPlay 
-                          playsInline
-                        />
-                      ) : (
-                        <img 
-                          src={product.albumCoverImageUrl} 
-                          alt={product.albumTitle}
-                          className="w-full h-full object-cover"
-                        />
-                      )}
+                      <AlbumCover url={product.albumCoverImageUrl} title={product.albumTitle} />
                     </div>
 
                     {/* Product Info */}
@@ -173,22 +186,19 @@ const SmartRecommendationVisualizer = ({
                       </h4>
                       <p className="text-sm text-gray-400 mb-2">{rec.reason}</p>
                       
-                      {/* Feature Matches */}
+                      {/* Feature Matches - Always visible, updates with current features */}
                       <div className="flex gap-2 flex-wrap">
                         <MatchIndicator 
                           label="Tempo" 
                           value={rec.tempo_match} 
-                          show={hoveredRec === rec.product_id}
                         />
                         <MatchIndicator 
                           label="Energy" 
                           value={rec.energy_match} 
-                          show={hoveredRec === rec.product_id}
                         />
                         <MatchIndicator 
                           label="Mood" 
                           value={rec.mood_match} 
-                          show={hoveredRec === rec.product_id}
                         />
                       </div>
                     </div>
@@ -219,7 +229,7 @@ const SmartRecommendationVisualizer = ({
       {/* Algorithm Info */}
       <div className="mt-4 pt-4 border-t border-gray-800">
         <p className="text-xs text-gray-500 text-center">
-          🤖 Powered by real-time audio feature similarity matching
+          Powered by real-time audio feature similarity matching
         </p>
       </div>
     </div>
@@ -234,16 +244,51 @@ const FeatureBadge = ({ label, value }) => (
   </div>
 );
 
-const MatchIndicator = ({ label, value, show }) => {
-  if (!show) return null;
+const AlbumCover = ({ url, title }) => {
+  const [error, setError] = useState(false);
   
+  if (error || !url) {
+    return (
+      <div className="w-full h-full flex items-center justify-center text-gray-400 text-xl bg-gray-700">
+        🎵
+      </div>
+    );
+  }
+  
+  if (url.includes('.mp4')) {
+    return (
+      <video 
+        src={url} 
+        className="w-full h-full object-cover"
+        muted 
+        loop 
+        autoPlay 
+        playsInline
+        onError={() => setError(true)}
+      />
+    );
+  }
+  
+  return (
+    <img 
+      src={url} 
+      alt={title}
+      className="w-full h-full object-cover"
+      onError={() => setError(true)}
+    />
+  );
+};
+
+const MatchIndicator = ({ label, value }) => {
   const percentage = (value * 100).toFixed(0);
   const color = value >= 0.7 ? 'bg-green-500' : value >= 0.5 ? 'bg-yellow-500' : 'bg-red-500';
   
   return (
     <motion.div
-      initial={{ opacity: 0, scale: 0.8 }}
+      key={`${label}-${percentage}`}
+      initial={{ opacity: 0.5, scale: 0.95 }}
       animate={{ opacity: 1, scale: 1 }}
+      transition={{ duration: 0.3 }}
       className="flex items-center gap-1 text-xs"
     >
       <span className="text-gray-400">{label}:</span>
