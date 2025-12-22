@@ -176,7 +176,7 @@ const SmartRecommendationVisualizer = ({
                   <div className="flex items-start gap-4">
                     {/* Album Cover */}
                     <div className="w-16 h-16 rounded-lg overflow-hidden flex-shrink-0 border-2 border-gray-600 group-hover:border-cyan-500 transition-colors">
-                      <AlbumCover url={product.albumCoverImageUrl} title={product.albumTitle} />
+                      <AlbumCover url={product.albumCoverImageUrl} title={product.albumTitle} productId={rec.product_id} />
                     </div>
 
                     {/* Product Info */}
@@ -244,7 +244,7 @@ const FeatureBadge = ({ label, value }) => (
   </div>
 );
 
-const AlbumCover = ({ url, title }) => {
+const AlbumCover = ({ url, title, productId }) => {
   const [error, setError] = useState(false);
   
   if (error || !url) {
@@ -255,17 +255,15 @@ const AlbumCover = ({ url, title }) => {
     );
   }
   
+  // For videos, show a gradient placeholder instead of loading multiple video instances
+  // (Chrome has cache issues with multiple video elements loading the same signed URL)
   if (url.includes('.mp4')) {
     return (
-      <video 
-        src={url} 
-        className="w-full h-full object-cover"
-        muted 
-        loop 
-        autoPlay 
-        playsInline
-        onError={() => setError(true)}
-      />
+      <div className="w-full h-full bg-gradient-to-br from-cyan-600 via-purple-600 to-pink-600 flex items-center justify-center">
+        <svg className="w-8 h-8 text-blue-900" fill="currentColor" viewBox="0 0 24 24">
+          <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/>
+        </svg>
+      </div>
     );
   }
   
