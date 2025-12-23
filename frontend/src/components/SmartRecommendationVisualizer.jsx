@@ -19,103 +19,110 @@ const SmartRecommendationVisualizer = ({
   const [loading, setLoading] = useState(false);
   const [hoveredRec, setHoveredRec] = useState(null);
   const [noMatchFound, setNoMatchFound] = useState(false);
-  const lastFetchRef = useRef(0);
   const isInitialLoad = useRef(true);
+  const intervalRef = useRef(null);
   
   // Get playbackRate from Redux to trigger immediate recommendation updates
   const { playbackRate } = useSelector((state) => state.player);
   
-  // Track previous playback rate to detect changes
-  const prevPlaybackRateRef = useRef(playbackRate);
+  // Store playbackRate in ref so interval always has latest value
+  const playbackRateRef = useRef(playbackRate);
+  playbackRateRef.current = playbackRate;
+  
+  // Track if a fetch is in progress to avoid duplicate calls
+  const fetchInProgressRef = useRef(false);
 
-  // IMMEDIATELY check for unrealistic tempo when playbackRate changes
-  useEffect(() => {
-    if (!audioFeatures?.tempo) return;
-    
-    const effectiveTempo = audioFeatures.tempo * playbackRate;
-    const isUnrealisticTempo = effectiveTempo < 40 || effectiveTempo > 300;
-    
-    if (isUnrealisticTempo) {
-      setNoMatchFound(true);
-    } else if (prevPlaybackRateRef.current !== playbackRate) {
-      // Only reset noMatchFound if playback rate changed AND tempo is now realistic
-      // This prevents flicker when tempo becomes valid again
-      setNoMatchFound(false);
-    }
-    
-    prevPlaybackRateRef.current = playbackRate;
-  }, [playbackRate, audioFeatures?.tempo]);
-
-  // Fetch recommendations every 5 seconds while playing OR immediately when playbackRate changes
-  useEffect(() => {
-    if (!currentProduct || !audioFeatures || !sessionId) return;
-    
-    // Skip API call if tempo is unrealistic
-    const effectiveTempo = audioFeatures.tempo * playbackRate;
-    if (effectiveTempo < 40 || effectiveTempo > 300) {
+  const fetchRecommendations = async (product, features, rate, session) => {
+    if (!product || !features) {
+      console.log('fetchRecommendations: Missing product or features', { product: !!product, features: !!features });
       return;
     }
-
-    // Throttle: minimum 2 seconds between fetches (reduced from 5 for faster response)
-    const now = Date.now();
-    if (now - lastFetchRef.current < 2000) {
+    
+    // Avoid duplicate concurrent fetches
+    if (fetchInProgressRef.current) {
+      console.log('fetchRecommendations: Fetch already in progress, skipping');
       return;
     }
-
-    fetchRecommendations();
-    lastFetchRef.current = now;
-  }, [currentProduct?.id, audioFeatures, sessionId, playbackRate]); // Added playbackRate dependency
-
-  const fetchRecommendations = async () => {
-    if (!currentProduct || !audioFeatures) return;
+    
+    fetchInProgressRef.current = true;
+    
+    console.log('fetchRecommendations: Starting fetch for product', product.id, 'with features', features);
     
     try {
-      // Only show loading spinner on initial load, not refreshes
-      if (isInitialLoad.current || recommendations.length === 0) {
+      // Only show loading spinner on initial load
+      if (isInitialLoad.current) {
         setLoading(true);
       }
       
       // Include playback rate for tempo-adjusted recommendations
       const adjustedFeatures = {
-        ...audioFeatures,
-        effective_tempo: audioFeatures.tempo ? audioFeatures.tempo * playbackRate : null,
-        playback_rate: playbackRate
+        ...features,
+        effective_tempo: features.tempo ? features.tempo * rate : null,
+        playback_rate: rate
       };
       
       const response = await axios.post('http://localhost:5000/api/audio/realtime-recommendations', {
-        current_product_id: currentProduct.id,
+        current_product_id: product.id,
         audio_features: adjustedFeatures,
-        session_id: sessionId,
+        session_id: session,
         limit: 5,
-        playback_rate: playbackRate // Send playback rate separately too
+        playback_rate: rate
       });
 
       const recs = response.data.recommendations || [];
+      console.log('fetchRecommendations: Received', recs.length, 'recommendations:', recs.map(r => ({ id: r.product_id, score: r.similarity_score })));
+      console.log('fetchRecommendations: Available products IDs:', products?.slice(0, 10).map(p => p.id));
+      
       setRecommendations(recs);
-      
-      // Calculate effective tempo
-      const effectiveTempo = audioFeatures.tempo * playbackRate;
-      
-      // Check if no matches found:
-      // Show "No Match Found" only if:
-      // 1. Unrealistic tempo (below 40 BPM or above 300 BPM)
-      // 2. Zero recommendations returned
-      // 3. All recommendations have extremely poor similarity (< 0.15)
-      const isUnrealisticTempo = effectiveTempo < 40 || effectiveTempo > 300;
-      const hasAnyRecs = recs.length > 0;
-      const hasAnyDecentMatch = recs.some(r => r.similarity_score >= 0.15);
-      
-      // Show recommendations even if only 1-4 songs match
-      setNoMatchFound(isUnrealisticTempo || !hasAnyRecs || !hasAnyDecentMatch);
+      setNoMatchFound(recs.length === 0);
+      console.log('fetchRecommendations: Set noMatchFound to', recs.length === 0);
       
       isInitialLoad.current = false;
     } catch (error) {
-      console.error('Error fetching recommendations:', error);
+      console.error('fetchRecommendations: Error fetching recommendations:', error);
       setNoMatchFound(true);
     } finally {
       setLoading(false);
+      fetchInProgressRef.current = false;
     }
   };
+
+  // Fetch IMMEDIATELY when playbackRate changes - no debounce
+  useEffect(() => {
+    if (!currentProduct || !audioFeatures || !sessionId) {
+      console.log('Skipping fetch - missing:', { currentProduct: !!currentProduct, audioFeatures: !!audioFeatures, sessionId: !!sessionId });
+      return;
+    }
+    
+    // Immediately fetch when playback rate changes
+    fetchRecommendations(currentProduct, audioFeatures, playbackRate, sessionId);
+  }, [playbackRate, currentProduct?.id, audioFeatures, sessionId]);
+
+  // Set up 5-second interval for periodic refresh
+  useEffect(() => {
+    if (!currentProduct || !audioFeatures || !sessionId) {
+      return;
+    }
+
+    // Clear existing interval
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+    }
+
+    // Set up 5-second interval for periodic refresh
+    // Uses ref so it always gets latest playbackRate
+    intervalRef.current = setInterval(() => {
+      console.log('Interval triggered: fetching recommendations');
+      fetchRecommendations(currentProduct, audioFeatures, playbackRateRef.current, sessionId);
+    }, 5000);
+
+    // Cleanup interval on unmount or when dependencies change
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+      }
+    };
+  }, [currentProduct?.id, audioFeatures, sessionId]);
 
   // Calculate real-time match values based on current audio features
   const calculateLiveMatch = (recProductId) => {
@@ -136,9 +143,15 @@ const SmartRecommendationVisualizer = ({
 
   const getRecommendedProduct = (productId) => {
     // Products might use 'id' or 'productId' depending on source
-    const product = products?.find(p => p.id === productId || p.productId === productId);
+    // Also try matching as string in case of type mismatch
+    const product = products?.find(p => 
+      p.id === productId || 
+      p.productId === productId ||
+      p.id === String(productId) ||
+      String(p.id) === String(productId)
+    );
     if (!product) {
-      console.warn(`Product not found for ID: ${productId}. Available IDs:`, products?.slice(0, 5).map(p => p.id || p.productId));
+      console.warn(`Product not found for ID: ${productId}. Available IDs:`, products?.slice(0, 10).map(p => ({ id: p.id, type: typeof p.id, albumTitle: p.albumTitle })));
     }
     return product;
   };
@@ -155,6 +168,16 @@ const SmartRecommendationVisualizer = ({
     if (score >= 0.4) return 'Somewhat Similar';
     return 'Different Vibe';
   };
+
+  // Debug log render state
+  console.log('SmartRecommendationVisualizer render:', {
+    currentProduct: currentProduct?.id,
+    audioFeatures: !!audioFeatures,
+    recommendations: recommendations.length,
+    noMatchFound,
+    loading,
+    products: products?.length
+  });
 
   if (!currentProduct) {
     return (
@@ -271,7 +294,9 @@ const SmartRecommendationVisualizer = ({
             
             {recommendations.map((rec, index) => {
               const product = getRecommendedProduct(rec.product_id);
-              if (!product) return null;
+              // Show recommendation even if product not found locally - use rec data as fallback
+              const displayTitle = product?.albumTitle || `Track ID: ${rec.product_id}`;
+              const displayUrl = product?.albumCoverImageUrl || null;
 
               return (
                 <motion.div
@@ -281,7 +306,7 @@ const SmartRecommendationVisualizer = ({
                   transition={{ delay: index * 0.1 }}
                   onMouseEnter={() => setHoveredRec(rec.product_id)}
                   onMouseLeave={() => setHoveredRec(null)}
-                  onClick={() => onRecommendationClick?.(product)}
+                  onClick={() => product && onRecommendationClick?.(product)}
                   className="relative p-4 bg-gray-800/70 hover:bg-gray-700/70 rounded-lg border border-gray-700 hover:border-cyan-500 transition-all cursor-pointer group"
                 >
                   {/* Similarity Score Badge */}
@@ -300,13 +325,13 @@ const SmartRecommendationVisualizer = ({
                   <div className="flex items-start gap-4">
                     {/* Album Cover */}
                     <div className="w-16 h-16 rounded-lg overflow-hidden flex-shrink-0 border-2 border-gray-600 group-hover:border-cyan-500 transition-colors">
-                      <AlbumCover url={product.albumCoverImageUrl} title={product.albumTitle} productId={rec.product_id} />
+                      <AlbumCover url={displayUrl} title={displayTitle} productId={rec.product_id} />
                     </div>
 
                     {/* Product Info */}
                     <div className="flex-1 min-w-0">
                       <h4 className="text-white font-semibold truncate group-hover:text-cyan-400 transition-colors">
-                        {product.albumTitle}
+                        {displayTitle}
                       </h4>
                       <p className="text-sm text-gray-400 mb-2">{rec.reason}</p>
                       
