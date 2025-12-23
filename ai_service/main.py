@@ -70,6 +70,11 @@ class RecommendationResponse(BaseModel):
 model_session: Optional[ort.InferenceSession] = None
 MODEL_PATH = os.getenv("MODEL_PATH", "./models/recommendation_model.onnx")
 
+# Cache for audio features - loaded once at startup to avoid repeated DB queries
+audio_features_cache: Dict[int, Dict] = {}
+cache_loaded: bool = False
+db_available: bool = False  # Track if DB is available to avoid repeated timeouts
+
 # Initialize YouTube service
 youtube_service = YouTubeService()
 
@@ -104,7 +109,7 @@ def get_db_connection():
 @app.on_event("startup")
 async def load_model():
     """Load the ONNX model on startup"""
-    global model_session
+    global model_session, audio_features_cache, cache_loaded
     try:
         if os.path.exists(MODEL_PATH):
             model_session = ort.InferenceSession(MODEL_PATH)
@@ -113,6 +118,45 @@ async def load_model():
             print(f"⚠️  Warning: Model not found at {MODEL_PATH}. Using fallback recommendations.")
     except Exception as e:
         print(f"❌ Error loading model: {e}")
+    
+    # Load audio features into cache for fast recommendations
+    try:
+        with get_db_connection() as conn:
+            if conn:
+                with conn.cursor() as cursor:
+                    sql = """
+                        SELECT 
+                            ProductID,
+                            Tempo,
+                            Energy,
+                            Valence,
+                            Danceability,
+                            Acousticness,
+                            Genre
+                        FROM AudioFeatures
+                        WHERE Tempo IS NOT NULL
+                        AND Energy IS NOT NULL
+                    """
+                    cursor.execute(sql)
+                    results = cursor.fetchall()
+                    
+                    # Build cache dictionary
+                    for row in results:
+                        audio_features_cache[row['ProductID']] = {
+                            'id': row['ProductID'],
+                            'tempo': row['Tempo'],
+                            'energy': row['Energy'],
+                            'valence': row['Valence'],
+                            'danceability': row['Danceability'],
+                            'acousticness': row['Acousticness'],
+                            'genre': row['Genre']
+                        }
+                    
+                    cache_loaded = True
+                    print(f"✅ Cached {len(audio_features_cache)} audio features for fast recommendations")
+    except Exception as e:
+        print(f"⚠️  Could not load audio features cache: {e}")
+        print("⚠️  Will use fallback data for recommendations")
 
 @app.get("/")
 async def root():
@@ -195,6 +239,8 @@ async def check_config():
 class AudioFeatures(BaseModel):
     """Audio features extracted from browser or uploaded file"""
     tempo: Optional[float] = None
+    effective_tempo: Optional[float] = None  # Tempo adjusted by playback rate
+    playback_rate: Optional[float] = None    # Current playback speed (0.1x - 2.0x)
     energy: Optional[float] = None
     danceability: Optional[float] = None
     valence: Optional[float] = None
@@ -230,70 +276,93 @@ async def get_realtime_recommendations(request: RealtimeRecommendationRequest):
     Get real-time product recommendations based on audio features
     Uses euclidean distance in feature space for similarity
     Production-ready with comprehensive audio feature matching
+    OPTIMIZED: Uses in-memory cache for sub-50ms response times
     """
     try:
         recommendations = []
         
-        # Query audio features from database
-        products = []
-        db_connected = False
-        with get_db_connection() as conn:
-            if conn:
-                try:
-                    with conn.cursor() as cursor:
-                        # Query all products with audio features except the current one
-                        sql = """
-                            SELECT 
-                                ProductID as id,
-                                Tempo as tempo,
-                                Energy as energy,
-                                Valence as valence,
-                                Danceability as danceability,
-                                Acousticness as acousticness,
-                                Genre as genre
-                            FROM AudioFeatures
-                            WHERE ProductID != %s
-                            AND Tempo IS NOT NULL
-                            AND Energy IS NOT NULL
-                        """
-                        cursor.execute(sql, (request.current_product_id,))
-                        products = cursor.fetchall()
-                        db_connected = True
-                        print(f"✅ Loaded {len(products)} products from AudioFeatures table")
-                except Exception as db_error:
-                    print(f"⚠️ Database query failed: {db_error}")
-        
-        # Fallback to mock data if database unavailable or empty
-        if not products:
-            print("⚠️ Using mock data - database unavailable or empty")
+        # Use cached audio features for instant response (no DB query!)
+        if cache_loaded and audio_features_cache:
             products = [
-                {"id": 6, "tempo": 117.45, "energy": 0.17, "valence": 0.45, "danceability": 0.55, "acousticness": 0.3, "genre": "Pop"},
-                {"id": 7, "tempo": 80.75, "energy": 0.32, "valence": 0.50, "danceability": 0.48, "acousticness": 0.4, "genre": "Ambient"},
-                {"id": 8, "tempo": 136.0, "energy": 0.21, "valence": 0.60, "danceability": 0.65, "acousticness": 0.2, "genre": "Pop"},
-                {"id": 11, "tempo": 92.29, "energy": 0.24, "valence": 0.55, "danceability": 0.50, "acousticness": 0.5, "genre": "Ambient"},
-                {"id": 13, "tempo": 136.0, "energy": 0.18, "valence": 0.52, "danceability": 0.60, "acousticness": 0.25, "genre": "Pop"},
-                {"id": 15, "tempo": 129.2, "energy": 0.27, "valence": 0.58, "danceability": 0.62, "acousticness": 0.3, "genre": "Pop"},
-                {"id": 17, "tempo": 92.29, "energy": 0.27, "valence": 0.56, "danceability": 0.52, "acousticness": 0.45, "genre": "Ambient"},
-                {"id": 35, "tempo": 92.29, "energy": 0.31, "valence": 0.60, "danceability": 0.55, "acousticness": 0.4, "genre": "Ambient"},
-                {"id": 40, "tempo": 112.35, "energy": 0.18, "valence": 0.48, "danceability": 0.50, "acousticness": 0.35, "genre": "Pop"},
-                {"id": 44, "tempo": 143.55, "energy": 0.42, "valence": 0.65, "danceability": 0.70, "acousticness": 0.2, "genre": "Pop"},
+                product for pid, product in audio_features_cache.items() 
+                if pid != request.current_product_id
             ]
+            print(f"✅ Using cached features for {len(products)} products (no DB query)")
+        else:
+            # Fallback: Query audio features from database
+            products = []
+            with get_db_connection() as conn:
+                if conn:
+                    try:
+                        with conn.cursor() as cursor:
+                            # Query all products with audio features except the current one
+                            sql = """
+                                SELECT 
+                                    ProductID as id,
+                                    Tempo as tempo,
+                                    Energy as energy,
+                                    Valence as valence,
+                                    Danceability as danceability,
+                                    Acousticness as acousticness,
+                                    Genre as genre
+                                FROM AudioFeatures
+                                WHERE ProductID != %s
+                                AND Tempo IS NOT NULL
+                                AND Energy IS NOT NULL
+                            """
+                            cursor.execute(sql, (request.current_product_id,))
+                            products = cursor.fetchall()
+                            print(f"✅ Loaded {len(products)} products from AudioFeatures table (DB query)")
+                    except Exception as db_error:
+                        print(f"⚠️ Database query failed: {db_error}")
+            
+            # Fallback to mock data if database unavailable or empty
+            if not products:
+                print("⚠️ Using mock data - database unavailable or empty")
+                products = [
+                    {"id": 6, "tempo": 117.45, "energy": 0.17, "valence": 0.45, "danceability": 0.55, "acousticness": 0.3, "genre": "Pop"},
+                    {"id": 7, "tempo": 80.75, "energy": 0.32, "valence": 0.50, "danceability": 0.48, "acousticness": 0.4, "genre": "Ambient"},
+                    {"id": 8, "tempo": 136.0, "energy": 0.21, "valence": 0.60, "danceability": 0.65, "acousticness": 0.2, "genre": "Pop"},
+                    {"id": 11, "tempo": 92.29, "energy": 0.24, "valence": 0.55, "danceability": 0.50, "acousticness": 0.5, "genre": "Ambient"},
+                    {"id": 13, "tempo": 136.0, "energy": 0.18, "valence": 0.52, "danceability": 0.60, "acousticness": 0.25, "genre": "Pop"},
+                    {"id": 15, "tempo": 129.2, "energy": 0.27, "valence": 0.58, "danceability": 0.62, "acousticness": 0.3, "genre": "Pop"},
+                    {"id": 17, "tempo": 92.29, "energy": 0.27, "valence": 0.56, "danceability": 0.52, "acousticness": 0.45, "genre": "Ambient"},
+                    {"id": 35, "tempo": 92.29, "energy": 0.31, "valence": 0.60, "danceability": 0.55, "acousticness": 0.4, "genre": "Ambient"},
+                    {"id": 40, "tempo": 112.35, "energy": 0.18, "valence": 0.48, "danceability": 0.50, "acousticness": 0.35, "genre": "Pop"},
+                    {"id": 44, "tempo": 143.55, "energy": 0.42, "valence": 0.65, "danceability": 0.70, "acousticness": 0.2, "genre": "Pop"},
+                ]
         
         # Extract features with defaults
-        current_tempo = request.audio_features.tempo or 120
-        current_energy = request.audio_features.energy or 0.5
-        current_valence = request.audio_features.valence or 0.5
-        current_danceability = request.audio_features.danceability or 0.5
-        current_acousticness = request.audio_features.acousticness or 0.1
+        # Use effective_tempo (adjusted by playback rate) if provided, otherwise use base tempo
+        # Check explicitly for None since 0 is a valid (though unusual) tempo
+        if request.audio_features.effective_tempo is not None:
+            current_tempo = request.audio_features.effective_tempo
+        elif request.audio_features.tempo is not None:
+            current_tempo = request.audio_features.tempo
+        else:
+            current_tempo = 120
+            
+        current_energy = request.audio_features.energy if request.audio_features.energy is not None else 0.5
+        current_valence = request.audio_features.valence if request.audio_features.valence is not None else 0.5
+        current_danceability = request.audio_features.danceability if request.audio_features.danceability is not None else 0.5
+        current_acousticness = request.audio_features.acousticness if request.audio_features.acousticness is not None else 0.1
+        
+        playback_rate = request.audio_features.playback_rate if request.audio_features.playback_rate is not None else 1.0
+        print(f"🎵 Calculating similarity with tempo: {current_tempo} BPM (effective_tempo: {request.audio_features.effective_tempo}, base_tempo: {request.audio_features.tempo}, playback rate: {playback_rate}x)")
         
         for product in products:
             if product["id"] == request.current_product_id:
                 continue
             
             # Multi-dimensional feature similarity calculation
-            # Tempo similarity (normalized)
-            tempo_diff = abs(product["tempo"] - current_tempo) / 100
-            tempo_match = max(0, 1 - tempo_diff)
+            # Tempo similarity - use ratio-based matching for better accuracy
+            # A song at 120 BPM vs 12 BPM should have ~10% match, not 0%
+            product_tempo = product["tempo"]
+            if current_tempo > 0 and product_tempo > 0:
+                tempo_ratio = min(current_tempo, product_tempo) / max(current_tempo, product_tempo)
+                tempo_match = tempo_ratio  # Direct ratio gives better results
+            else:
+                tempo_match = 0
             
             # Energy similarity
             energy_diff = abs(product["energy"] - current_energy)

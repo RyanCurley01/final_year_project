@@ -28,31 +28,21 @@ const SmartRecommendationVisualizer = ({
   // Store playbackRate in ref so interval always has latest value
   const playbackRateRef = useRef(playbackRate);
   playbackRateRef.current = playbackRate;
-  
-  // Track if a fetch is in progress to avoid duplicate calls
-  const fetchInProgressRef = useRef(false);
 
-  const fetchRecommendations = async (product, features, rate, session) => {
+  const fetchRecommendations = async (product, features, rate, session, forceRefresh = false) => {
     if (!product || !features) {
       console.log('fetchRecommendations: Missing product or features', { product: !!product, features: !!features });
       return;
     }
     
-    // Avoid duplicate concurrent fetches
-    if (fetchInProgressRef.current) {
-      console.log('fetchRecommendations: Fetch already in progress, skipping');
-      return;
-    }
-    
-    fetchInProgressRef.current = true;
-    
-    console.log('fetchRecommendations: Starting fetch for product', product.id, 'with features', features);
+    console.log('fetchRecommendations: Starting fetch for product', product.id, 'rate:', rate);
     
     try {
-      // Only show loading spinner on initial load
-      if (isInitialLoad.current) {
+      // Only show loading spinner on initial load (when no recommendations exist)
+      if (isInitialLoad.current && recommendations.length === 0) {
         setLoading(true);
       }
+      // Don't reset noMatchFound here - wait for response
       
       // Include playback rate for tempo-adjusted recommendations
       const adjustedFeatures = {
@@ -71,11 +61,9 @@ const SmartRecommendationVisualizer = ({
 
       const recs = response.data.recommendations || [];
       console.log('fetchRecommendations: Received', recs.length, 'recommendations:', recs.map(r => ({ id: r.product_id, score: r.similarity_score })));
-      console.log('fetchRecommendations: Available products IDs:', products?.slice(0, 10).map(p => p.id));
       
       setRecommendations(recs);
       setNoMatchFound(recs.length === 0);
-      console.log('fetchRecommendations: Set noMatchFound to', recs.length === 0);
       
       isInitialLoad.current = false;
     } catch (error) {
@@ -83,20 +71,29 @@ const SmartRecommendationVisualizer = ({
       setNoMatchFound(true);
     } finally {
       setLoading(false);
-      fetchInProgressRef.current = false;
     }
   };
 
-  // Fetch IMMEDIATELY when playbackRate changes - no debounce
+  // Fetch IMMEDIATELY when playbackRate changes (slider moved) - no debounce
   useEffect(() => {
     if (!currentProduct || !audioFeatures || !sessionId) {
-      console.log('Skipping fetch - missing:', { currentProduct: !!currentProduct, audioFeatures: !!audioFeatures, sessionId: !!sessionId });
       return;
     }
     
-    // Immediately fetch when playback rate changes
-    fetchRecommendations(currentProduct, audioFeatures, playbackRate, sessionId);
-  }, [playbackRate, currentProduct?.id, audioFeatures, sessionId]);
+    console.log('Slider changed to:', playbackRate, '- fetching new recommendations');
+    // Always fetch when playbackRate changes
+    fetchRecommendations(currentProduct, audioFeatures, playbackRate, sessionId, true);
+  }, [playbackRate]);
+
+  // Initial fetch when component mounts or product changes
+  useEffect(() => {
+    if (!currentProduct || !audioFeatures || !sessionId) {
+      return;
+    }
+
+    console.log('Initial fetch for product:', currentProduct.id);
+    fetchRecommendations(currentProduct, audioFeatures, playbackRate, sessionId, true);
+  }, [currentProduct?.id, audioFeatures, sessionId]);
 
   // Set up 5-second interval for periodic refresh
   useEffect(() => {
@@ -113,7 +110,7 @@ const SmartRecommendationVisualizer = ({
     // Uses ref so it always gets latest playbackRate
     intervalRef.current = setInterval(() => {
       console.log('Interval triggered: fetching recommendations');
-      fetchRecommendations(currentProduct, audioFeatures, playbackRateRef.current, sessionId);
+      fetchRecommendations(currentProduct, audioFeatures, playbackRateRef.current, sessionId, false);
     }, 5000);
 
     // Cleanup interval on unmount or when dependencies change
@@ -168,16 +165,6 @@ const SmartRecommendationVisualizer = ({
     if (score >= 0.4) return 'Somewhat Similar';
     return 'Different Vibe';
   };
-
-  // Debug log render state
-  console.log('SmartRecommendationVisualizer render:', {
-    currentProduct: currentProduct?.id,
-    audioFeatures: !!audioFeatures,
-    recommendations: recommendations.length,
-    noMatchFound,
-    loading,
-    products: products?.length
-  });
 
   if (!currentProduct) {
     return (
