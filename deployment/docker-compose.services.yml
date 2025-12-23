@@ -262,8 +262,19 @@ services:
       YOUTUBE_API_KEY: AIzaSyA_cOSojH1AVc4phKoP14cYPkGUpdWhpuQ
       YOUTUBE_CHANNEL_ID: "@Ritrix252"
       MODEL_PATH: /app/models/recommendation_model.onnx
+      # Database configuration - connects to db service on Docker network
+      MYSQL_HOST: db
+      MYSQL_PORT: 3306
+      MYSQL_USER: gamestore_user
+      MYSQL_PASSWORD: gamestore_pass
+      MYSQL_DATABASE: Game_Store_System
+      BACKEND_API_URL: http://products-service:8081
     volumes:
       - ../ai_service:/app
+      - ../YouTubeAPI:/app/YouTubeAPI
+    depends_on:
+      db:
+        condition: service_healthy
     networks:
       - services-network
     restart: unless-stopped

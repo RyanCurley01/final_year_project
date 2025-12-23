@@ -124,3 +124,15 @@ docker exec -it gamestore_services-db-1 mysql -u root -prootpassword Game_Store_
 
 To stop AI service in docker container
 docker stop gamestore_services-ai-service-1
+
+
+To start volume mount for ai service in external container
+./services-control.sh stop ai-service
+./services-control.sh start ai-service
+
+OR
+docker compose -f docker-compose.services.yml -p gamestore_services stop ai-service
+docker compose -f docker-compose.services.yml -p gamestore_services up -d ai-service
+
+To Check if AI service is running
+./services-control.sh logs ai-service

@@ -44,29 +44,20 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
 ENV VENV_PATH=/opt/venv
 RUN python3 -m venv $VENV_PATH \
     && $VENV_PATH/bin/python -m pip install --upgrade pip setuptools wheel \
-    && $VENV_PATH/bin/pip install --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu \
     && $VENV_PATH/bin/pip install --no-cache-dir \
-        onnxruntime \
-        boto3 \
         fastapi \
         uvicorn[standard] \
+        pydantic \
+        onnxruntime \
         numpy \
-        pandas \
-        scikit-learn \
-        requests \
-        httpx \
         pymysql \
-        sqlalchemy \
+        cryptography \
         python-dotenv \
-        pyyaml \
-        pytest \
+        requests \
         google-api-python-client \
         google-auth \
         google-auth-oauthlib \
-        google-auth-httplib2 \
-        moviepy \
-        Pillow \
-        opencv-python
+        google-auth-httplib2
 
 # Make the venv's python the default for interactive shells in the container
 ENV PATH="$VENV_PATH/bin:$PATH"

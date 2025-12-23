@@ -13,8 +13,11 @@ import pymysql
 from contextlib import contextmanager
 
 # Add parent directory to path to import YouTubeAPI module
+# Works both locally and in Docker (where YouTubeAPI is mounted as subdirectory)
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
+# Also add current directory for Docker mount
+sys.path.insert(0, str(Path(__file__).parent))
 
 from YouTubeAPI import YouTubeService
 
@@ -83,7 +86,7 @@ DB_CONFIG = {
     'host': os.getenv('MYSQL_HOST', os.getenv('DB_HOST', 'host.docker.internal')),
     'port': int(os.getenv('MYSQL_PORT', os.getenv('DB_PORT', '3306'))),
     'user': os.getenv('MYSQL_USER', os.getenv('DB_USER', 'root')),
-    'password': os.getenv('MYSQL_ROOT_PASSWORD', os.getenv('DB_PASSWORD', 'rootpassword')),
+    'password': os.getenv('MYSQL_PASSWORD', os.getenv('MYSQL_ROOT_PASSWORD', os.getenv('DB_PASSWORD', 'rootpassword'))),
     'database': os.getenv('MYSQL_DATABASE', os.getenv('DB_NAME', 'Game_Store_System')),
     'charset': 'utf8mb4',
     'cursorclass': pymysql.cursors.DictCursor,
@@ -315,22 +318,7 @@ async def get_realtime_recommendations(request: RealtimeRecommendationRequest):
                             print(f"✅ Loaded {len(products)} products from AudioFeatures table (DB query)")
                     except Exception as db_error:
                         print(f"⚠️ Database query failed: {db_error}")
-            
-            # Fallback to mock data if database unavailable or empty
-            if not products:
-                print("⚠️ Using mock data - database unavailable or empty")
-                products = [
-                    {"id": 6, "tempo": 117.45, "energy": 0.17, "valence": 0.45, "danceability": 0.55, "acousticness": 0.3, "genre": "Pop"},
-                    {"id": 7, "tempo": 80.75, "energy": 0.32, "valence": 0.50, "danceability": 0.48, "acousticness": 0.4, "genre": "Ambient"},
-                    {"id": 8, "tempo": 136.0, "energy": 0.21, "valence": 0.60, "danceability": 0.65, "acousticness": 0.2, "genre": "Pop"},
-                    {"id": 11, "tempo": 92.29, "energy": 0.24, "valence": 0.55, "danceability": 0.50, "acousticness": 0.5, "genre": "Ambient"},
-                    {"id": 13, "tempo": 136.0, "energy": 0.18, "valence": 0.52, "danceability": 0.60, "acousticness": 0.25, "genre": "Pop"},
-                    {"id": 15, "tempo": 129.2, "energy": 0.27, "valence": 0.58, "danceability": 0.62, "acousticness": 0.3, "genre": "Pop"},
-                    {"id": 17, "tempo": 92.29, "energy": 0.27, "valence": 0.56, "danceability": 0.52, "acousticness": 0.45, "genre": "Ambient"},
-                    {"id": 35, "tempo": 92.29, "energy": 0.31, "valence": 0.60, "danceability": 0.55, "acousticness": 0.4, "genre": "Ambient"},
-                    {"id": 40, "tempo": 112.35, "energy": 0.18, "valence": 0.48, "danceability": 0.50, "acousticness": 0.35, "genre": "Pop"},
-                    {"id": 44, "tempo": 143.55, "energy": 0.42, "valence": 0.65, "danceability": 0.70, "acousticness": 0.2, "genre": "Pop"},
-                ]
+                        
         
         # Extract features with defaults
         # Use effective_tempo (adjusted by playback rate) if provided, otherwise use base tempo
@@ -541,84 +529,6 @@ async def get_product_audio_features(product_id: int):
                             }
                 except Exception as db_error:
                     print(f"⚠️ Database query failed: {db_error}")
-        
-        # Fallback to mock database with realistic feature distributions
-        print(f"⚠️ Using fallback mock data for product {product_id}")
-        mock_features = {
-            6: {
-                "tempo": 128, "energy": 0.92, "valence": 0.75, "danceability": 0.88,
-                "acousticness": 0.05, "instrumentalness": 0.95, "loudness": -7.5,
-                "speechiness": 0.02, "mood": "Energetic", "genre": "Electronic",
-                "key": "C", "mode": "Major", "spectral_centroid": 2500.0
-            },
-            7: {
-                "tempo": 140, "energy": 0.95, "valence": 0.80, "danceability": 0.85,
-                "acousticness": 0.03, "instrumentalness": 0.98, "loudness": -6.0,
-                "speechiness": 0.01, "mood": "Energetic", "genre": "Electronic",
-                "key": "G", "mode": "Major", "spectral_centroid": 2800.0
-            },
-            10: {
-                "tempo": 150, "energy": 0.92, "valence": 0.75, "danceability": 0.90,
-                "acousticness": 0.04, "instrumentalness": 0.97, "loudness": -6.5,
-                "speechiness": 0.02, "mood": "Energetic", "genre": "Electronic",
-                "key": "D", "mode": "Major", "spectral_centroid": 2700.0
-            },
-            11: {
-                "tempo": 90, "energy": 0.45, "valence": 0.65, "danceability": 0.50,
-                "acousticness": 0.20, "instrumentalness": 0.85, "loudness": -12.0,
-                "speechiness": 0.03, "mood": "Calm", "genre": "Ambient",
-                "key": "A", "mode": "Minor", "spectral_centroid": 1500.0
-            },
-            13: {
-                "tempo": 125, "energy": 0.88, "valence": 0.95, "danceability": 0.90,
-                "acousticness": 0.08, "instrumentalness": 0.92, "loudness": -7.0,
-                "speechiness": 0.02, "mood": "Uplifting", "genre": "Electronic",
-                "key": "E", "mode": "Major", "spectral_centroid": 2600.0
-            },
-            15: {
-                "tempo": 128, "energy": 0.92, "valence": 0.75, "danceability": 0.85,
-                "acousticness": 0.06, "instrumentalness": 0.94, "loudness": -7.2,
-                "speechiness": 0.02, "mood": "Energetic", "genre": "Electronic",
-                "key": "C", "mode": "Major", "spectral_centroid": 2550.0
-            },
-            16: {
-                "tempo": 95, "energy": 0.48, "valence": 0.68, "danceability": 0.52,
-                "acousticness": 0.18, "instrumentalness": 0.88, "loudness": -11.5,
-                "speechiness": 0.03, "mood": "Calm", "genre": "Ambient",
-                "key": "F", "mode": "Minor", "spectral_centroid": 1600.0
-            },
-            20: {
-                "tempo": 135, "energy": 0.85, "valence": 0.70, "danceability": 0.82,
-                "acousticness": 0.07, "instrumentalness": 0.93, "loudness": -7.8,
-                "speechiness": 0.02, "mood": "Energetic", "genre": "Electronic",
-                "key": "B", "mode": "Major", "spectral_centroid": 2650.0
-            },
-            22: {
-                "tempo": 130, "energy": 0.88, "valence": 0.78, "danceability": 0.87,
-                "acousticness": 0.05, "instrumentalness": 0.95, "loudness": -7.0,
-                "speechiness": 0.01, "mood": "Energetic", "genre": "Electronic",
-                "key": "A", "mode": "Major", "spectral_centroid": 2700.0
-            },
-            25: {
-                "tempo": 142, "energy": 0.94, "valence": 0.82, "danceability": 0.92,
-                "acousticness": 0.04, "instrumentalness": 0.96, "loudness": -6.2,
-                "speechiness": 0.02, "mood": "Energetic", "genre": "Electronic",
-                "key": "G", "mode": "Major", "spectral_centroid": 2850.0
-            }
-        }
-        
-        if product_id not in mock_features:
-            raise HTTPException(status_code=404, detail=f"Audio features not found for product {product_id}")
-        
-        features_data = mock_features[product_id]
-        
-        return {
-            "product_id": product_id,
-            "features": features_data,
-            "status": "success",
-            "data_source": "AudioFeatures table",
-            "last_updated": datetime.now().isoformat()
-        }
         
     except HTTPException:
         raise
