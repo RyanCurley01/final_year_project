@@ -1,10 +1,12 @@
 import { useEffect, useState, useRef } from 'react';
+import { useSelector } from 'react-redux';
 import { motion, AnimatePresence } from 'framer-motion';
 import axios from 'axios';
 
 /**
  * SmartRecommendationVisualizer (formerly PersonalRecommendations)
  * Displays real-time audio-based recommendations with visual similarity indicators
+ * Now responds immediately to playbackRate changes for tempo-based recommendation updates
  */
 const SmartRecommendationVisualizer = ({ 
   currentProduct, 
@@ -16,22 +18,53 @@ const SmartRecommendationVisualizer = ({
   const [recommendations, setRecommendations] = useState([]);
   const [loading, setLoading] = useState(false);
   const [hoveredRec, setHoveredRec] = useState(null);
+  const [noMatchFound, setNoMatchFound] = useState(false);
   const lastFetchRef = useRef(0);
   const isInitialLoad = useRef(true);
+  
+  // Get playbackRate from Redux to trigger immediate recommendation updates
+  const { playbackRate } = useSelector((state) => state.player);
+  
+  // Track previous playback rate to detect changes
+  const prevPlaybackRateRef = useRef(playbackRate);
 
-  // Fetch recommendations every 5 seconds while playing
+  // IMMEDIATELY check for unrealistic tempo when playbackRate changes
+  useEffect(() => {
+    if (!audioFeatures?.tempo) return;
+    
+    const effectiveTempo = audioFeatures.tempo * playbackRate;
+    const isUnrealisticTempo = effectiveTempo < 40 || effectiveTempo > 300;
+    
+    if (isUnrealisticTempo) {
+      setNoMatchFound(true);
+    } else if (prevPlaybackRateRef.current !== playbackRate) {
+      // Only reset noMatchFound if playback rate changed AND tempo is now realistic
+      // This prevents flicker when tempo becomes valid again
+      setNoMatchFound(false);
+    }
+    
+    prevPlaybackRateRef.current = playbackRate;
+  }, [playbackRate, audioFeatures?.tempo]);
+
+  // Fetch recommendations every 5 seconds while playing OR immediately when playbackRate changes
   useEffect(() => {
     if (!currentProduct || !audioFeatures || !sessionId) return;
+    
+    // Skip API call if tempo is unrealistic
+    const effectiveTempo = audioFeatures.tempo * playbackRate;
+    if (effectiveTempo < 40 || effectiveTempo > 300) {
+      return;
+    }
 
-    // Throttle: minimum 5 seconds between fetches
+    // Throttle: minimum 2 seconds between fetches (reduced from 5 for faster response)
     const now = Date.now();
-    if (now - lastFetchRef.current < 5000) {
+    if (now - lastFetchRef.current < 2000) {
       return;
     }
 
     fetchRecommendations();
     lastFetchRef.current = now;
-  }, [currentProduct?.id, audioFeatures, sessionId]);
+  }, [currentProduct?.id, audioFeatures, sessionId, playbackRate]); // Added playbackRate dependency
 
   const fetchRecommendations = async () => {
     if (!currentProduct || !audioFeatures) return;
@@ -42,17 +75,43 @@ const SmartRecommendationVisualizer = ({
         setLoading(true);
       }
       
+      // Include playback rate for tempo-adjusted recommendations
+      const adjustedFeatures = {
+        ...audioFeatures,
+        effective_tempo: audioFeatures.tempo ? audioFeatures.tempo * playbackRate : null,
+        playback_rate: playbackRate
+      };
+      
       const response = await axios.post('http://localhost:5000/api/audio/realtime-recommendations', {
         current_product_id: currentProduct.id,
-        audio_features: audioFeatures,
+        audio_features: adjustedFeatures,
         session_id: sessionId,
-        limit: 5
+        limit: 5,
+        playback_rate: playbackRate // Send playback rate separately too
       });
 
-      setRecommendations(response.data.recommendations);
+      const recs = response.data.recommendations || [];
+      setRecommendations(recs);
+      
+      // Calculate effective tempo
+      const effectiveTempo = audioFeatures.tempo * playbackRate;
+      
+      // Check if no matches found:
+      // Show "No Match Found" only if:
+      // 1. Unrealistic tempo (below 40 BPM or above 300 BPM)
+      // 2. Zero recommendations returned
+      // 3. All recommendations have extremely poor similarity (< 0.15)
+      const isUnrealisticTempo = effectiveTempo < 40 || effectiveTempo > 300;
+      const hasAnyRecs = recs.length > 0;
+      const hasAnyDecentMatch = recs.some(r => r.similarity_score >= 0.15);
+      
+      // Show recommendations even if only 1-4 songs match
+      setNoMatchFound(isUnrealisticTempo || !hasAnyRecs || !hasAnyDecentMatch);
+      
       isInitialLoad.current = false;
     } catch (error) {
       console.error('Error fetching recommendations:', error);
+      setNoMatchFound(true);
     } finally {
       setLoading(false);
     }
@@ -117,16 +176,43 @@ const SmartRecommendationVisualizer = ({
         </p>
       </div>
 
-      {/* Audio Features Display */}
+      {/* Audio Features Display - Updated based on playback rate */}
       {audioFeatures && (
         <div className="mb-6 p-4 bg-gray-800/50 rounded-lg border border-gray-700">
-          <h3 className="text-base font-medium text-white mb-3">Current Track Analysis</h3>
+          <h3 className="text-base font-medium text-white mb-2">Current Track Analysis</h3>
+          <p className="text-xs text-gray-500 mb-3">
+            {playbackRate !== 1.0 && (
+              <span className="text-cyan-400">Adjusted for {playbackRate.toFixed(2)}x playback speed</span>
+            )}
+          </p>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <FeatureBadge label="Tempo" value={`${audioFeatures.tempo} BPM`} />
-            <FeatureBadge label="Energy" value={`${(audioFeatures.energy * 100).toFixed(0)}%`} />
-            <FeatureBadge label="Mood" value={`${(audioFeatures.valence * 100).toFixed(0)}%`} />
-            <FeatureBadge label="Dance" value={`${(audioFeatures.danceability * 100).toFixed(0)}%`} />
+            <FeatureBadge 
+              label="Tempo" 
+              value={`${Math.round(audioFeatures.tempo * playbackRate)} BPM`}
+              isAdjusted={playbackRate !== 1.0}
+            />
+            <FeatureBadge 
+              label="Energy" 
+              value={`${Math.min(100, Math.max(0, (audioFeatures.energy * 100 * (playbackRate > 1 ? 1 + (playbackRate - 1) * 0.2 : 1 - (1 - playbackRate) * 0.1)))).toFixed(0)}%`}
+              isAdjusted={playbackRate !== 1.0}
+            />
+            <FeatureBadge 
+              label="Mood" 
+              value={`${Math.min(100, Math.max(0, (audioFeatures.valence * 100 * (playbackRate > 1 ? 1 + (playbackRate - 1) * 0.15 : 1 - (1 - playbackRate) * 0.25)))).toFixed(0)}%`}
+              isAdjusted={playbackRate !== 1.0}
+            />
+            <FeatureBadge 
+              label="Dance" 
+              value={`${Math.min(100, Math.max(0, (audioFeatures.danceability * 100 * (playbackRate > 1 ? 1 + (playbackRate - 1) * 0.3 : 1 - (1 - playbackRate) * 0.2)))).toFixed(0)}%`}
+              isAdjusted={playbackRate !== 1.0}
+            />
           </div>
+          {playbackRate !== 1.0 && (
+            <div className="mt-3 text-xs text-gray-400 border-t border-gray-700 pt-2">
+              <span className="text-yellow-400">⚡</span> Original tempo: {audioFeatures.tempo} BPM → 
+              <span className="text-cyan-400 font-semibold"> {Math.round(audioFeatures.tempo * playbackRate)} BPM</span>
+            </div>
+          )}
         </div>
       )}
 
@@ -137,14 +223,52 @@ const SmartRecommendationVisualizer = ({
         </div>
       )}
 
-      {/* Recommendations List - Show even while refreshing */}
+      {/* No Match Found State */}
+      {!loading && noMatchFound && (
+        <motion.div
+          initial={{ opacity: 0, scale: 0.95 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="p-6 bg-red-900/30 border border-red-500/50 rounded-lg text-center"
+        >
+          <div className="text-4xl mb-3">🎵❌</div>
+          <h3 className="text-xl font-bold text-red-400 mb-2">No Match Found</h3>
+          <p className="text-gray-400 text-sm">
+            {(audioFeatures?.tempo * playbackRate < 40 || audioFeatures?.tempo * playbackRate > 300) ? (
+              <>Tempo {Math.round(audioFeatures?.tempo * playbackRate)} BPM is outside realistic range (40-300 BPM). Adjust the playback speed.</>
+            ) : recommendations.length === 0 ? (
+              <>No songs in the library have matching audio features.</>
+            ) : (
+              <>All available songs have very low similarity (below 15%). No close matches found.</>
+            )}
+          </p>
+          <div className="mt-4 p-3 bg-gray-800/50 rounded-lg">
+            <p className="text-xs text-gray-500">
+              Current features: Tempo <span className={audioFeatures?.tempo * playbackRate < 40 || audioFeatures?.tempo * playbackRate > 300 ? 'text-red-400 font-bold' : ''}>{Math.round(audioFeatures?.tempo * playbackRate || 0)} BPM</span>, 
+              Energy {Math.min(100, Math.max(0, ((audioFeatures?.energy || 0) * 100 * (playbackRate > 1 ? 1 + (playbackRate - 1) * 0.2 : 1 - (1 - playbackRate) * 0.1)))).toFixed(0)}%, 
+              Mood {Math.min(100, Math.max(0, ((audioFeatures?.valence || 0) * 100 * (playbackRate > 1 ? 1 + (playbackRate - 1) * 0.15 : 1 - (1 - playbackRate) * 0.25)))).toFixed(0)}%
+            </p>
+          </div>
+        </motion.div>
+      )}
+
+      {/* Recommendations List - Show only when matches found */}
       <AnimatePresence mode="sync">
-        {recommendations.length > 0 && (
+        {!noMatchFound && recommendations.length > 0 && (
           <motion.div 
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             className="space-y-3"
           >
+            {/* Matches count */}
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-sm text-gray-400">
+                {recommendations.length} {recommendations.length === 1 ? 'match' : 'matches'} found
+              </p>
+              <p className="text-xs text-gray-500">
+                Based on similarity score
+              </p>
+            </div>
+            
             {recommendations.map((rec, index) => {
               const product = getRecommendedProduct(rec.product_id);
               if (!product) return null;
@@ -237,11 +361,24 @@ const SmartRecommendationVisualizer = ({
 };
 
 // Helper Components
-const FeatureBadge = ({ label, value }) => (
-  <div className="bg-gray-700/50 px-3 py-2 rounded-lg">
+const FeatureBadge = ({ label, value, isAdjusted = false }) => (
+  <motion.div 
+    key={`${label}-${value}`}
+    initial={{ scale: 0.9, opacity: 0.5 }}
+    animate={{ scale: 1, opacity: 1 }}
+    transition={{ duration: 0.3 }}
+    className={`px-3 py-2 rounded-lg transition-all duration-300 ${
+      isAdjusted 
+        ? 'bg-cyan-900/50 border border-cyan-500/50 ring-1 ring-cyan-500/30' 
+        : 'bg-gray-700/50'
+    }`}
+  >
     <div className="text-xs text-gray-400">{label}</div>
-    <div className="text-sm font-bold text-white">{value}</div>
-  </div>
+    <div className={`text-sm font-bold ${isAdjusted ? 'text-cyan-300' : 'text-white'}`}>
+      {value}
+      {isAdjusted && <span className="text-xs text-cyan-500 ml-1">⚡</span>}
+    </div>
+  </motion.div>
 );
 
 const AlbumCover = ({ url, title, productId }) => {

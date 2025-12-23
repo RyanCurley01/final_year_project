@@ -7,7 +7,7 @@ import { FiShoppingCart } from 'react-icons/fi';
 import PlayPause from './PlayPause';
 import AudioReactiveVideo from './AudioReactiveVideo';
 import { useVideoModal } from '../context/VideoModalContext';
-import { playPause, setActiveSong } from '../redux/features/playerSlice';
+import { playPause, setActiveSong, setPlaybackRate } from '../redux/features/playerSlice';
 import { addToCart } from '../redux/features/cartSlice';
 import placeholders from '../utils/placeholderImage';
 
@@ -33,8 +33,14 @@ const SongCard = ({ product, payment, i, data }) => {
   const isPlayableSong = isMusic && product.albumTitle !== 'Selected Electronic Works';
 
   const dispatch = useDispatch();
-  const { activeSong, isPlaying, songEnded } = useSelector((state) => state.player);
+  const { activeSong, isPlaying, songEnded, playbackRate } = useSelector((state) => state.player);
   const { openModal } = useVideoModal();
+  
+  // Handle playback rate change - dispatch to Redux for recommendations update
+  const handlePlaybackRateChange = (e) => {
+    const newRate = parseFloat(e.target.value);
+    dispatch(setPlaybackRate(newRate));
+  };
   
   // Check if this card's song is currently active
   const isThisSongActive = activeSong?.albumTitle === product.albumTitle;
@@ -83,6 +89,7 @@ const SongCard = ({ product, payment, i, data }) => {
               className="w-full h-full rounded-lg object-cover"
               isPlaying={isPlaying}
               isActive={isThisSongActive}
+              playbackRate={isThisSongActive ? playbackRate : 1.0}
               onError={(e) => {
                 console.error('Video failed to load:', coverMedia, e);
               }}
@@ -123,6 +130,36 @@ const SongCard = ({ product, payment, i, data }) => {
           )}
         </div>
       </div>
+
+      {/* Tempo Slider - shown only for videos when this song is active */}
+      {isVideo && isThisSongActive && (
+        <div className="mt-2 px-2">
+          <div className="flex items-center justify-between mb-1">
+            <label className="text-xs text-white/70">Playback Speed</label>
+            <span className="text-xs text-white font-mono">{playbackRate.toFixed(2)}x</span>
+          </div>
+          <input
+            type="range"
+            min="0.1"
+            max="2.0"
+            step="0.05"
+            value={playbackRate}
+            onChange={handlePlaybackRateChange}
+            className="w-full h-1 bg-gray-600 rounded-lg appearance-none cursor-pointer
+                     slider-thumb:appearance-none slider-thumb:w-3 slider-thumb:h-3 
+                     slider-thumb:bg-blue-500 slider-thumb:rounded-full slider-thumb:cursor-pointer
+                     hover:bg-gray-500 transition-colors"
+            style={{
+              background: `linear-gradient(to right, #3b82f6 0%, #3b82f6 ${((playbackRate - 0.1) / 1.9) * 100}%, #4b5563 ${((playbackRate - 0.1) / 1.9) * 100}%, #4b5563 100%)`
+            }}
+          />
+          <div className="flex justify-between text-xs text-white/50 mt-0.5">
+            <span>0.1x</span>
+            <span>1.0x</span>
+            <span>2.0x</span>
+          </div>
+        </div>
+      )}
 
       <div className="flex flex-col mt-4">
         <p className="font-semibold text-lg text-white">

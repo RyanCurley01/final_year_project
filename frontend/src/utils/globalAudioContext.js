@@ -42,11 +42,12 @@ class GlobalAudioContext {
         this.mediaSource = this.audioContext.createMediaElementSource(audioElement);
         console.log('✅ Using createMediaElementSource');
         
-        // Create onset detector with lower threshold for byte-based analysis
+        // Create onset detector with drum-optimized settings
         this.onsetDetector = new OnsetDetector(this.audioContext, {
-          threshold: 5.0,
+          threshold: 0.8,  // Lowered for better drum detection
           fftSize: 2048,
-          minTimeBetweenOnsets: 80,
+          hopSize: 256,
+          minTimeBetweenOnsets: 60,
         });
 
         // IMPORTANT: Connect to destination so audio plays!
@@ -73,9 +74,10 @@ class GlobalAudioContext {
         this.mediaSource = this.audioContext.createMediaStreamSource(stream);
         
         this.onsetDetector = new OnsetDetector(this.audioContext, {
-          threshold: 5.0,
+          threshold: 0.8,  // Lowered for better drum detection
           fftSize: 2048,
-          minTimeBetweenOnsets: 80,
+          hopSize: 256,
+          minTimeBetweenOnsets: 60,
         });
 
         // Connect stream (no need for destination with captureStream)
@@ -129,6 +131,37 @@ class GlobalAudioContext {
   resume() {
     if (this.audioContext && this.audioContext.state === 'suspended') {
       this.audioContext.resume();
+    }
+  }
+
+  /**
+   * Set playback rate for the audio element
+   */
+  setPlaybackRate(rate) {
+    if (this.audioElement) {
+      const clampedRate = Math.max(0.1, Math.min(2.0, rate));
+      this.audioElement.playbackRate = clampedRate;
+      console.log('🎚️ Set audio playback rate to:', clampedRate);
+      
+      // Adjust onset detector sensitivity based on playback rate
+      // At slower speeds: increase min time between onsets (drums are further apart)
+      // At faster speeds: decrease min time (drums are closer together)
+      if (this.onsetDetector) {
+        // Base min time is 60ms at 1x speed
+        // At 0.1x: 60 / 0.1 = 600ms between detections
+        // At 2.0x: 60 / 2.0 = 30ms between detections
+        this.onsetDetector.minTimeBetweenOnsets = Math.round(60 / clampedRate);
+        
+        // Also adjust threshold - at slower speeds, transients are stretched and weaker
+        // Lower threshold to compensate
+        const baseThreshold = 0.8;
+        this.onsetDetector.threshold = baseThreshold * Math.sqrt(clampedRate);
+        
+        console.log('🥁 Adjusted onset detection for', clampedRate + 'x:', {
+          minTime: this.onsetDetector.minTimeBetweenOnsets + 'ms',
+          threshold: this.onsetDetector.threshold.toFixed(3)
+        });
+      }
     }
   }
 

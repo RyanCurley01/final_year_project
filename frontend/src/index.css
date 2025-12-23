@@ -39,3 +39,44 @@
   -ms-overflow-style: none; /* IE and Edge */
   scrollbar-width: none; /* Firefox */
 }
+/* Tempo slider custom styles */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  background: #3b82f6;
+  border-radius: 50%;
+  cursor: pointer;
+  box-shadow: 0 0 4px rgba(59, 130, 246, 0.5);
+  transition: all 0.15s ease;
+}
+
+input[type="range"]::-webkit-slider-thumb:hover {
+  background: #2563eb;
+  box-shadow: 0 0 8px rgba(59, 130, 246, 0.8);
+  transform: scale(1.1);
+}
+
+input[type="range"]::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  background: #3b82f6;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  box-shadow: 0 0 4px rgba(59, 130, 246, 0.5);
+  transition: all 0.15s ease;
+}
+
+input[type="range"]::-moz-range-thumb:hover {
+  background: #2563eb;
+  box-shadow: 0 0 8px rgba(59, 130, 246, 0.8);
+  transform: scale(1.1);
+}

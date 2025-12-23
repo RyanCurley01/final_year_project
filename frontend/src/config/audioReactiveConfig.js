@@ -134,6 +134,23 @@ export const presets = {
     },
   },
   
+  // Optimized for IDM (Intelligent Dance Music) - Aphex Twin, Squarepusher
+  idm: {
+    onset: {
+      fftSize: 2048,
+      threshold: 3.5,      // Balanced for kick drums and complex rhythms
+      minTimeBetweenOnsets: 60,  // Fast for rapid-fire beats
+      hopSize: 256,        // Smaller hop for complex patterns
+      hfcWeight: 0.1,      // Low weight for high-freq
+      fluxWeight: 0.15,    // Medium weight for general onsets
+    },
+    effects: {
+      smoothTransitions: false,  // Glitchy, immediate changes
+      transitionDuration: 50,    // Very fast transitions
+      randomColors: true,
+    },
+  },
+  
   // Low CPU usage for mobile devices
   lowPerformance: {
     performance: {

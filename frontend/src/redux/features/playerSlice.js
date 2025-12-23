@@ -8,6 +8,7 @@ const initialState = {
   activeSong: {},
   genreListId: '',
   songEnded: false,
+  playbackRate: 1.0,
 };
 
 const playerSlice = createSlice({
@@ -58,6 +59,10 @@ const playerSlice = createSlice({
       }
     },
 
+    setPlaybackRate: (state, action) => {
+      state.playbackRate = action.payload;
+    },
+
     songEnded: (state) => {
       state.songEnded = true;
     },
@@ -68,6 +73,6 @@ const playerSlice = createSlice({
   },
 });
 
-export const { setActiveSong, nextSong, prevSong, playPause, songEnded, selectGenreListId } = playerSlice.actions;
+export const { setActiveSong, nextSong, prevSong, playPause, setPlaybackRate, songEnded, selectGenreListId } = playerSlice.actions;
 
 export default playerSlice.reducer;

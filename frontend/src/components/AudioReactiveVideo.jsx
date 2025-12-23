@@ -29,6 +29,7 @@ const AudioReactiveVideo = ({
   className, 
   isPlaying, 
   isActive,
+  playbackRate = 1.0,
   onError,
   ...props 
 }) => {
@@ -165,6 +166,20 @@ const AudioReactiveVideo = ({
       }
     }
   }, [volume]);
+  
+  // Sync playback rate
+  useEffect(() => {
+    if (videoRef.current && playbackRate !== undefined && playbackRate !== null) {
+      const rate = parseFloat(playbackRate);
+      if (!isNaN(rate) && isFinite(rate) && rate > 0) {
+        videoRef.current.playbackRate = Math.max(0.1, Math.min(2.0, rate));
+        // Also notify global audio context to sync audio playback rate
+        if (isActive) {
+          globalAudioContext.setPlaybackRate(rate);
+        }
+      }
+    }
+  }, [playbackRate, isActive]);
   
   // Cleanup
   useEffect(() => {
