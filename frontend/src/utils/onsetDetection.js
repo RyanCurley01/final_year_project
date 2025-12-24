@@ -24,9 +24,17 @@ class OnsetDetector {
     
     // Onset detection state
     this.onsetCallbacks = [];
+    this.glitchCallbacks = []; // For unusual/glitch sounds
     this.isRunning = false;
     this.lastOnsetTime = 0;
+    this.lastGlitchTime = 0; // Track last glitch detection
     this.minTimeBetweenOnsets = 100; // ms, prevents double detection
+    
+    // Glitch detection state (for IDM-style effects like Vordhosbn)
+    this.recentOnsets = []; // Track recent onset times
+    this.previousEnergy = 0; // For tracking energy changes
+    this.energyHistory = []; // Track energy over time
+    this.glitchTriggeredRecently = false; // Prevents double triggering
   }
   
   /**
@@ -43,6 +51,34 @@ class OnsetDetector {
   onOnset(callback) {
     this.onsetCallbacks.push(callback);
     return this;
+  }
+  
+  /**
+   * Add callback for glitch sound events
+   */
+  onGlitch(callback) {
+    this.glitchCallbacks.push(callback);
+    return this;
+  }
+  
+  /**
+   * Calculate high frequency content (for hi-hats, cymbals, glitchy sounds)
+   * Focuses on 5kHz-15kHz range
+   */
+  calculateHighFrequencyContent(spectrum) {
+    const nyquist = this.sampleRate / 2;
+    const binWidth = nyquist / spectrum.length;
+    
+    // Focus on high frequencies: 5kHz-15kHz
+    const minBin = Math.floor(5000 / binWidth);
+    const maxBin = Math.min(Math.floor(15000 / binWidth), spectrum.length);
+    
+    let highFreqEnergy = 0;
+    for (let k = minBin; k < maxBin; k++) {
+      const magnitude = spectrum[k] / 255.0;
+      highFreqEnergy += magnitude * magnitude;
+    }
+    return highFreqEnergy / (maxBin - minBin);
   }
   
   /**
@@ -121,25 +157,37 @@ class OnsetDetector {
   }
   
   /**
-   * Low-Frequency Content (LFC) onset detection function
-   * Optimized for kick drums which are typically in 40-100Hz range
-   * IDM music often has complex bass patterns that need focused detection
+   * Drum Content Detection - ALL drum types
+   * Analyzes percussion across full spectrum:
+   * - Kick: 40-100Hz
+   * - Snare: 150-250Hz + 3-5kHz
+   * - Hi-hat/Cymbals: 5-10kHz
+   * - Toms: 80-400Hz
    */
-  calculateLFC(spectrum) {
+  calculateDrumContent(spectrum) {
     const nyquist = this.sampleRate / 2;
     const binWidth = nyquist / spectrum.length;
     
-    // Focus on bass frequencies: 0-200Hz for kick drums
-    const maxKickFreqBin = Math.floor(200 / binWidth);
+    // Analyze drum frequency ranges (0-8000Hz captures most drum energy)
+    const maxDrumFreqBin = Math.floor(8000 / binWidth);
     
-    let lfc = 0;
-    for (let k = 0; k < Math.min(maxKickFreqBin, spectrum.length); k++) {
+    let drumContent = 0;
+    for (let k = 0; k < Math.min(maxDrumFreqBin, spectrum.length); k++) {
       const magnitude = spectrum[k] / 255.0;
-      // Weight lower frequencies more heavily for kick detection
-      const weight = 1.0 - (k / maxKickFreqBin) * 0.5; // Linear decay
-      lfc += magnitude * magnitude * weight;
+      // Emphasize typical drum frequencies
+      const freq = k * binWidth;
+      let weight = 1.0;
+      
+      // Boost kick range (40-100Hz)
+      if (freq >= 40 && freq <= 100) weight = 1.5;
+      // Boost snare fundamentals (150-250Hz)
+      else if (freq >= 150 && freq <= 250) weight = 1.3;
+      // Boost hi-hat/cymbal range (5-8kHz)
+      else if (freq >= 5000 && freq <= 8000) weight = 1.2;
+      
+      drumContent += magnitude * magnitude * weight;
     }
-    return lfc;
+    return drumContent;
   }
   
   /**
@@ -151,7 +199,6 @@ class OnsetDetector {
    */
   calculatePercussiveOnset(currentSpectrum, previousSpectrum) {
     let transientEnergy = 0;
-    let broadbandCount = 0;
     
     // Count frequency bands with sudden increases (transients)
     const bandSize = 20;
@@ -175,15 +222,15 @@ class OnsetDetector {
       }
       
       // A band has a transient if significant sudden increase
-      if (bandTransient > 0.3) {
+      if (bandTransient > 0.25) {
         bandsWithTransients++;
         transientEnergy += bandTransient;
       }
     }
     
     // Drums hit many frequency bands simultaneously
-    // Melodies typically affect fewer, more specific bands
-    const isBroadband = bandsWithTransients >= 3;
+    // Melodies/acid typically affect fewer, more specific bands
+    const isBroadband = bandsWithTransients >= 6; // Lower = detect more drums; Higher = stricter filtering
     
     // Only count as onset if broadband (drum-like)
     if (isBroadband) {
@@ -272,68 +319,113 @@ class OnsetDetector {
     const isPercussiveFrame = this.isPercussive(this.frequencyData, this.previousSpectrum);
     const flatness = this.calculateSpectralFlatness(this.frequencyData);
     const percussive = this.calculatePercussiveOnset(this.frequencyData, this.previousSpectrum);
-    const lfc = this.calculateLFC(this.frequencyData);
+    const drumContent = this.calculateDrumContent(this.frequencyData);
     
-    // Calculate transient strength (sharp attack detection)
+    // Calculate transient strength across full drum spectrum (sharp attack detection)
+    // Analyze 0-400 bins (~0-8kHz at 44.1kHz) to capture all drum types
     let transientStrength = 0;
-    for (let k = 0; k < 50; k++) {
+    const drumBins = Math.min(400, this.frequencyData.length);
+    
+    for (let k = 0; k < drumBins; k++) {
       const current = this.frequencyData[k] / 255.0;
       const previous = this.previousSpectrum[k] / 255.0;
       const change = current - previous;
-      if (change > 0.15) { // Sharp increase
+      // Lowered to 0.15 to capture softer drums while still filtering gradual changes
+      if (change > 0.15) { // Sharp increases (drums)
         transientStrength += change * change;
       }
     }
     
-    // DRUM DETECTION - Less strict but still filters sustained tones:
-    // Drums have TRANSIENTS (sharp attacks) - bass/acid patterns are more sustained
-    // Use transient strength as the primary filter
-    const hasSharpTransient = transientStrength > 0.05;
-    const hasBroadbandEnergy = percussive > 0.1;
+    // STRICT DRUM DETECTION - Filter out melodies, acid, and bass:
+    // 1. Drums have VERY sharp transients (acid/bass have smoother envelopes)
+    // 2. Drums are broadband (acid/melodies are narrow-band tonal)
+    // 3. Drums have high spectral flatness (noise-like), melodies are tonal (low flatness)
+    // 4. Drums have significant energy in typical drum frequency ranges
     
-    // Accept as drum if: sharp transient AND (broadband OR percussive frame)
-    const isDrumHit = hasSharpTransient && (hasBroadbandEnergy || isPercussiveFrame);
+    const hasVerySharpTransient = transientStrength > 0.12; // Balanced: catches most drums while filtering gradual changes
+    const hasBroadbandEnergy = percussive > 0.25; // Strict: drums must hit many bands simultaneously
+    const isNoiseLike = flatness > 0.35; // Critical: reject tonal content (melodies/acid are < 0.2)
+    const hasTypicalDrumFrequencies = drumContent > 0.15; // Must have energy in drum ranges
+    
+    // Accept as drum ONLY if: very sharp transient AND broadband AND noise-like AND drum frequencies
+    // This quad-condition filters out:
+    // - Melodies: tonal (low flatness), narrow-band, wrong frequencies
+    // - Acid: tonal (low flatness), resonant peaks, sustained
+    // - Bass: narrow-band, smoother attack, too low frequency
+    const isDrumHit = hasVerySharpTransient && hasBroadbandEnergy && isNoiseLike && hasTypicalDrumFrequencies;
+    
+    // IDM-STYLE GLITCH DETECTION (Vordhosbn, Aphex Twin style)
+    // Detects: sudden audio CUTS/SILENCES - the signature of IDM glitch edits
+    // Only triggers ONCE per glitch event
+    
+    // Calculate current frame energy
+    const currentEnergy = this.frequencyData.reduce((sum, v) => sum + v, 0) / this.frequencyData.length / 255;
+    
+    // Track energy history (last 30 frames ~0.5 seconds)
+    this.energyHistory.push(currentEnergy);
+    if (this.energyHistory.length > 30) this.energyHistory.shift();
+    
+    // GLITCH DETECTION: Sudden silence/cut after sustained audio
+    // This is THE characteristic of Vordhosbn-style glitches
+    let isGlitchSound = false;
+    
+    if (this.energyHistory.length >= 10 && !this.glitchTriggeredRecently) {
+      // Check if audio was playing (average energy over recent frames)
+      const recentEnergy = this.energyHistory.slice(-10, -1); // Last 10 frames excluding current
+      const avgRecentEnergy = recentEnergy.reduce((a, b) => a + b, 0) / recentEnergy.length;
+      
+      // Sudden cut: was playing audio (energy > 0.08), now suddenly silent/very quiet
+      const wasPlayingAudio = avgRecentEnergy > 0.08;
+      const suddenSilence = currentEnergy < 0.02; // Nearly silent now
+      const sharpDrop = currentEnergy < avgRecentEnergy * 0.15; // 85%+ drop
+      
+      isGlitchSound = wasPlayingAudio && suddenSilence && sharpDrop;
+      
+      if (isGlitchSound) {
+        // Prevent re-triggering for 500ms after a glitch
+        this.glitchTriggeredRecently = true;
+        setTimeout(() => { this.glitchTriggeredRecently = false; }, 500);
+      }
+    }
+    
+    this.previousEnergy = currentEnergy;
     
     // Calculate onset function
     let onsetFunction = 0;
     if (isDrumHit) {
-      // Combine transient strength with percussive detection
-      onsetFunction = (transientStrength * 20) + (percussive * 2);
+      // Combine transient strength with percussive detection and drum frequency content
+      onsetFunction = (transientStrength * 15) + (percussive * 2) + (drumContent * 3);
     }
     
     // Debug every 30 frames (~0.5 seconds at 60fps)
     this.debugCounter++;
     if (this.debugCounter % 30 === 0) {
-      console.log('🥁 DRUM DETECTION:', {
+      console.log('🥁 AUDIO DETECTION:', {
         transient: transientStrength.toFixed(4),
-        percussive: percussive.toFixed(3),
-        flatness: flatness.toFixed(3),
-        hasSharpTransient: hasSharpTransient ? '✅ SHARP' : '❌ SUSTAINED',
-        hasBroadband: hasBroadbandEnergy ? '✅' : '❌',
-        isPercussive: isPercussiveFrame ? '✅' : '❌',
-        isDrumHit: isDrumHit ? '🥁 DRUM' : '🎹 NOT DRUM',
-        total: onsetFunction.toFixed(4),
-        threshold: this.threshold,
-        willTrigger: onsetFunction > this.threshold ? '🔥 YES' : '⏸️ NO'
+        energy: currentEnergy.toFixed(3),
+        isDrum: isDrumHit ? '🥁 YES' : '❌ NO',
+        isGlitch: isGlitchSound ? '⚡ AUDIO CUT!' : '❌ NO'
       });
-    }
-    
-    // Debug: Log onset function value occasionally
-    if (Math.random() < 0.005) {
-      console.log('🎵 Drum check:', 
-        'Transient:', transientStrength.toFixed(4), 
-        '| Percussive:', isPercussiveFrame,
-        '| Broadband:', percussive.toFixed(3), 
-        '→ Total:', onsetFunction.toFixed(4), 
-        '| Is Drum:', isDrumHit);
     }
     
     // Detect onset
     if (this.detectOnset(onsetFunction)) {
-      // Trigger all callbacks
+      // Trigger all drum callbacks
       this.onsetCallbacks.forEach(cb => cb({
         time: this.audioContext.currentTime,
-        strength: onsetFunction
+        strength: onsetFunction,
+        type: 'drum'
+      }));
+    }
+    
+    // Detect glitch sounds - IDM-style audio CUTS (like Vordhosbn)
+    // The glitchTriggeredRecently flag prevents multiple triggers
+    if (isGlitchSound) {
+      console.log('⚡ GLITCH DETECTED! Sudden audio cut/silence');
+      this.glitchCallbacks.forEach(cb => cb({
+        time: this.audioContext.currentTime,
+        strength: transientStrength,
+        type: 'cut'
       }));
     }
     

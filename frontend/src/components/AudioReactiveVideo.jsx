@@ -42,6 +42,11 @@ const AudioReactiveVideo = ({
   const { volume } = useSelector((state) => state.player);
   const { currentSkyColor: globalSkyColor, setCurrentSkyColor: setGlobalSkyColor } = useVideoModal();
   
+  // Glitch effect state
+  const [isGlitching, setIsGlitching] = useState(false);
+  const [glitchType, setGlitchType] = useState(null); // 'flip' or 'stutter' - randomly chosen
+  const glitchTimeoutRef = useRef(null);
+  
   // Determine which color to use: global if active (regardless of playing state), local if not
   const currentSkyColor = isActive ? globalSkyColor : localSkyColor;
   
@@ -58,6 +63,7 @@ const AudioReactiveVideo = ({
   }, [isActive]);
   
   // Listen for drum hits from global audio context (ONLY when this video is active)
+  // Drums trigger sky color changes
   useEffect(() => {
     // Only register callback if this video is the currently playing one
     if (!isActive || !isPlaying) {
@@ -81,6 +87,43 @@ const AudioReactiveVideo = ({
       globalAudioContext.offOnset(handleOnset);
     };
   }, [isActive, isPlaying, setGlobalSkyColor]); // Re-register when active state changes
+  
+  // Listen for glitch sounds (unusual sounds that are NOT drums/melodies/bass/acid)
+  // Glitch sounds trigger video flip and rapid cloud repeat
+  useEffect(() => {
+    if (!isActive || !isPlaying) {
+      return;
+    }
+    
+    const handleGlitch = (glitch) => {
+      // Randomly choose between flip (75%) OR stutter (25%)
+      const chosenEffect = Math.random() < 0.25 ? 'flip' : 'stutter';
+      console.log(`⚡ AudioReactiveVideo: Glitch detected - applying ${chosenEffect} effect`);
+      
+      // Trigger glitch effect
+      setGlitchType(chosenEffect);
+      setIsGlitching(true);
+      
+      // Clear any existing timeout
+      if (glitchTimeoutRef.current) {
+        clearTimeout(glitchTimeoutRef.current);
+      }
+      
+      // End glitch after 150ms (quick burst) - video will flip back automatically
+      glitchTimeoutRef.current = setTimeout(() => {
+        setIsGlitching(false);
+        setGlitchType(null);
+      }, 150);
+    };
+    
+    console.log('🔌 AudioReactiveVideo: Registering glitch callback for ACTIVE video');
+    globalAudioContext.onGlitch(handleGlitch);
+    
+    return () => {
+      console.log('🔌 AudioReactiveVideo: Unregistering glitch callback');
+      globalAudioContext.offGlitch(handleGlitch);
+    };
+  }, [isActive, isPlaying]);
   
   // Render initial frame when video loads (so we see a preview even when not playing)
   useEffect(() => {
@@ -139,6 +182,45 @@ const AudioReactiveVideo = ({
           canvasRef.current,
           currentSkyColorRef.current
         );
+        
+        // Apply glitch effect if active - EITHER flip video OR stutter clouds (not both)
+        if (isGlitching && canvasRef.current && videoRef.current && glitchType) {
+          const ctx = canvasRef.current.getContext('2d');
+          const width = canvasRef.current.width;
+          const height = canvasRef.current.height;
+          
+          if (glitchType === 'flip') {
+            // FLIP EFFECT: Mirror the video horizontally
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = width;
+            tempCanvas.height = height;
+            const tempCtx = tempCanvas.getContext('2d');
+            
+            // Copy current canvas to temp
+            tempCtx.drawImage(canvasRef.current, 0, 0);
+            
+            // Clear main canvas and draw flipped
+            ctx.clearRect(0, 0, width, height);
+            ctx.save();
+            ctx.translate(width, 0);
+            ctx.scale(-1, 1);
+            ctx.drawImage(tempCanvas, 0, 0);
+            ctx.restore();
+            // Video flips back to normal automatically when isGlitching becomes false
+          } else if (glitchType === 'stutter') {
+            // STUTTER EFFECT: Rapid cloud movement repeat
+            const currentTime = videoRef.current.currentTime;
+            videoRef.current.currentTime = Math.max(0, currentTime - 0.08);
+            videoRef.current.playbackRate = 15.0; // Very fast playback for stutter effect
+          }
+        } else if (videoRef.current && playbackRate) {
+          // Restore normal playback rate when not glitching
+          const rate = parseFloat(playbackRate);
+          if (!isNaN(rate) && isFinite(rate) && rate > 0) {
+            videoRef.current.playbackRate = Math.max(0.1, Math.min(2.0, rate));
+          }
+        }
+        
         lastVideoTime = currentVideoTime;
       }
       
@@ -155,7 +237,7 @@ const AudioReactiveVideo = ({
         cancelAnimationFrame(animationFrameRef.current);
       }
     };
-  }, [isPlaying, isActive, skySegmentation]);
+  }, [isPlaying, isActive, skySegmentation, isGlitching, glitchType, playbackRate]);
   
   // Sync volume
   useEffect(() => {
@@ -186,6 +268,9 @@ const AudioReactiveVideo = ({
     return () => {
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current);
+      }
+      if (glitchTimeoutRef.current) {
+        clearTimeout(glitchTimeoutRef.current);
       }
       skySegmentation.dispose();
     };

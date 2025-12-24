@@ -13,6 +13,7 @@ class GlobalAudioContext {
     this.mediaSource = null;
     this.isInitialized = false;
     this.onsetCallbacks = [];
+    this.glitchCallbacks = []; // For unusual sounds (not drums/melodies/bass/acid)
   }
 
   /**
@@ -86,10 +87,17 @@ class GlobalAudioContext {
 
       // Set up onset callback to trigger all registered callbacks
       this.onsetDetector.onOnset((onset) => {
-        console.log('🥁 Kick drum detected! Callbacks:', this.onsetCallbacks.length, onset);
+        console.log('🥁 Drum detected! Callbacks:', this.onsetCallbacks.length, onset);
         this.onsetCallbacks.forEach(callback => {
-          console.log('Calling onset callback...');
           callback(onset);
+        });
+      });
+      
+      // Set up glitch callback for unusual sounds
+      this.onsetDetector.onGlitch((glitch) => {
+        console.log('⚡ Glitch sound detected! Callbacks:', this.glitchCallbacks.length, glitch);
+        this.glitchCallbacks.forEach(callback => {
+          callback(glitch);
         });
       });
 
@@ -123,6 +131,23 @@ class GlobalAudioContext {
    */
   offOnset(callback) {
     this.onsetCallbacks = this.onsetCallbacks.filter(cb => cb !== callback);
+  }
+
+  /**
+   * Register a callback for glitch events (unusual sounds)
+   */
+  onGlitch(callback) {
+    if (!this.glitchCallbacks.includes(callback)) {
+      this.glitchCallbacks.push(callback);
+      console.log('📝 Registered glitch callback, total callbacks:', this.glitchCallbacks.length);
+    }
+  }
+
+  /**
+   * Unregister a glitch callback
+   */
+  offGlitch(callback) {
+    this.glitchCallbacks = this.glitchCallbacks.filter(cb => cb !== callback);
   }
 
   /**

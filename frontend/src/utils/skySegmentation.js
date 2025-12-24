@@ -138,21 +138,30 @@ class SkySegmentation {
       const g = data[i + 1];
       const b = data[i + 2];
       
-      // Detect blue sky pixels (excluding white clouds)
-      // Sky characteristics:
-      // 1. Blue channel is highest
-      // 2. Blue > Red and Blue > Green
-      // 3. Not too bright (clouds are near white with RGB all high)
-      // 4. Has color saturation (not gray/white)
+      // Detect blue sky pixels (excluding white/gray clouds)
+      // Balanced detection - not too strict, not too loose
       
       const isBlueDominant = b > r && b > g;
       const blueStrength = b - Math.max(r, g); // How much more blue than others
       const brightness = (r + g + b) / 3;
-      const isNotTooWhite = brightness < 220; // Exclude bright clouds
-      const hasSaturation = Math.max(r, g, b) - Math.min(r, g, b) > 30; // Not gray
+      const saturation = Math.max(r, g, b) - Math.min(r, g, b);
+      
+      // Balanced cloud filtering:
+      // - Allow brighter sky (higher brightness threshold)
+      // - Still require some saturation (clouds are white/gray)
+      // - Blue must be dominant but not extremely so
+      const isNotTooWhite = brightness < 210; // Allow lighter sky, exclude very bright clouds
+      const hasSomeSaturation = saturation > 40; // Clouds are desaturated (white/gray)
+      const hasGoodBlue = blueStrength > 25; // Blue should be noticeably higher
+      
+      // Basic checks:
+      const redIsReasonable = r < 200; // Not too red (clouds are whiter)
+      const greenIsReasonable = g < 210; // Not too green
+      const isBlueish = b > 100 && b > r * 1.15 && b > g * 1.1; // Blue 15% higher than red
       
       // Check if this pixel is blue sky (not cloud)
-      const isSky = isBlueDominant && blueStrength > 20 && isNotTooWhite && hasSaturation;
+      const isSky = isBlueDominant && hasGoodBlue && isNotTooWhite && hasSomeSaturation && 
+                    redIsReasonable && greenIsReasonable && isBlueish;
       
       if (isSky) {
         // Blend the sky pixel with the target color
