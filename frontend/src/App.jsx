@@ -72,8 +72,8 @@ const AppContent = () => {
       
       <Sidebar />
       <div className="flex-1 flex flex-col bg-gradient-to-br from-[#041529] to-[#2970c2]">
-        <div className="px-6 h-full overflow-y-scroll flex xl:flex-row flex-col-reverse">
-          <div className="flex-1 h-fit pb-40">
+        <div className={`px-6 overflow-y-scroll flex xl:flex-row flex-col-reverse ${(activeSong?.albumTitle || activeSong?.gameTitle) ? 'h-[calc(100vh-7rem)]' : 'h-full'}`}>
+          <div className="flex-1 h-fit pb-4">
             <Searchbar />
 
             <Routes>
@@ -113,7 +113,7 @@ const AppContent = () => {
 
       {/* Music Player - Fixed at bottom */}
       {(activeSong?.albumTitle || activeSong?.gameTitle) && (
-        <div className="absolute h-28 bottom-0 left-0 right-0 flex animate-slideup bg-gradient-to-br from-white/10 to-[#cf616a] backdrop-blur-lg rounded-t-3xl z-10">
+        <div className="absolute h-28 bottom-0 left-0 right-0 flex animate-slideup bg-gradient-to-br from-white/10 to-[#cf616a] backdrop-blur-lg block-t-3xl z-50">
           <MusicPlayer />
         </div>
       )}

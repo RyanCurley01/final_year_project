@@ -39,8 +39,8 @@ const Track = ({ isPlaying, isActive, activeSong }) => {
   }, [songEnded, isActive, isVideo, videoError]);
 
   return (
-  <div className="flex-1 flex items-center justify-start">
-    <div className={`${isPlaying && isActive ? 'animate-[spin_3s_linear_infinite]' : ''} hidden sm:block h-16 w-16 mr-4`}>
+  <div className="flex items-center justify-start flex-shrink-0">
+    <div className={`${isPlaying && isActive ? 'animate-[spin_3s_linear_infinite]' : ''} block h-12 w-12 sm:h-16 sm:w-16 mr-2 sm:mr-4 flex-shrink-0`}>
       {isVideo && !videoError ? (
         <video
           ref={videoRef}
@@ -71,11 +71,11 @@ const Track = ({ isPlaying, isActive, activeSong }) => {
         />
       ) : null}
     </div>
-    <div className="w-[50%]">
-      <p className="truncate text-white font-bold text-lg">
+    <div className="min-w-0">
+      <p className="text-white font-bold text-sm sm:text-base">
         {activeSong?.albumTitle || activeSong?.gameTitle || 'No active Song'}
       </p>
-      <p className="truncate text-gray-300">
+      <p className="text-gray-300 text-xs sm:text-sm">
         {activeSong?.albumPrice ? `$${activeSong.albumPrice.toFixed(2)}` : activeSong?.gamePrice ? `$${activeSong.gamePrice.toFixed(2)}` : 'Select a song'}
       </p>
     </div>
