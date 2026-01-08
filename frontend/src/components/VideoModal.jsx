@@ -7,7 +7,7 @@ const VideoModal = ({ isOpen, onClose, videoSrc, title, isPlaying, isActive }) =
 
   return createPortal(
     <div
-      className="fixed bg-gradient-to-br from-gray-900 to-black rounded-lg shadow-2xl border border-gray-700"
+      className="fixed bg-gradient-to-br from-gray-900 to-black rounded-lg shadow-2xl border border-gray-700 z-0"
       style={{
         width: '400px',
         maxWidth: 'calc(100vw - 2rem)',

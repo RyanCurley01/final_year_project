@@ -294,7 +294,7 @@ const SmartRecommendationVisualizer = ({
                   onMouseEnter={() => setHoveredRec(rec.product_id)}
                   onMouseLeave={() => setHoveredRec(null)}
                   onClick={() => product && onRecommendationClick?.(product)}
-                  className="relative p-4 bg-gray-800/70 hover:bg-gray-700/70 rounded-lg border border-gray-700 hover:border-cyan-500 transition-all cursor-pointer group"
+                  className="relative p-8 bg-gray-800/70 hover:bg-gray-700/70 rounded-lg border border-gray-700 hover:border-cyan-500 transition-all cursor-pointer group"
                 >
                   {/* Similarity Score Badge */}
                   <div className="absolute top-2 right-2">

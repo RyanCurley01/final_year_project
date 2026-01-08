@@ -58,7 +58,7 @@ const TopChartCard = ({ song, i, isPlaying, activeSong, handlePauseClick, handle
             <button
               onClick={handleMaximizeClick}
               className="absolute top-1 right-1 p-1 bg-black/70 hover:bg-black/90 rounded-md 
-                       transition-all duration-200 z-50 shadow-lg"
+                       transition-all duration-200 z-0 shadow-lg cursor-pointer"
               title="Fullscreen"
             >
               <MdFullscreen className="text-white text-lg" />

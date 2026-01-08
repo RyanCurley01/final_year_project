@@ -1,5 +1,5 @@
 import { useSelector, useDispatch } from 'react-redux';
-import { Route, Routes } from 'react-router-dom';
+import { Route, Routes, useLocation } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 
 import { Searchbar, Sidebar, MusicPlayer, TopPlay } from './components';
@@ -17,6 +17,7 @@ const AppContent = () => {
   const { activeSong, isPlaying } = useSelector((state) => state.player);
   const { modalState, closeModal } = useVideoModal();
   const dispatch = useDispatch();
+  const location = useLocation();
   const [audioFeatures, setAudioFeatures] = useState(null);
   const [sessionId] = useState(`session_${Date.now()}`);
   const [products, setProducts] = useState([]);
@@ -71,8 +72,8 @@ const AppContent = () => {
       />
       
       <Sidebar />
-      <div className="flex-1 flex flex-col bg-gradient-to-br from-[#041529] to-[#2970c2]">
-        <div className={`px-6 overflow-y-scroll flex xl:flex-row flex-col-reverse ${(activeSong?.albumTitle || activeSong?.gameTitle) ? 'h-[calc(100vh-7rem)]' : 'h-full'}`}>
+      <div className="flex-1 flex flex-col bg-gradient-to-br from-[#041529] to-[#2970c2] overflow-hidden">
+        <div className={`px-6 overflow-y-auto flex xl:flex-row flex-col-reverse ${(activeSong?.albumTitle || activeSong?.gameTitle) ? 'h-[calc(100vh-7rem)]' : 'h-screen'}`}>
           <div className="flex-1 h-fit pb-4">
             <Searchbar />
 
@@ -89,25 +90,27 @@ const AppContent = () => {
             </Routes>
           </div>
           {/* Right sidebar with increased width and right alignment */}
-          <div className="relative top-0 h-fit py-10 xl:w-[500px] 2xl:w-[600px]">
-            <TopPlay />
-            <div className="w-full px-8 py-8 mt-4 ml-5">
-              {/* Smart Recommendation Visualizer */}
-              {isPlaying && activeSong?.albumTitle ? (
-                <SmartRecommendationVisualizer 
-                  currentProduct={activeSong}
-                  audioFeatures={audioFeatures}
-                  products={musicProducts}
-                  sessionId={sessionId}
-                  onRecommendationClick={handleRecommendationClick}
-                />
-              ) : (
-                <div className="bg-gradient-to-br from-gray-900 to-black p-6 rounded-lg border border-gray-800">
-                  <p className="text-gray-400 text-center">Play a song to see audio-based recommendations</p>
-                </div>
-              )}
+          {location.pathname === '/' && (
+            <div className="relative top-0 h-fit py-10 xl:w-[500px] 2xl:w-[600px]">
+              <TopPlay />
+              <div className="w-full px-8 py-8 mt-4 ml-5">
+                {/* Smart Recommendation Visualizer */}
+                {isPlaying && activeSong?.albumTitle ? (
+                  <SmartRecommendationVisualizer 
+                    currentProduct={activeSong}
+                    audioFeatures={audioFeatures}
+                    products={musicProducts}
+                    sessionId={sessionId}
+                    onRecommendationClick={handleRecommendationClick}
+                  />
+                ) : (
+                  <div className="bg-gradient-to-br from-gray-900 to-black p-6 rounded-lg border border-gray-800">
+                    <p className="text-gray-400 text-center">Play a song to see audio-based recommendations</p>
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
+          )}
         </div>
       </div>
 
