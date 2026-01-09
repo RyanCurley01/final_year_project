@@ -7,6 +7,7 @@ import TopCharts from './TopCharts';
 import AroundYou from './AroundYou';
 import Cart from './Cart';
 import PurchaseHistory from './PurchaseHistory';
+import SimilarSongs from './SimilarSongs';
 
 export {
   CustomerScreen,
@@ -18,4 +19,5 @@ export {
   AroundYou,
   Cart,
   PurchaseHistory,
+  SimilarSongs,
 };
