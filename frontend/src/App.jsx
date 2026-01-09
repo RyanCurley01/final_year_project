@@ -7,8 +7,8 @@ import { ArtistDetails, TopArtists, AroundYou, CustomerScreen, Search, SongDetai
 import Cart from './pages/Cart';
 import PurchaseHistory from './pages/PurchaseHistory';
 import SmartRecommendationVisualizer from './components/SmartRecommendationVisualizer';
-import AudioAnalyzer from './components/AudioAnalyzer';
 import { VideoModalProvider, useVideoModal } from './context/VideoModalContext';
+import { AudioFeaturesProvider } from './context/AudioFeaturesContext';
 import VideoModal from './components/VideoModal';
 import { productService } from './redux/services';
 import { setActiveSong, playPause as playPauseAction } from './redux/features/playerSlice';
@@ -18,7 +18,6 @@ const AppContent = () => {
   const { modalState, closeModal } = useVideoModal();
   const dispatch = useDispatch();
   const location = useLocation();
-  const [audioFeatures, setAudioFeatures] = useState(null);
   const [sessionId] = useState(`session_${Date.now()}`);
   const [products, setProducts] = useState([]);
   
@@ -41,14 +40,6 @@ const AppContent = () => {
     fetchProducts();
   }, []);
 
-  // Get audio element for analyzer
-  const audioElement = typeof document !== 'undefined' ? document.querySelector('audio') : null;
-
-  // Handle audio features extraction
-  const handleFeaturesExtracted = (features) => {
-    setAudioFeatures(features);
-  };
-
   // Handle recommendation click
   const handleRecommendationClick = (product) => {
     const music = products.filter(p => p.albumTitle);
@@ -64,13 +55,6 @@ const AppContent = () => {
 
   return (
     <div className="relative flex h-screen overflow-hidden">
-      {/* Audio Analyzer - Headless component */}
-      <AudioAnalyzer 
-        audioElement={audioElement}
-        onFeaturesExtracted={handleFeaturesExtracted}
-        isPlaying={isPlaying}
-      />
-      
       <Sidebar />
       <div className="flex-1 flex flex-col bg-gradient-to-br from-[#041529] to-[#2970c2] overflow-hidden">
         <div className={`px-6 overflow-y-auto flex xl:flex-row flex-col-reverse ${(activeSong?.albumTitle || activeSong?.gameTitle) ? 'h-[calc(100vh-7rem)]' : 'h-screen'}`}>
@@ -99,7 +83,6 @@ const AppContent = () => {
                 {isPlaying && activeSong?.albumTitle ? (
                   <SmartRecommendationVisualizer 
                     currentProduct={activeSong}
-                    audioFeatures={audioFeatures}
                     products={musicProducts}
                     sessionId={sessionId}
                     onRecommendationClick={handleRecommendationClick}
@@ -139,7 +122,9 @@ const AppContent = () => {
 
 const App = () => (
   <VideoModalProvider>
-    <AppContent />
+    <AudioFeaturesProvider>
+      <AppContent />
+    </AudioFeaturesProvider>
   </VideoModalProvider>
 );
 

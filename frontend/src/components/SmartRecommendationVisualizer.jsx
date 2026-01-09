@@ -2,15 +2,15 @@ import { useEffect, useState, useRef } from 'react';
 import { useSelector } from 'react-redux';
 import { motion, AnimatePresence } from 'framer-motion';
 import axios from 'axios';
+import { useAudioFeatures } from '../context/AudioFeaturesContext';
 
 /**
  * SmartRecommendationVisualizer (formerly PersonalRecommendations)
  * Displays real-time audio-based recommendations with visual similarity indicators
- * Now responds immediately to playbackRate changes for tempo-based recommendation updates
+ * Now uses shared AudioFeaturesContext for audio features
  */
 const SmartRecommendationVisualizer = ({ 
   currentProduct, 
-  audioFeatures, 
   products,
   sessionId,
   onRecommendationClick 
@@ -21,6 +21,9 @@ const SmartRecommendationVisualizer = ({
   const [noMatchFound, setNoMatchFound] = useState(false);
   const isInitialLoad = useRef(true);
   const intervalRef = useRef(null);
+  
+  // Get audio features from shared context
+  const { audioFeatures } = useAudioFeatures();
   
   // Get playbackRate from Redux to trigger immediate recommendation updates
   const { playbackRate } = useSelector((state) => state.player);
@@ -74,52 +77,52 @@ const SmartRecommendationVisualizer = ({
     }
   };
 
-  // Fetch IMMEDIATELY when playbackRate changes (slider moved) - no debounce
+  // Single useEffect to handle all recommendation updates
   useEffect(() => {
-    if (!currentProduct || !audioFeatures || !sessionId) {
-      return;
-    }
-    
-    console.log('Slider changed to:', playbackRate, '- fetching new recommendations');
-    // Always fetch when playbackRate changes
-    fetchRecommendations(currentProduct, audioFeatures, playbackRate, sessionId, true);
-  }, [playbackRate]);
-
-  // Initial fetch when component mounts or product changes
-  useEffect(() => {
-    if (!currentProduct || !audioFeatures || !sessionId) {
-      return;
-    }
-
-    console.log('Initial fetch for product:', currentProduct.id);
-    fetchRecommendations(currentProduct, audioFeatures, playbackRate, sessionId, true);
-  }, [currentProduct?.id, audioFeatures, sessionId]);
-
-  // Set up 5-second interval for periodic refresh
-  useEffect(() => {
-    if (!currentProduct || !audioFeatures || !sessionId) {
-      return;
-    }
-
-    // Clear existing interval
+    // Clear any existing interval
     if (intervalRef.current) {
       clearInterval(intervalRef.current);
+      intervalRef.current = null;
     }
 
-    // Set up 5-second interval for periodic refresh
-    // Uses ref so it always gets latest playbackRate
-    intervalRef.current = setInterval(() => {
-      console.log('Interval triggered: fetching recommendations');
-      fetchRecommendations(currentProduct, audioFeatures, playbackRateRef.current, sessionId, false);
-    }, 5000);
+    if (!currentProduct || !sessionId) {
+      return;
+    }
 
-    // Cleanup interval on unmount or when dependencies change
+    // Helper function to fetch recommendations
+    const doFetch = (forceRefresh = false) => {
+      const features = audioFeatures || {
+        tempo: 120,
+        energy: 0.5,
+        valence: 0.5,
+        danceability: 0.5
+      };
+      
+      console.log('🔄 Fetching recommendations:', {
+        product: currentProduct.id,
+        hasRealFeatures: !!audioFeatures,
+        playbackRate: playbackRateRef.current
+      });
+      
+      fetchRecommendations(currentProduct, features, playbackRateRef.current, sessionId, forceRefresh);
+    };
+
+    // Immediate fetch
+    console.log('⚡ INSTANT fetch for product:', currentProduct.id);
+    doFetch(true);
+
+    // Set up polling interval (2 seconds)
+    console.log('⏱️ Starting 2s polling interval');
+    intervalRef.current = setInterval(() => doFetch(false), 2000);
+
+    // Cleanup
     return () => {
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
+        intervalRef.current = null;
       }
     };
-  }, [currentProduct?.id, audioFeatures, sessionId]);
+  }, [currentProduct?.id, audioFeatures, sessionId, playbackRate]);
 
   // Calculate real-time match values based on current audio features
   const calculateLiveMatch = (recProductId) => {

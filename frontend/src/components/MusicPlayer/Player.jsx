@@ -10,7 +10,7 @@ const Player = ({ activeSong, isPlaying, volume, seekTime, onEnded, onTimeUpdate
     if (ref.current) {
       console.log('Player state:', { isPlaying, activeSong: activeSong?.albumTitle, fileUrl: activeSong?.fileUrl });
       
-      if (isPlaying) {
+      if (isPlaying && activeSong?.fileUrl) {
         const playPromise = ref.current.play();
         if (playPromise !== undefined) {
           playPromise
@@ -51,14 +51,12 @@ const Player = ({ activeSong, isPlaying, volume, seekTime, onEnded, onTimeUpdate
     }
   }, [seekTime]);
 
-  if (!activeSong?.fileUrl) {
-    console.log('No fileUrl available');
-    return null;
-  }
-
+  // IMPORTANT: Always render the audio element to keep it persistent
+  // This prevents the element from being destroyed/recreated which breaks
+  // the Web Audio API connection (createMediaElementSource can only be called once)
   return (
     <audio
-      src={activeSong.fileUrl}
+      src={activeSong?.fileUrl || ''}
       ref={ref}
       crossOrigin="anonymous"
       loop={repeat}
@@ -69,7 +67,10 @@ const Player = ({ activeSong, isPlaying, volume, seekTime, onEnded, onTimeUpdate
         onLoadedData(e);
       }}
       onError={(e) => {
-        console.error('Audio loading error:', e.target.error);
+        // Only log real errors, not empty src errors
+        if (activeSong?.fileUrl) {
+          console.error('Audio loading error:', e.target.error);
+        }
       }}
     />
   );

@@ -65,7 +65,8 @@ const AudioAnalyzer = ({ audioElement, onFeaturesExtracted, isPlaying }) => {
     if (!analyser || !isPlaying) return;
 
     let lastCallbackTime = 0;
-    const CALLBACK_THROTTLE_MS = 3000; // Only send features every 3 seconds
+    const CALLBACK_THROTTLE_MS = 1000; // Call back every 1 second (was 3s)
+    let hasCalledInitially = false;
 
     const extractFeatures = (timestamp) => {
       const bufferLength = analyser.frequencyBinCount;
@@ -82,10 +83,14 @@ const AudioAnalyzer = ({ audioElement, onFeaturesExtracted, isPlaying }) => {
       // Always update local state for smooth UI
       setFeatures(extractedFeatures);
       
-      // Throttle the callback to avoid overwhelming the recommendation API
-      if (onFeaturesExtractedRef.current && timestamp - lastCallbackTime >= CALLBACK_THROTTLE_MS) {
+      // Call immediately on first valid extraction, then throttle
+      const shouldCallback = !hasCalledInitially || (timestamp - lastCallbackTime >= CALLBACK_THROTTLE_MS);
+      
+      if (onFeaturesExtractedRef.current && shouldCallback) {
+        console.log('🎵 AudioAnalyzer sending features:', extractedFeatures);
         onFeaturesExtractedRef.current(extractedFeatures);
         lastCallbackTime = timestamp;
+        hasCalledInitially = true;
       }
 
       // Continue analysis loop

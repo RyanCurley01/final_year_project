@@ -6,7 +6,16 @@ const Track = ({ isPlaying, isActive, activeSong }) => {
   const videoRef = useRef(null);
   const [videoError, setVideoError] = useState(false);
   const { songEnded } = useSelector((state) => state.player);
-  const coverMedia = activeSong?.albumCoverImageUrl || activeSong?.gameCoverImageUrl;
+  
+  // Support both database songs (albumCoverImageUrl) and iTunes songs (artworkUrl100)
+  const getCoverMedia = () => {
+    if (activeSong?.albumCoverImageUrl) return activeSong.albumCoverImageUrl;
+    if (activeSong?.gameCoverImageUrl) return activeSong.gameCoverImageUrl;
+    if (activeSong?.artworkUrl100) return activeSong.artworkUrl100.replace('100x100', '400x400');
+    return null;
+  };
+  
+  const coverMedia = getCoverMedia();
   const isVideo = coverMedia && coverMedia.toLowerCase().includes('.mp4');
   
   // Reset video error when song changes
@@ -72,11 +81,11 @@ const Track = ({ isPlaying, isActive, activeSong }) => {
       ) : null}
     </div>
     <div className="min-w-0">
-      <p className="text-white font-bold text-sm sm:text-base">
-        {activeSong?.albumTitle || activeSong?.gameTitle || 'No active Song'}
+      <p className="text-white font-bold text-sm sm:text-base truncate">
+        {activeSong?.trackName || activeSong?.albumTitle || activeSong?.gameTitle || 'No active Song'}
       </p>
-      <p className="text-gray-300 text-xs sm:text-sm">
-        {activeSong?.albumPrice ? `$${activeSong.albumPrice.toFixed(2)}` : activeSong?.gamePrice ? `$${activeSong.gamePrice.toFixed(2)}` : 'Select a song'}
+      <p className="text-gray-300 text-xs sm:text-sm truncate">
+        {activeSong?.artistName || (activeSong?.albumPrice ? `$${activeSong.albumPrice.toFixed(2)}` : activeSong?.gamePrice ? `$${activeSong.gamePrice.toFixed(2)}` : 'Select a song')}
       </p>
     </div>
   </div>

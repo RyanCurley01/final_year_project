@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { NavLink } from 'react-router-dom'; 
+import { useDispatch } from 'react-redux';
 import { HiOutlineMenu } from 'react-icons/hi';
 import { RiCloseLine } from 'react-icons/ri';
 import { FaReceipt } from 'react-icons/fa';
@@ -7,8 +8,9 @@ import { FaReceipt } from 'react-icons/fa';
 import { logo } from '../assets';
 import { links } from '../assets/constants';
 import CartIcon from './CartIcon';
+import { resetPlayer } from '../redux/features/playerSlice';
 
-const NavLinks = ({ handleClick }) => (
+const NavLinks = ({ handleClick, onResetPlayer }) => (
   <div className="mt-10">
     {links.map((item) => (
       <NavLink 
@@ -18,7 +20,10 @@ const NavLinks = ({ handleClick }) => (
       justify-start items-center my-8 text-sm
       font-medium text-gray-300
       hover:text-primary-light"
-      onClick={() => handleClick && handleClick()}
+      onClick={() => {
+        onResetPlayer && onResetPlayer();
+        handleClick && handleClick();
+      }}
       >
         <item.icon className="w-6 h-6 mr-2" />
         {item.name}
@@ -29,7 +34,10 @@ const NavLinks = ({ handleClick }) => (
     <NavLink
       to="/cart"
       className="flex flex-row justify-start items-center my-8 text-sm font-medium text-gray-300 hover:text-primary-light"
-      onClick={() => handleClick && handleClick()}
+      onClick={() => {
+        onResetPlayer && onResetPlayer();
+        handleClick && handleClick();
+      }}
     >
       <CartIcon />
       <span className="ml-4">Cart</span>
@@ -39,7 +47,10 @@ const NavLinks = ({ handleClick }) => (
     <NavLink
       to="/purchase-history"
       className="flex flex-row justify-start items-center my-8 text-sm font-medium text-gray-300 hover:text-primary-light"
-      onClick={() => handleClick && handleClick()}
+      onClick={() => {
+        onResetPlayer && onResetPlayer();
+        handleClick && handleClick();
+      }}
     >
       <FaReceipt className="w-6 h-6 mr-2" />
       Purchase History
@@ -49,6 +60,11 @@ const NavLinks = ({ handleClick }) => (
 
 const Sidebar = () => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const dispatch = useDispatch();
+
+  const handleResetPlayer = () => {
+    dispatch(resetPlayer());
+  };
 
   return (
     <>
@@ -56,7 +72,7 @@ const Sidebar = () => {
     py-10 px-4 bg-[#252246] relative z-20">
       <img src={logo} alt="logo" className="w-full h-[100px] 
       object-contain" />
-      < NavLinks />
+      <NavLinks onResetPlayer={handleResetPlayer} />
     </div>
 
 
@@ -77,8 +93,7 @@ const Sidebar = () => {
     '-left-full'}`}>
       <img src={logo} alt="logo" className="w-full h-[100px] 
       object-contain" />
-      < NavLinks handleClick={() => setMobileMenuOpen
-      (false)}/>
+      <NavLinks handleClick={() => setMobileMenuOpen(false)} onResetPlayer={handleResetPlayer} />
     </div>
     </>
   );
