@@ -282,15 +282,11 @@ USE Game_Store_System;
     (NULL, 'Alien Utopia', NULL, NULL, 0.50, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Music Cover Image and cloud movement script/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien Utopia.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien Utopia.wav', 200),
     (NULL, 'Alien Wonder', NULL, NULL, 0.50, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Music Cover Image and cloud movement script/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien Wonder.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien Wonder.wav', 200),
     (NULL, 'Extraterrestrial Rave', NULL, NULL, 0.50, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Music Cover Image and cloud movement script/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Extraterrestrial Rave.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Extraterrestrial Rave.wav', 200),
-    (NULL, 'Find The Light', NULL, NULL, 0.50, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Music Cover Image and cloud movement script/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Find The Light.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Find The Light.wav', 200),
     (NULL, 'Green Bear', NULL, NULL, 0.50, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Music Cover Image and cloud movement script/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Green Bear.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Green Bear.wav', 200),
     (NULL, 'Green God', NULL, NULL, 0.50, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Music Cover Image and cloud movement script/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Green God.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Green God.wav', 200),
     (NULL, 'Intergalactic Rave', NULL, NULL, 0.50, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Music Cover Image and cloud movement script/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Intergalactic Rave.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Intergalactic Rave.wav', 200),
-    (NULL, 'Mike''s Rave', NULL, NULL, 0.50, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Music Cover Image and cloud movement script/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Mike%E2%80%99s%20Rave.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Mike%E2%80%99s%20Rave.wav', 200),
-    (NULL, 'Mike''s Utopia', NULL, NULL, 0.50, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Music Cover Image and cloud movement script/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Mike%E2%80%99s%20Utopia.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Mike%E2%80%99s%20Utopia.wav', 200),
     (NULL, 'Ted Chilling', NULL, NULL, 0.50, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Music Cover Image and cloud movement script/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted Chilling.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted Chilling.wav', 200),
     (NULL, 'Teddy Emotion', NULL, NULL, 0.50, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Music Cover Image and cloud movement script/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Teddy Emotion.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Teddy Emotion.wav', 200),
-    (NULL, 'Ted''s Adventure', NULL, NULL, 0.50, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Music Cover Image and cloud movement script/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Adventure.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Adventure.wav', 200),
     (NULL, 'Ted''s Awakening', NULL, NULL, 0.50, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Music Cover Image and cloud movement script/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Awakening.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Awakening.wav', 200),
     (NULL, 'Ted''s Beautiful Anger', NULL, NULL, 0.50, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Music Cover Image and cloud movement script/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Beautiful%20Anger.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Beautiful%20Anger.wav', 200),
     (NULL, 'Ted''s Chillness', NULL, NULL, 0.50, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Music Cover Image and cloud movement script/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Chillness.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Chillness.wav', 200),
@@ -299,7 +295,12 @@ USE Game_Store_System;
     (NULL, 'Ted''s Energy', NULL, NULL, 0.50, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Music Cover Image and cloud movement script/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Energy.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Energy.wav', 200),
     (NULL, 'Ted''s Green Machine', NULL, NULL, 0.50, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Music Cover Image and cloud movement script/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Green%20Machine.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Green%20Machine.wav', 200),
     (NULL, 'Ted''s Rush Up', NULL, NULL, 0.50, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Music Cover Image and cloud movement script/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Rush%20Up.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Rush%20Up.wav', 200),
-    (NULL, 'Ted''s Utopia', NULL, NULL, 0.50, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Music Cover Image and cloud movement script/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Utopia.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Utopia.wav', 200);
+    (NULL, 'Ted''s Utopia', NULL, NULL, 0.50, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Music Cover Image and cloud movement script/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Utopia.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Utopia.wav', 200),
+    (NULL, 'Acid Ambience', NULL, NULL, 0.50, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Music Cover Image and cloud movement script/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Acid%20Ambience%20.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Acid%20Ambience%20.wav', 200),
+    (NULL, 'Alien Amen Break Beat', NULL, NULL, 0.50, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Music Cover Image and cloud movement script/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Amen%20Break%20Beat.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Amen%20Break%20Beat.wav', 200),
+    (NULL, 'Breakcore Bear Hug', NULL, NULL, 0.50, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Music Cover Image and cloud movement script/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Breakcore%20Bear%20Hug.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Breakcore%20Bear%20Hug.wav', 200),
+    (NULL, 'Drunk House', NULL, NULL, 0.50, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Music Cover Image and cloud movement script/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Drunk%20House.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Drunk%20House.wav', 200),
+    (NULL, 'Soft Chaos', NULL, NULL, 0.50, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Music Cover Image and cloud movement script/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Soft%20Chaos.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Soft%20Chaos.wav', 200);
 
     -- Insert Stock entries 
     INSERT INTO Stock (StockQuantity, ProductID) VALUES
@@ -308,7 +309,7 @@ USE Game_Store_System;
     (100, 3),  -- Protectors
     (100, 4),  -- Red Hood
     (200, 5),  -- Selected Electronic Works (full album ZIP)
-    -- Individual songs (Product IDs 6-53)
+    -- Individual songs (Product IDs 6-58)
     (200, 6), (200, 7), (200, 8), (200, 9), (200, 10),
     (200, 11), (200, 12), (200, 13), (200, 14), (200, 15),
     (200, 16), (200, 17), (200, 18), (200, 19), (200, 20),
@@ -318,7 +319,8 @@ USE Game_Store_System;
     (200, 36), (200, 37), (200, 38), (200, 39), (200, 40),
     (200, 41), (200, 42), (200, 43), (200, 44), (200, 45),
     (200, 46), (200, 47), (200, 48), (200, 49), (200, 50),
-    (200, 51), (200, 52), (200, 53);
+    (200, 51), (200, 52), (200, 53), (200, 54), (200, 55),
+    (200, 56), (200, 57), (200, 58);
 
     -- Insert Orders
     INSERT INTO Orders (AccountID, orderDate, TotalAmount) VALUES
@@ -388,61 +390,50 @@ USE Game_Store_System;
     (9, 3),   -- Frank wants Protectors
     (10, 2);  -- Grace wants Midnight Haunt
 
-    -- Insert Sample UserInteractions (simulate user behavior)
-    INSERT INTO UserInteractions (AccountID, ProductID, InteractionType, DurationSeconds, CompletionPercentage, EngagementScore, DeviceType, SessionID) VALUES
-    -- John Smith (Manager) exploring music
-    (1, 6, 'play', 120, 75.5, 0.85, 'desktop', 'sess_001'),
-    (1, 7, 'preview', 45, 90.0, 0.92, 'desktop', 'sess_001'),
-    (1, 8, 'play', 180, 100.0, 0.98, 'desktop', 'sess_001'),
-    -- Alice Brown (Customer) - likes energetic music
-    (4, 10, 'play', 150, 95.0, 0.95, 'mobile', 'sess_002'),
-    (4, 15, 'play', 200, 100.0, 0.99, 'mobile', 'sess_002'),
-    (4, 20, 'preview', 30, 50.0, 0.65, 'mobile', 'sess_002'),
-    (4, 1, 'view', 10, 100.0, 0.40, 'mobile', 'sess_002'),
-    (4, 1, 'purchase', NULL, NULL, 1.0, 'mobile', 'sess_002'),
-    -- Bob Davis - exploring various genres
-    (5, 25, 'play', 90, 60.0, 0.70, 'tablet', 'sess_003'),
-    (5, 30, 'play', 160, 85.0, 0.88, 'tablet', 'sess_003'),
-    (5, 35, 'preview', 20, 40.0, 0.55, 'tablet', 'sess_003'),
-    -- Carol White - chill music listener
-    (6, 11, 'play', 210, 100.0, 0.96, 'desktop', 'sess_004'),
-    (6, 16, 'play', 190, 95.0, 0.94, 'desktop', 'sess_004'),
-    (6, 40, 'play', 180, 100.0, 0.97, 'desktop', 'sess_004'),
-    -- David Lee - game browser
-    (7, 1, 'view', 25, 100.0, 0.75, 'desktop', 'sess_005'),
-    (7, 2, 'view', 30, 100.0, 0.80, 'desktop', 'sess_005'),
-    (7, 3, 'view', 45, 100.0, 0.90, 'desktop', 'sess_005'),
-    (7, 3, 'purchase', NULL, NULL, 1.0, 'desktop', 'sess_005');
-
-    -- Insert Sample AudioFeatures (placeholder data - will be populated by AI service)
-    -- Features for a few songs to demonstrate the structure
-    INSERT INTO AudioFeatures (ProductID, Tempo, Energy, Danceability, Valence, Acousticness, Instrumentalness, Loudness, Speechiness, Genre, Mood, Duration, SpectralCentroid, SpectralRolloff, ZeroCrossingRate) VALUES
-    -- Alien Acid - High energy electronic
-    (6, 128.0, 0.92, 0.88, 0.75, 0.05, 0.95, -5.5, 0.03, 'Electronic', 'Energetic', 240, 2500.0, 8000.0, 0.15),
-    -- Alien Action - Fast paced
-    (7, 140.0, 0.95, 0.85, 0.80, 0.03, 0.98, -4.8, 0.02, 'Electronic', 'Energetic', 210, 2800.0, 8500.0, 0.18),
-    -- Alien Chilling - Relaxed ambient
-    (11, 90.0, 0.45, 0.50, 0.65, 0.20, 0.90, -12.0, 0.01, 'Ambient', 'Calm', 300, 1500.0, 5000.0, 0.08),
-    -- Alien Euphoria - Happy uplifting
-    (13, 125.0, 0.88, 0.90, 0.95, 0.08, 0.85, -6.2, 0.04, 'Electronic', 'Happy', 220, 2600.0, 7800.0, 0.14),
-    -- Ted Chilling - Relaxed downtempo
-    (36, 85.0, 0.40, 0.55, 0.70, 0.25, 0.88, -13.5, 0.02, 'Downtempo', 'Calm', 280, 1400.0, 4800.0, 0.07);
-
-    -- Insert Sample Recommendations (AI-generated recommendations)
-    INSERT INTO UserRecommendations (AccountID, ProductID, RecommendationScore, RecommendationType, ReasonCode, ExpiresAt, WasShown, WasClicked) VALUES
-    -- Recommendations for Alice (likes energetic music)
-    (4, 7, 0.95, 'content-based', 'Similar tempo and energy to Alien Hyperness', DATE_ADD(NOW(), INTERVAL 7 DAY), TRUE, TRUE),
-    (4, 13, 0.92, 'content-based', 'High valence and energy match your preferences', DATE_ADD(NOW(), INTERVAL 7 DAY), TRUE, FALSE),
-    (4, 22, 0.88, 'collaborative', 'Users with similar taste enjoyed this', DATE_ADD(NOW(), INTERVAL 7 DAY), FALSE, FALSE),
-    -- Recommendations for Bob
-    (5, 40, 0.90, 'collaborative', 'Popular among users who liked Alien Sense', DATE_ADD(NOW(), INTERVAL 7 DAY), TRUE, FALSE),
-    (5, 16, 0.85, 'content-based', 'Similar audio features to your recent listens', DATE_ADD(NOW(), INTERVAL 7 DAY), FALSE, FALSE),
-    -- Recommendations for Carol (likes chill music)
-    (6, 36, 0.93, 'content-based', 'Low tempo and calm mood match your preferences', DATE_ADD(NOW(), INTERVAL 7 DAY), TRUE, TRUE),
-    (6, 45, 0.89, 'content-based', 'Similar spectral features to Ted Chilling', DATE_ADD(NOW(), INTERVAL 7 DAY), FALSE, FALSE),
-    -- Game recommendations for David
-    (7, 2, 0.87, 'collaborative', 'Users who bought Protectors also enjoyed this', DATE_ADD(NOW(), INTERVAL 7 DAY), TRUE, FALSE),
-    (7, 4, 0.82, 'trending', 'Popular this week', DATE_ADD(NOW(), INTERVAL 7 DAY), FALSE, FALSE);
+    -- Insert AudioFeatures for music products (extracted from S3 WAV files)
+    INSERT INTO AudioFeatures (ProductID, Tempo, Energy, Danceability, Valence, Acousticness, Instrumentalness, Loudness, Speechiness, Genre, Mood, Key_Signature, TimeSignature, Duration, SpectralCentroid, SpectralRolloff, ZeroCrossingRate) VALUES
+    (6, 117.45, 0.168, 1.0, 0.584, 1.0, 0.874, -69.04, 0.126, 'Pop', 'Neutral', 'C', '4/4', 30, 1722.19, 3584.83, 0.0632),
+    (7, 80.75, 0.318, 1.0, 0.464, 1.0, 0.928, -56.39, 0.072, 'Ambient', 'Neutral', 'G', '4/4', 30, 1121.95, 2261.08, 0.0359),
+    (8, 136.0, 0.21, 1.0, 0.843, 0.999, 0.672, -58.5, 0.328, 'Pop', 'Uplifting', 'A#', '4/4', 30, 2529.68, 5621.21, 0.1638),
+    (9, 80.75, 0.187, 1.0, 0.762, 0.999, 0.802, -64.71, 0.198, 'Ambient', 'Uplifting', 'F', '4/4', 30, 2291.16, 4872.53, 0.099),
+    (10, 152.0, 0.159, 0.745, 0.318, 1.0, 0.889, -66.97, 0.111, 'Pop', 'Calm', 'A', '4/4', 30, 847.88, 1581.54, 0.0555),
+    (11, 92.29, 0.236, 1.0, 0.739, 0.999, 0.863, -59.6, 0.137, 'Ambient', 'Uplifting', 'B', '4/4', 30, 2148.9, 5034.32, 0.0687),
+    (12, 161.5, 0.193, 1.0, 0.768, 0.999, 0.81, -65.08, 0.19, 'Pop', 'Uplifting', 'G', '4/4', 30, 2303.12, 4652.55, 0.0952),
+    (13, 136.0, 0.182, 1.0, 0.488, 1.0, 0.938, -70.85, 0.062, 'Pop', 'Neutral', 'A', '4/4', 30, 1385.08, 3130.71, 0.0311),
+    (14, 112.35, 0.257, 1.0, 0.553, 1.0, 0.887, -65.53, 0.113, 'Pop', 'Neutral', 'C', '4/4', 30, 1502.17, 3165.63, 0.0565),
+    (15, 129.2, 0.272, 1.0, 1.0, 0.999, 0.784, -57.63, 0.216, 'Pop', 'Uplifting', 'A#', '4/4', 30, 3146.82, 6556.56, 0.108),
+    (16, 112.35, 0.14, 1.0, 0.657, 1.0, 0.736, -59.99, 0.264, 'Pop', 'Uplifting', 'G#', '4/4', 30, 2004.54, 3494.78, 0.1319),
+    (17, 92.29, 0.267, 1.0, 0.679, 0.999, 0.86, -57.42, 0.14, 'Ambient', 'Uplifting', 'A#', '4/4', 30, 1908.07, 4277.34, 0.0701),
+    (18, 86.13, 0.163, 1.0, 0.945, 0.999, 0.639, -58.19, 0.361, 'Ambient', 'Uplifting', 'C', '4/4', 30, 2931.59, 6334.57, 0.1807),
+    (19, 129.2, 0.199, 1.0, 0.444, 1.0, 0.928, -69.34, 0.072, 'Pop', 'Neutral', 'C', '4/4', 30, 1214.5, 2459.02, 0.0362),
+    (20, 161.5, 0.143, 0.601, 0.186, 1.0, 0.931, -76.58, 0.069, 'Pop', 'Calm', 'F', '4/4', 30, 429.12, 532.33, 0.0343),
+    (21, 129.2, 0.244, 1.0, 0.65, 1.0, 0.839, -62.74, 0.161, 'Pop', 'Uplifting', 'E', '4/4', 30, 1842.72, 3721.17, 0.0805),
+    (22, 129.2, 0.246, 1.0, 0.563, 1.0, 0.89, -63.1, 0.11, 'Pop', 'Neutral', 'G', '4/4', 30, 1547.24, 3208.03, 0.0548),
+    (23, 129.2, 0.157, 1.0, 0.759, 0.999, 0.778, -61.78, 0.222, 'Pop', 'Uplifting', 'C', '4/4', 30, 2321.93, 4855.42, 0.1112),
+    (24, 73.83, 0.183, 0.973, 0.506, 1.0, 0.82, -66.38, 0.18, 'Ambient', 'Neutral', 'D', '4/4', 30, 1443.37, 2549.16, 0.0899),
+    (25, 161.5, 0.263, 1.0, 0.733, 0.999, 0.706, -58.08, 0.294, 'Pop', 'Uplifting', 'E', '4/4', 30, 2091.32, 4488.33, 0.147),
+    (26, 92.29, 0.267, 1.0, 0.679, 0.999, 0.86, -57.42, 0.14, 'Ambient', 'Uplifting', 'A#', '4/4', 30, 1907.88, 4277.46, 0.0701),
+    (27, 103.36, 0.178, 1.0, 0.668, 0.999, 0.835, -65.95, 0.165, 'Pop', 'Uplifting', 'C#', '4/4', 30, 1989.41, 4071.02, 0.0824),
+    (28, 161.5, 0.161, 1.0, 0.735, 0.999, 0.834, -58.97, 0.166, 'Pop', 'Uplifting', 'A', '4/4', 30, 2235.88, 4691.57, 0.083),
+    (29, 92.29, 0.207, 1.0, 0.509, 1.0, 0.93, -65.31, 0.07, 'Ambient', 'Neutral', 'G', '4/4', 30, 1421.32, 3156.86, 0.0352),
+    (30, 161.5, 0.141, 1.0, 0.857, 0.999, 0.78, -61.09, 0.22, 'Pop', 'Uplifting', 'F', '4/4', 30, 2667.46, 5212.79, 0.1099),
+    (31, 172.27, 0.137, 0.805, 0.61, 1.0, 0.874, -64.91, 0.126, 'Pop', 'Uplifting', 'A#', '4/4', 30, 1849.5, 3946.58, 0.0629),
+    (32, 95.7, 0.198, 1.0, 0.493, 1.0, 0.87, -63.82, 0.13, 'Ambient', 'Neutral', 'C', '4/4', 30, 1378.91, 2547.81, 0.0648),
+    (33, 60.09, 0.096, 0.742, 0.74, 0.999, 0.804, -58.33, 0.196, 'Ambient', 'Uplifting', 'C', '4/4', 30, 2338.57, 4998.79, 0.0981),
+    (35, 92.29, 0.314, 1.0, 0.832, 0.999, 0.839, -58.19, 0.161, 'Ambient', 'Uplifting', 'C', '4/4', 30, 2353.98, 5312.02, 0.0807),
+    (36, 123.05, 0.235, 0.958, 0.263, 1.0, 0.96, -73.74, 0.04, 'Pop', 'Calm', 'A#', '4/4', 30, 564.45, 920.97, 0.0201),
+    (37, 117.45, 0.113, 1.0, 0.877, 0.999, 0.84, -65.66, 0.16, 'Pop', 'Uplifting', 'C', '4/4', 30, 2772.4, 5332.76, 0.0798),
+    (40, 112.35, 0.181, 1.0, 0.584, 1.0, 0.876, -63.42, 0.124, 'Pop', 'Neutral', 'A', '4/4', 30, 1704.25, 3612.22, 0.0621),
+    (41, 117.45, 0.212, 1.0, 0.65, 1.0, 0.858, -66.77, 0.142, 'Pop', 'Uplifting', 'C', '4/4', 30, 1882.64, 3912.38, 0.071),
+    (43, 129.2, 0.199, 1.0, 0.526, 1.0, 0.885, -68.73, 0.115, 'Pop', 'Neutral', 'D', '4/4', 30, 1486.79, 2944.74, 0.0573),
+    (44, 143.55, 0.423, 1.0, 0.721, 1.0, 0.846, -59.63, 0.154, 'Pop', 'Uplifting', 'C', '4/4', 30, 1841.02, 3447.75, 0.077),
+    (45, 123.05, 0.183, 0.953, 0.256, 1.0, 0.94, -70.1, 0.06, 'Pop', 'Calm', 'A#', '4/4', 30, 609.73, 1061.64, 0.0299),
+    (46, 172.27, 0.232, 1.0, 0.817, 0.999, 0.765, -60.53, 0.235, 'Pop', 'Uplifting', 'E', '4/4', 30, 2413.98, 5027.39, 0.1173),
+    (47, 152.0, 0.204, 1.0, 0.538, 1.0, 0.901, -64.92, 0.099, 'Pop', 'Neutral', 'A#', '4/4', 30, 1520.3, 3478.45, 0.0495),
+    (48, 152.0, 0.264, 1.0, 0.792, 0.999, 0.791, -67.07, 0.209, 'Pop', 'Uplifting', 'A', '4/4', 30, 2288.0, 4430.66, 0.1047),
+    (49, 152.0, 0.258, 1.0, 0.879, 0.999, 0.722, -67.27, 0.278, 'Pop', 'Uplifting', 'A', '4/4', 30, 2586.07, 4570.36, 0.1391),
+    (50, 95.7, 0.2, 1.0, 0.41, 1.0, 0.863, -64.95, 0.137, 'Ambient', 'Neutral', 'C', '4/4', 30, 1099.42, 2375.89, 0.0687),
+    (51, 152.0, 0.173, 1.0, 0.641, 0.999, 0.886, -66.67, 0.114, 'Pop', 'Uplifting', 'G', '4/4', 30, 1906.83, 4123.88, 0.0571);
 
     -- Grant privileges to gamestore_user
     GRANT ALL PRIVILEGES ON Game_Store_System.* TO 'gamestore_user'@'%';
