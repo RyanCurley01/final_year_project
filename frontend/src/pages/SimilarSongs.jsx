@@ -77,21 +77,39 @@ const matchArtistSongsToDbSongs = (artistSongs, dbSongs) => {
   return matched;
 };
 
-// Feature Badge Component
-const FeatureBadge = ({ label, value, color = 'cyan' }) => (
-  <div className="bg-gray-800/80 rounded-lg p-2 text-center">
-    <p className="text-xs text-gray-400">{label}</p>
-    <p className={`text-sm font-bold text-${color}-400`}>{value}</p>
-  </div>
-);
+// Helper function for mood-based colors - same as SmartRecommendationVisualizer
+const getFeatureColor = (label, value) => {
+  const numericValue = parseInt(value);
+  
+  if (label === 'Tempo') {
+    if (numericValue < 90) return { bg: 'bg-blue-900/50', text: 'text-blue-300', border: 'border-blue-500/50' };
+    if (numericValue < 130) return { bg: 'bg-green-900/50', text: 'text-green-300', border: 'border-green-500/50' };
+    return { bg: 'bg-red-900/50', text: 'text-red-300', border: 'border-red-500/50' };
+  }
+  
+  if (numericValue >= 70) return { bg: 'bg-green-900/50', text: 'text-green-300', border: 'border-green-500/50' };
+  if (numericValue >= 50) return { bg: 'bg-yellow-900/50', text: 'text-yellow-300', border: 'border-yellow-500/50' };
+  return { bg: 'bg-red-900/50', text: 'text-red-300', border: 'border-red-500/50' };
+};
+
+// Feature Badge Component - with dynamic colors
+const FeatureBadge = ({ label, value }) => {
+  const colors = getFeatureColor(label, value);
+  return (
+    <div className={`rounded-lg p-2 text-center border ${colors.bg} ${colors.border}`}>
+      <p className="text-xs text-gray-400">{label}</p>
+      <p className={`text-sm font-bold ${colors.text}`}>{value}</p>
+    </div>
+  );
+};
 
 const SongCard = ({ song, isPlaying, activeSong, onPlay, onPause, index }) => {
   const isThisSongActive = activeSong?.id === song.id;
   const albumArt = song.artworkUrl100?.replace('100x100', '600x600') || fallbackImage;
   
   return (
-    <div className="flex flex-col w-[250px] p-4 bg-white/5 backdrop-blur-sm animate-slideup rounded-lg cursor-pointer hover:bg-white/10 transition-all">
-      <div className="relative w-full h-48 group">
+    <div className="flex flex-col p-4 bg-white/5 backdrop-blur-sm animate-slideup rounded-lg cursor-pointer hover:bg-white/10 transition-all">
+      <div className="relative w-full aspect-square group">
         <img src={albumArt} alt={song.trackName} className="w-full h-full rounded-lg object-cover" onError={(e) => { e.target.src = fallbackImage; }} />
         
         {song.previewUrl && (
@@ -149,7 +167,7 @@ const SimilarSongs = () => {
   const intervalRef = useRef(null);
   const dispatch = useDispatch();
   const { activeSong, isPlaying, playbackRate } = useSelector((state) => state.player);
-  
+
   // Get audio features from shared context
   const { audioFeatures } = useAudioFeatures();
 
@@ -209,7 +227,7 @@ const SimilarSongs = () => {
     // Sort by similarity and return top 6
     return scoredSongs
       .sort((a, b) => b.similarity_score - a.similarity_score)
-      .slice(0, 6);
+      .slice(0, 5);
   };
 
   // Initial data fetch
@@ -342,6 +360,13 @@ const SimilarSongs = () => {
     }
   };
 
+  const getMoodColor = (moodMatch) => {
+    if (moodMatch >= 0.8) return '#10b981'; // green
+    if (moodMatch >= 0.6) return '#f59e0b'; // amber
+    return '#ef4444'; // red
+  };
+
+
   if (loading) return <Loader title="Finding similar songs from iTunes..." />;
   
   if (error) {
@@ -360,8 +385,8 @@ const SimilarSongs = () => {
       {/* Main Content */}
       <div className="flex-1">
         <div className="mb-6">
-          <h1 className="font-bold text-3xl text-white mb-2">Similar Tracks</h1>
-          <p className="text-gray-400">Aphex Twin, Squarepusher and Boards of Canada songs matched to my {dbSongs.length} library tracks from the Discover page based on a simlarity score on the top right of the song</p>
+          <h1 className="font-bold text-3xl text-white mb-2">Similar Track Information</h1>
+          <p className="text-gray-400">Aphex Twin, Squarepusher and Boards of Canada songs matched to the {dbSongs.length} library tracks from the Discover page based on a simlarity score on the top right of the song</p>
           <p className="text-xs text-cyan-400 mt-1">Powered by iTunes API - {songs.length} artist tracks with 30s previews</p>
         </div>
 
@@ -383,7 +408,7 @@ const SimilarSongs = () => {
           </button>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3 2xl:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
           {filteredSongs.map((song, i) => (
             <SongCard key={song.id} song={song} isPlaying={isPlaying} activeSong={activeSong} onPlay={handlePlay} onPause={handlePause} index={i} />
           ))}
@@ -392,18 +417,22 @@ const SimilarSongs = () => {
 
       {/* Right Sidebar - Real-time Recommendations with Audio Feature Badges */}
       <div className="xl:w-[400px] 2xl:w-[450px]">
+        {/* Empty State - when no song is playing */}
+        {(!activeSong || Object.keys(activeSong).length === 0) && (
+          <div className="bg-gradient-to-br from-gray-900 to-black p-6 rounded-lg border border-gray-800">
+            <p className="text-gray-400 text-center">Play a song to see audio-based recommendations</p>
+          </div>
+        )}
+
+        {/* Active State - when a song is playing */}
+        {activeSong && Object.keys(activeSong).length > 0 && (
         <div className="bg-gradient-to-br from-gray-900 to-black p-5 rounded-lg border border-gray-800 sticky top-6">
           <h3 className="text-lg font-bold text-white mb-1">Similar Artist Tracks</h3>
           <p className="text-xs text-gray-400 mb-4">
-            {activeSong ? (
-              <>Similar tracks based on <span className="text-cyan-400">{activeSong.trackName || activeSong.albumTitle}</span></>
-            ) : (
-              'Play a song to see similar artist tracks'
-            )}
+            Real-time suggestions based on <span className="text-cyan-400">{activeSong.trackName || activeSong.albumTitle}</span>'s audio features
           </p>
 
           {/* Current Track Analysis */}
-          {activeSong && Object.keys(activeSong).length > 0 && (
             <div className="mb-4 p-3 bg-gray-800/50 rounded-lg border border-gray-700">
               <div className="flex items-center gap-3 mb-3">
                 {/* Spinning Album Cover */}
@@ -452,14 +481,6 @@ const SimilarSongs = () => {
                 </p>
               )}
             </div>
-          )}
-
-          {/* Loading State */}
-          {recLoading && recommendations.length === 0 && (
-            <div className="flex items-center justify-center py-8">
-              <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-cyan-500"></div>
-            </div>
-          )}
 
           {/* Recommendations List */}
           {activeSong && recommendations.length > 0 && (
@@ -483,21 +504,37 @@ const SimilarSongs = () => {
                       </p>
                       <p className="text-xs text-gray-400 truncate">{rec.artistName}</p>
                       <p className="text-xs text-gray-500">{rec.match_reason}</p>
-                      {/* Match Badges */}
+                      {/* Match Badges - Dynamic colors based on match value */}
                       <div className="flex gap-1 mt-1">
-                        <span className="px-1.5 py-0.5 bg-purple-500/30 rounded text-[10px] text-purple-300">
+                        <span className={`px-1.5 py-0.5 rounded text-[10px] ${
+                          rec.tempo_match >= 0.7 ? 'bg-green-500/30 text-green-300' : 
+                          rec.tempo_match >= 0.5 ? 'bg-yellow-500/30 text-yellow-300' : 
+                          'bg-red-500/30 text-red-300'
+                        }`}>
                           Tempo:{Math.round(rec.tempo_match * 100)}%
                         </span>
-                        <span className="px-1.5 py-0.5 bg-green-500/30 rounded text-[10px] text-green-300">
+                        <span className={`px-1.5 py-0.5 rounded text-[10px] ${
+                          rec.energy_match >= 0.7 ? 'bg-green-500/30 text-green-300' : 
+                          rec.energy_match >= 0.5 ? 'bg-yellow-500/30 text-yellow-300' : 
+                          'bg-red-500/30 text-red-300'
+                        }`}>
                           Energy:{Math.round(rec.energy_match * 100)}%
                         </span>
-                        <span className="px-1.5 py-0.5 bg-yellow-500/30 rounded text-[10px] text-yellow-300">
+                        <span className={`px-1.5 py-0.5 rounded text-[10px] ${
+                          rec.mood_match >= 0.7 ? 'bg-green-500/30 text-green-300' : 
+                          rec.mood_match >= 0.5 ? 'bg-yellow-500/30 text-yellow-300' : 
+                          'bg-red-500/30 text-red-300'
+                        }`}>
                           Mood:{Math.round(rec.mood_match * 100)}%
                         </span>
                       </div>
                     </div>
                     <div className="text-right">
-                      <span className={`px-2 py-1 ${getArtistBadgeColor(rec.artistName)} rounded-full text-xs font-bold text-white`}>
+                      <span className={`px-2 py-1 rounded-full text-xs font-bold text-white ${
+                        rec.similarity_score >= 0.7 ? 'bg-green-500' : 
+                        rec.similarity_score >= 0.5 ? 'bg-yellow-500' : 
+                        'bg-red-500'
+                      }`}>
                         {Math.round(rec.similarity_score * 100)}%
                       </span>
                     </div>
@@ -507,26 +544,15 @@ const SimilarSongs = () => {
             </>
           )}
 
-          {/* Empty State */}
-          {!activeSong && (
-            <div className="text-center py-8">
-              <div className="text-5xl mb-4">🎧</div>
-              <p className="text-gray-400 text-sm">Play a song to see recommendations</p>
-              <div className="mt-4 text-xs text-gray-500">
-                <p>Your library: {dbSongs.length} tracks</p>
-                <p>Artist songs: {songs.length} tracks</p>
-              </div>
-            </div>
-          )}
-
           {/* No matches state */}
-          {activeSong && !recLoading && recommendations.length === 0 && (
+          {!recLoading && recommendations.length === 0 && (
             <div className="text-center py-6">
               <p className="text-gray-400 text-sm">Finding similar artist tracks...</p>
               <p className="text-xs text-gray-500 mt-2">Analyzing audio features</p>
             </div>
           )}
         </div>
+        )}
       </div>
     </div>
   );

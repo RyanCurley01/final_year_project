@@ -11,7 +11,7 @@ import CartIcon from './CartIcon';
 import { resetPlayer } from '../redux/features/playerSlice';
 
 const NavLinks = ({ handleClick, onResetPlayer }) => (
-  <div className="mt-10">
+  <div className="mt-4">
     {links.map((item) => (
       <NavLink 
       key={item.name}
@@ -70,7 +70,7 @@ const Sidebar = () => {
     <>
     <div className="md:flex hidden flex-col w-[240px] bg-gradient-to-br
     py-10 px-4 bg-[#252246] relative z-20">
-      <img src={logo} alt="logo" className="w-full h-[100px] 
+      <img src={logo} alt="logo" className="rounded w-full h-[100px] 
       object-contain" />
       <NavLinks onResetPlayer={handleResetPlayer} />
     </div>

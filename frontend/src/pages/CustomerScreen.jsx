@@ -58,11 +58,19 @@ const CustomerScreen = () => {
 
   return (
     <div className="flex flex-col">
+      <div className="mb-8">
+        <h1 className="font-bold text-3xl text-white mb-6">Music Information and Multimedia Store</h1>
+      </div>
+
+      <div className="mb-6">
+        <h2 className="font-bold text-3xl text-white mb-6">Welcome, {user?.firstName || 'Customer'}!</h2>
+        <p className="text-gray-400">Explore our collection of games and electronic music</p>
+      </div>
+
       {/* Games Section */}
       <div className="mb-8">
-        <h2 className="font-bold text-3xl text-white mb-6">
-          Games
-        </h2>
+        <h2 className="font-bold text-3xl text-white mb-6">Games</h2>
+
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
           {games.map((product, i) => (
             <SongCard
@@ -80,9 +88,8 @@ const CustomerScreen = () => {
 
       {/* Music Section */}
       <div>
-        <h2 className="font-bold text-3xl text-white mb-6">
-          Music
-        </h2>
+        <h2 className="font-bold text-3xl text-white mb-6">Music</h2>
+
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
           {music.map((product, i) => (
             <SongCard

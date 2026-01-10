@@ -1,9 +1,9 @@
 import { useSelector, useDispatch } from 'react-redux';
-import { Route, Routes, useLocation } from 'react-router-dom';
+import { Route, Routes, useLocation, Navigate } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 
 import { Searchbar, Sidebar, MusicPlayer, TopPlay } from './components';
-import { ArtistDetails, TopArtists, AroundYou, CustomerScreen, Search, SongDetails, TopCharts, SimilarSongs } from './pages';
+import { ArtistDetails, CustomerScreen, Search, SongDetails, TopCharts, SimilarSongs } from './pages';
 import Cart from './pages/Cart';
 import PurchaseHistory from './pages/PurchaseHistory';
 import SmartRecommendationVisualizer from './components/SmartRecommendationVisualizer';
@@ -57,43 +57,77 @@ const AppContent = () => {
     <div className="relative flex h-screen overflow-hidden">
       <Sidebar />
       <div className="flex-1 flex flex-col bg-gradient-to-br from-[#041529] to-[#2970c2] overflow-hidden">
-        <div className={`px-6 overflow-y-auto flex xl:flex-row flex-col-reverse ${(activeSong?.albumTitle || activeSong?.gameTitle) ? 'h-[calc(100vh-7rem)]' : 'h-screen'}`}>
+        <div className={`px-6 overflow-y-auto flex xl:flex-row flex-col ${(activeSong?.albumTitle || activeSong?.gameTitle) ? 'h-[calc(100vh-7rem)]' : 'h-screen'}`}>
           <div className="flex-1 h-fit pb-4">
             <Searchbar />
 
             <Routes>
               <Route path="/" element={<CustomerScreen />} />
-              <Route path="/top-artists" element={<TopArtists />} />
               <Route path="/top-charts" element={<TopCharts />} />
-              <Route path="/around-you" element={<AroundYou />} />
               <Route path="/similar-songs" element={<SimilarSongs />} />
               <Route path="/artists/:id" element={<ArtistDetails />} />
               <Route path="/songs/:songid" element={<SongDetails />} />
               <Route path="/search/:searchTerm" element={<Search />} />
               <Route path="/cart" element={<Cart />} />
               <Route path="/purchase-history" element={<PurchaseHistory />} />
+              {/* Catch-all route for removed/invalid paths */}
+              <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </div>
-          {/* Right sidebar with increased width and right alignment */}
+          
+          {/* Right Sidebar - TopPlay + Visualizer - only on home page */}
+          {/* On small screens: appears at bottom (due to flex-col), On xl+: fixed sidebar */}
           {location.pathname === '/' && (
-            <div className="relative top-0 h-fit py-10 xl:w-[500px] 2xl:w-[600px]">
-              <TopPlay />
-              <div className="w-full px-8 py-8 mt-4 ml-5">
-                {/* Smart Recommendation Visualizer */}
-                {isPlaying && activeSong?.albumTitle ? (
-                  <SmartRecommendationVisualizer 
-                    currentProduct={activeSong}
-                    products={musicProducts}
-                    sessionId={sessionId}
-                    onRecommendationClick={handleRecommendationClick}
-                  />
-                ) : (
-                  <div className="bg-gradient-to-br from-gray-900 to-black p-6 rounded-lg border border-gray-800">
-                    <p className="text-gray-400 text-center">Play a song to see audio-based recommendations</p>
-                  </div>
-                )}
+            <>
+              {/* Spacer for fixed sidebar - only visible on xl+ screens */}
+              <div className="hidden xl:block xl:w-[36vw] 2xl:w-[30vw]"></div>
+              
+              {/* Mobile/Tablet: Inline flow (appears at bottom due to flex-col) */}
+              <div className="xl:hidden w-full p-4">
+                {/* TopPlay */}
+                <div className="mb-4">
+                  <TopPlay />
+                </div>
+                {/* Visualizer */}
+                <div>
+                  {activeSong?.albumTitle ? (
+                    <SmartRecommendationVisualizer 
+                      currentProduct={activeSong}
+                      products={musicProducts}
+                      sessionId={sessionId}
+                      onRecommendationClick={handleRecommendationClick}
+                    />
+                  ) : (
+                    <div className="bg-gradient-to-br from-gray-900 to-black p-6 rounded-lg border border-gray-800">
+                      <p className="text-gray-400 text-center">Play a song to see audio-based recommendations</p>
+                    </div>
+                  )}
+                </div>
               </div>
-            </div>
+              
+              {/* Desktop: Fixed sidebar - only visible on xl+ screens */}
+              <div className="hidden xl:block fixed top-0 right-0 w-[36vw] 2xl:w-[30vw] h-[calc(100vh-7rem)] overflow-y-auto z-40 p-4">
+                {/* TopPlay */}
+                <div className="mb-4">
+                  <TopPlay />
+                </div>
+                {/* Visualizer */}
+                <div>
+                  {activeSong?.albumTitle ? (
+                    <SmartRecommendationVisualizer 
+                      currentProduct={activeSong}
+                      products={musicProducts}
+                      sessionId={sessionId}
+                      onRecommendationClick={handleRecommendationClick}
+                    />
+                  ) : (
+                    <div className="bg-gradient-to-br from-gray-900 to-black p-6 rounded-lg border border-gray-800">
+                      <p className="text-gray-400 text-center">Play a song to see audio-based recommendations</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </>
           )}
         </div>
       </div>

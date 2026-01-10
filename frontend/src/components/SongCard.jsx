@@ -77,10 +77,10 @@ const SongCard = ({ product, payment, i, data }) => {
     /**
      * Shows the cover image with song and game details
      */
-    <div className="flex flex-col w-[250px] p-4 bg-white/5 
+    <div className="flex flex-col p-4 bg-white/5 
     bg-opacity-80 backdrop-blur-sm animate-slideup
     rounded-lg cursor-pointer">
-      <div className="relative w-full h-[160px] group">
+      <div className="relative w-full aspect-square group">
         {isVideo ? (
           <>
             <AudioReactiveVideo
@@ -129,6 +129,17 @@ const SongCard = ({ product, payment, i, data }) => {
             />
           )}
         </div>
+
+        {/* Playing indicator - bottom right */}
+        {isThisSongActive && isPlaying && (
+          <div className="absolute bottom-2 right-2 flex items-center gap-1 bg-green-500/90 px-2 py-1 rounded-full z-20">
+            <div className="flex gap-0.5">
+              <span className="w-1 h-3 bg-white rounded-full animate-pulse"></span>
+              <span className="w-1 h-4 bg-white rounded-full animate-pulse" style={{ animationDelay: '150ms' }}></span>
+              <span className="w-1 h-2 bg-white rounded-full animate-pulse" style={{ animationDelay: '300ms' }}></span>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Tempo Slider - shown only for videos when this song is active */}

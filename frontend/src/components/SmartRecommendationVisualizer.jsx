@@ -3,6 +3,7 @@ import { useSelector } from 'react-redux';
 import { motion, AnimatePresence } from 'framer-motion';
 import axios from 'axios';
 import { useAudioFeatures } from '../context/AudioFeaturesContext';
+import placeholders from '../utils/placeholderImage';
 
 /**
  * SmartRecommendationVisualizer (formerly PersonalRecommendations)
@@ -25,8 +26,8 @@ const SmartRecommendationVisualizer = ({
   // Get audio features from shared context
   const { audioFeatures } = useAudioFeatures();
   
-  // Get playbackRate from Redux to trigger immediate recommendation updates
-  const { playbackRate } = useSelector((state) => state.player);
+  // Get playbackRate and isPlaying from Redux
+  const { playbackRate, isPlaying } = useSelector((state) => state.player);
   
   // Store playbackRate in ref so interval always has latest value
   const playbackRateRef = useRef(playbackRate);
@@ -181,12 +182,59 @@ const SmartRecommendationVisualizer = ({
     <div className="bg-gradient-to-br from-gray-900 to-black p-6 rounded-lg border border-gray-800 shadow-xl">
       {/* Header */}
       <div className="mb-6">
-        <h2 className="text-2xl font-bold text-white mb-2">
-          Smart Audio Recommendations
-        </h2>
+        <h1 className="text-2xl font-bold text-white mb-2">Smart Audio Recommendations</h1>
         <p className="text-sm text-gray-400">
           Real-time suggestions based on <span className="text-cyan-400 font-semibold">{currentProduct.albumTitle}</span>'s audio features
         </p>
+      </div>
+      
+      {/* Current Track Analysis */}
+      <div className="mb-4 p-3 bg-gray-800/50 rounded-lg border border-gray-700">
+        <div className="flex items-center gap-3 mb-3">
+          {/* Spinning Album Cover */}
+          {(() => {
+            const coverMedia = currentProduct.albumCoverImageUrl || currentProduct.artworkUrl100?.replace('100x100', '200x200');
+            const isVideo = coverMedia && coverMedia.toLowerCase().includes('.mp4');
+            
+            return (
+              <div className="relative w-14 h-14 flex-shrink-0">
+                {isVideo ? (
+                  <video
+                    src={coverMedia}
+                    className={`w-14 h-14 rounded-full object-cover border-2 border-cyan-500/50 ${isPlaying ? 'animate-spin' : ''}`}
+                    style={{ animationDuration: '3s' }}
+                    autoPlay
+                    loop
+                    muted
+                    playsInline
+                  />
+                ) : (
+                  <img 
+                    src={coverMedia || placeholders.music}
+                    alt={currentProduct.trackName || currentProduct.albumTitle}
+                    className={`w-14 h-14 rounded-full object-cover border-2 border-cyan-500/50 ${isPlaying ? 'animate-spin' : ''}`}
+                    style={{ animationDuration: '3s' }}
+                    onError={(e) => { e.target.src = placeholders.music; }}
+                  />
+                )}
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                  <div className="w-4 h-4 rounded-full bg-gray-900 border border-gray-700"></div>
+                </div>
+              </div>
+            );
+          })()}
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-white truncate">{currentProduct.albumTitle || currentProduct.trackName}</p>
+            <p className="text-xs text-gray-400 truncate">Selected Electronic Works</p>
+          </div>
+          {isPlaying && (
+            <div className="flex gap-0.5">
+              <span className="w-1 h-3 bg-cyan-400 rounded-full animate-pulse"></span>
+              <span className="w-1 h-4 bg-cyan-400 rounded-full animate-pulse" style={{ animationDelay: '150ms' }}></span>
+              <span className="w-1 h-2 bg-cyan-400 rounded-full animate-pulse" style={{ animationDelay: '300ms' }}></span>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Audio Features Display - Updated based on playback rate */}
@@ -273,14 +321,9 @@ const SmartRecommendationVisualizer = ({
             className="space-y-3"
           >
             {/* Matches count */}
-            <div className="flex items-center justify-between mb-2">
-              <p className="text-sm text-gray-400">
-                {recommendations.length} {recommendations.length === 1 ? 'match' : 'matches'} found
-              </p>
-              <p className="text-xs text-gray-500">
-                Based on similarity score
-              </p>
-            </div>
+            <p className="text-xs text-gray-500 mb-3">
+              {recommendations.length} {recommendations.length === 1 ? 'match' : 'matches'} found • Updates every 2s
+            </p>
             
             {recommendations.map((rec, index) => {
               const product = getRecommendedProduct(rec.product_id);
@@ -375,26 +418,48 @@ const SmartRecommendationVisualizer = ({
   );
 };
 
-// Helper Components
-const FeatureBadge = ({ label, value, isAdjusted = false }) => (
-  <motion.div 
-    key={`${label}-${value}`}
-    initial={{ scale: 0.9, opacity: 0.5 }}
-    animate={{ scale: 1, opacity: 1 }}
-    transition={{ duration: 0.3 }}
-    className={`px-3 py-2 rounded-lg transition-all duration-300 ${
-      isAdjusted 
-        ? 'bg-cyan-900/50 border border-cyan-500/50 ring-1 ring-cyan-500/30' 
-        : 'bg-gray-700/50'
-    }`}
-  >
-    <div className="text-xs text-gray-400">{label}</div>
-    <div className={`text-sm font-bold ${isAdjusted ? 'text-cyan-300' : 'text-white'}`}>
-      {value}
-      {isAdjusted && <span className="text-xs text-cyan-500 ml-1">⚡</span>}
-    </div>
-  </motion.div>
-);
+  // Helper function for mood-based colors
+  const getFeatureColor = (label, value) => {
+    // Extract numeric value from string like "120 BPM" or "75%"
+    const numericValue = parseInt(value);
+    
+    if (label === 'Tempo') {
+      // Tempo coloring: slow (blue), medium (green), fast (red)
+      if (numericValue < 90) return { bg: 'bg-blue-900/50', text: 'text-blue-300', border: 'border-blue-500/50' };
+      if (numericValue < 130) return { bg: 'bg-green-900/50', text: 'text-green-300', border: 'border-green-500/50' };
+      return { bg: 'bg-red-900/50', text: 'text-red-300', border: 'border-red-500/50' };
+    }
+    
+    // Percentage-based features (Energy, Mood, Dance) - same thresholds as match indicators
+    if (numericValue >= 70) return { bg: 'bg-green-900/50', text: 'text-green-300', border: 'border-green-500/50' };
+    if (numericValue >= 50) return { bg: 'bg-yellow-900/50', text: 'text-yellow-300', border: 'border-yellow-500/50' };
+    return { bg: 'bg-red-900/50', text: 'text-red-300', border: 'border-red-500/50' };
+  };
+
+  // Helper Components
+  const FeatureBadge = ({ label, value, isAdjusted = false }) => {
+  const colors = getFeatureColor(label, value);
+  
+  return (
+    <motion.div 
+      key={`${label}-${value}`}
+      initial={{ scale: 0.9, opacity: 0.5 }}
+      animate={{ scale: 1, opacity: 1 }}
+      transition={{ duration: 0.3 }}
+      className={`px-3 py-2 rounded-lg transition-all duration-300 border ${
+        isAdjusted 
+          ? `${colors.bg} ${colors.border} ring-1 ring-cyan-500/30` 
+          : `${colors.bg} ${colors.border}`
+      }`}
+    >
+      <div className="text-xs text-gray-400">{label}</div>
+      <div className={`text-sm font-bold ${colors.text}`}>
+        {value}
+        {isAdjusted && <span className="text-xs text-cyan-500 ml-1">⚡</span>}
+      </div>
+    </motion.div>
+  );
+};
 
 const AlbumCover = ({ url, title, productId }) => {
   const [error, setError] = useState(false);
