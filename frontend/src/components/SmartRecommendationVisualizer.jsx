@@ -235,47 +235,27 @@ const SmartRecommendationVisualizer = ({
             </div>
           )}
         </div>
-      </div>
 
-      {/* Audio Features Display - Updated based on playback rate */}
-      {audioFeatures && (
-        <div className="mb-6 p-4 bg-gray-800/50 rounded-lg border border-gray-700">
-          <h3 className="text-base font-medium text-white mb-2">Current Track Analysis</h3>
-          <p className="text-xs text-gray-500 mb-3">
-            {playbackRate !== 1.0 && (
-              <span className="text-cyan-400">Adjusted for {playbackRate.toFixed(2)}x playback speed</span>
-            )}
-          </p>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <FeatureBadge 
-              label="Tempo" 
-              value={`${Math.round(audioFeatures.tempo * playbackRate)} BPM`}
-              isAdjusted={playbackRate !== 1.0}
-            />
-            <FeatureBadge 
-              label="Energy" 
-              value={`${Math.min(100, Math.max(0, (audioFeatures.energy * 100 * (playbackRate > 1 ? 1 + (playbackRate - 1) * 0.2 : 1 - (1 - playbackRate) * 0.1)))).toFixed(0)}%`}
-              isAdjusted={playbackRate !== 1.0}
-            />
-            <FeatureBadge 
-              label="Mood" 
-              value={`${Math.min(100, Math.max(0, (audioFeatures.valence * 100 * (playbackRate > 1 ? 1 + (playbackRate - 1) * 0.15 : 1 - (1 - playbackRate) * 0.25)))).toFixed(0)}%`}
-              isAdjusted={playbackRate !== 1.0}
-            />
-            <FeatureBadge 
-              label="Dance" 
-              value={`${Math.min(100, Math.max(0, (audioFeatures.danceability * 100 * (playbackRate > 1 ? 1 + (playbackRate - 1) * 0.3 : 1 - (1 - playbackRate) * 0.2)))).toFixed(0)}%`}
-              isAdjusted={playbackRate !== 1.0}
-            />
+        {/* Audio Feature Badges */}
+        {audioFeatures && (
+          <div className="grid grid-cols-4 gap-2">
+            <FeatureBadge label="Tempo" value={`${Math.round(audioFeatures.tempo * (playbackRate || 1))} BPM`} />
+            <FeatureBadge label="Energy" value={`${Math.round(audioFeatures.energy * 100)}%`} />
+            <FeatureBadge label="Mood" value={`${Math.round(audioFeatures.valence * 100)}%`} />
+            <FeatureBadge label="Dance" value={`${Math.round(audioFeatures.danceability * 100)}%`} />
           </div>
-          {playbackRate !== 1.0 && (
-            <div className="mt-3 text-xs text-gray-400 border-t border-gray-700 pt-2">
-              <span className="text-yellow-400">⚡</span> Original tempo: {audioFeatures.tempo} BPM → 
-              <span className="text-cyan-400 font-semibold"> {Math.round(audioFeatures.tempo * playbackRate)} BPM</span>
-            </div>
-          )}
-        </div>
-      )}
+        )}
+        
+        {!audioFeatures && (
+          <p className="text-xs text-gray-500 text-center">Analyzing audio features...</p>
+        )}
+        
+        {playbackRate && playbackRate !== 1.0 && (
+          <p className="text-xs text-yellow-400 mt-2">
+            ⚡ Tempo adjusted for {playbackRate.toFixed(2)}x speed
+          </p>
+        )}
+      </div>
 
       {/* Loading State - Only show spinner if no recommendations yet */}
       {loading && recommendations.length === 0 && (
