@@ -2,12 +2,10 @@
 """
 Complete script to:
 1. Read AWS credentials from application.yml
-2. Download ZIP file from S3 using those credentials
-3. Extract individual songs
-4. Generate and execute SQL to insert songs into database
+2. List and download songs directly from S3 songs/ folder
+3. Generate and execute SQL to insert songs into database
 """
 
-import zipfile
 import os
 import sys
 import mysql.connector
@@ -18,8 +16,9 @@ from botocore.exceptions import ClientError, NoCredentialsError
 from urllib.parse import quote
 
 # Configuration
-ALBUM_COVER_URL = 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Music Cover Image and cloud movement script/z4AnyQN.webp'
+ALBUM_COVER_URL = 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Music Cover Image and cloud movement script/cloud-animation.mp4'
 S3_SONGS_BASE_URL = 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/'
+S3_SONGS_PREFIX = 'songs/'
 PRICE_PER_SONG = 0.50
 STOCK_QUANTITY = 200
 
@@ -55,11 +54,11 @@ def load_aws_config():
         print(f"❌ Error loading AWS config: {e}")
         return None
 
-def download_from_s3(aws_config, s3_key='Song_WAV_Files_For_Final_Year_Project.zip', output_path='songs.zip'):
-    """Download ZIP file from S3 using boto3"""
-    print(f"\n📥 Downloading ZIP from S3...")
+def list_songs_from_s3(aws_config):
+    """List all song files in the S3 songs/ folder"""
+    print(f"\n📥 Listing songs from S3 bucket...")
     print(f"   Bucket: {aws_config['bucket_name']}")
-    print(f"   Key: {s3_key}")
+    print(f"   Prefix: {S3_SONGS_PREFIX}")
     
     try:
         # Create S3 client
@@ -70,57 +69,69 @@ def download_from_s3(aws_config, s3_key='Song_WAV_Files_For_Final_Year_Project.z
             aws_secret_access_key=aws_config['secret_access_key']
         )
         
-        # Download file
-        s3_client.download_file(aws_config['bucket_name'], s3_key, output_path)
+        # List objects in the songs/ folder
+        response = s3_client.list_objects_v2(
+            Bucket=aws_config['bucket_name'],
+            Prefix=S3_SONGS_PREFIX
+        )
         
-        file_size = os.path.getsize(output_path) / (1024 * 1024)  # Convert to MB
-        print(f"✅ Downloaded successfully: {output_path} ({file_size:.2f} MB)")
+        songs = []
+        if 'Contents' in response:
+            for obj in response['Contents']:
+                key = obj['Key']
+                # Skip the folder itself and only get audio files
+                if key != S3_SONGS_PREFIX and key.lower().endswith(('.wav', '.mp3', '.flac', '.ogg', '.m4a')):
+                    filename = os.path.basename(key)
+                    songs.append(filename)
+                    print(f"   ✓ {filename}")
         
-        return output_path
+        print(f"\n✅ Found {len(songs)} songs in S3")
+        return sorted(songs)
     
     except NoCredentialsError:
         print(f"❌ AWS credentials not found or invalid")
-        return None
+        return []
     except ClientError as e:
         print(f"❌ AWS Error: {e}")
-        return None
+        return []
     except Exception as e:
-        print(f"❌ Error downloading: {e}")
-        return None
+        print(f"❌ Error listing songs: {e}")
+        return []
 
-def extract_songs(zip_path, output_dir="extracted_songs"):
-    """Extract all audio files from ZIP"""
-    print(f"\n📦 Extracting songs from ZIP...")
+def download_songs_from_s3(aws_config, songs, output_dir="extracted_songs"):
+    """Download songs from S3 to local directory (optional for audio feature extraction)"""
+    print(f"\n📦 Downloading songs from S3...")
     
     # Create output directory
-    Path(output_dir).mkdir(exist_ok=True)
-    
-    songs = []
+    output_path = Path(output_dir)
+    output_path.mkdir(exist_ok=True, parents=True)
     
     try:
-        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-            for file_info in zip_ref.filelist:
-                # Check if it's an audio file
-                if file_info.filename.lower().endswith(('.wav', '.mp3', '.flac', '.ogg', '.m4a')):
-                    filename = os.path.basename(file_info.filename)
-                    
-                    # Skip hidden files, __MACOSX, and empty names
-                    if filename and not filename.startswith('.') and '__MACOSX' not in file_info.filename:
-                        # Extract file
-                        target_path = os.path.join(output_dir, filename)
-                        
-                        with zip_ref.open(file_info.filename) as source:
-                            with open(target_path, 'wb') as target:
-                                target.write(source.read())
-                        
-                        songs.append(filename)
-                        print(f"   ✓ {filename}")
+        # Create S3 client
+        s3_client = boto3.client(
+            's3',
+            region_name=aws_config['region'],
+            aws_access_key_id=aws_config['access_key_id'],
+            aws_secret_access_key=aws_config['secret_access_key']
+        )
         
-        print(f"\n✅ Extracted {len(songs)} songs to: {output_dir}")
-        return songs
+        downloaded = []
+        for song_filename in songs:
+            s3_key = f"{S3_SONGS_PREFIX}{song_filename}"
+            local_path = str(output_path / song_filename)
+            
+            try:
+                s3_client.download_file(aws_config['bucket_name'], s3_key, local_path)
+                downloaded.append(song_filename)
+                print(f"   ✓ {song_filename}")
+            except Exception as e:
+                print(f"   ✗ Error downloading {song_filename}: {e}")
+        
+        print(f"\n✅ Downloaded {len(downloaded)} songs to: {output_dir}")
+        return downloaded
     
     except Exception as e:
-        print(f"❌ Error extracting: {e}")
+        print(f"❌ Error downloading songs: {e}")
         return []
 
 def insert_songs_to_database(songs):
@@ -145,7 +156,6 @@ def insert_songs_to_database(songs):
         for song_filename in sorted(songs):
             # Create song title (clean up filename)
             song_name = Path(song_filename).stem  # Remove extension
-            song_title = f"Electronic Works - {song_name}"
             
             # Create S3 URL for the song with proper URL encoding for special characters
             # URL encode the filename to handle apostrophes, spaces, and other special characters
@@ -153,14 +163,14 @@ def insert_songs_to_database(songs):
             file_url = f"{S3_SONGS_BASE_URL}{encoded_filename}"
             
             # Insert into database
-            values = (song_title, PRICE_PER_SONG, ALBUM_COVER_URL, file_url, STOCK_QUANTITY)
+            values = (song_name, PRICE_PER_SONG, ALBUM_COVER_URL, file_url, STOCK_QUANTITY)
             
             try:
                 cursor.execute(insert_query, values)
                 inserted_count += 1
-                print(f"   ✓ {song_title}")
+                print(f"   ✓ {song_name}")
             except mysql.connector.Error as e:
-                print(f"   ✗ Error inserting {song_title}: {e}")
+                print(f"   ✗ Error inserting {song_name}: {e}")
         
         # Commit changes
         conn.commit()
@@ -190,13 +200,12 @@ def generate_sql_file(songs, output_file="insert_songs.sql"):
     values = []
     for song_filename in sorted(songs):
         song_name = Path(song_filename).stem
-        song_title = f"Electronic Works - {song_name}"
         
         # URL encode the filename to handle apostrophes, spaces, and other special characters
         encoded_filename = quote(song_filename, safe='')
         file_url = f"{S3_SONGS_BASE_URL}{encoded_filename}"
         
-        value = f"(NULL, '{song_title}', NULL, NULL, {PRICE_PER_SONG}, '{ALBUM_COVER_URL}', NULL, '{file_url}', NULL, {STOCK_QUANTITY})"
+        value = f"(NULL, '{song_name}', NULL, NULL, {PRICE_PER_SONG}, '{ALBUM_COVER_URL}', NULL, '{file_url}', '{file_url}', {STOCK_QUANTITY})"
         values.append(value)
     
     sql_lines.append(",\n".join(values) + ";")
@@ -219,19 +228,22 @@ def main():
         print("\n❌ Failed to load AWS configuration. Exiting.")
         sys.exit(1)
     
-    # Step 2: Download ZIP from S3
-    zip_path = download_from_s3(aws_config)
-    if not zip_path:
-        print("\n❌ Failed to download ZIP file. Exiting.")
-        sys.exit(1)
-    
-    # Step 3: Extract songs
-    songs = extract_songs(zip_path)
+    # Step 2: List songs from S3 songs/ folder
+    songs = list_songs_from_s3(aws_config)
     if not songs:
-        print("\n❌ No songs found in ZIP file. Exiting.")
+        print("\n❌ No songs found in S3 bucket. Exiting.")
         sys.exit(1)
     
     print(f"\n📊 Found {len(songs)} songs")
+    
+    # Step 3: Download songs for local processing (optional, for audio feature extraction)
+    print("\n" + "=" * 60)
+    download_response = input("Do you want to download songs locally? (yes/no): ").strip().lower()
+    
+    if download_response in ['yes', 'y']:
+        downloaded = download_songs_from_s3(aws_config, songs)
+        if downloaded:
+            print(f"   ✅ Songs saved to: extracted_songs/")
     
     # Step 4: Generate SQL file (backup)
     sql_file = generate_sql_file(songs)
@@ -257,12 +269,6 @@ def main():
     else:
         print(f"\n📝 Songs not inserted. You can manually run:")
         print(f"   mysql -h localhost -u root -prootpassword Game_Store_System < {sql_file}")
-    
-    # Cleanup
-    print("\n🧹 Cleaning up...")
-    if os.path.exists(zip_path):
-        os.remove(zip_path)
-        print(f"   Removed: {zip_path}")
     
     print("\n✅ Done!")
 

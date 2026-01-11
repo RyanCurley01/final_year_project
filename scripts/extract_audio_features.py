@@ -55,6 +55,92 @@ DB_CONFIG = {
     'write_timeout': 10
 }
 
+# Path to init-database.sh
+INIT_DATABASE_PATH = '/workspaces/final_year_project/deployment/init-database.sh'
+
+
+def parse_products_from_init_script():
+    """
+    Parse the init-database.sh file to extract music products.
+    Returns a list of dicts with ProductID, AlbumTitle, and file_url.
+    """
+    import re
+    
+    try:
+        with open(INIT_DATABASE_PATH, 'r') as f:
+            content = f.read()
+        
+        products = []
+        
+        # Find the INSERT INTO Products statement
+        # Pattern matches: (NULL, 'SongName', NULL, NULL, 0.5, 'cover_url', NULL, 'file_url', 'preview_url', 200)
+        # For music: GameTitle is NULL, AlbumTitle has value
+        pattern = r"\(NULL,\s*'([^']+)',\s*NULL,\s*NULL,\s*[\d.]+,\s*'[^']*',\s*NULL,\s*'([^']+)',\s*'[^']*',\s*\d+\)"
+        
+        matches = re.findall(pattern, content)
+        
+        # Product IDs start at 1 for games, then album, then individual songs
+        # Based on init-database.sh: 4 games (1-4), 1 album (5), then songs (6+)
+        # We need to count all products to get correct IDs
+        
+        # First, count all products in order
+        all_products_pattern = r"\('([^']*)',\s*'?([^',]*)'?,\s*'?([^',]*)'?,\s*[\d.]+,\s*'?([^',]*)'?,\s*'([^']*)',\s*'?([^',]*)'?,\s*'([^']*)',\s*'?([^',]*)'?,\s*\d+\)"
+        
+        # Simpler approach: find all music product inserts (where GameTitle is NULL and AlbumTitle is not)
+        # Skip the full album (Selected Electronic Works) which doesn't have individual file_url in songs folder
+        
+        product_id = 1  # Start counting
+        
+        # Find the Products INSERT section
+        insert_start = content.find("INSERT INTO Products")
+        if insert_start == -1:
+            print("❌ Could not find Products INSERT in init-database.sh")
+            return []
+        
+        insert_section = content[insert_start:]
+        
+        # Count games first (GameTitle is NOT NULL)
+        # Games pattern: ('GameTitle', NULL, 'Platform', price, NULL, ...)
+        games_pattern = r"\('([^']+)',\s*NULL,\s*'([^']+)',\s*[\d.]+,"
+        games = re.findall(games_pattern, insert_section)
+        product_id += len(games)  # Skip game IDs
+        
+        # Skip the album bundle (ID after games)
+        # Album pattern: (NULL, 'Selected Electronic Works', NULL, NULL, 5.00, ...)
+        album_pattern = r"\(NULL,\s*'Selected Electronic Works',"
+        if re.search(album_pattern, insert_section):
+            product_id += 1  # Skip album ID
+        
+        # Now find all individual songs
+        # Individual songs pattern: (NULL, 'SongTitle', NULL, NULL, 0.5, 'cover', NULL, 'file_url', ...)
+        # But NOT 'Selected Electronic Works'
+        songs_pattern = r"\(NULL,\s*'([^']+)',\s*NULL,\s*NULL,\s*0\.5[0]*,\s*'[^']*',\s*NULL,\s*'([^']+)',\s*'[^']*',\s*\d+\)"
+        songs = re.findall(songs_pattern, insert_section)
+        
+        for album_title, file_url in songs:
+            # Skip the album bundle
+            if album_title == 'Selected Electronic Works':
+                continue
+            
+            products.append({
+                'ProductID': product_id,
+                'AlbumTitle': album_title,
+                'file_url': file_url
+            })
+            product_id += 1
+        
+        print(f"   Found {len(games)} games (IDs 1-{len(games)})")
+        print(f"   Found 1 album bundle (ID {len(games) + 1})")
+        print(f"   Found {len(products)} individual songs (IDs {len(games) + 2}-{len(games) + 1 + len(products)})")
+        
+        return products
+        
+    except Exception as e:
+        print(f"❌ Error parsing init-database.sh: {e}")
+        import traceback
+        traceback.print_exc()
+        return []
+
 
 def load_aws_config():
     """Load AWS credentials from application.yml"""
@@ -378,36 +464,16 @@ def process_products(local_dir=None, limit=None, sql_only=False, output_file=Non
     # SQL output storage
     sql_statements = []
     
-    # For SQL-only mode, we need a list of products
+    # For SQL-only mode, we need a list of products from init-database.sh
     if sql_only:
-        # Hardcode the product info from init-database.sh
-        print("\n📀 Using product list from database schema...")
-        products = []
-        # Product IDs 6-53 are individual songs (based on init-database.sh)
-        song_names = [
-            (6, 'Alien Acid'), (7, 'Alien Action'), (8, 'Alien Amp Up'), (9, 'Alien Bars'),
-            (10, 'Alien Business'), (11, 'Alien Chilling'), (12, 'Alien Essence'), (13, 'Alien Euphoria'),
-            (14, 'Alien Feels'), (15, 'Alien Flow State'), (16, 'Alien Grind'), (17, 'Alien Harmony'),
-            (18, 'Alien Hyperness'), (19, 'Alien Joy'), (20, 'Alien Memories'), (21, 'Alien Mode'),
-            (22, 'Alien Nature'), (23, 'Alien Ragebait'), (24, 'Alien Realm'), (25, 'Alien Sense'),
-            (26, 'Alien Singing'), (27, 'Alien Soul'), (28, 'Alien Translation'), (29, 'Alien Turn Up'),
-            (30, 'Alien Upgrade'), (31, 'Alien Utopia'), (32, 'Alien Wonder'), (33, 'Extraterrestrial Rave'),
-            (34, 'Find The Light'), (35, 'Green Bear'), (36, 'Green God'), (37, 'Intergalactic Rave'),
-            (38, "Mike's Rave"), (39, "Mike's Utopia"), (40, 'Ted Chilling'), (41, 'Teddy Emotion'),
-            (42, "Ted's Adventure"), (43, "Ted's Awakening"), (44, "Ted's Beautiful Anger"),
-            (45, "Ted's Chillness"), (46, "Ted's Deepness"), (47, "Ted's Dream"), (48, "Ted's Energy"),
-            (49, "Ted's Green Machine"), (50, "Ted's Rush Up"), (51, "Ted's Utopia")
-        ]
-        for pid, name in song_names:
-            url_name = name.replace(' ', '%20').replace("'", '%E2%80%99')
-            products.append({
-                'ProductID': pid,
-                'AlbumTitle': name,
-                'file_url': f"https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/{url_name}.wav"
-            })
+        print("\n📀 Parsing products from init-database.sh...")
+        products = parse_products_from_init_script()
+        if not products:
+            print("❌ Failed to parse products from init-database.sh")
+            return
         if limit:
             products = products[:limit]
-        print(f"✅ Processing {len(products)} songs")
+        print(f"✅ Found {len(products)} music products")
     else:
         # Get music products from database
         print("\n📀 Querying music products...")
