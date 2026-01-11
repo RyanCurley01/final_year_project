@@ -292,15 +292,15 @@ USE Game_Store_System;
     (NULL, 'Soft Chaos', NULL, NULL, 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Soft%20Chaos.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Soft%20Chaos.wav', 200),
     (NULL, 'Ted Chilling', NULL, NULL, 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%20Chilling.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%20Chilling.wav', 200),
     (NULL, 'Teddy Emotion', NULL, NULL, 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Teddy%20Emotion.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Teddy%20Emotion.wav', 200),
-    (NULL, 'Ted's Awakening', NULL, NULL, 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Awakening.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Awakening.wav', 200),
-    (NULL, 'Ted's Beautiful Anger', NULL, NULL, 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Beautiful%20Anger.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Beautiful%20Anger.wav', 200),
-    (NULL, 'Ted's Chillness', NULL, NULL, 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Chillness.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Chillness.wav', 200),
-    (NULL, 'Ted's Deepness', NULL, NULL, 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Deepness.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Deepness.wav', 200),
-    (NULL, 'Ted's Dream', NULL, NULL, 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Dream.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Dream.wav', 200),
-    (NULL, 'Ted's Energy', NULL, NULL, 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Energy.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Energy.wav', 200),
-    (NULL, 'Ted's Green Machine', NULL, NULL, 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Green%20Machine.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Green%20Machine.wav', 200),
-    (NULL, 'Ted's Rush Up', NULL, NULL, 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Rush%20Up.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Rush%20Up.wav', 200),
-    (NULL, 'Ted's Utopia', NULL, NULL, 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Utopia.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Utopia.wav', 200);
+    (NULL, 'Ted''s Awakening', NULL, NULL, 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Awakening.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Awakening.wav', 200),
+    (NULL, 'Ted''s Beautiful Anger', NULL, NULL, 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Beautiful%20Anger.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Beautiful%20Anger.wav', 200),
+    (NULL, 'Ted''s Chillness', NULL, NULL, 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Chillness.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Chillness.wav', 200),
+    (NULL, 'Ted''s Deepness', NULL, NULL, 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Deepness.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Deepness.wav', 200),
+    (NULL, 'Ted''s Dream', NULL, NULL, 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Dream.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Dream.wav', 200),
+    (NULL, 'Ted''s Energy', NULL, NULL, 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Energy.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Energy.wav', 200),
+    (NULL, 'Ted''s Green Machine', NULL, NULL, 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Green%20Machine.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Green%20Machine.wav', 200),
+    (NULL, 'Ted''s Rush Up', NULL, NULL, 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Rush%20Up.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Rush%20Up.wav', 200),
+    (NULL, 'Ted''s Utopia', NULL, NULL, 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Utopia.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Utopia.wav', 200);
 
     -- Insert Stock entries 
     INSERT INTO Stock (StockQuantity, ProductID) VALUES
@@ -309,7 +309,7 @@ USE Game_Store_System;
     (100, 3),  -- Protectors
     (100, 4),  -- Red Hood
     (200, 5),  -- Selected Electronic Works (full album ZIP)
-    -- Individual songs (Product IDs 6-58)
+    -- Individual songs (Product IDs 6-52)
     (200, 6), (200, 7), (200, 8), (200, 9), (200, 10),
     (200, 11), (200, 12), (200, 13), (200, 14), (200, 15),
     (200, 16), (200, 17), (200, 18), (200, 19), (200, 20),
@@ -319,8 +319,7 @@ USE Game_Store_System;
     (200, 36), (200, 37), (200, 38), (200, 39), (200, 40),
     (200, 41), (200, 42), (200, 43), (200, 44), (200, 45),
     (200, 46), (200, 47), (200, 48), (200, 49), (200, 50),
-    (200, 51), (200, 52), (200, 53), (200, 54), (200, 55),
-    (200, 56), (200, 57), (200, 58);
+    (200, 51), (200, 52);
 
     -- Insert Orders
     INSERT INTO Orders (AccountID, orderDate, TotalAmount) VALUES
@@ -391,7 +390,7 @@ USE Game_Store_System;
     (10, 2);  -- Grace wants Midnight Haunt
 
     -- Insert AudioFeatures for music products (extracted from S3 WAV files)
-    INSERT INTO AudioFeatures (ProductID, Tempo, Energy, Danceability, Valence, Acousticness, Instrumentalness, Loudness, Speechiness, Genre, Mood, Key_Signature, TimeSignature, Duration, SpectralCentroid, SpectralRolloff, ZeroCrossingRate) VALUES
+    INSERT INTO AudioFeatures (ProductID, Tempo, Energy, Danceability, Valence, Acousticness, Instrumentalness, Loudness, Speechiness, Genre, Mood, Key_Signature, TimeSignature, Duration, SpectralCentroid, SpectralRolloff, ZeroCrossingRate, MfccMean, ChromaMean) VALUES
     (6, 117.45, 0.168, 1.0, 0.584, 1.0, 0.874, -69.04, 0.126, 'Pop', 'Neutral', 'C', '4/4', 30, 1722.19, 3584.83, 0.0632, '[-291.7796630859375, 111.64028930664062, 48.19269561767578, 14.828948974609375, 1.358401894569397, 8.407594680786133, 4.571701526641846, 9.025636672973633, 3.417975902557373, 6.400054931640625, 1.8948384523391724, 1.1143864393234253, -1.3582206964492798]', '[0.8696908950805664, 0.5900623202323914, 0.44574981927871704, 0.40920647978782654, 0.42403730750083923, 0.3584105968475342, 0.3536975383758545, 0.47110438346862793, 0.42281636595726013, 0.4094597399234772, 0.45202934741973877, 0.5952065587043762]'),
     (7, 80.75, 0.318, 1.0, 0.464, 1.0, 0.928, -56.39, 0.072, 'Ambient', 'Neutral', 'G', '4/4', 30, 1121.95, 2261.08, 0.0359, '[-160.5883331298828, 154.20309448242188, 6.3192338943481445, 39.80005645751953, 11.498737335205078, 10.888457298278809, 3.7194249629974365, 7.480372905731201, 1.5592849254608154, 9.576579093933105, 3.297532320022583, 2.85922908782959, -2.3978922367095947]', '[0.4899479150772095, 0.4097428023815155, 0.3703620433807373, 0.3697986304759979, 0.41869351267814636, 0.4767346978187561, 0.4084570109844208, 0.5346569418907166, 0.4780023992061615, 0.48205694556236267, 0.5121042728424072, 0.5257125496864319]'),
     (8, 0.0, 0.1, 0.147, 0.168, 1.0, 0.927, -77.18, 0.073, 'Ambient', 'Calm', 'F#', '4/4', 30, 427.85, 544.56, 0.0367, '[-498.8492736816406, 157.57118225097656, 76.0373306274414, 8.46163558959961, -19.200679779052734, -23.63567352294922, -28.274229049682617, -36.56103515625, -39.56654739379883, -33.278038024902344, -22.332683563232422, -14.160150527954102, -12.939478874206543]', '[0.25219181180000305, 0.1900118887424469, 0.0725824162364006, 0.21958181262016296, 0.05029677227139473, 0.12331201136112213, 0.6893225312232971, 0.4777854382991791, 0.12202893197536469, 0.1776473969221115, 0.5485554337501526, 0.19877542555332184]'),

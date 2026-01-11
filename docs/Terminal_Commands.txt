@@ -75,10 +75,14 @@ docker ps -a
 # Convert line endings to Unix format
 dos2unix init-database.sh || sed -i 's/\r$//' init-database.sh
 
-# Now recreate the database from scratch
+
+# To recreate the database if updated or new data is added
 ./services-control.sh down
+
 docker volume rm gamestore_services_mysql-data
+
 ./services-control.sh start
+
 
 # Wait 30 seconds for database to initialize
 sleep 30
