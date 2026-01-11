@@ -10,6 +10,7 @@ import { paymentService } from '../redux/services/paymentService';
 import { orderService } from '../redux/services/orderService';
 import { orderItemService } from '../redux/services/orderItemService';
 import placeholders from '../utils/placeholderImage';
+import { downloadMultipleFiles, generateFilename } from '../utils/downloadHelper';
 
 const Cart = () => {
   const dispatch = useDispatch();
@@ -94,7 +95,32 @@ const Cart = () => {
       // Clear cart
       dispatch(clearCart());
       
-      alert("Payment successful! Check your purchase history.");
+      // Trigger automatic downloads for purchased items
+      const filesToDownload = items
+        .filter(item => {
+          // Only download music files (WAV files from S3)
+          // Skip games since they link to itch.io
+          const isMusic = item.albumTitle !== null && item.albumTitle !== undefined;
+          return isMusic && item.fileUrl;
+        })
+        .map(item => ({
+          url: item.fileUrl,
+          filename: generateFilename(item, item.fileUrl)
+        }));
+      
+      if (filesToDownload.length > 0) {
+        console.log(`Starting download of ${filesToDownload.length} file(s)...`);
+        try {
+          await downloadMultipleFiles(filesToDownload);
+          alert("Payment successful! Your files are downloading. Check your purchase history for details.");
+        } catch (downloadError) {
+          console.error("Error downloading files:", downloadError);
+          alert("Payment successful! However, some files failed to download. Check your purchase history to download them manually.");
+        }
+      } else {
+        alert("Payment successful! Check your purchase history.");
+      }
+      
       setShowPayPal(false);
     } catch (error) {
       console.error("Error capturing PayPal order:", error);

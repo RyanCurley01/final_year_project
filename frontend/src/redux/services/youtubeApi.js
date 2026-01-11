@@ -21,7 +21,12 @@ export const youtubeApi = createApi({
       query: () => '/youtube/top-songs',
       pollingInterval: 60000, // Poll every 60 seconds
     }),
+    getTopPlayedSongs: builder.query({
+      query: (limit = 5) => `/songs/top-played?limit=${limit}`,
+      // Refresh every 30 seconds to reflect new plays
+      pollingInterval: 30000,
+    }),
   }),
 });
 
-export const { useGetTopSongsQuery } = youtubeApi;
+export const { useGetTopSongsQuery, useGetTopPlayedSongsQuery } = youtubeApi;

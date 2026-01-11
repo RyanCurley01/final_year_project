@@ -1,10 +1,27 @@
 import { useSelector } from 'react-redux';
 import { Link } from 'react-router-dom';
-import { FaReceipt, FaCalendar, FaDollarSign } from 'react-icons/fa';
+import { FaReceipt, FaCalendar, FaDollarSign, FaDownload } from 'react-icons/fa';
 import placeholders from '../utils/placeholderImage';
+import { downloadFile, generateFilename } from '../utils/downloadHelper';
 
 const PurchaseHistory = () => {
   const { purchases } = useSelector((state) => state.purchase);
+
+  const handleDownload = (item) => {
+    const isMusic = item.albumTitle !== null && item.albumTitle !== undefined;
+    
+    if (isMusic && item.fileUrl) {
+      try {
+        downloadFile(item.fileUrl, generateFilename(item, item.fileUrl));
+      } catch (error) {
+        console.error("Error downloading file:", error);
+        alert("Failed to download file. Please try again.");
+      }
+    } else if (!isMusic && item.fileUrl) {
+      // For games, open itch.io link in new tab
+      window.open(item.fileUrl, '_blank', 'noopener,noreferrer');
+    }
+  };
 
   if (purchases.length === 0) {
     return (
@@ -33,7 +50,7 @@ const PurchaseHistory = () => {
             <div className="flex flex-wrap justify-between items-start mb-4 pb-4 border-b border-gray-600">
               <div>
                 <h3 className="text-white font-semibold text-lg mb-2">
-                  Order ID: {purchase.id}
+                  Order ID: {purchase.id.replace('purchase-', '')}
                 </h3>
                 <div className="flex flex-wrap gap-4 text-gray-400 text-sm">
                   <div className="flex items-center gap-2">
@@ -59,34 +76,63 @@ const PurchaseHistory = () => {
 
             {/* Purchase Items */}
             <div className="space-y-3">
-              <h4 className="text-gray-300 font-semibold mb-2">Items:</h4>
+              <h4 className="text-white font-semibold mb-2">Items:</h4>
               {purchase.items.map((item, index) => {
                 const isMusic = item.albumTitle !== null && item.albumTitle !== undefined;
                 const productName = isMusic ? item.albumTitle : item.gameTitle;
                 const price = isMusic ? item.albumPrice : item.gamePrice;
                 const coverMedia = isMusic ? item.albumCoverImageUrl : item.gameCoverImageUrl;
+                const isVideo = coverMedia && coverMedia.toLowerCase().includes('.mp4');
 
                 return (
-                  <div key={index} className="flex gap-3 bg-white/5 rounded-lg p-3">
-                    <img
-                      src={coverMedia || placeholders.small}
-                      alt={productName}
-                      className="w-16 h-16 rounded-lg object-cover"
-                      onError={(e) => {
-                        if (e.target.src !== placeholders.small) {
-                          e.target.src = placeholders.small;
-                        }
-                      }}
-                    />
+                  <div key={index} className="flex gap-3 bg-white/5 rounded-lg p-3 items-center">
+                    {isVideo ? (
+                      <video
+                        src={coverMedia}
+                        className="w-16 h-16 rounded-lg object-cover"
+                        muted
+                        loop
+                        autoPlay
+                        onError={(e) => {
+                          // If video fails to load, replace with image fallback
+                          const img = document.createElement('img');
+                          img.src = placeholders.small;
+                          img.alt = productName;
+                          img.className = 'w-16 h-16 rounded-lg object-cover';
+                          e.target.parentNode.replaceChild(img, e.target);
+                        }}
+                      />
+                    ) : (
+                      <img
+                        src={coverMedia || placeholders.small}
+                        alt={productName}
+                        className="w-16 h-16 rounded-lg object-cover"
+                        onError={(e) => {
+                          if (e.target.src !== placeholders.small) {
+                            e.target.src = placeholders.small;
+                          }
+                        }}
+                      />
+                    )}
                     <div className="flex-1">
                       <p className="text-white font-semibold">{productName}</p>
                       <p className="text-gray-400 text-sm">
                         Quantity: {item.quantity} × ${price.toFixed(2)}
                       </p>
                     </div>
-                    <div className="text-white font-semibold">
+                    <div className="text-white font-semibold mr-4">
                       ${(price * item.quantity).toFixed(2)}
                     </div>
+                    {item.fileUrl && (
+                      <button
+                        onClick={() => handleDownload(item)}
+                        className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
+                        title={isMusic ? "Download file" : "View on itch.io"}
+                      >
+                        <FaDownload />
+                        {isMusic ? "Download" : "View"}
+                      </button>
+                    )}
                   </div>
                 );
               })}

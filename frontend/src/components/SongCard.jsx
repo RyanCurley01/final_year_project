@@ -1,12 +1,10 @@
 import {Link } from 'react-router-dom';
 import {useDispatch, useSelector } from 'react-redux';
 import { useRef, useEffect, useState } from 'react';
-import { MdFullscreen } from 'react-icons/md';
 import { FiShoppingCart } from 'react-icons/fi';
 
 import PlayPause from './PlayPause';
 import AudioReactiveVideo from './AudioReactiveVideo';
-import { useVideoModal } from '../context/VideoModalContext';
 import { playPause, setActiveSong, setPlaybackRate } from '../redux/features/playerSlice';
 import { addToCart } from '../redux/features/cartSlice';
 import placeholders from '../utils/placeholderImage';
@@ -34,7 +32,6 @@ const SongCard = ({ product, payment, i, data }) => {
 
   const dispatch = useDispatch();
   const { activeSong, isPlaying, songEnded, playbackRate } = useSelector((state) => state.player);
-  const { openModal } = useVideoModal();
   
   // Handle playback rate change - dispatch to Redux for recommendations update
   const handlePlaybackRateChange = (e) => {
@@ -44,16 +41,6 @@ const SongCard = ({ product, payment, i, data }) => {
   
   // Check if this card's song is currently active
   const isThisSongActive = activeSong?.albumTitle === product.albumTitle;
-
-  const handleMaximizeClick = (e) => {
-    e.stopPropagation();
-    openModal({
-      videoSrc: coverMedia,
-      title: productName,
-      isPlaying,
-      isActive: isThisSongActive
-    });
-  };
 
   const handlePauseClick = () => {
     console.log('🔴 Pause clicked for:', product.albumTitle);
@@ -77,33 +64,20 @@ const SongCard = ({ product, payment, i, data }) => {
     /**
      * Shows the cover image with song and game details
      */
-    <div className="flex flex-col p-4 bg-white/5 
-    bg-opacity-80 backdrop-blur-sm animate-slideup
-    rounded-lg cursor-pointer">
+    <div className="flex flex-col p-4 bg-white/5 backdrop-blur-sm animate-slideup rounded-lg cursor-pointer hover:bg-white/10 transition-all">
       <div className="relative w-full aspect-square group">
         {isVideo ? (
-          <>
-            <AudioReactiveVideo
-              src={coverMedia}
-              alt={productName}
-              className="w-full h-full rounded-lg object-cover"
-              isPlaying={isPlaying}
-              isActive={isThisSongActive}
-              playbackRate={isThisSongActive ? playbackRate : 1.0}
-              onError={(e) => {
-                console.error('Video failed to load:', coverMedia, e);
-              }}
-            />
-            {/* Maximize button - always visible for videos */}
-            <button
-              onClick={handleMaximizeClick}
-              className="absolute top-2 right-2 p-1.5 bg-black/70 hover:bg-black/90 rounded-md 
-                       transition-all duration-200 z-50 shadow-lg"
-              title="Fullscreen"
-            >
-              <MdFullscreen className="text-white text-2xl" />
-            </button>
-          </>
+          <AudioReactiveVideo
+            src={coverMedia}
+            alt={productName}
+            className="w-full h-full rounded-lg object-cover"
+            isPlaying={isPlaying}
+            isActive={isThisSongActive}
+            playbackRate={isThisSongActive ? playbackRate : 1.0}
+            onError={(e) => {
+              console.error('Video failed to load:', coverMedia, e);
+            }}
+          />
         ) : (
           <img
             src={coverMedia || placeholders.large}
@@ -116,10 +90,8 @@ const SongCard = ({ product, payment, i, data }) => {
             }}
           />
         )}
-        <div className={`group-hover:flex absolute rounded-lg inset-0 justify-center items-center
-           bg-black bg-opacity-50 z-10 ${isPlayableSong ? 'flex bg-black bg-opacity-50' : 'hidden'}
-            ${isPlayableSong ? 'hidden' : 'flex bg-black bg-opacity-50'}`}>
-          {isPlayableSong && (
+        {isPlayableSong && (
+          <div className={`absolute inset-0 rounded-lg flex justify-center items-center bg-black/50 z-10 ${isThisSongActive && isPlaying ? 'flex' : 'hidden group-hover:flex'}`}>
             <PlayPause 
               isPlaying={isPlaying && activeSong?.albumTitle === product.albumTitle}
               activeSong={activeSong}
@@ -127,8 +99,8 @@ const SongCard = ({ product, payment, i, data }) => {
               handlePlay={handlePlayClick}
               song={product}
             />
-          )}
-        </div>
+          </div>
+        )}
 
         {/* Playing indicator - bottom right */}
         {isThisSongActive && isPlaying && (
@@ -174,14 +146,16 @@ const SongCard = ({ product, payment, i, data }) => {
 
       <div className="flex flex-col mt-4">
         <p className="font-semibold text-lg text-white">
-          {isGame ? (
-            <Link
-              to={`/games/${product.id}`}
-              title={productName || 'Unknown'}
-              className="block break-words"
+          {isGame && product.fileUrl ? (
+            <a
+              href={product.fileUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              title={`View ${productName || 'Unknown'} on itch.io`}
+              className="block break-words hover:text-blue-400 transition-colors"
             >
               {productName || 'Unknown'}
-            </Link>
+            </a>
           ) : (
             <span className="block break-words">
               {productName || 'Unknown'}

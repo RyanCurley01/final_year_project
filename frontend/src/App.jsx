@@ -98,7 +98,7 @@ const AppContent = () => {
                       onRecommendationClick={handleRecommendationClick}
                     />
                   ) : (
-                    <div className="bg-gradient-to-br from-gray-900 to-black p-6 rounded-lg border border-gray-800">
+                    <div className="bg-gradient-to-br from-gray-900 to-black p-5 rounded-lg border border-gray-800">
                       <p className="text-gray-400 text-center">Play a song to see audio-based recommendations</p>
                     </div>
                   )}
@@ -121,7 +121,7 @@ const AppContent = () => {
                       onRecommendationClick={handleRecommendationClick}
                     />
                   ) : (
-                    <div className="bg-gradient-to-br from-gray-900 to-black p-6 rounded-lg border border-gray-800">
+                    <div className="bg-gradient-to-br from-gray-900 to-black p-5 rounded-lg border border-gray-800">
                       <p className="text-gray-400 text-center">Play a song to see audio-based recommendations</p>
                     </div>
                   )}

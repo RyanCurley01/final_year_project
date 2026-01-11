@@ -211,6 +211,71 @@ async def get_top_songs(max_results: int = 10):
     """
     return youtube_service.get_top_songs(max_results)
 
+# ============================================
+# TOP PLAYED SONGS ENDPOINT (from UserInteractions)
+# ============================================
+
+@app.get("/api/songs/top-played")
+async def get_top_played_songs(limit: int = 5):
+    """
+    Get top played songs based on play count from UserInteractions table.
+    Returns songs ranked by number of 'play' interactions.
+    
+    Args:
+        limit: Maximum number of songs to return (default: 5)
+    """
+    try:
+        with get_db_connection() as conn:
+            if conn:
+                with conn.cursor() as cursor:
+                    # Query top played songs by counting 'play' interactions
+                    sql = """
+                        SELECT 
+                            p.ProductID as productId,
+                            p.AlbumTitle as albumTitle,
+                            p.albumCoverImageUrl,
+                            p.file_url as fileUrl,
+                            p.preview_url as previewUrl,
+                            p.AlbumPrice as albumPrice,
+                            COUNT(ui.InteractionID) as playCount
+                        FROM Products p
+                        LEFT JOIN UserInteractions ui ON p.ProductID = ui.ProductID 
+                            AND ui.InteractionType = 'play'
+                        WHERE p.AlbumTitle IS NOT NULL 
+                            AND p.AlbumTitle != 'Selected Electronic Works'
+                            AND p.file_url IS NOT NULL
+                        GROUP BY p.ProductID, p.AlbumTitle, p.albumCoverImageUrl, 
+                                 p.file_url, p.preview_url, p.AlbumPrice
+                        ORDER BY playCount DESC, p.AlbumTitle ASC
+                        LIMIT %s
+                    """
+                    cursor.execute(sql, (limit,))
+                    results = cursor.fetchall()
+                    
+                    # Format response
+                    songs = []
+                    for row in results:
+                        songs.append({
+                            "productId": row['productId'],
+                            "albumTitle": row['albumTitle'],
+                            "albumCoverImageUrl": row['albumCoverImageUrl'],
+                            "fileUrl": row['fileUrl'],
+                            "previewUrl": row['previewUrl'],
+                            "albumPrice": float(row['albumPrice']) if row['albumPrice'] else 0.5,
+                            "playCount": row['playCount']
+                        })
+                    
+                    return {
+                        "status": "success",
+                        "data": songs,
+                        "count": len(songs)
+                    }
+            else:
+                raise HTTPException(status_code=503, detail="Database connection unavailable")
+    except Exception as e:
+        print(f"Error fetching top played songs: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/api/test/songs")
 async def get_test_songs():
     """

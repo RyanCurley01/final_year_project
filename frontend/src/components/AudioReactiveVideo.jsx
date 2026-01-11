@@ -292,7 +292,7 @@ const AudioReactiveVideo = ({
   }, [isPlaying, isActive, src]);
   
   return (
-    <div className="relative" style={{ width: '100%', height: '100%' }}>
+    <div className="relative rounded-lg overflow-hidden" style={{ width: '100%', height: '100%' }}>
       {/* Hidden muted video element for visual animation only */}
       <video
         ref={videoRef}

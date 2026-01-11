@@ -20,18 +20,24 @@ const SmartRecommendationVisualizer = ({
   const [loading, setLoading] = useState(false);
   const [hoveredRec, setHoveredRec] = useState(null);
   const [noMatchFound, setNoMatchFound] = useState(false);
+  const [displayedFeatures, setDisplayedFeatures] = useState(null);
+  const [displayedPlaybackRate, setDisplayedPlaybackRate] = useState(1);
   const isInitialLoad = useRef(true);
   const intervalRef = useRef(null);
   
   // Get audio features from shared context
   const { audioFeatures } = useAudioFeatures();
   
-  // Get playbackRate and isPlaying from Redux
-  const { playbackRate, isPlaying } = useSelector((state) => state.player);
+  // Get playbackRate, isPlaying, and activeSong from Redux
+  const { playbackRate, isPlaying, activeSong } = useSelector((state) => state.player);
   
   // Store playbackRate in ref so interval always has latest value
   const playbackRateRef = useRef(playbackRate);
   playbackRateRef.current = playbackRate;
+  
+  // Store audioFeatures in ref so interval always has latest value without triggering re-renders
+  const audioFeaturesRef = useRef(audioFeatures);
+  audioFeaturesRef.current = audioFeatures;
 
   const fetchRecommendations = async (product, features, rate, session, forceRefresh = false) => {
     if (!product || !features) {
@@ -92,29 +98,32 @@ const SmartRecommendationVisualizer = ({
 
     // Helper function to fetch recommendations
     const doFetch = (forceRefresh = false) => {
-      const features = audioFeatures || {
+      const features = audioFeaturesRef.current || {
         tempo: 120,
         energy: 0.5,
         valence: 0.5,
         danceability: 0.5
       };
+      const rate = playbackRateRef.current;
       
       console.log('🔄 Fetching recommendations:', {
         product: currentProduct.id,
-        hasRealFeatures: !!audioFeatures,
-        playbackRate: playbackRateRef.current
+        hasRealFeatures: !!audioFeaturesRef.current,
+        playbackRate: rate
       });
       
-      fetchRecommendations(currentProduct, features, playbackRateRef.current, sessionId, forceRefresh);
+      setDisplayedFeatures(features);
+      setDisplayedPlaybackRate(rate);
+      fetchRecommendations(currentProduct, features, rate, sessionId, forceRefresh);
     };
 
     // Immediate fetch
     console.log('⚡ INSTANT fetch for product:', currentProduct.id);
     doFetch(true);
 
-    // Set up polling interval (2 seconds)
-    console.log('⏱️ Starting 2s polling interval');
-    intervalRef.current = setInterval(() => doFetch(false), 2000);
+    // Set up polling interval (3 seconds)
+    console.log('⏱️ Starting 3s polling interval');
+    intervalRef.current = setInterval(() => doFetch(false), 3000);
 
     // Cleanup
     return () => {
@@ -123,7 +132,7 @@ const SmartRecommendationVisualizer = ({
         intervalRef.current = null;
       }
     };
-  }, [currentProduct?.id, audioFeatures, sessionId, playbackRate]);
+  }, [currentProduct?.id, sessionId]);
 
   // Calculate real-time match values based on current audio features
   const calculateLiveMatch = (recProductId) => {
@@ -172,18 +181,18 @@ const SmartRecommendationVisualizer = ({
 
   if (!currentProduct) {
     return (
-      <div className="bg-gradient-to-br from-gray-900 to-black p-6 rounded-lg border border-gray-800">
+      <div className="bg-gradient-to-br from-gray-900 to-black p-5 rounded-lg border border-gray-800">
         <p className="text-gray-400 text-center">Play a song to see audio-based recommendations</p>
       </div>
     );
   }
 
   return (
-    <div className="bg-gradient-to-br from-gray-900 to-black p-6 rounded-lg border border-gray-800 shadow-xl">
+    <div className="bg-gradient-to-br from-gray-900 to-black p-5 rounded-lg border border-gray-800 sticky top-6">
       {/* Header */}
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-white mb-2">Smart Audio Recommendations</h1>
-        <p className="text-sm text-gray-400">
+      <div className="mb-4">
+        <h3 className="text-lg font-bold text-white mb-1">Smart Audio Recommendations</h3>
+        <p className="text-xs text-gray-400">
           Real-time suggestions based on <span className="text-cyan-400 font-semibold">{currentProduct.albumTitle}</span>'s audio features
         </p>
       </div>
@@ -237,22 +246,22 @@ const SmartRecommendationVisualizer = ({
         </div>
 
         {/* Audio Feature Badges */}
-        {audioFeatures && (
+        {displayedFeatures && (
           <div className="grid grid-cols-4 gap-2">
-            <FeatureBadge label="Tempo" value={`${Math.round(audioFeatures.tempo * (playbackRate || 1))} BPM`} />
-            <FeatureBadge label="Energy" value={`${Math.round(audioFeatures.energy * 100)}%`} />
-            <FeatureBadge label="Mood" value={`${Math.round(audioFeatures.valence * 100)}%`} />
-            <FeatureBadge label="Dance" value={`${Math.round(audioFeatures.danceability * 100)}%`} />
+            <FeatureBadge label="Tempo" value={`${Math.round(displayedFeatures.tempo * (displayedPlaybackRate || 1))} BPM`} />
+            <FeatureBadge label="Energy" value={`${Math.round(displayedFeatures.energy * 100)}%`} />
+            <FeatureBadge label="Mood" value={`${Math.round(displayedFeatures.valence * 100)}%`} />
+            <FeatureBadge label="Dance" value={`${Math.round(displayedFeatures.danceability * 100)}%`} />
           </div>
         )}
         
-        {!audioFeatures && (
+        {!displayedFeatures && (
           <p className="text-xs text-gray-500 text-center">Analyzing audio features...</p>
         )}
         
-        {playbackRate && playbackRate !== 1.0 && (
+        {displayedPlaybackRate && displayedPlaybackRate !== 1.0 && currentProduct && (activeSong?.albumTitle === currentProduct.albumTitle || activeSong?.id === currentProduct.id) && (
           <p className="text-xs text-yellow-400 mt-2">
-            ⚡ Tempo adjusted for {playbackRate.toFixed(2)}x speed
+            ⚡ Tempo adjusted for {displayedPlaybackRate.toFixed(2)}x speed
           </p>
         )}
       </div>
@@ -302,7 +311,7 @@ const SmartRecommendationVisualizer = ({
           >
             {/* Matches count */}
             <p className="text-xs text-gray-500 mb-3">
-              {recommendations.length} {recommendations.length === 1 ? 'match' : 'matches'} found • Updates every 2s
+              {recommendations.length} {recommendations.length === 1 ? 'match' : 'matches'} found • Updates every 3s
             </p>
             
             {recommendations.map((rec, index) => {
@@ -476,7 +485,6 @@ const AlbumCover = ({ url, title, productId }) => {
 
 const MatchIndicator = ({ label, value }) => {
   const percentage = (value * 100).toFixed(0);
-  const color = value >= 0.7 ? 'bg-green-500' : value >= 0.5 ? 'bg-yellow-500' : 'bg-red-500';
   
   return (
     <motion.div
@@ -484,12 +492,14 @@ const MatchIndicator = ({ label, value }) => {
       initial={{ opacity: 0.5, scale: 0.95 }}
       animate={{ opacity: 1, scale: 1 }}
       transition={{ duration: 0.3 }}
-      className="flex items-center gap-1 text-xs"
     >
-      <span className="text-gray-400">{label}:</span>
-      <div className={`${color} text-white px-2 py-0.5 rounded-full font-semibold`}>
-        {percentage}%
-      </div>
+      <span className={`px-1.5 py-0.5 rounded text-[13px] ${
+        value >= 0.7 ? 'bg-green-500/30 text-green-300' : 
+        value >= 0.5 ? 'bg-yellow-500/30 text-yellow-300' : 
+        'bg-red-500/30 text-red-300'
+      }`}>
+        {label}:{percentage}%
+      </span>
     </motion.div>
   );
 };

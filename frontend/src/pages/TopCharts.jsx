@@ -107,6 +107,8 @@ const TopCharts = () => {
   const [error, setError] = useState(null);
   const [recommendations, setRecommendations] = useState([]);
   const [recLoading, setRecLoading] = useState(false);
+  const [displayedFeatures, setDisplayedFeatures] = useState(null);
+  const [displayedPlaybackRate, setDisplayedPlaybackRate] = useState(1);
   
   const intervalRef = useRef(null);
   const dispatch = useDispatch();
@@ -114,6 +116,12 @@ const TopCharts = () => {
   
   // Get audio features from shared context
   const { audioFeatures } = useAudioFeatures();
+  
+  // Store values in refs so interval always has latest value without triggering re-renders
+  const audioFeaturesRef = useRef(audioFeatures);
+  audioFeaturesRef.current = audioFeatures;
+  const playbackRateRef = useRef(playbackRate);
+  playbackRateRef.current = playbackRate;
 
   const email = 'john.smith@store.com';
   const password = 'password';
@@ -189,16 +197,18 @@ const TopCharts = () => {
         
         for (const artist of ARTISTS) {
           const response = await fetch(
-            `https://itunes.apple.com/search?term=${encodeURIComponent(artist)}&media=music&entity=song&limit=20`
+            `https://itunes.apple.com/search?term=${encodeURIComponent(artist)}&media=music&entity=song&limit=400`
           );
           
           if (!response.ok) throw new Error(`Failed to fetch ${artist}`);
           
           const data = await response.json();
           
+          // Filter to only include tracks that have a preview AND match the artist name
+          const artistLower = artist.toLowerCase();
           const artistSongs = data.results
-            .filter(track => track.previewUrl)
-            .slice(0, 20) // Take only first 20 (most popular)
+            .filter(track => track.previewUrl && track.artistName?.toLowerCase().includes(artistLower))
+            .slice(0, 50) // Take only first 50 (most popular)
             .map((track, artistIndex) => ({
               id: track.trackId,
               trackName: track.trackName,
@@ -209,8 +219,8 @@ const TopCharts = () => {
               previewUrl: track.previewUrl,
               fileUrl: track.previewUrl,
               price: track.trackPrice || 1.29,
-              artistRank: artistIndex + 1, // Track position within artist's results (1-20)
-              popularityScore: 21 - artistIndex // Higher score = more popular (20 for #1, 1 for #20)
+              artistRank: artistIndex + 1, // Track position within artist's results (1-50)
+              popularityScore: 51 - artistIndex // Higher score = more popular (50 for #1, 1 for #50)
             }));
           
           allArtistSongs.push(...artistSongs);
@@ -245,22 +255,25 @@ const TopCharts = () => {
 
     // Helper function to update recommendations
     const updateRecs = () => {
-      const features = audioFeatures || {
+      const features = audioFeaturesRef.current || {
         tempo: 120,
         energy: 0.5,
         valence: 0.5,
         danceability: 0.5
       };
+      const rate = playbackRateRef.current;
       
       console.log('🔄 Updating recommendations:', {
         song: activeSong.trackName || activeSong.albumTitle,
-        hasRealFeatures: !!audioFeatures,
+        hasRealFeatures: !!audioFeaturesRef.current,
         tempo: features.tempo,
-        playbackRate
+        playbackRate: rate
       });
       
-      const recs = findSimilarArtistSongs(activeSong, features, songs, playbackRate);
+      const recs = findSimilarArtistSongs(activeSong, features, songs, rate);
       setRecommendations(recs);
+      setDisplayedFeatures(features);
+      setDisplayedPlaybackRate(rate);
     };
 
     // Immediate update
@@ -269,9 +282,9 @@ const TopCharts = () => {
     updateRecs();
     setRecLoading(false);
 
-    // Set up polling interval
-    console.log('⏱️ Starting 2s polling interval');
-    intervalRef.current = setInterval(updateRecs, 2000);
+    // Set up polling interval (3 seconds)
+    console.log('⏱️ Starting 3s polling interval');
+    intervalRef.current = setInterval(updateRecs, 3000);
 
     // Cleanup
     return () => {
@@ -280,7 +293,7 @@ const TopCharts = () => {
         intervalRef.current = null;
       }
     };
-  }, [activeSong?.id, audioFeatures, songs, playbackRate]);
+  }, [activeSong?.id, songs]);
 
   const filteredSongs = useMemo(() => {
     if (filter === 'all') return songs;
@@ -325,8 +338,8 @@ const TopCharts = () => {
       {/* Main Content */}
       <div className="flex-1">
         <div className="mb-6">
-          <h1 className="font-bold text-3xl text-white mb-2">Top 20 Popular Songs</h1>
-          <p className="text-gray-400">The 20 most popular songs from Aphex Twin, Boards of Canada, and Squarepusher - ordered by popularity</p>
+          <h1 className="font-bold text-3xl text-white mb-2">Top 50 Popular Songs</h1>
+          <p className="text-gray-400">The 50 most popular songs from Aphex Twin, Boards of Canada, and Squarepusher - ordered by popularity</p>
           <p className="text-xs text-cyan-400 mt-1">Powered by iTunes API - {songs.length} artist tracks with 30s previews</p>
         </div>
 
@@ -402,30 +415,24 @@ const TopCharts = () => {
               </div>
               
               {/* Audio Feature Badges */}
-              {audioFeatures && (
+              {displayedFeatures && (
                 <div className="grid grid-cols-4 gap-2">
-                  <FeatureBadge label="Tempo" value={`${Math.round(audioFeatures.tempo * (playbackRate || 1))} BPM`} />
-                  <FeatureBadge label="Energy" value={`${Math.round(audioFeatures.energy * 100)}%`} />
-                  <FeatureBadge label="Mood" value={`${Math.round(audioFeatures.valence * 100)}%`} />
-                  <FeatureBadge label="Dance" value={`${Math.round(audioFeatures.danceability * 100)}%`} />
+                  <FeatureBadge label="Tempo" value={`${Math.round(displayedFeatures.tempo * (displayedPlaybackRate || 1))} BPM`} />
+                  <FeatureBadge label="Energy" value={`${Math.round(displayedFeatures.energy * 100)}%`} />
+                  <FeatureBadge label="Mood" value={`${Math.round(displayedFeatures.valence * 100)}%`} />
+                  <FeatureBadge label="Dance" value={`${Math.round(displayedFeatures.danceability * 100)}%`} />
                 </div>
               )}
               
-              {!audioFeatures && (
+              {!displayedFeatures && (
                 <p className="text-xs text-gray-500 text-center">Analyzing audio features...</p>
-              )}
-              
-              {playbackRate && playbackRate !== 1.0 && (
-                <p className="text-xs text-yellow-400 mt-2">
-                  ⚡ Tempo adjusted for {playbackRate.toFixed(2)}x speed
-                </p>
               )}
             </div>
 
           {/* Recommendations List */}
           {activeSong && recommendations.length > 0 && (
             <>
-              <p className="text-xs text-gray-500 mb-3">{recommendations.length} similar artist tracks • Updates every 5s</p>
+              <p className="text-xs text-gray-500 mb-3">{recommendations.length} similar artist tracks • Updates every 3s</p>
               <div className="space-y-2 max-h-[400px] overflow-y-auto">
                 {recommendations.map((rec) => (
                   <div 
@@ -446,21 +453,21 @@ const TopCharts = () => {
                       <p className="text-xs text-gray-500">{rec.match_reason}</p>
                       {/* Match Badges - Dynamic colors based on match value */}
                       <div className="flex gap-1 mt-1">
-                        <span className={`px-1.5 py-0.5 rounded text-[10px] ${
+                        <span className={`px-1.5 py-0.5 rounded text-[13px] ${
                           rec.tempo_match >= 0.7 ? 'bg-green-500/30 text-green-300' : 
                           rec.tempo_match >= 0.5 ? 'bg-yellow-500/30 text-yellow-300' : 
                           'bg-red-500/30 text-red-300'
                         }`}>
                           Tempo:{Math.round(rec.tempo_match * 100)}%
                         </span>
-                        <span className={`px-1.5 py-0.5 rounded text-[10px] ${
+                        <span className={`px-1.5 py-0.5 rounded text-[13px] ${
                           rec.energy_match >= 0.7 ? 'bg-green-500/30 text-green-300' : 
                           rec.energy_match >= 0.5 ? 'bg-yellow-500/30 text-yellow-300' : 
                           'bg-red-500/30 text-red-300'
                         }`}>
                           Energy:{Math.round(rec.energy_match * 100)}%
                         </span>
-                        <span className={`px-1.5 py-0.5 rounded text-[10px] ${
+                        <span className={`px-1.5 py-0.5 rounded text-[13px] ${
                           rec.mood_match >= 0.7 ? 'bg-green-500/30 text-green-300' : 
                           rec.mood_match >= 0.5 ? 'bg-yellow-500/30 text-yellow-300' : 
                           'bg-red-500/30 text-red-300'
@@ -475,7 +482,7 @@ const TopCharts = () => {
                         rec.similarity_score >= 0.5 ? 'bg-yellow-500' : 
                         'bg-red-500'
                       }`}>
-                        {Math.round(rec.similarity_score * 100)}%
+                        {Math.round(rec.similarity_score * 100)}% Match
                       </span>
                     </div>
                   </div>
