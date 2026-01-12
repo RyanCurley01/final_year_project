@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 
 import { nextSong, prevSong, playPause, songEnded } from '../../redux/features/playerSlice';
+import { useRecordInteractionMutation } from '../../redux/services/apiService';
 import Controls from './Controls';
 import Player from './Player';
 import Seekbar from './Seekbar';
@@ -17,10 +18,37 @@ const MusicPlayer = () => {
   const [repeat, setRepeat] = useState(false);
   const [shuffle, setShuffle] = useState(false);
   const dispatch = useDispatch();
+  
+  // Track play interactions
+  const [recordInteraction] = useRecordInteractionMutation();
+  const wasPlayingRef = useRef(false); // Track previous playing state
 
   useEffect(() => {
     if (currentSongs.length) dispatch(playPause(true));
   }, [currentIndex]);
+
+  // Record play interaction when playback STARTS (transitions from paused to playing)
+  useEffect(() => {
+    // Support both ProductID (from backend) and productId (from API response)
+    const songProductId = activeSong?.productId || activeSong?.ProductID || activeSong?.id;
+    
+    // Only record when transitioning from NOT playing to playing
+    const justStartedPlaying = isPlaying && !wasPlayingRef.current;
+    
+    // Update the ref for next render
+    wasPlayingRef.current = isPlaying;
+    
+    // Record if we just started playing and have a valid song
+    if (justStartedPlaying && activeSong && songProductId) {
+      recordInteraction({
+        account_id: 1,
+        product_id: songProductId,
+        interaction_type: 'play',
+        duration_seconds: Math.floor(duration),
+        session_id: sessionStorage.getItem('sessionId') || `session-${Date.now()}`
+      }).catch(() => {});
+    }
+  }, [isPlaying, activeSong?.productId, activeSong?.ProductID, activeSong?.id, recordInteraction, duration]);
 
   const handlePlayPause = () => {
     if (!isActive) return;

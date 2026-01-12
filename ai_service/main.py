@@ -12,15 +12,6 @@ from dotenv import load_dotenv
 import pymysql
 from contextlib import contextmanager
 
-# Add parent directory to path to import YouTubeAPI module
-# Works both locally and in Docker (where YouTubeAPI is mounted as subdirectory)
-project_root = Path(__file__).parent.parent
-sys.path.insert(0, str(project_root))
-# Also add current directory for Docker mount
-sys.path.insert(0, str(Path(__file__).parent))
-
-from YouTubeAPI import YouTubeService
-
 # Load environment variables
 load_dotenv()
 
@@ -33,9 +24,13 @@ app = FastAPI(
 # CORS middleware for frontend integration
 # Include both local and potential Codespaces origins
 allowed_origins = [
-    "http://localhost:5173", 
+    "http://localhost:5173",
+    "http://localhost:5174",
+    "http://localhost:5175",
     "http://localhost:3000",
     "http://127.0.0.1:5173",
+    "http://127.0.0.1:5174",
+    "http://127.0.0.1:5175",
     "http://127.0.0.1:3000"
 ]
 
@@ -77,9 +72,6 @@ MODEL_PATH = os.getenv("MODEL_PATH", "./models/recommendation_model.onnx")
 audio_features_cache: Dict[int, Dict] = {}
 cache_loaded: bool = False
 db_available: bool = False  # Track if DB is available to avoid repeated timeouts
-
-# Initialize YouTube service
-youtube_service = YouTubeService()
 
 # Database configuration
 DB_CONFIG = {
@@ -166,14 +158,11 @@ async def root():
     return {
         "service": "AI Recommendation Service",
         "status": "running",
-        "model_loaded": model_session is not None,
-        "youtube_service": "active"
+        "model_loaded": model_session is not None
     }
 
 @app.get("/health")
 async def health_check():
-    youtube_config = youtube_service.check_config()
-    
     # Check database connectivity
     db_status = "disconnected"
     audio_features_count = 0
@@ -191,25 +180,9 @@ async def health_check():
     return {
         "status": "healthy",
         "model_loaded": model_session is not None,
-        "youtube_configured": youtube_config["youtube_api_configured"],
         "database_status": db_status,
         "audio_features_in_db": audio_features_count
     }
-
-# ============================================
-# YOUTUBE API ENDPOINTS (using separate service)
-# ============================================
-
-@app.get("/api/youtube/top-songs")
-async def get_top_songs(max_results: int = 10):
-    """
-    Fetch top songs/videos from the YouTube channel
-    Uses the separate YouTubeAPI service
-    
-    Args:
-        max_results: Maximum number of videos to return (default: 10)
-    """
-    return youtube_service.get_top_songs(max_results)
 
 # ============================================
 # TOP PLAYED SONGS ENDPOINT (from UserInteractions)
@@ -276,22 +249,59 @@ async def get_top_played_songs(limit: int = 5):
         print(f"Error fetching top played songs: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/test/songs")
-async def get_test_songs():
+# ============================================
+# RECORD USER INTERACTION ENDPOINT
+# ============================================
+
+class UserInteractionRequest(BaseModel):
+    """Request to record a user interaction"""
+    account_id: int
+    product_id: int
+    interaction_type: str  # 'play', 'preview', 'pause', 'purchase', 'wishlist', 'view', 'click'
+    duration_seconds: Optional[int] = None
+    session_id: Optional[str] = None
+
+@app.post("/api/interactions/record")
+async def record_interaction(interaction: UserInteractionRequest):
     """
-    Test endpoint that returns mock data without making YouTube API calls
-    Useful for debugging and development
+    Record a user interaction with a product (e.g., play, preview, purchase)
+    This tracks user behavior for analytics and recommendations
     """
-    return youtube_service.get_test_songs()
+    try:
+        with get_db_connection() as conn:
+            if conn:
+                with conn.cursor() as cursor:
+                    sql = """
+                        INSERT INTO UserInteractions 
+                        (AccountID, ProductID, InteractionType, DurationSeconds, SessionID)
+                        VALUES (%s, %s, %s, %s, %s)
+                    """
+                    cursor.execute(sql, (
+                        interaction.account_id,
+                        interaction.product_id,
+                        interaction.interaction_type,
+                        interaction.duration_seconds,
+                        interaction.session_id
+                    ))
+                    conn.commit()
+                    
+                    return {
+                        "status": "success",
+                        "message": f"Recorded {interaction.interaction_type} interaction for product {interaction.product_id}",
+                        "interaction_id": cursor.lastrowid
+                    }
+            else:
+                raise HTTPException(status_code=503, detail="Database connection unavailable")
+    except Exception as e:
+        print(f"Error recording interaction: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/config/check")
 async def check_config():
     """
     Check the current configuration without making external API calls
     """
-    youtube_config = youtube_service.check_config()
     return {
-        **youtube_config,
         "model_path": MODEL_PATH,
         "model_loaded": model_session is not None,
         "environment": os.getenv('ENVIRONMENT', 'unknown'),

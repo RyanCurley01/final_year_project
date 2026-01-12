@@ -28,7 +28,7 @@ const EnvironmentInfo = () => {
       </div>
 
       <div style={{ marginBottom: '15px' }}>
-        <strong>🎵 AI Service (YouTube API):</strong><br/>
+        <strong>🎵 AI Service:</strong><br/>
         <a href={config.apiBaseUrl} target="_blank" rel="noopener noreferrer">
           {config.apiBaseUrl}
         </a>
@@ -44,10 +44,6 @@ const EnvironmentInfo = () => {
             </a>
           </div>
         ))}
-      </div>
-
-      <div style={{ marginBottom: '15px' }}>
-        <strong>🎬 YouTube Channel:</strong> {config.youtubeChannelId}
       </div>
 
       <div style={{ fontSize: '10px', color: '#666' }}>

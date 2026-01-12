@@ -3,7 +3,7 @@
  * Combines sky segmentation with onset detection for reactive visuals
  */
 
-import { useRef, useEffect, useState, useCallback } from 'react';
+import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import { useSelector } from 'react-redux';
 import SkySegmentation from '../utils/skySegmentation';
 import globalAudioContext from '../utils/globalAudioContext';
@@ -39,13 +39,46 @@ const AudioReactiveVideo = ({
   const [localSkyColor, setLocalSkyColor] = useState([135, 206, 235]); // Local color for inactive videos
   const currentSkyColorRef = useRef([135, 206, 235]); // Ref for animation loop
   const animationFrameRef = useRef(null);
+  const isPlayingRef = useRef(isPlaying); // Track current playing state
+  const isActiveRef = useRef(isActive); // Track current active state
   const { volume } = useSelector((state) => state.player);
   const { currentSkyColor: globalSkyColor, setCurrentSkyColor: setGlobalSkyColor } = useVideoModal();
   
   // Glitch effect state
   const [isGlitching, setIsGlitching] = useState(false);
-  const [glitchType, setGlitchType] = useState(null); // 'flip' or 'stutter' - randomly chosen
+  const [glitchType, setGlitchType] = useState(null);
   const glitchTimeoutRef = useRef(null);
+  
+  // Video load error state - fallback to showing video directly
+  const [videoLoadError, setVideoLoadError] = useState(false);
+  
+  // Video ready state
+  const [videoReady, setVideoReady] = useState(false);
+  
+  // Callback ID refs for proper cleanup
+  const onsetCallbackIdRef = useRef(null);
+  const glitchCallbackIdRef = useRef(null);
+  
+  // Keep refs in sync with props
+  useEffect(() => {
+    isPlayingRef.current = isPlaying;
+    isActiveRef.current = isActive;
+  }, [isPlaying, isActive]);
+  
+  // Clean video URL - strip AWS presigning parameters and add cache-buster
+  // The bucket has public access enabled via CORS
+  const cleanVideoUrl = useMemo(() => {
+    if (!src) return src;
+    try {
+      const url = new URL(src);
+      // Strip AWS signature params and use clean URL
+      const cleanUrl = `${url.origin}${url.pathname}`;
+      // Add cache-buster to force fresh request with CORS headers
+      return `${cleanUrl}?cb=${Date.now()}`;
+    } catch {
+      return src;
+    }
+  }, [src]);
   
   // Determine which color to use: global if active (regardless of playing state), local if not
   const currentSkyColor = isActive ? globalSkyColor : localSkyColor;
@@ -55,75 +88,82 @@ const AudioReactiveVideo = ({
     currentSkyColorRef.current = currentSkyColor;
   }, [currentSkyColor]);
   
-  // Reset to default color when video becomes inactive
+  // Reset colors when active state changes
   useEffect(() => {
-    if (!isActive) {
-      setLocalSkyColor([135, 206, 235]); // Reset to sky blue
+    if (isActive) {
+      // Reset global color to default when this video becomes active (new song)
+      setGlobalSkyColor([135, 206, 235]);
+    } else {
+      // Reset local color when becoming inactive
+      setLocalSkyColor([135, 206, 235]);
     }
-  }, [isActive]);
+  }, [isActive, setGlobalSkyColor]);
   
   // Listen for drum hits from global audio context (ONLY when this video is active)
-  // Drums trigger sky color changes
+  // Register callback whenever active - the callback itself checks if playing
+  // This avoids race conditions when isActive and isPlaying update separately
   useEffect(() => {
-    // Only register callback if this video is the currently playing one
-    if (!isActive || !isPlaying) {
-      return;
+    // Always cleanup previous callback first
+    if (onsetCallbackIdRef.current !== null) {
+      globalAudioContext.offOnset(onsetCallbackIdRef.current);
+      onsetCallbackIdRef.current = null;
     }
     
-    const handleOnset = (onset) => {
-      const randomColor = SKY_COLORS[Math.floor(Math.random() * SKY_COLORS.length)];
-      console.log('🎨 AudioReactiveVideo: Changing sky color on drum hit:', randomColor);
-      // Always update global color when active
-      setGlobalSkyColor(randomColor);
-    };
+    // Register callback when active - it will be called on drum hits
+    if (isActive) {
+      const handleOnset = () => {
+        // Use ref to check current playing state
+        if (!isPlayingRef.current || !isActiveRef.current) return;
+        const randomColor = SKY_COLORS[Math.floor(Math.random() * SKY_COLORS.length)];
+        setGlobalSkyColor(randomColor);
+      };
+      
+      onsetCallbackIdRef.current = globalAudioContext.onOnset(handleOnset);
+    }
     
-    console.log('🔌 AudioReactiveVideo: Registering onset callback for ACTIVE video');
-    // Register callback with global audio context
-    globalAudioContext.onOnset(handleOnset);
-    
-    // Cleanup: unregister when component unmounts or becomes inactive
     return () => {
-      console.log('🔌 AudioReactiveVideo: Unregistering onset callback');
-      globalAudioContext.offOnset(handleOnset);
-    };
-  }, [isActive, isPlaying, setGlobalSkyColor]); // Re-register when active state changes
-  
-  // Listen for glitch sounds (unusual sounds that are NOT drums/melodies/bass/acid)
-  // Glitch sounds trigger video flip and rapid cloud repeat
-  useEffect(() => {
-    if (!isActive || !isPlaying) {
-      return;
-    }
-    
-    const handleGlitch = (glitch) => {
-      // Randomly choose between flip (75%) OR stutter (25%)
-      const chosenEffect = Math.random() < 0.25 ? 'flip' : 'stutter';
-      console.log(`⚡ AudioReactiveVideo: Glitch detected - applying ${chosenEffect} effect`);
-      
-      // Trigger glitch effect
-      setGlitchType(chosenEffect);
-      setIsGlitching(true);
-      
-      // Clear any existing timeout
-      if (glitchTimeoutRef.current) {
-        clearTimeout(glitchTimeoutRef.current);
+      if (onsetCallbackIdRef.current !== null) {
+        globalAudioContext.offOnset(onsetCallbackIdRef.current);
+        onsetCallbackIdRef.current = null;
       }
-      
-      // End glitch after 150ms (quick burst) - video will flip back automatically
-      glitchTimeoutRef.current = setTimeout(() => {
-        setIsGlitching(false);
-        setGlitchType(null);
-      }, 150);
     };
+  }, [isActive, setGlobalSkyColor]);
+  
+  // Listen for glitch sounds (register when active, not dependent on isPlaying)
+  useEffect(() => {
+    if (glitchCallbackIdRef.current !== null) {
+      globalAudioContext.offGlitch(glitchCallbackIdRef.current);
+      glitchCallbackIdRef.current = null;
+    }
     
-    console.log('🔌 AudioReactiveVideo: Registering glitch callback for ACTIVE video');
-    globalAudioContext.onGlitch(handleGlitch);
+    if (isActive) {
+      const handleGlitch = () => {
+        // Use ref to check current playing state
+        if (!isPlayingRef.current || !isActiveRef.current) return;
+        const chosenEffect = Math.random() < 0.25 ? 'flip' : 'stutter';
+        setGlitchType(chosenEffect);
+        setIsGlitching(true);
+        
+        if (glitchTimeoutRef.current) {
+          clearTimeout(glitchTimeoutRef.current);
+        }
+        
+        glitchTimeoutRef.current = setTimeout(() => {
+          setIsGlitching(false);
+          setGlitchType(null);
+        }, 150);
+      };
+      
+      glitchCallbackIdRef.current = globalAudioContext.onGlitch(handleGlitch);
+    }
     
     return () => {
-      console.log('🔌 AudioReactiveVideo: Unregistering glitch callback');
-      globalAudioContext.offGlitch(handleGlitch);
+      if (glitchCallbackIdRef.current !== null) {
+        globalAudioContext.offGlitch(glitchCallbackIdRef.current);
+        glitchCallbackIdRef.current = null;
+      }
     };
-  }, [isActive, isPlaying]);
+  }, [isActive]);
   
   // Render initial frame when video loads (so we see a preview even when not playing)
   useEffect(() => {
@@ -132,6 +172,7 @@ const AudioReactiveVideo = ({
     const renderInitialFrame = async () => {
       // Wait for video to have loaded enough data
       if (videoRef.current && videoRef.current.readyState >= 2) {
+        setVideoReady(true);
         await skySegmentation.processFrame(
           videoRef.current,
           canvasRef.current,
@@ -141,18 +182,26 @@ const AudioReactiveVideo = ({
     };
     
     const handleCanPlay = () => {
+      setVideoReady(true);
       renderInitialFrame();
     };
     
+    const handleLoadedData = () => {
+      setVideoReady(true);
+    };
+    
     if (videoRef.current && videoRef.current.readyState >= 2) {
+      setVideoReady(true);
       renderInitialFrame();
     } else if (videoRef.current) {
       videoRef.current.addEventListener('canplay', handleCanPlay, { once: true });
+      videoRef.current.addEventListener('loadeddata', handleLoadedData, { once: true });
     }
     
     return () => {
       if (videoRef.current) {
         videoRef.current.removeEventListener('canplay', handleCanPlay);
+        videoRef.current.removeEventListener('loadeddata', handleLoadedData);
       }
     };
   }, [src, skySegmentation, currentSkyColor]);
@@ -163,10 +212,30 @@ const AudioReactiveVideo = ({
     let lastVideoTime = -1;
     const targetFrameRate = 30; // Target 30fps for better performance
     const frameInterval = 1000 / targetFrameRate;
+    let loopRunning = true;
     
     const processFrames = async (timestamp) => {
-      if (!videoRef.current || !canvasRef.current) return;
-      if (!isPlaying || !isActive) return;
+      // Check if loop should stop
+      if (!loopRunning) return;
+      
+      // If refs are not available, try again next frame
+      if (!videoRef.current || !canvasRef.current) {
+        animationFrameRef.current = requestAnimationFrame(processFrames);
+        return;
+      }
+      
+      // Use refs for current state (not stale closure values)
+      if (!isPlayingRef.current || !isActiveRef.current) {
+        // Keep loop alive but don't process - check again next frame
+        animationFrameRef.current = requestAnimationFrame(processFrames);
+        return;
+      }
+      
+      // Wait for video to be ready (readyState >= 2 means HAVE_CURRENT_DATA)
+      if (videoRef.current.readyState < 2) {
+        animationFrameRef.current = requestAnimationFrame(processFrames);
+        return;
+      }
       
       // Throttle to target frame rate
       if (timestamp - lastFrameTime < frameInterval) {
@@ -228,16 +297,17 @@ const AudioReactiveVideo = ({
       animationFrameRef.current = requestAnimationFrame(processFrames);
     };
     
-    if (isPlaying && isActive) {
-      animationFrameRef.current = requestAnimationFrame(processFrames);
-    }
+    // Always start the loop - it will check refs for active state
+    animationFrameRef.current = requestAnimationFrame(processFrames);
     
     return () => {
+      loopRunning = false;
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current);
+        animationFrameRef.current = null;
       }
     };
-  }, [isPlaying, isActive, skySegmentation, isGlitching, glitchType, playbackRate]);
+  }, [skySegmentation, isGlitching, glitchType, playbackRate]);
   
   // Sync volume
   useEffect(() => {
@@ -281,29 +351,69 @@ const AudioReactiveVideo = ({
   useEffect(() => {
     if (!videoRef.current) return;
     
-    // Mute the video so only the main Player's audio is heard
     videoRef.current.muted = true;
     
     if (isPlaying && isActive) {
-      videoRef.current.play().catch(e => console.error('Video play error:', e));
+      // Ensure video is loaded before playing
+      if (videoRef.current.readyState < 2) {
+        videoRef.current.load();
+      }
+      const playPromise = videoRef.current.play();
+      if (playPromise) {
+        playPromise.catch(() => {
+          // Retry play after a short delay
+          setTimeout(() => {
+            if (videoRef.current && isPlayingRef.current && isActiveRef.current) {
+              videoRef.current.play().catch(() => {});
+            }
+          }, 100);
+        });
+      }
     } else {
       videoRef.current.pause();
     }
   }, [isPlaying, isActive, src]);
+  
+  // Handle video load error
+  const handleVideoError = (e) => {
+    console.warn('Video load error, falling back to direct display:', cleanVideoUrl);
+    setVideoLoadError(true);
+    if (onError) onError(e);
+  };
+  
+  // If video failed to load with CORS, show it directly without processing
+  if (videoLoadError) {
+    return (
+      <video
+        src={cleanVideoUrl}
+        className={className}
+        muted
+        playsInline
+        autoPlay={isPlaying && isActive}
+        loop
+        style={{ 
+          width: '100%', 
+          height: '100%', 
+          objectFit: 'cover',
+          borderRadius: 'inherit'
+        }}
+      />
+    );
+  }
   
   return (
     <div className="relative rounded-lg overflow-hidden" style={{ width: '100%', height: '100%' }}>
       {/* Hidden muted video element for visual animation only */}
       <video
         ref={videoRef}
-        src={src}
+        src={cleanVideoUrl}
         crossOrigin="anonymous"
         muted
         playsInline
         preload="auto"
         loop
         style={{ display: 'none' }}
-        onError={onError}
+        onError={handleVideoError}
         {...props}
       />
       

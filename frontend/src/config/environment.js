@@ -64,11 +64,6 @@ class EnvironmentConfig {
       config.backendApiUrl = 'http://localhost:8080';
     }
 
-    // YouTube Channel ID
-    config.youtubeChannelId = viteEnv.VITE_YOUTUBE_CHANNEL_ID || 
-                             runtimeEnv.VITE_YOUTUBE_CHANNEL_ID || 
-                             '@Ritrix252';
-
     // Environment
     config.environment = viteEnv.VITE_ENVIRONMENT || 
                         runtimeEnv.VITE_ENVIRONMENT || 
@@ -85,10 +80,6 @@ class EnvironmentConfig {
 
   getBackendApiUrl() {
     return this.config.backendApiUrl;
-  }
-
-  getYouTubeChannelId() {
-    return this.config.youtubeChannelId;
   }
 
   getEnvironment() {
@@ -117,8 +108,7 @@ export default envConfig;
 // Named exports for convenience
 export const {
   getApiBaseUrl,
-  getBackendApiUrl, 
-  getYouTubeChannelId,
+  getBackendApiUrl,
   getEnvironment,
   isCodespaces,
   isLocalhost,

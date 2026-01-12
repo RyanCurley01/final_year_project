@@ -5,33 +5,31 @@ import globalAudioContext from '../../utils/globalAudioContext';
 const Player = ({ activeSong, isPlaying, volume, seekTime, onEnded, onTimeUpdate, onLoadedData, repeat }) => {
   const ref = useRef(null);
   const audioContextInitialized = useRef(false);
+  const lastSongRef = useRef(null);
   
   useEffect(() => {
     if (ref.current) {
-      console.log('Player state:', { isPlaying, activeSong: activeSong?.albumTitle, fileUrl: activeSong?.fileUrl });
+      // Check if song changed - reset detector state
+      const currentSongId = activeSong?.id || activeSong?.albumTitle;
+      if (currentSongId && currentSongId !== lastSongRef.current) {
+        lastSongRef.current = currentSongId;
+        // Reset onset detector state for the new song
+        globalAudioContext.resetDetector();
+      }
       
       if (isPlaying && activeSong?.fileUrl) {
         const playPromise = ref.current.play();
         if (playPromise !== undefined) {
           playPromise
             .then(() => {
-              console.log('Audio playing successfully');
-              
-              // Initialize audio context ONLY on very first play ever
               if (!audioContextInitialized.current) {
-                console.log('🎤 Initializing audio context for the first time');
-                globalAudioContext.initialize(ref.current).catch(err => {
-                  console.warn('Could not initialize onset detection:', err);
-                });
+                globalAudioContext.initialize(ref.current).catch(() => {});
                 audioContextInitialized.current = true;
-              } else {
-                console.log('🔊 Resuming existing audio context');
-                globalAudioContext.resume();
               }
+              // Always resume after play succeeds to ensure onset detection is running
+              globalAudioContext.resume();
             })
-            .catch(error => {
-              console.error('Error playing audio:', error);
-            });
+            .catch(() => {});
         }
       } else {
         ref.current.pause();
@@ -62,16 +60,8 @@ const Player = ({ activeSong, isPlaying, volume, seekTime, onEnded, onTimeUpdate
       loop={repeat}
       onEnded={onEnded}
       onTimeUpdate={onTimeUpdate}
-      onLoadedData={(e) => {
-        console.log('Audio loaded, duration:', e.target.duration);
-        onLoadedData(e);
-      }}
-      onError={(e) => {
-        // Only log real errors, not empty src errors
-        if (activeSong?.fileUrl) {
-          console.error('Audio loading error:', e.target.error);
-        }
-      }}
+      onLoadedData={onLoadedData}
+      onError={() => {}}
     />
   );
 };

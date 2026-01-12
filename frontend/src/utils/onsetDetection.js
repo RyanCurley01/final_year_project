@@ -26,6 +26,7 @@ class OnsetDetector {
     this.onsetCallbacks = [];
     this.glitchCallbacks = []; // For unusual/glitch sounds
     this.isRunning = false;
+    this.loopId = 0; // Unique ID for each loop instance, used to prevent duplicate loops
     this.lastOnsetTime = 0;
     this.lastGlitchTime = 0; // Track last glitch detection
     this.minTimeBetweenOnsets = 100; // ms, prevents double detection
@@ -35,6 +36,7 @@ class OnsetDetector {
     this.previousEnergy = 0; // For tracking energy changes
     this.energyHistory = []; // Track energy over time
     this.glitchTriggeredRecently = false; // Prevents double triggering
+    this.framesAfterReset = 10; // Start ready to detect (skip frame logic)
   }
   
   /**
@@ -262,22 +264,14 @@ class OnsetDetector {
   detectOnset(onsetFunction) {
     const now = Date.now();
     
-    // Check if enough time has passed since last onset
     if (now - this.lastOnsetTime < this.minTimeBetweenOnsets) {
       return false;
     }
     
-    // Debug: Log when we're close to threshold
-    if (onsetFunction > this.threshold * 0.6) {
-      console.log('📊 Close to threshold:', onsetFunction.toFixed(4), 'vs', this.threshold, '(', Math.round((onsetFunction / this.threshold) * 100), '%)');
-    }
-    
-    // Simple peak detection: current value is higher than previous and above threshold
     const isOnset = onsetFunction > this.previousOnsetFunction && 
                     onsetFunction > this.threshold;
     
     if (isOnset) {
-      console.log('🥁💥 KICK DETECTED! Value:', onsetFunction.toFixed(4), 'Threshold:', this.threshold);
       this.lastOnsetTime = now;
       return true;
     }
@@ -287,31 +281,27 @@ class OnsetDetector {
   
   /**
    * Process audio frame
+   * @param {number} loopId - The ID of this loop instance, used to detect stale loops
    */
-  processFrame() {
-    if (!this.isRunning) return;
+  processFrame(loopId) {
+    // Stop if this loop instance has been superseded by a newer one
+    if (!this.isRunning || loopId !== this.loopId) return;
     
     // Get frequency data as bytes (0-255)
     this.analyser.getByteFrequencyData(this.frequencyData);
     
-    // Debug: Log stats occasionally (every ~500 frames = ~8s at 60fps)
-    if (Math.random() < 0.002) {
-      const max = Math.max(...this.frequencyData);
-      const avg = this.frequencyData.reduce((a, b) => a + b, 0) / this.frequencyData.length;
-      const nonZero = this.frequencyData.filter(v => v > 0).length;
-      console.log('🎵 Frequency data stats:', {
-        max: max,
-        avg: avg.toFixed(1),
-        nonZero: nonZero,
-        total: this.frequencyData.length,
-        contextState: this.audioContext.state
-      });
-    }
-    
     // Skip processing if we have no audio data (all zeros)
     const hasAudio = this.frequencyData.some(v => v > 0);
     if (!hasAudio) {
-      requestAnimationFrame(() => this.processFrame());
+      requestAnimationFrame(() => this.processFrame(loopId));
+      return;
+    }
+    
+    // Skip detection for first few frames after reset to let spectrum stabilize
+    if (this.framesAfterReset < 10) {
+      this.framesAfterReset++;
+      this.previousSpectrum.set(this.frequencyData);
+      requestAnimationFrame(() => this.processFrame(loopId));
       return;
     }
     
@@ -393,19 +383,7 @@ class OnsetDetector {
     // Calculate onset function
     let onsetFunction = 0;
     if (isDrumHit) {
-      // Combine transient strength with percussive detection and drum frequency content
       onsetFunction = (transientStrength * 15) + (percussive * 2) + (drumContent * 3);
-    }
-    
-    // Debug every 30 frames (~0.5 seconds at 60fps)
-    this.debugCounter++;
-    if (this.debugCounter % 30 === 0) {
-      console.log('🥁 AUDIO DETECTION:', {
-        transient: transientStrength.toFixed(4),
-        energy: currentEnergy.toFixed(3),
-        isDrum: isDrumHit ? '🥁 YES' : '❌ NO',
-        isGlitch: isGlitchSound ? '⚡ AUDIO CUT!' : '❌ NO'
-      });
     }
     
     // Detect onset
@@ -418,10 +396,8 @@ class OnsetDetector {
       }));
     }
     
-    // Detect glitch sounds - IDM-style audio CUTS (like Vordhosbn)
-    // The glitchTriggeredRecently flag prevents multiple triggers
+    // Detect glitch sounds
     if (isGlitchSound) {
-      console.log('⚡ GLITCH DETECTED! Sudden audio cut/silence');
       this.glitchCallbacks.forEach(cb => cb({
         time: this.audioContext.currentTime,
         strength: transientStrength,
@@ -433,19 +409,63 @@ class OnsetDetector {
     this.previousSpectrum.set(this.frequencyData);
     this.previousOnsetFunction = onsetFunction;
     
-    // Schedule next frame
-    requestAnimationFrame(() => this.processFrame());
+    // Schedule next frame (only if this loop is still valid)
+    if (loopId === this.loopId) {
+      requestAnimationFrame(() => this.processFrame(loopId));
+    }
+  }
+  
+  /**
+   * Reset detection state - call when switching songs
+   */
+  reset() {
+    // Clear spectrum data
+    this.frequencyData.fill(0);
+    this.previousSpectrum.fill(0);
+    this.previousOnsetFunction = 0;
+    
+    // Reset timing
+    this.lastOnsetTime = 0;
+    this.lastGlitchTime = 0;
+    
+    // Reset glitch detection state
+    this.recentOnsets = [];
+    this.previousEnergy = 0;
+    this.energyHistory = [];
+    this.glitchTriggeredRecently = false;
+    
+    // Only skip 3 frames after reset (faster recovery)
+    this.framesAfterReset = 7;
+    
+    return this;
   }
   
   /**
    * Start onset detection
    */
   start() {
+    // Always ensure the loop is running
+    // If already running, this is a no-op (processFrame will be scheduled)
+    // If not running, start the loop
     if (!this.isRunning) {
-      console.log('🎬 OnsetDetector: Starting detection loop');
       this.isRunning = true;
-      this.processFrame();
+      this.loopId = (this.loopId || 0) + 1; // Unique ID for this loop instance
+      this.processFrame(this.loopId);
     }
+    return this;
+  }
+
+  /**
+   * Force restart the detection loop (use if loop may have stopped)
+   * This properly invalidates any existing loop before starting a new one
+   */
+  restart() {
+    // Invalidate any existing loop by incrementing the loop ID
+    this.loopId = (this.loopId || 0) + 1;
+    const currentLoopId = this.loopId;
+    this.isRunning = true;
+    // Start new loop with the new ID
+    this.processFrame(currentLoopId);
     return this;
   }
   

@@ -40,12 +40,18 @@ const SmartRecommendationVisualizer = ({
   audioFeaturesRef.current = audioFeatures;
 
   const fetchRecommendations = async (product, features, rate, session, forceRefresh = false) => {
-    if (!product || !features) {
-      console.log('fetchRecommendations: Missing product or features', { product: !!product, features: !!features });
+    // Guard against undefined product or product.id
+    const productId = product?.id || product?.productId || product?.ProductID;
+    if (!product || !productId || !features) {
+      console.log('fetchRecommendations: Missing product or features', { 
+        product: !!product, 
+        productId: productId,
+        features: !!features 
+      });
       return;
     }
     
-    console.log('fetchRecommendations: Starting fetch for product', product.id, 'rate:', rate);
+    console.log('fetchRecommendations: Starting fetch for product', productId, 'rate:', rate);
     
     try {
       // Only show loading spinner on initial load (when no recommendations exist)
@@ -62,7 +68,7 @@ const SmartRecommendationVisualizer = ({
       };
       
       const response = await axios.post('http://localhost:5000/api/audio/realtime-recommendations', {
-        current_product_id: product.id,
+        current_product_id: productId,
         audio_features: adjustedFeatures,
         session_id: session,
         limit: 5,
@@ -96,6 +102,13 @@ const SmartRecommendationVisualizer = ({
       return;
     }
 
+    // Get product ID (support different field names)
+    const productId = currentProduct?.id || currentProduct?.productId || currentProduct?.ProductID;
+    if (!productId) {
+      console.log('⚠️ No valid product ID found:', currentProduct);
+      return;
+    }
+
     // Helper function to fetch recommendations
     const doFetch = (forceRefresh = false) => {
       const features = audioFeaturesRef.current || {
@@ -107,7 +120,7 @@ const SmartRecommendationVisualizer = ({
       const rate = playbackRateRef.current;
       
       console.log('🔄 Fetching recommendations:', {
-        product: currentProduct.id,
+        product: productId,
         hasRealFeatures: !!audioFeaturesRef.current,
         playbackRate: rate
       });
@@ -118,7 +131,7 @@ const SmartRecommendationVisualizer = ({
     };
 
     // Immediate fetch
-    console.log('⚡ INSTANT fetch for product:', currentProduct.id);
+    console.log('⚡ INSTANT fetch for product:', productId);
     doFetch(true);
 
     // Set up polling interval (3 seconds)
@@ -132,7 +145,7 @@ const SmartRecommendationVisualizer = ({
         intervalRef.current = null;
       }
     };
-  }, [currentProduct?.id, sessionId]);
+  }, [currentProduct?.id, currentProduct?.productId, currentProduct?.ProductID, sessionId]);
 
   // Calculate real-time match values based on current audio features
   const calculateLiveMatch = (recProductId) => {

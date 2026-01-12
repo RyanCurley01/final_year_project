@@ -2,8 +2,8 @@ import {Link } from 'react-router-dom';
 import {useDispatch, useSelector } from 'react-redux';
 import { useRef, useEffect, useState } from 'react';
 import { FiShoppingCart } from 'react-icons/fi';
+import { FaPauseCircle, FaPlayCircle } from 'react-icons/fa';
 
-import PlayPause from './PlayPause';
 import AudioReactiveVideo from './AudioReactiveVideo';
 import { playPause, setActiveSong, setPlaybackRate } from '../redux/features/playerSlice';
 import { addToCart } from '../redux/features/cartSlice';
@@ -22,13 +22,13 @@ const SongCard = ({ product, payment, i, data }) => {
   // Check if the cover media is a video (mp4)
   const isVideo = coverMedia && coverMedia.toLowerCase().includes('.mp4');
   
-  // Debug logging
-  if (i === 0) {
-    console.log('First product:', { productName, coverMedia, isVideo, isMusic, isGame });
-  }
+
 
   // Check if current song is a playable song 
   const isPlayableSong = isMusic && product.albumTitle !== 'Selected Electronic Works';
+  
+  // Hover state for showing play button
+  const [isHovered, setIsHovered] = useState(false);
 
   const dispatch = useDispatch();
   const { activeSong, isPlaying, songEnded, playbackRate } = useSelector((state) => state.player);
@@ -40,23 +40,27 @@ const SongCard = ({ product, payment, i, data }) => {
   };
   
   // Check if this card's song is currently active
-  const isThisSongActive = activeSong?.albumTitle === product.albumTitle;
+  // Product id from backend is 'id', compare that and albumTitle as fallback
+  const isThisSongActive = Boolean(
+    activeSong && product && (
+      (activeSong.id && product.id && activeSong.id === product.id) ||
+      (activeSong.albumTitle && product.albumTitle && activeSong.albumTitle === product.albumTitle)
+    )
+  );
 
   const handlePauseClick = () => {
-    console.log('🔴 Pause clicked for:', product.albumTitle);
     dispatch(playPause(false));
+    setIsHovered(false); // Hide overlay after clicking
   };
 
   const handlePlayClick = () => {
-    console.log('▶️ Play clicked for:', product.albumTitle, 'fileUrl:', product.fileUrl);
     dispatch(setActiveSong({ song: product, data, i }));
     dispatch(playPause(true));
+    setIsHovered(false); // Hide overlay after clicking
   };
 
   const handleAddToCart = () => {
     dispatch(addToCart(product));
-    // Optional: Show a toast notification
-    console.log('Added to cart:', productName);
   };
 
 
@@ -65,18 +69,19 @@ const SongCard = ({ product, payment, i, data }) => {
      * Shows the cover image with song and game details
      */
     <div className="flex flex-col p-4 bg-white/5 backdrop-blur-sm animate-slideup rounded-lg cursor-pointer hover:bg-white/10 transition-all">
-      <div className="relative w-full aspect-square group">
+      <div 
+        className="relative w-full aspect-square"
+        onMouseEnter={() => setIsHovered(true)}
+        onMouseLeave={() => setIsHovered(false)}
+      >
         {isVideo ? (
           <AudioReactiveVideo
             src={coverMedia}
             alt={productName}
             className="w-full h-full rounded-lg object-cover"
-            isPlaying={isPlaying}
+            isPlaying={isPlaying && isThisSongActive}
             isActive={isThisSongActive}
             playbackRate={isThisSongActive ? playbackRate : 1.0}
-            onError={(e) => {
-              console.error('Video failed to load:', coverMedia, e);
-            }}
           />
         ) : (
           <img
@@ -90,21 +95,38 @@ const SongCard = ({ product, payment, i, data }) => {
             }}
           />
         )}
+        
+        {/* Play/Pause overlay - shows on hover */}
         {isPlayableSong && (
-          <div className={`absolute inset-0 rounded-lg flex justify-center items-center bg-black/50 z-10 ${isThisSongActive && isPlaying ? 'flex' : 'hidden group-hover:flex'}`}>
-            <PlayPause 
-              isPlaying={isPlaying && activeSong?.albumTitle === product.albumTitle}
-              activeSong={activeSong}
-              handlePause={handlePauseClick}
-              handlePlay={handlePlayClick}
-              song={product}
-            />
+          <div 
+            className={`absolute inset-0 rounded-lg flex justify-center items-center z-20 ${isHovered ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
+            style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (isPlaying && isThisSongActive) {
+                handlePauseClick();
+              } else {
+                handlePlayClick();
+              }
+            }}
+          >
+            {isPlaying && isThisSongActive ? (
+              <FaPauseCircle 
+                size={45}
+                className="text-white drop-shadow-lg cursor-pointer hover:scale-110 transition-transform"
+              />
+            ) : (
+              <FaPlayCircle 
+                size={45}
+                className="text-white drop-shadow-lg cursor-pointer hover:scale-110 transition-transform"
+              />
+            )}
           </div>
         )}
 
         {/* Playing indicator - bottom right */}
         {isThisSongActive && isPlaying && (
-          <div className="absolute bottom-2 right-2 flex items-center gap-1 bg-green-500/90 px-2 py-1 rounded-full z-20">
+          <div className="absolute bottom-2 right-2 flex items-center gap-1 bg-green-500/90 px-2 py-1 rounded-full z-30">
             <div className="flex gap-0.5">
               <span className="w-1 h-3 bg-white rounded-full animate-pulse"></span>
               <span className="w-1 h-4 bg-white rounded-full animate-pulse" style={{ animationDelay: '150ms' }}></span>

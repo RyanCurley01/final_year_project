@@ -129,7 +129,14 @@ class SkySegmentation {
     ctx.drawImage(videoElement, 0, 0, width, height);
     
     // Get pixel data for sky detection
-    const imageData = ctx.getImageData(0, 0, width, height);
+    // Wrap in try-catch for CORS errors
+    let imageData;
+    try {
+      imageData = ctx.getImageData(0, 0, width, height);
+    } catch (e) {
+      // CORS error - canvas is tainted, just show the video without processing
+      return;
+    }
     const data = imageData.data;
     
     // Create overlay for sky pixels only
