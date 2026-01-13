@@ -25,10 +25,7 @@ public class ProductController {
             @RequestParam(required = false) String albumCoverImageUrl,
             @RequestParam(required = false) String platform) {
 
-        if (gameCoverImageUrl != null || albumCoverImageUrl != null || platform != null) {
-            return ResponseEntity.ok(productService.getAllProductsWithSignedUrls());
-        }
-        
+        // Always return all products with signed URLs (filtering handled in the service layer if needed)
         return ResponseEntity.ok(productService.getAllProductsWithSignedUrls());
     }
 

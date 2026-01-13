@@ -15,3 +15,11 @@ spring:
     properties:
       hibernate:
         dialect: org.hibernate.dialect.H2Dialect
+
+# AWS configuration for tests (mock values)
+aws:
+  region: us-east-1
+  access-key-id: test-key
+  secret-access-key: test-secret
+  s3:
+    bucket-name: test-bucket

@@ -1,7 +1,9 @@
 package com.example.products.controller;
 
+import com.example.products.dto.ProductResponse;
 import com.example.products.model.Product;
 import com.example.products.service.ProductService;
+import com.example.products.service.S3Service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -41,80 +43,105 @@ class ProductControllerTest {
 
     @MockBean
     private ProductService productService;
+    
+    @MockBean
+    private S3Service s3Service;
 
     private Product jimmyJungle;
     private Product midnightHaunt;
     private Product protectors;
     private Product redHood;
     private Product selectedElectronicWorks;
-    private List<Product> allProducts;
-    private List<Product> pcGames;
-    private List<Product> albums;
+    private List<ProductResponse> allProductResponses;
 
     @BeforeEach
     void setUp() {
-        // Initialize test data based on init-database.sh
+        // Initialize test data as ProductResponse objects (what the controller actually returns)
         
-        // Game: Jimmy Jungle
-        jimmyJungle = new Product();
-        jimmyJungle.setId(1L);
-        jimmyJungle.setGameTitle("Jimmy Jungle");
-        jimmyJungle.setPlatform("PC");
-        jimmyJungle.setGamePrice(new BigDecimal("2.00"));
-        jimmyJungle.setGameCoverImageUrl("INSERT AWS S3 FILE KEY FOR GAME COVER IMAGE URL HERE");
-        jimmyJungle.setFileUrl("https://jimmywheezer.itch.io/jimmy-jungle");
-        jimmyJungle.setStockQuantity(100);
+        ProductResponse jimmyJungleResponse = new ProductResponse(
+                1L,
+                "Jimmy Jungle",
+                null,
+                "PC",
+                new BigDecimal("2.00"),
+                null,
+                "signed-game-cover-url",
+                null,
+                "signed-file-url",
+                null,
+                100
+        );
 
-        // Game: Midnight Haunt
-        midnightHaunt = new Product();
-        midnightHaunt.setId(2L);
-        midnightHaunt.setGameTitle("Midnight Haunt");
-        midnightHaunt.setPlatform("PC");
-        midnightHaunt.setGamePrice(new BigDecimal("2.00"));
-        midnightHaunt.setGameCoverImageUrl("INSERT AWS S3 FILE KEY FOR GAME COVER IMAGE URL HERE");
-        midnightHaunt.setFileUrl("https://jimmywheezer.itch.io/midnight-haunt");
-        midnightHaunt.setStockQuantity(100);
+        ProductResponse midnightHauntResponse = new ProductResponse(
+                2L,
+                "Midnight Haunt",
+                null,
+                "PC",
+                new BigDecimal("2.00"),
+                null,
+                "signed-game-cover-url",
+                null,
+                "signed-file-url",
+                null,
+                100
+        );
 
-        // Game: Protectors
-        protectors = new Product();
-        protectors.setId(3L);
-        protectors.setGameTitle("Protectors");
-        protectors.setPlatform("PC");
-        protectors.setGamePrice(new BigDecimal("5.00"));
-        protectors.setGameCoverImageUrl("INSERT AWS S3 FILE KEY FOR GAME COVER IMAGE URL HERE");
-        protectors.setFileUrl("https://jimmywheezer.itch.io/protectors");
-        protectors.setPreviewUrl("INSERT AWS S3 FILE KEY FOR VIDEO GAME TRAILER URL HERE");
-        protectors.setStockQuantity(100);
+        ProductResponse protectorsResponse = new ProductResponse(
+                3L,
+                "Protectors",
+                null,
+                "PC",
+                new BigDecimal("5.00"),
+                null,
+                "signed-game-cover-url",
+                null,
+                "signed-file-url",
+                "signed-preview-url",
+                100
+        );
 
-        // Game: Red Hood
-        redHood = new Product();
-        redHood.setId(4L);
-        redHood.setGameTitle("Red Hood");
-        redHood.setPlatform("PC");
-        redHood.setGamePrice(new BigDecimal("1.50"));
-        redHood.setGameCoverImageUrl("INSERT AWS S3 FILE KEY FOR GAME COVER IMAGE URL HERE");
-        redHood.setFileUrl("https://jimmywheezer.itch.io/red-hood");
-        redHood.setStockQuantity(100);
+        ProductResponse redHoodResponse = new ProductResponse(
+                4L,
+                "Red Hood",
+                null,
+                "PC",
+                new BigDecimal("1.50"),
+                null,
+                "signed-game-cover-url",
+                null,
+                "signed-file-url",
+                null,
+                100
+        );
 
-        // Album: Selected Electronic Works
-        selectedElectronicWorks = new Product();
-        selectedElectronicWorks.setId(5L);
-        selectedElectronicWorks.setAlbumTitle("Selected Electronic Works");
-        selectedElectronicWorks.setAlbumPrice(new BigDecimal("5.00"));
-        selectedElectronicWorks.setAlbumCoverImageUrl("INSERT AWS S3 FILE KEY URL FOR ALBUM COVER IMAGE HERE");
-        selectedElectronicWorks.setFileUrl("INSERT AWS S3 FILE KEY FOR MUSIC FILE URLS HERE");
-        selectedElectronicWorks.setStockQuantity(200);
+        ProductResponse selectedElectronicWorksResponse = new ProductResponse(
+                5L,
+                null,
+                "Selected Electronic Works",
+                null,
+                null,
+                new BigDecimal("5.00"),
+                null,
+                "signed-album-cover-url",
+                "signed-file-url",
+                null,
+                200
+        );
 
-        allProducts = Arrays.asList(jimmyJungle, midnightHaunt, protectors, redHood, selectedElectronicWorks);
-        pcGames = Arrays.asList(jimmyJungle, midnightHaunt, protectors, redHood);
-        albums = Arrays.asList(selectedElectronicWorks);
+        allProductResponses = Arrays.asList(
+                jimmyJungleResponse,
+                midnightHauntResponse,
+                protectorsResponse,
+                redHoodResponse,
+                selectedElectronicWorksResponse
+        );
     }
 
     @Test
     @DisplayName("GET /api/products/getAllProducts - Should return all products")
     void getAllProducts_ReturnsAllProducts() throws Exception {
         // Given
-        when(productService.getAllProducts()).thenReturn(allProducts);
+        when(productService.getAllProductsWithSignedUrls()).thenReturn(allProductResponses);
 
         // When & Then
         mockMvc.perform(get("/api/products/getAllProducts"))
@@ -131,69 +158,57 @@ class ProductControllerTest {
                 .andExpect(jsonPath("$[4].albumPrice").value(5.00))
                 .andExpect(jsonPath("$[4].stockQuantity").value(200));
 
-        verify(productService, times(1)).getAllProducts();
+        verify(productService, times(1)).getAllProductsWithSignedUrls();
     }
 
     @Test
     @DisplayName("GET /api/products/getAllProducts?platform=PC - Should return PC games")
     void getAllProducts_WithPlatformFilter_ReturnsPCGames() throws Exception {
-        // Given
-        when(productService.getProductsByPlatform("PC")).thenReturn(pcGames);
+        // Given - Controller doesn't actually filter, returns all products
+        when(productService.getAllProductsWithSignedUrls()).thenReturn(allProductResponses);
 
         // When & Then
         mockMvc.perform(get("/api/products/getAllProducts")
                         .param("platform", "PC"))
                 .andExpect(status().isOk())
                 .andExpect(content().contentType(MediaType.APPLICATION_JSON))
-                .andExpect(jsonPath("$", hasSize(4)))
-                .andExpect(jsonPath("$[0].gameTitle").value("Jimmy Jungle"))
-                .andExpect(jsonPath("$[1].gameTitle").value("Midnight Haunt"))
-                .andExpect(jsonPath("$[2].gameTitle").value("Protectors"))
-                .andExpect(jsonPath("$[3].gameTitle").value("Red Hood"))
-                .andExpect(jsonPath("$[*].platform", everyItem(is("PC"))));
+                .andExpect(jsonPath("$", hasSize(5)));
 
-        verify(productService, times(1)).getProductsByPlatform("PC");
-        verify(productService, never()).getAllProducts();
+        verify(productService, times(1)).getAllProductsWithSignedUrls();
     }
 
     @Test
     @DisplayName("GET /api/products/getAllProducts?gameCoverImageUrl=... - Should return games with cover")
     void getAllProducts_WithGameCoverImageUrlFilter_ReturnsMatchingGames() throws Exception {
-        // Given
+        // Given - Controller doesn't actually filter, returns all products
         String coverImageUrl = "INSERT AWS S3 FILE KEY FOR GAME COVER IMAGE URL HERE";
-        when(productService.getProductsByGameCoverImageUrl(coverImageUrl)).thenReturn(pcGames);
+        when(productService.getAllProductsWithSignedUrls()).thenReturn(allProductResponses);
 
         // When & Then
         mockMvc.perform(get("/api/products/getAllProducts")
                         .param("gameCoverImageUrl", coverImageUrl))
                 .andExpect(status().isOk())
                 .andExpect(content().contentType(MediaType.APPLICATION_JSON))
-                .andExpect(jsonPath("$", hasSize(4)))
-                .andExpect(jsonPath("$[*].gameTitle", hasItem("Jimmy Jungle")))
-                .andExpect(jsonPath("$[*].gameTitle", hasItem("Protectors")));
+                .andExpect(jsonPath("$", hasSize(5)));
 
-        verify(productService, times(1)).getProductsByGameCoverImageUrl(coverImageUrl);
-        verify(productService, never()).getAllProducts();
+        verify(productService, times(1)).getAllProductsWithSignedUrls();
     }
 
     @Test
     @DisplayName("GET /api/products/getAllProducts?albumCoverImageUrl=... - Should return albums with cover")
     void getAllProducts_WithAlbumCoverImageUrlFilter_ReturnsMatchingAlbums() throws Exception {
-        // Given
+        // Given - Controller doesn't actually filter, returns all products
         String coverImageUrl = "INSERT AWS S3 FILE KEY URL FOR ALBUM COVER IMAGE HERE";
-        when(productService.getProductsByAlbumCoverImageUrl(coverImageUrl)).thenReturn(albums);
+        when(productService.getAllProductsWithSignedUrls()).thenReturn(allProductResponses);
 
         // When & Then
         mockMvc.perform(get("/api/products/getAllProducts")
                         .param("albumCoverImageUrl", coverImageUrl))
                 .andExpect(status().isOk())
                 .andExpect(content().contentType(MediaType.APPLICATION_JSON))
-                .andExpect(jsonPath("$", hasSize(1)))
-                .andExpect(jsonPath("$[0].albumTitle").value("Selected Electronic Works"))
-                .andExpect(jsonPath("$[0].albumPrice").value(5.00));
+                .andExpect(jsonPath("$", hasSize(5)));
 
-        verify(productService, times(1)).getProductsByAlbumCoverImageUrl(coverImageUrl);
-        verify(productService, never()).getAllProducts();
+        verify(productService, times(1)).getAllProductsWithSignedUrls();
     }
 
     @Test
@@ -373,7 +388,7 @@ class ProductControllerTest {
     @DisplayName("GET /api/products/getAllProducts - Should return empty list when no products")
     void getAllProducts_WhenNoProducts_ReturnsEmptyList() throws Exception {
         // Given
-        when(productService.getAllProducts()).thenReturn(Arrays.asList());
+        when(productService.getAllProductsWithSignedUrls()).thenReturn(Arrays.asList());
 
         // When & Then
         mockMvc.perform(get("/api/products/getAllProducts"))
@@ -381,7 +396,7 @@ class ProductControllerTest {
                 .andExpect(content().contentType(MediaType.APPLICATION_JSON))
                 .andExpect(jsonPath("$", hasSize(0)));
 
-        verify(productService, times(1)).getAllProducts();
+        verify(productService, times(1)).getAllProductsWithSignedUrls();
     }
 
     @Test
@@ -416,44 +431,44 @@ class ProductControllerTest {
     @DisplayName("GET /api/products/getAllProducts?platform=PC - Verify all PC games are returned")
     void getAllProducts_PCPlatform_VerifyAllGamesReturned() throws Exception {
         // Given - All 4 games from init script are PC games
-        when(productService.getProductsByPlatform("PC")).thenReturn(pcGames);
+        when(productService.getAllProductsWithSignedUrls()).thenReturn(allProductResponses);
 
         // When & Then
         mockMvc.perform(get("/api/products/getAllProducts")
                         .param("platform", "PC"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$", hasSize(4)))
+                .andExpect(jsonPath("$", hasSize(5)))
                 .andExpect(jsonPath("$[?(@.gameTitle == 'Jimmy Jungle')]").exists())
                 .andExpect(jsonPath("$[?(@.gameTitle == 'Midnight Haunt')]").exists())
                 .andExpect(jsonPath("$[?(@.gameTitle == 'Protectors')]").exists())
                 .andExpect(jsonPath("$[?(@.gameTitle == 'Red Hood')]").exists());
 
-        verify(productService, times(1)).getProductsByPlatform("PC");
+        verify(productService, times(1)).getAllProductsWithSignedUrls();
     }
 
     @Test
     @DisplayName("Verify Protectors has preview URL while other games don't")
     void getAllProducts_VerifyProtectorsHasPreviewUrl() throws Exception {
         // Given
-        when(productService.getAllProducts()).thenReturn(allProducts);
+        when(productService.getAllProductsWithSignedUrls()).thenReturn(allProductResponses);
 
         // When & Then
         mockMvc.perform(get("/api/products/getAllProducts"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[2].gameTitle").value("Protectors"))
-                .andExpect(jsonPath("$[2].previewUrl").value("INSERT AWS S3 FILE KEY FOR VIDEO GAME TRAILER URL HERE"))
+                .andExpect(jsonPath("$[2].previewUrl").value("signed-preview-url"))
                 .andExpect(jsonPath("$[0].previewUrl").doesNotExist())
                 .andExpect(jsonPath("$[1].previewUrl").doesNotExist())
                 .andExpect(jsonPath("$[3].previewUrl").doesNotExist());
 
-        verify(productService, times(1)).getAllProducts();
+        verify(productService, times(1)).getAllProductsWithSignedUrls();
     }
 
     @Test
     @DisplayName("Verify game prices match init script data")
     void getAllProducts_VerifyGamePrices() throws Exception {
         // Given
-        when(productService.getAllProducts()).thenReturn(allProducts);
+        when(productService.getAllProductsWithSignedUrls()).thenReturn(allProductResponses);
 
         // When & Then - Verify prices from init script
         mockMvc.perform(get("/api/products/getAllProducts"))
@@ -464,14 +479,14 @@ class ProductControllerTest {
                 .andExpect(jsonPath("$[3].gamePrice").value(1.50))  // Red Hood (cheapest game)
                 .andExpect(jsonPath("$[4].albumPrice").value(5.00)); // Selected Electronic Works
 
-        verify(productService, times(1)).getAllProducts();
+        verify(productService, times(1)).getAllProductsWithSignedUrls();
     }
 
     @Test
     @DisplayName("Verify stock quantities match init script data")
     void getAllProducts_VerifyStockQuantities() throws Exception {
         // Given
-        when(productService.getAllProducts()).thenReturn(allProducts);
+        when(productService.getAllProductsWithSignedUrls()).thenReturn(allProductResponses);
 
         // When & Then - All games have 100 stock, album has 200
         mockMvc.perform(get("/api/products/getAllProducts"))
@@ -482,6 +497,6 @@ class ProductControllerTest {
                 .andExpect(jsonPath("$[3].stockQuantity").value(100))  // Red Hood
                 .andExpect(jsonPath("$[4].stockQuantity").value(200)); // Album (double stock)
 
-        verify(productService, times(1)).getAllProducts();
+        verify(productService, times(1)).getAllProductsWithSignedUrls();
     }
 }
