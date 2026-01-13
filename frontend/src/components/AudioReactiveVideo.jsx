@@ -65,19 +65,10 @@ const AudioReactiveVideo = ({
     isActiveRef.current = isActive;
   }, [isPlaying, isActive]);
   
-  // Clean video URL - strip AWS presigning parameters and add cache-buster
-  // The bucket has public access enabled via CORS
+  // Use the presigned URL directly from backend - DO NOT strip AWS signature parameters
+  // The backend generates presigned URLs with proper authentication
   const cleanVideoUrl = useMemo(() => {
-    if (!src) return src;
-    try {
-      const url = new URL(src);
-      // Strip AWS signature params and use clean URL
-      const cleanUrl = `${url.origin}${url.pathname}`;
-      // Add cache-buster to force fresh request with CORS headers
-      return `${cleanUrl}?cb=${Date.now()}`;
-    } catch {
-      return src;
-    }
+    return src;
   }, [src]);
   
   // Determine which color to use: global if active (regardless of playing state), local if not

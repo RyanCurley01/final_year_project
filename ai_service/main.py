@@ -11,6 +11,9 @@ from pathlib import Path
 from dotenv import load_dotenv
 import pymysql
 from contextlib import contextmanager
+import boto3
+from botocore.exceptions import ClientError
+from urllib.parse import urlparse, unquote
 
 # Load environment variables
 load_dotenv()
@@ -86,6 +89,69 @@ DB_CONFIG = {
     'read_timeout': 5,
     'write_timeout': 5
 }
+
+# S3 Configuration for presigned URLs
+S3_CONFIG = {
+    'bucket_name': os.getenv('AWS_S3_BUCKET_NAME', 'game-and-music-files'),
+    'region': os.getenv('AWS_REGION', 'eu-west-1'),
+    'access_key': os.getenv('AWS_ACCESS_KEY_ID'),
+    'secret_key': os.getenv('AWS_SECRET_ACCESS_KEY'),
+    'url_expiration': 3600  # URLs valid for 1 hour
+}
+
+# Initialize S3 client
+s3_client = None
+try:
+    if S3_CONFIG['access_key'] and S3_CONFIG['secret_key']:
+        s3_client = boto3.client(
+            's3',
+            region_name=S3_CONFIG['region'],
+            aws_access_key_id=S3_CONFIG['access_key'],
+            aws_secret_access_key=S3_CONFIG['secret_key']
+        )
+        print("✅ S3 client initialized for presigned URLs")
+    else:
+        print("⚠️  AWS credentials not found. Presigned URLs will not be generated.")
+except Exception as e:
+    print(f"⚠️  Failed to initialize S3 client: {e}")
+    s3_client = None
+
+def generate_presigned_url(s3_url: str) -> str:
+    """
+    Generate a presigned URL for an S3 object.
+    
+    Args:
+        s3_url: Full S3 URL (e.g., https://bucket.s3.region.amazonaws.com/key)
+    
+    Returns:
+        Presigned URL or original URL if presigning fails
+    """
+    if not s3_url or not s3_client:
+        return s3_url
+    
+    try:
+        # Extract the S3 key from the URL
+        # Format: https://bucket.s3.region.amazonaws.com/path/to/file
+        parsed = urlparse(s3_url)
+        key = parsed.path.lstrip('/')
+        
+        # URL decode the key (database has URL-encoded paths, S3 keys have literal characters)
+        key = unquote(key)
+        
+        # Generate presigned URL
+        presigned_url = s3_client.generate_presigned_url(
+            'get_object',
+            Params={
+                'Bucket': S3_CONFIG['bucket_name'],
+                'Key': key
+            },
+            ExpiresIn=S3_CONFIG['url_expiration']
+        )
+        
+        return presigned_url
+    except Exception as e:
+        print(f"Error generating presigned URL for {s3_url}: {e}")
+        return s3_url  # Return original URL as fallback
 
 @contextmanager
 def get_db_connection():
@@ -225,15 +291,15 @@ async def get_top_played_songs(limit: int = 5):
                     cursor.execute(sql, (limit,))
                     results = cursor.fetchall()
                     
-                    # Format response
+                    # Format response with presigned URLs
                     songs = []
                     for row in results:
                         songs.append({
                             "productId": row['productId'],
                             "albumTitle": row['albumTitle'],
-                            "albumCoverImageUrl": row['albumCoverImageUrl'],
-                            "fileUrl": row['fileUrl'],
-                            "previewUrl": row['previewUrl'],
+                            "albumCoverImageUrl": generate_presigned_url(row['albumCoverImageUrl']),
+                            "fileUrl": generate_presigned_url(row['fileUrl']),
+                            "previewUrl": generate_presigned_url(row['previewUrl']) if row['previewUrl'] else None,
                             "albumPrice": float(row['albumPrice']) if row['albumPrice'] else 0.5,
                             "playCount": row['playCount']
                         })

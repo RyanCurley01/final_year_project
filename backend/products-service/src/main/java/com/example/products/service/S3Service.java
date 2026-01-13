@@ -102,22 +102,20 @@ public class S3Service {
      */
     private String extractKeyFromUrl(String s3Url) {
         try {
-            // Handle both formats:
+            // Handle multiple S3 URL formats:
             // https://bucket.s3.region.amazonaws.com/key
             // https://bucket.s3.amazonaws.com/key
-            String[] parts = s3Url.split(bucketName + ".s3");
-            if (parts.length < 2) {
+            // First, find where ".amazonaws.com/" appears in the URL
+            String searchPattern = ".amazonaws.com/";
+            int amazonDomainIndex = s3Url.indexOf(searchPattern);
+            
+            if (amazonDomainIndex == -1) {
+                System.err.println("Could not find '.amazonaws.com/' in URL: " + s3Url);
                 return null;
             }
             
-            // Get everything after ".amazonaws.com/"
-            String afterDomain = parts[1];
-            int startIndex = afterDomain.indexOf('/');
-            if (startIndex == -1) {
-                return null;
-            }
-            
-            String key = afterDomain.substring(startIndex + 1);
+            // Extract everything after ".amazonaws.com/"
+            String key = s3Url.substring(amazonDomainIndex + searchPattern.length());
             
             // URL decode the key since the database stores URL-encoded paths
             // The actual S3 object keys have literal apostrophes and spaces
@@ -131,6 +129,7 @@ public class S3Service {
             
             return key;
         } catch (Exception e) {
+            System.err.println("Error extracting key from URL: " + e.getMessage());
             return null;
         }
     }

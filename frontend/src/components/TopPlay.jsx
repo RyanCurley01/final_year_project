@@ -75,14 +75,10 @@ const TopPlay = () => {
   const divRef = useRef(null);
 
   // Fetch top played songs based on user play count from UserInteractions
-  const { data: topPlayedData, isFetching, error } = useGetTopPlayedSongsQuery(5);
+  const { data: topPlayedData, isLoading, error } = useGetTopPlayedSongsQuery(5);
 
   // Extract songs array from API response
   const topSongs = topPlayedData?.data || [];
-
-  if (isFetching) return <Loader title="Loading top songs..." />;
-  if (error) return <Error />;
-
   const topPlays = topSongs;
   
   const handlePauseClick = () => {
@@ -101,31 +97,56 @@ const TopPlay = () => {
     }
   };
 
+  // Render content based on state
+  const renderContent = () => {
+    if (isLoading) {
+      return (
+        <div className="flex flex-col items-center justify-center py-8">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-cyan-400 mb-4"></div>
+          <p className="text-gray-400 text-sm">Loading top songs...</p>
+        </div>
+      );
+    }
+
+    if (error || topPlays.length === 0) {
+      return (
+        <div className="flex flex-col items-center justify-center py-8 text-center px-4">
+          <p className="text-gray-400 text-sm">
+            {error ? 'Unable to load top songs' : 'No songs played yet'}
+          </p>
+          <p className="text-gray-500 text-xs mt-2">
+            Play a song to see it appear here!
+          </p>
+        </div>
+      );
+    }
+
+    return (
+      <div className="mt-4 flex flex-col gap-1">
+        {topPlays.map((song, i) => (
+          <TopChartCard 
+            key={song.productId || song.id || `song-${i}`}
+            song={song}
+            i={i}
+            isPlaying={isPlaying}
+            activeSong={activeSong}
+            songEnded={songEnded}
+            handlePauseClick={handlePauseClick}
+            handlePlayClick={handlePlayClick}
+          />
+        ))}
+      </div>
+    );
+  };
+
   return (
     <div ref={divRef} className="xl:ml-16 mr-30 xl:mb-0 mb-6 
     flex-1 xl:max-w-[500px] max-w-full flex flex-col">
       <div className="w-full flex flex-col">
         <div className="flex flex-row justify-between items-center">
           <h2 className="text-white font-bold text-2xl ml-5">Popular Songs</h2>
-          {/* <Link to="/top-charts">
-            <p className="text-gray-300 text-base cursor-pointer">See More</p>
-          </Link> */}
         </div>
-
-        <div className="mt-4 flex flex-col gap-1">
-          {topPlays?.map((song, i) => (
-            <TopChartCard 
-              key={song.productId || song.id || `song-${i}`}
-              song={song}
-              i={i}
-              isPlaying={isPlaying}
-              activeSong={activeSong}
-              songEnded={songEnded}
-              handlePauseClick={handlePauseClick}
-              handlePlayClick={handlePlayClick}
-            />
-          ))}
-        </div>
+        {renderContent()}
       </div>
     </div>
   )

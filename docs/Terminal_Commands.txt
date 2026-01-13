@@ -201,3 +201,6 @@ INSERT INTO AudioFeatures (ProductID, Tempo, Energy, Danceability, Valence, Acou
 (50, 95.7, 0.2, 1.0, 0.41, 1.0, 0.863, -64.95, 0.137, 'Ambient', 'Neutral', 'C', '4/4', 30, 1099.42, 2375.89, 0.0687),
 (51, 152.0, 0.173, 1.0, 0.641, 0.999, 0.886, -66.67, 0.114, 'Pop', 'Uplifting', 'G', '4/4', 30, 1906.83, 4123.88, 0.0571);
 EOF
+
+# To start services in their docker images
+docker-compose -f docker-compose.services.yml up -d
