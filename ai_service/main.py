@@ -67,10 +67,6 @@ class RecommendationResponse(BaseModel):
     user_id: int
     recommendations: List[Recommendation]
 
-# Global variables for model
-model_session: Optional[ort.InferenceSession] = None
-MODEL_PATH = os.getenv("MODEL_PATH", "./models/recommendation_model.onnx")
-
 # Cache for audio features - loaded once at startup to avoid repeated DB queries
 audio_features_cache: Dict[int, Dict] = {}
 cache_loaded: bool = False

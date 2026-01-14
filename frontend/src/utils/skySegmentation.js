@@ -5,6 +5,9 @@
 
 import * as tf from '@tensorflow/tfjs';
 
+// Track if we've already logged initialization
+let hasLoggedInit = false;
+
 class SkySegmentation {
   constructor() {
     this.model = null;
@@ -23,7 +26,11 @@ class SkySegmentation {
       await tf.ready();
       
       this.isInitialized = true;
-      console.log('Sky segmentation initialized');
+      // Only log once across all instances
+      if (!hasLoggedInit) {
+        console.log('Sky segmentation initialized');
+        hasLoggedInit = true;
+      }
     } catch (error) {
       console.error('Failed to initialize TensorFlow.js:', error);
       throw error;

@@ -204,3 +204,7 @@ EOF
 
 # To start services in their docker images
 docker-compose -f docker-compose.services.yml up -d
+
+To rebuild docker images 
+docker compose -f docker-compose.services.yml -p gamestore_services build
+

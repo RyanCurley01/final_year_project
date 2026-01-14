@@ -71,6 +71,11 @@ const AudioReactiveVideo = ({
     return src;
   }, [src]);
   
+  // Check if this is the cloud animation background video (doesn't need CORS)
+  const isCloudAnimation = useMemo(() => {
+    return src?.toLowerCase().includes('cloud-animation');
+  }, [src]);
+  
   // Determine which color to use: global if active (regardless of playing state), local if not
   const currentSkyColor = isActive ? globalSkyColor : localSkyColor;
   
@@ -395,10 +400,12 @@ const AudioReactiveVideo = ({
   return (
     <div className="relative rounded-lg overflow-hidden" style={{ width: '100%', height: '100%' }}>
       {/* Hidden muted video element for visual animation only */}
+      {/* Note: crossOrigin="anonymous" is needed for canvas pixel access (sky segmentation)
+          but not for cloud-animation.mp4 (background video without processing) */}
       <video
         ref={videoRef}
         src={cleanVideoUrl}
-        crossOrigin="anonymous"
+        {...(!isCloudAnimation && { crossOrigin: "anonymous" })}
         muted
         playsInline
         preload="auto"
