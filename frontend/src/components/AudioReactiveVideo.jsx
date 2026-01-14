@@ -71,7 +71,7 @@ const AudioReactiveVideo = ({
     return src;
   }, [src]);
   
-  // Check if this is the cloud animation background video (doesn't need CORS)
+  // Check if this is the cloud animation background video (doesn't need CORS for sky segmentation)
   const isCloudAnimation = useMemo(() => {
     return src?.toLowerCase().includes('cloud-animation');
   }, [src]);
@@ -400,12 +400,12 @@ const AudioReactiveVideo = ({
   return (
     <div className="relative rounded-lg overflow-hidden" style={{ width: '100%', height: '100%' }}>
       {/* Hidden muted video element for visual animation only */}
-      {/* Note: crossOrigin="anonymous" is needed for canvas pixel access (sky segmentation)
-          but not for cloud-animation.mp4 (background video without processing) */}
+      {/* Note: crossOrigin="anonymous" is REQUIRED for canvas pixel access (sky segmentation)
+          S3 bucket has CORS configured to allow all origins */}
       <video
         ref={videoRef}
         src={cleanVideoUrl}
-        {...(!isCloudAnimation && { crossOrigin: "anonymous" })}
+        crossOrigin="anonymous"
         muted
         playsInline
         preload="auto"
