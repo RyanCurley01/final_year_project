@@ -22,7 +22,7 @@ show_usage() {
     echo "  - products-service"
     echo "  - orders-service"
     echo "  - payments-service"
-    echo "  - ai-service"
+    echo "  - audio-service"
     echo "  - db (database)"
     echo ""
     echo "Examples:"

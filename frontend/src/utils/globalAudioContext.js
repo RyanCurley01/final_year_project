@@ -22,11 +22,18 @@ class GlobalAudioContext {
    */
   async initialize(audioElement) {
     if (this.isInitialized && this.audioElement === audioElement) {
+      // Same element, ensure detector is still running
+      console.log('🔄 globalAudioContext: Already initialized, ensuring detector is running');
+      if (this.onsetDetector) {
+        this.onsetDetector.restart();
+      }
       return;
     }
 
     if (this.isInitialized) {
-      return;
+      // Different audio element - need to reconnect
+      console.log('🔄 globalAudioContext: Reconnecting to new audio element');
+      this.cleanup();
     }
 
     try {

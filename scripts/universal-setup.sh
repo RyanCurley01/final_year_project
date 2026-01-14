@@ -71,9 +71,9 @@ echo ""
 echo "📦 Installing dependencies..."
 
 # AI Service dependencies
-if [ -f "ai_service/requirements.txt" ]; then
+if [ -f "audio_service/requirements.txt" ]; then
     echo "  Installing AI Service dependencies..."
-    "$VENV_PATH/bin/pip" install -q -r ai_service/requirements.txt || {
+    "$VENV_PATH/bin/pip" install -q -r audio_service/requirements.txt || {
         echo "⚠️  AI Service dependencies installation had issues (non-fatal)"
     }
 fi
@@ -103,9 +103,9 @@ fi
 echo ""
 echo "🔧 Configuring environment files..."
 
-if [ -f "ai_service/setup_env.py" ]; then
+if [ -f "audio_service/setup_env.py" ]; then
     echo "  Configuring AI Service environment..."
-    cd ai_service
+    cd audio_service
     python3 setup_env.py || echo "⚠️  AI Service env setup failed (non-fatal)"
     cd ..
 else

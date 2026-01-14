@@ -17,7 +17,7 @@ This project uses a **two-container architecture** to keep VS Code lightweight:
 - **Managed by**: `./services-control.sh` script at project root
 - **Services**:
   - MySQL Database (port 3306)
-  - AI Service (port 5000)
+  - Audio Service (port 5000)
   - Accounts Service (port 8080)
   - Products Service (port 8081)
   - Orders Service (port 8082)

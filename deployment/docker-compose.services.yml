@@ -250,9 +250,9 @@ services:
           memory: 512M
     restart: unless-stopped
 
-  ai-service:
+  audio-service:
     build:
-      context: ../ai_service
+      context: ../audio_service
       dockerfile: Dockerfile
     ports:
       - "5000:5000"

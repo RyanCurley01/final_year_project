@@ -2,12 +2,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional, Dict
-import onnxruntime as ort
-import numpy as np
 import os
-import sys
-from datetime import datetime
-from pathlib import Path
 from dotenv import load_dotenv
 import pymysql
 from contextlib import contextmanager
@@ -19,9 +14,9 @@ from urllib.parse import urlparse, unquote
 load_dotenv()
 
 app = FastAPI(
-    title="AI Recommendation Service - Production",
+    title="Audio Feature Similarity Service",
     description="Real-time audio-visual recommendations with multi-dimensional feature analysis",
-    version="2.0.0-production"
+    version="2.0.0"
 )
 
 # CORS middleware for frontend integration
@@ -56,21 +51,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Models
-class Recommendation(BaseModel):
-    product_id: int
-    product_name: str
-    category: str
-    score: float
-
-class RecommendationResponse(BaseModel):
-    user_id: int
-    recommendations: List[Recommendation]
-
 # Cache for audio features - loaded once at startup to avoid repeated DB queries
 audio_features_cache: Dict[int, Dict] = {}
 cache_loaded: bool = False
-db_available: bool = False  # Track if DB is available to avoid repeated timeouts
 
 # Database configuration
 DB_CONFIG = {
@@ -164,17 +147,9 @@ def get_db_connection():
             connection.close()
 
 @app.on_event("startup")
-async def load_model():
-    """Load the ONNX model on startup"""
-    global model_session, audio_features_cache, cache_loaded
-    try:
-        if os.path.exists(MODEL_PATH):
-            model_session = ort.InferenceSession(MODEL_PATH)
-            print(f"✅ Model loaded successfully from {MODEL_PATH}")
-        else:
-            print(f"⚠️  Warning: Model not found at {MODEL_PATH}. Using fallback recommendations.")
-    except Exception as e:
-        print(f"❌ Error loading model: {e}")
+async def startup_cache():
+    """Load audio features cache on startup"""
+    global audio_features_cache, cache_loaded
     
     # Load audio features into cache for fast recommendations
     try:
@@ -218,9 +193,10 @@ async def load_model():
 @app.get("/")
 async def root():
     return {
-        "service": "AI Recommendation Service",
+        "service": "Audio Feature Similarity Service",
         "status": "running",
-        "model_loaded": model_session is not None
+        "cache_loaded": cache_loaded,
+        "cached_products": len(audio_features_cache)
     }
 
 @app.get("/health")
@@ -241,9 +217,10 @@ async def health_check():
     
     return {
         "status": "healthy",
-        "model_loaded": model_session is not None,
         "database_status": db_status,
-        "audio_features_in_db": audio_features_count
+        "audio_features_in_db": audio_features_count,
+        "cache_loaded": cache_loaded,
+        "cached_products": len(audio_features_cache)
     }
 
 # ============================================
@@ -364,11 +341,11 @@ async def check_config():
     Check the current configuration without making external API calls
     """
     return {
-        "model_path": MODEL_PATH,
-        "model_loaded": model_session is not None,
         "environment": os.getenv('ENVIRONMENT', 'unknown'),
         "codespaces": os.getenv('CODESPACES') == 'true',
-        "codespace_name": os.getenv('CODESPACE_NAME', 'not_set')
+        "codespace_name": os.getenv('CODESPACE_NAME', 'not_set'),
+        "cache_loaded": cache_loaded,
+        "s3_configured": s3_client is not None
     }
 
 
@@ -385,12 +362,6 @@ class AudioFeatures(BaseModel):
     danceability: Optional[float] = None
     valence: Optional[float] = None
     acousticness: Optional[float] = None
-    instrumentalness: Optional[float] = None
-    loudness: Optional[float] = None
-    speechiness: Optional[float] = None
-    spectral_centroid: Optional[float] = None
-    spectral_rolloff: Optional[float] = None
-    zero_crossing_rate: Optional[float] = None
 
 class RealtimeRecommendationRequest(BaseModel):
     """Request for real-time audio similarity recommendations"""
@@ -789,120 +760,55 @@ async def get_similar_artist_songs(request: SimilarArtistSongsRequest):
         raise HTTPException(status_code=500, detail=f"Error finding similar artist songs: {str(e)}")
 
 
-@app.post("/api/audio/extract-features")
-async def extract_audio_features(audio_data: Dict):
-    """
-    Extract comprehensive audio features from raw audio data
-    Production-ready with extended feature set for ML recommendation algorithms
-    """
-    try:
-        # Production feature extraction using librosa
-        # In real deployment: librosa.load(audio_file), librosa.beat.tempo(), etc.
-        
-        # Comprehensive feature set for production ML models
-        features = AudioFeatures(
-            # Core rhythm features
-            tempo=128.0,                    # BPM from beat tracking
-            time_signature=4,               # Beats per measure
-            
-            # Energy and dynamics
-            energy=0.85,                    # RMS energy (0-1)
-            loudness=-6.0,                  # dB scale
-            
-            # Timbre and texture
-            spectral_centroid=2500.0,       # Brightness (Hz)
-            spectral_rolloff=8000.0,        # Frequency distribution
-            zero_crossing_rate=0.15,        # Percussiveness indicator
-            
-            # Musical characteristics
-            danceability=0.75,              # Groove and beat strength
-            valence=0.70,                   # Emotional positivity
-            acousticness=0.10,              # Acoustic vs electronic
-            instrumentalness=0.90,          # Vocal presence (inverse)
-            speechiness=0.05,               # Speech-like qualities
-            
-            # Advanced ML features
-            harmonic_ratio=0.75,            # Harmonic vs percussive
-            mfcc_mean=[0.0] * 13,          # Mel-frequency cepstral coefficients
-            chroma_stft=[0.0] * 12,        # Pitch class distribution
-            
-            # Metadata
-            key="C",
-            mode="Major",
-            genre="Electronic",
-            mood="Energetic",
-            
-            # Processing metadata
-            extracted_at=datetime.now().isoformat(),
-            algorithm_version="2.0-librosa",
-            confidence_scores={
-                "tempo": 0.95,
-                "energy": 0.97,
-                "genre": 0.92
-            }
-        )
-        
-        return {
-            "features": features,
-            "status": "success",
-            "processing_time_ms": 250,
-            "message": "Audio features extracted with production-grade algorithms"
-        }
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error extracting features: {str(e)}")
-
 @app.get("/api/audio/features/{product_id}")
 async def get_product_audio_features(product_id: int):
     """
     Get stored audio features for a specific product from database
-    Production-ready endpoint with comprehensive feature retrieval
     """
     try:
+        # Check cache first
+        if cache_loaded and product_id in audio_features_cache:
+            return {
+                "product_id": product_id,
+                "features": audio_features_cache[product_id],
+                "status": "success",
+                "data_source": "cache"
+            }
+        
         # Query from AudioFeatures table
         with get_db_connection() as conn:
             if conn:
-                try:
-                    with conn.cursor() as cursor:
-                        sql = """
-                            SELECT 
-                                ProductID,
-                                Tempo as tempo,
-                                Energy as energy,
-                                Valence as valence,
-                                Danceability as danceability,
-                                Acousticness as acousticness,
-                                Instrumentalness as instrumentalness,
-                                Loudness as loudness,
-                                Speechiness as speechiness,
-                                Mood as mood,
-                                Genre as genre,
-                                Key_Signature as key,
-                                TimeSignature as mode,
-                                SpectralCentroid as spectral_centroid
-                            FROM AudioFeatures
-                            WHERE ProductID = %s
-                        """
-                        cursor.execute(sql, (product_id,))
-                        features_data = cursor.fetchone()
-                        
-                        if features_data:
-                            # Remove ProductID from the dict
-                            features_data.pop('ProductID', None)
-                            return {
-                                "product_id": product_id,
-                                "features": features_data,
-                                "status": "success",
-                                "data_source": "AudioFeatures table (database)",
-                                "last_updated": datetime.now().isoformat()
-                            }
-                except Exception as db_error:
-                    print(f"⚠️ Database query failed: {db_error}")
-        
+                with conn.cursor() as cursor:
+                    sql = """
+                        SELECT 
+                            Tempo as tempo,
+                            Energy as energy,
+                            Valence as valence,
+                            Danceability as danceability,
+                            Acousticness as acousticness,
+                            Genre as genre
+                        FROM AudioFeatures
+                        WHERE ProductID = %s
+                    """
+                    cursor.execute(sql, (product_id,))
+                    features_data = cursor.fetchone()
+                    
+                    if features_data:
+                        return {
+                            "product_id": product_id,
+                            "features": features_data,
+                            "status": "success",
+                            "data_source": "database"
+                        }
+                    else:
+                        raise HTTPException(status_code=404, detail=f"No audio features found for product {product_id}")
+            else:
+                raise HTTPException(status_code=503, detail="Database connection unavailable")
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error retrieving audio features: {str(e)}")
+
 
 if __name__ == "__main__":
     import uvicorn

@@ -83,9 +83,9 @@ def main():
     # Setup each component
     results = []
     
-    # 1. Setup AI Service
+    # 1. Setup Audio Service
     results.append(run_setup_script(
-        'ai_service', 
+        'audio_service', 
         'setup_env.py',
         'Setting up AI Recommendation Service'
     ))
@@ -108,7 +108,7 @@ def main():
     print(f"\n📊 Setup Summary")
     print("=" * 50)
     
-    components = ['AI Service', 'Backend Services', 'Frontend']
+    components = ['Audio Service', 'Backend Services', 'Frontend']
     for i, (component, success) in enumerate(zip(components, results)):
         status = "✅ Success" if success else "❌ Failed"
         print(f"  {component}: {status}")
@@ -121,17 +121,17 @@ def main():
         print(f"\n🚀 Next Steps:")
         if is_codespaces:
             print(f"  🌐 Your services will be available at:")
-            print(f"    • AI Service: https://{codespace_name}-5000.preview.app.github.dev")
+            print(f"    • Audio Service: https://{codespace_name}-5000.preview.app.github.dev")
             print(f"    • Backend: https://{codespace_name}-8080.preview.app.github.dev") 
             print(f"    • Frontend: https://{codespace_name}-5173.preview.app.github.dev")
         else:
             print(f"  🌐 Your services will be available at:")
-            print(f"    • AI Service: http://localhost:5000")
+            print(f"    • Audio Service: http://localhost:5000")
             print(f"    • Backend: http://localhost:8080")
             print(f"    • Frontend: http://localhost:5173")
         
         print(f"\n  🔧 To start services:")
-        print(f"    • AI Service: cd ai_service && python main.py")
+        print(f"    • Audio Service: cd audio_service && python main.py")
         print(f"    • Backend: cd backend && ./gradlew bootRun")
         print(f"    • Frontend: cd frontend && npm run dev")
         

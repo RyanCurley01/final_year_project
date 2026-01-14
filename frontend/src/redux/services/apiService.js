@@ -5,14 +5,14 @@ import envConfig from '../../config/environment.js';
 // Get the API base URL using our environment configuration
 const API_BASE_URL = envConfig.getApiBaseUrl();
 
-console.log('🎵 AI Service API Configuration:', {
+console.log('🎵 Audio Service API Configuration:', {
   baseUrl: API_BASE_URL,
   environment: envConfig.getEnvironment(),
   isCodespaces: envConfig.isCodespaces()
 });
 
-export const aiServiceApi = createApi({
-  reducerPath: 'aiServiceApi',
+export const musicServiceApi = createApi({
+  reducerPath: 'musicServiceApi',
   baseQuery: fetchBaseQuery({
     baseUrl: `${API_BASE_URL}/api`,
   }),
@@ -35,4 +35,4 @@ export const aiServiceApi = createApi({
   }),
 });
 
-export const { useGetTopPlayedSongsQuery, useRecordInteractionMutation } = aiServiceApi;
+export const { useGetTopPlayedSongsQuery, useRecordInteractionMutation } = musicServiceApi;

@@ -85,10 +85,10 @@ if [ -f ./package.json ]; then
 fi
 
 # Install python deps if requirements.txt exists (for AI service)
-if [ -f ./ai_service/requirements.txt ]; then
-  echo "Found ai_service/requirements.txt — installing Python dependencies into venv..."
+if [ -f ./audio_service/requirements.txt ]; then
+  echo "Found audio_service/requirements.txt — installing Python dependencies into venv..."
   "$VENV_PATH/bin/pip" install --upgrade pip || true
-  "$VENV_PATH/bin/pip" install -r ./ai_service/requirements.txt || true
+  "$VENV_PATH/bin/pip" install -r ./audio_service/requirements.txt || true
 fi
 
 # Install python deps if requirements.txt exists in root

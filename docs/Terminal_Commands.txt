@@ -17,7 +17,7 @@ install all dependencies first, then run the dev server
 npm install 
 npm run dev
 
-To kill AI service port
+To kill Audio service port
 lsof -ti:5000 | xargs kill -9
 
 To run the cloud movement video
@@ -129,20 +129,20 @@ docker exec -it gamestore_services-db-1 mysql -u root -prootpassword Game_Store_
 # - For CSV export: Add --batch --skip-column-names flags
 
 
-To stop AI service in docker container
-docker stop gamestore_services-ai-service-1
+To stop Audio service in docker container
+docker stop gamestore_services-audio-service-1
 
 
 To start volume mount for ai service in external container
-./services-control.sh stop ai-service
-./services-control.sh start ai-service
+./services-control.sh stop audio-service
+./services-control.sh start audio-service
 
 OR
-docker compose -f docker-compose.services.yml -p gamestore_services stop ai-service
-docker compose -f docker-compose.services.yml -p gamestore_services up -d ai-service
+docker compose -f docker-compose.services.yml -p gamestore_services stop audio-service
+docker compose -f docker-compose.services.yml -p gamestore_services up -d audio-service
 
-To Check if AI service is running
-./services-control.sh logs ai-service
+To Check if Audio service is running
+./services-control.sh logs audio-service
 
 
 To insert the extracted song features into the AudioFeatures table
