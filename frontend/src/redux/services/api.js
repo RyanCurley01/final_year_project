@@ -27,12 +27,29 @@ export const PORTS = {
 // Helper function to get full URL
 export const getServiceUrl = (service) => {
   const port = PORTS[service];
+  const config = envConfig.getConfig();
   
   if (envConfig.isCodespaces()) {
     // In Codespaces, each service has its own forwarded port
-    const config = envConfig.getConfig();
     const url = `https://${config.codespaceName}-${port}.${config.codespacesDomain}`;
     console.log(`🌐 Service URL for ${service}:`, url);
+    return url;
+  } else if (config.isNgrok) {
+    // In ngrok mode, use proxy paths that map to Docker container names
+    const proxyMap = {
+      8080: '/proxy/backend',
+      8081: '/proxy/products',
+      8082: '/proxy/orders',
+      8083: '/proxy/payments',
+      8084: '/proxy/stock',
+      8085: '/proxy/wishlist',
+      8086: '/proxy/order-items',
+      8087: '/proxy/customer-summary',
+      8088: '/proxy/sold-products',
+      8089: '/proxy/sold-products',
+    };
+    const url = proxyMap[port] || `/proxy/backend`;
+    console.log(`🌐 Service URL for ${service} (ngrok):`, url);
     return url;
   } else {
     // In localhost, services might be on different ports
@@ -44,9 +61,17 @@ export const getServiceUrl = (service) => {
 
 // Helper function for authenticated requests
 export const getAuthHeaders = (token) => {
+  const hostname = window.location.hostname;
+  const isNgrok = hostname.includes('ngrok-free.dev') || hostname.includes('ngrok-free.app') || hostname.includes('ngrok.io');
+  
   const headers = {
     'Content-Type': 'application/json',
   };
+  
+  // Add ngrok bypass header
+  if (isNgrok) {
+    headers['ngrok-skip-browser-warning'] = 'true';
+  }
   
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
@@ -57,22 +82,42 @@ export const getAuthHeaders = (token) => {
 
 // Helper function for Basic Auth
 export const getBasicAuthHeaders = (email, password) => {
+  const hostname = window.location.hostname;
+  const isNgrok = hostname.includes('ngrok-free.dev') || hostname.includes('ngrok-free.app') || hostname.includes('ngrok.io');
+  
   const credentials = btoa(`${email}:${password}`);
-  return {
+  const headers = {
     'Content-Type': 'application/json',
     'Authorization': `Basic ${credentials}`,
   };
+  
+  // Add ngrok bypass header
+  if (isNgrok) {
+    headers['ngrok-skip-browser-warning'] = 'true';
+  }
+  
+  return headers;
 };
 
 // Generic API call handler
 export const apiCall = async (url, options = {}) => {
   try {
+    const hostname = window.location.hostname;
+    const isNgrok = hostname.includes('ngrok-free.dev') || hostname.includes('ngrok-free.app') || hostname.includes('ngrok.io');
+    
+    // Build headers with ngrok bypass if needed
+    const headers = {
+      'Content-Type': 'application/json',
+      ...options.headers,
+    };
+    
+    if (isNgrok) {
+      headers['ngrok-skip-browser-warning'] = 'true';
+    }
+    
     const response = await fetch(url, {
       ...options,
-      headers: {
-        'Content-Type': 'application/json',
-        ...options.headers,
-      },
+      headers,
     });
 
     if (!response.ok) {

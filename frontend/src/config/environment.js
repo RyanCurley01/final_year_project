@@ -9,6 +9,7 @@ class EnvironmentConfig {
   detectEnvironment() {
     const hostname = window.location.hostname;
     const isCodespaces = hostname.includes('app.github.dev');
+    const isNgrok = hostname.includes('ngrok-free.dev') || hostname.includes('ngrok-free.app') || hostname.includes('ngrok.io');
     const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1';
     
     // Extract codespace name if in Codespaces
@@ -26,6 +27,7 @@ class EnvironmentConfig {
     console.log('🔍 Environment Detection:', {
       hostname,
       isCodespaces,
+      isNgrok,
       codespaceName,
       codespacesDomain
     });
@@ -35,20 +37,24 @@ class EnvironmentConfig {
     const runtimeEnv = window.ENV_CONFIG || {};
     
     let config = {
-      environment: isCodespaces ? 'codespaces' : 'local',
+      environment: isCodespaces ? 'codespaces' : (isNgrok ? 'ngrok' : 'local'),
       isCodespaces,
+      isNgrok,
       isLocalhost,
       codespaceName,
       codespacesDomain
     };
 
-    // API Base URL (AI Service)
+    // API Base URL (Audio Service)
     if (viteEnv.VITE_API_BASE_URL) {
       config.apiBaseUrl = viteEnv.VITE_API_BASE_URL;
     } else if (runtimeEnv.VITE_API_BASE_URL) {
       config.apiBaseUrl = runtimeEnv.VITE_API_BASE_URL;
     } else if (isCodespaces && codespaceName) {
       config.apiBaseUrl = `https://${codespaceName}-5000.${codespacesDomain}`;
+    } else if (isNgrok) {
+      // Use Vite proxy when accessed via ngrok
+      config.apiBaseUrl = '/proxy/audio';
     } else {
       config.apiBaseUrl = 'http://localhost:5000';
     }
@@ -60,6 +66,9 @@ class EnvironmentConfig {
       config.backendApiUrl = runtimeEnv.VITE_BACKEND_API_URL;
     } else if (isCodespaces && codespaceName) {
       config.backendApiUrl = `https://${codespaceName}-8080.${codespacesDomain}`;
+    } else if (isNgrok) {
+      // Use Vite proxy when accessed via ngrok
+      config.backendApiUrl = '/proxy/backend';
     } else {
       config.backendApiUrl = 'http://localhost:8080';
     }
@@ -73,12 +82,22 @@ class EnvironmentConfig {
     return config;
   }
 
-  // Getter methods
+  // Getter methods - check at runtime for ngrok
   getApiBaseUrl() {
+    const hostname = window.location.hostname;
+    const isNgrok = hostname.includes('ngrok-free.dev') || hostname.includes('ngrok-free.app') || hostname.includes('ngrok.io');
+    if (isNgrok) {
+      return '/proxy/audio';
+    }
     return this.config.apiBaseUrl;
   }
 
   getBackendApiUrl() {
+    const hostname = window.location.hostname;
+    const isNgrok = hostname.includes('ngrok-free.dev') || hostname.includes('ngrok-free.app') || hostname.includes('ngrok.io');
+    if (isNgrok) {
+      return '/proxy/backend';
+    }
     return this.config.backendApiUrl;
   }
 
@@ -94,9 +113,21 @@ class EnvironmentConfig {
     return this.config.isLocalhost;
   }
 
+  isNgrok() {
+    const hostname = window.location.hostname;
+    return hostname.includes('ngrok-free.dev') || hostname.includes('ngrok-free.app') || hostname.includes('ngrok.io');
+  }
+
   // Get full configuration
   getConfig() {
-    return { ...this.config };
+    const hostname = window.location.hostname;
+    const isNgrok = hostname.includes('ngrok-free.dev') || hostname.includes('ngrok-free.app') || hostname.includes('ngrok.io');
+    return { 
+      ...this.config,
+      isNgrok,
+      apiBaseUrl: isNgrok ? '/proxy/audio' : this.config.apiBaseUrl,
+      backendApiUrl: isNgrok ? '/proxy/backend' : this.config.backendApiUrl,
+    };
   }
 }
 

@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import axios from 'axios';
 import { useAudioFeatures } from '../context/AudioFeaturesContext';
 import placeholders from '../utils/placeholderImage';
+import envConfig from '../config/environment';
 
 /**
  * SmartRecommendationVisualizer (formerly PersonalRecommendations)
@@ -67,7 +68,7 @@ const SmartRecommendationVisualizer = ({
         playback_rate: rate
       };
       
-      const response = await axios.post('http://localhost:5000/api/audio/realtime-recommendations', {
+      const response = await axios.post(`${envConfig.getApiBaseUrl()}/api/audio/realtime-recommendations`, {
         current_product_id: productId,
         audio_features: adjustedFeatures,
         session_id: session,
