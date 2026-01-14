@@ -121,7 +121,7 @@ USE Game_Store_System;
     );
 
     -- ============================================
-    -- AI RECOMMENDATION TABLES
+    -- AUDIO RECOMMENDATION TABLES
     -- ============================================
 
     -- AudioFeatures: Store extracted audio features for music products
