@@ -193,18 +193,18 @@ const SongCard = ({ product, payment, i, data }) => {
           </p>
         </div>
         {isGame && (
-          <div className="flex justify-between items-center mt-2">
-            <p className="text-xs text-white">
+          <>
+            <p className="text-xs text-gray-400 mt-1">
               {product.platform ? `Platform: ${product.platform}` : ''}
             </p>
             <button 
               onClick={handleAddToCart}
-              className="px-3 py-2 bg-blue-700 hover:bg-blue-800 rounded font-semibold text-white text-sm leading-none flex items-center justify-center gap-2"
+              className="mt-2 w-full px-3 py-2 bg-blue-700 hover:bg-blue-800 rounded font-semibold text-white text-sm leading-none flex items-center justify-center gap-2"
             >
               <FiShoppingCart />
               Add to Cart
             </button>
-          </div>
+          </>
         )}
         {isMusic && (
           <button 
