@@ -125,3 +125,4 @@ scripts/add_individual_songs*.sql
 *.mp4
 *.mov
 *.avi
+.env.docker

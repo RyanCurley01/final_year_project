@@ -21,11 +21,11 @@ spring:
 server:
   port: 8081
 aws:
-  region: eu-west-1
-  access-key-id: AKIA35JZMVQNLCI2ZQCE
-  secret-access-key: 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
+  region: ${AWS_REGION:eu-west-1}
+  access-key-id: ${AWS_ACCESS_KEY_ID}
+  secret-access-key: ${AWS_SECRET_ACCESS_KEY}
   s3:
-    bucket-name: game-and-music-files
+    bucket-name: ${AWS_S3_BUCKET_NAME:game-and-music-files}
 logging:
   level:
     com.example.products: WARN

@@ -58,10 +58,9 @@ services:
       - key: AWS_REGION
         value: eu-west-1
       - key: AWS_ACCESS_KEY_ID
-        value: AKIA35JZMVQNLCI2ZQCE
+        sync: false
       - key: AWS_SECRET_ACCESS_KEY
-        value: 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
-        value: AIzaSyA_cOSojH1AVc4phKoP14cYPkGUpdWhpuQ
+        sync: false
 
   # Accounts Service (Java/Spring Boot)
   - type: web
@@ -107,9 +106,9 @@ services:
       - key: AWS_REGION
         value: eu-west-1
       - key: AWS_ACCESS_KEY_ID
-        value: AKIA35JZMVQNLCI2ZQCE
+        sync: false
       - key: AWS_SECRET_ACCESS_KEY
-        value: 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
+        sync: false
       - key: AWS_S3_BUCKET_NAME
         value: game-and-music-files
 

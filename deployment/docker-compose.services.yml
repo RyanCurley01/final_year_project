@@ -60,8 +60,8 @@ services:
       SPRING_DATASOURCE_PASSWORD: gamestore_pass
       JAVA_OPTS: "-Xmx256m -Xms128m -XX:MaxMetaspaceSize=128m -XX:+UseSerialGC"
       AWS_REGION: eu-west-1
-      AWS_ACCESS_KEY_ID: AKIA35JZMVQNLCI2ZQCE
-      AWS_SECRET_ACCESS_KEY: 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
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
       AWS_S3_BUCKET_NAME: game-and-music-files
     depends_on:
       db:
@@ -260,8 +260,8 @@ services:
       MODEL_PATH: /app/models/recommendation_model.onnx
       # AWS S3 credentials for presigned URLs
       AWS_REGION: eu-west-1
-      AWS_ACCESS_KEY_ID: AKIA35JZMVQNLCI2ZQCE
-      AWS_SECRET_ACCESS_KEY: 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
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
       AWS_S3_BUCKET_NAME: game-and-music-files
       # Database configuration - connects to db service on Docker network
       MYSQL_HOST: db
