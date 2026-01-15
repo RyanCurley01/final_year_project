@@ -100,6 +100,12 @@ ENV/
 # Windows Zone Identifier files
 *:Zone.Identifier
 
+# Environment files with secrets
+.env
+.env.*
+!.env.example
+.envrc
+
 # Audio files (too large for Git)
 *.wav
 *.mp3

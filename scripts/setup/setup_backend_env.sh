@@ -56,8 +56,8 @@ STOCK_SERVICE_URL=https://${CODESPACE_NAME}-8084.${GITHUB_CODESPACES_PORT_FORWAR
 
 # Environment
 ENVIRONMENT=codespaces
-YOUTUBE_API_KEY=AIzaSyA_cOSojH1AVc4phKoP14cYPkGUpdWhpuQ
-YOUTUBE_CHANNEL_ID=@Ritrix252
+YOUTUBE_API_KEY=${YOUTUBE_API_KEY:-REPLACE_WITH_YOUR_YOUTUBE_API_KEY}
+YOUTUBE_CHANNEL_ID=${YOUTUBE_CHANNEL_ID:-@YourChannel}
 EOF
 
     # Update application.yml files for Codespaces
@@ -76,9 +76,9 @@ spring:
     name: $service_name
   
   datasource:
-    url: $DB_URL
-    username: gamestore_user
-    password: gamestore_pass
+    url: \${DB_URL:$DB_URL}
+    username: \${DB_USERNAME:gamestore_user}
+    password: \${DB_PASSWORD:gamestore_pass}
     driver-class-name: com.mysql.cj.jdbc.Driver
   
   jpa:
@@ -128,8 +128,8 @@ else
 # Database Configuration
 DB_HOST=$DB_HOST
 DB_URL=$DB_URL
-DB_USERNAME=gamestore_user
-DB_PASSWORD=gamestore_pass
+DB_USERNAME=${DB_USERNAME:-REPLACE_WITH_YOUR_DB_USERNAME}
+DB_PASSWORD=${DB_PASSWORD:-REPLACE_WITH_YOUR_DB_PASSWORD}
 
 # Service URLs
 ACCOUNTS_SERVICE_URL=http://localhost:8080
@@ -140,8 +140,8 @@ STOCK_SERVICE_URL=http://localhost:8084
 
 # Environment
 ENVIRONMENT=local
-YOUTUBE_API_KEY=AIzaSyA_cOSojH1AVc4phKoP14cYPkGUpdWhpuQ
-YOUTUBE_CHANNEL_ID=@Ritrix252
+YOUTUBE_API_KEY=${YOUTUBE_API_KEY:-REPLACE_WITH_YOUR_YOUTUBE_API_KEY}
+YOUTUBE_CHANNEL_ID=${YOUTUBE_CHANNEL_ID:-@YourChannel}
 EOF
 
     # Update application.yml files for local development
@@ -160,9 +160,9 @@ spring:
     name: $service_name
   
   datasource:
-    url: $DB_URL
-    username: gamestore_user
-    password: gamestore_pass
+    url: \${DB_URL:$DB_URL}
+    username: \${DB_USERNAME:gamestore_user}
+    password: \${DB_PASSWORD:gamestore_pass}
     driver-class-name: com.mysql.cj.jdbc.Driver
   
   jpa:

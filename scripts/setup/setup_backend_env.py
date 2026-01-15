@@ -69,11 +69,11 @@ def create_backend_env_file(is_codespaces, codespace_name, github_domain):
         env_vars['PAYMENTS_SERVICE_URL'] = 'http://localhost:8083'
         env_vars['STOCK_SERVICE_URL'] = 'http://localhost:8084'
     
-    # Common configuration
-    env_vars['DB_USERNAME'] = 'gamestore_user'
-    env_vars['DB_PASSWORD'] = 'gamestore_pass'
-    env_vars['YOUTUBE_API_KEY'] = 'AIzaSyA_cOSojH1AVc4phKoP14cYPkGUpdWhpuQ'
-    env_vars['YOUTUBE_CHANNEL_ID'] = '@Ritrix252'
+    # Common configuration - Get from environment or use placeholders
+    env_vars['DB_USERNAME'] = os.getenv('DB_USERNAME', 'REPLACE_WITH_YOUR_DB_USERNAME')
+    env_vars['DB_PASSWORD'] = os.getenv('DB_PASSWORD', 'REPLACE_WITH_YOUR_DB_PASSWORD')
+    env_vars['YOUTUBE_API_KEY'] = os.getenv('YOUTUBE_API_KEY', 'REPLACE_WITH_YOUR_YOUTUBE_API_KEY')
+    env_vars['YOUTUBE_CHANNEL_ID'] = os.getenv('YOUTUBE_CHANNEL_ID', '@YourChannel')
     
     # Write .env file
     with open('.env', 'w') as f:
