@@ -71,6 +71,8 @@ class EnvironmentConfig {
       config.apiBaseUrl = `https://${codespaceName}-5000.${codespacesDomain}`;
     } else if (isNgrok) {
       config.apiBaseUrl = '/proxy/audio';
+    } else if (viteEnv.VITE_AUDIO_SERVICE_URL) {
+      config.apiBaseUrl = viteEnv.VITE_AUDIO_SERVICE_URL;
     } else if (isProduction) {
       // In production without proper config, use relative path (assumes same origin or API gateway)
       config.apiBaseUrl = '/api';
