@@ -1,0 +1,121 @@
+# Render Blueprint - Deploy all services with one click
+# Push this to GitHub, then click "New Blueprint Instance" in Render
+
+services:
+  # Frontend (React/Vite)
+  - type: web
+    name: frontend
+    runtime: static
+    buildCommand: cd frontend && npm ci && npm run build
+    staticPublishPath: frontend/dist
+    envVars:
+      - key: VITE_API_BASE_URL
+        fromService:
+          type: web
+          name: audio-service
+          property: host
+      - key: VITE_BACKEND_API_URL
+        fromService:
+          type: web
+          name: accounts-service
+          property: host
+      - key: VITE_ENVIRONMENT
+        value: production
+      - key: VITE_YOUTUBE_CHANNEL_ID
+        value: "@Ritrix252"
+      - key: VITE_PAYPAL_CLIENT_ID
+        value: AXdVCMyFcV5gBpkkWsbmY-H-grAdSXwf7iecD4wC6gkJeUjuNzvY6i_rUo1lKNErJoa-kAbwgFWkoUef
+
+  # Audio Service (Python/FastAPI)
+  - type: web
+    name: audio-service
+    runtime: docker
+    dockerfilePath: ./audio_service/Dockerfile
+    dockerContext: ./audio_service
+    plan: free
+    envVars:
+      - key: MYSQL_HOST
+        fromDatabase:
+          name: gamestore-db
+          property: host
+      - key: MYSQL_PORT
+        fromDatabase:
+          name: gamestore-db
+          property: port
+      - key: MYSQL_USER
+        fromDatabase:
+          name: gamestore-db
+          property: user
+      - key: MYSQL_PASSWORD
+        fromDatabase:
+          name: gamestore-db
+          property: password
+      - key: MYSQL_DATABASE
+        fromDatabase:
+          name: gamestore-db
+          property: database
+      - key: AWS_S3_BUCKET_NAME
+        value: game-and-music-files
+      - key: AWS_REGION
+        value: eu-west-1
+      - key: AWS_ACCESS_KEY_ID
+        value: AKIA35JZMVQNLCI2ZQCE
+      - key: AWS_SECRET_ACCESS_KEY
+        value: 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
+      - key: YOUTUBE_API_KEY
+        value: AIzaSyA_cOSojH1AVc4phKoP14cYPkGUpdWhpuQ
+
+  # Accounts Service (Java/Spring Boot)
+  - type: web
+    name: accounts-service
+    runtime: docker
+    dockerfilePath: ./backend/accounts-service/Dockerfile
+    dockerContext: ./backend
+    plan: free
+    envVars:
+      - key: SPRING_DATASOURCE_URL
+        value: jdbc:mysql://${MYSQL_HOST}:${MYSQL_PORT}/${MYSQL_DATABASE}
+      - key: SPRING_DATASOURCE_USERNAME
+        fromDatabase:
+          name: gamestore-db
+          property: user
+      - key: SPRING_DATASOURCE_PASSWORD
+        fromDatabase:
+          name: gamestore-db
+          property: password
+      - key: SERVER_PORT
+        value: 8080
+
+  # Products Service
+  - type: web
+    name: products-service
+    runtime: docker
+    dockerfilePath: ./backend/products-service/Dockerfile
+    dockerContext: ./backend
+    plan: free
+    envVars:
+      - key: SPRING_DATASOURCE_URL
+        value: jdbc:mysql://${MYSQL_HOST}:${MYSQL_PORT}/${MYSQL_DATABASE}
+      - key: SPRING_DATASOURCE_USERNAME
+        fromDatabase:
+          name: gamestore-db
+          property: user
+      - key: SPRING_DATASOURCE_PASSWORD
+        fromDatabase:
+          name: gamestore-db
+          property: password
+      - key: SERVER_PORT
+        value: 8081
+      - key: AWS_REGION
+        value: eu-west-1
+      - key: AWS_ACCESS_KEY_ID
+        value: AKIA35JZMVQNLCI2ZQCE
+      - key: AWS_SECRET_ACCESS_KEY
+        value: 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
+      - key: AWS_S3_BUCKET_NAME
+        value: game-and-music-files
+
+databases:
+  - name: gamestore-db
+    plan: free
+    databaseName: Game_Store_System
