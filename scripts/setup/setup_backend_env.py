@@ -72,8 +72,6 @@ def create_backend_env_file(is_codespaces, codespace_name, github_domain):
     # Common configuration - Get from environment or use placeholders
     env_vars['DB_USERNAME'] = os.getenv('DB_USERNAME', 'REPLACE_WITH_YOUR_DB_USERNAME')
     env_vars['DB_PASSWORD'] = os.getenv('DB_PASSWORD', 'REPLACE_WITH_YOUR_DB_PASSWORD')
-    env_vars['YOUTUBE_API_KEY'] = os.getenv('YOUTUBE_API_KEY', 'REPLACE_WITH_YOUR_YOUTUBE_API_KEY')
-    env_vars['YOUTUBE_CHANNEL_ID'] = os.getenv('YOUTUBE_CHANNEL_ID', '@YourChannel')
     
     # Write .env file
     with open('.env', 'w') as f:
@@ -93,8 +91,6 @@ def create_backend_env_file(is_codespaces, codespace_name, github_domain):
         
         f.write(f"\n# Environment\n")
         f.write(f"ENVIRONMENT={env_vars['ENVIRONMENT']}\n")
-        f.write(f"YOUTUBE_API_KEY={env_vars['YOUTUBE_API_KEY']}\n")
-        f.write(f"YOUTUBE_CHANNEL_ID={env_vars['YOUTUBE_CHANNEL_ID']}\n")
     
     print(f"📍 Database: {env_vars['DB_HOST']}")
 
@@ -161,8 +157,8 @@ def update_application_yml(file_path, is_codespaces, codespace_name, github_doma
     
     config['spring']['datasource'].update({
         'url': db_url,
-        'username': 'gamestore_user',
-        'password': 'gamestore_pass',
+        'username': os.getenv('DB_USERNAME', 'gamestore_user'),
+        'password': os.getenv('DB_PASSWORD', 'your_password_here'),
         'driver-class-name': 'com.mysql.cj.jdbc.Driver'
     })
     

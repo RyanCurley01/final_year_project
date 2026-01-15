@@ -31,19 +31,7 @@ def validate_environment():
     for var, value in critical_vars.items():
         print(f"  {var}: {value}")
     
-    # Check YouTube API configuration
-    youtube_api_key = os.getenv('YOUTUBE_API_KEY')
-    youtube_channel_id = os.getenv('YOUTUBE_CHANNEL_ID', '@Ritrix252')
-    
-    print(f"\n🎵 YouTube Configuration:")
-    print(f"  YOUTUBE_API_KEY: {'✅ Set' if youtube_api_key and youtube_api_key != 'your_youtube_api_key_here' else '❌ Not configured'}")
-    print(f"  YOUTUBE_CHANNEL_ID: {youtube_channel_id}")
-    
     if not youtube_api_key or youtube_api_key == 'your_youtube_api_key_here':
-        warnings.append("YouTube API key not configured - will use fallback data")
-    
-    # Check environment detection
-    environment = os.getenv('ENVIRONMENT', 'unknown')
     is_codespaces = os.getenv('CODESPACES') == 'true'
     codespace_name = os.getenv('CODESPACE_NAME')
     

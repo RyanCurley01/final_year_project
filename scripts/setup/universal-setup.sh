@@ -33,28 +33,8 @@ attempt=0
 db_ready=false
 
 # Try different connection methods in order of preference
-while [ $attempt -lt $max_attempts ]; do
-    # First try host.docker.internal (external services)
-    if mysqladmin ping -h host.docker.internal -u gamestore_user -pgamestore_pass --silent 2>/dev/null; then
-        echo "✅ Database is ready! (connected via external services)"
-        db_ready=true
-        break
-    # Then try 'db' service name (old devcontainer setup)
-    elif mysqladmin ping -h db -u gamestore_user -pgamestore_pass --silent 2>/dev/null; then
-        echo "✅ Database is ready! (connected via 'db' service)"
-        db_ready=true
-        break
-    # Then try localhost
-    elif mysqladmin ping -h localhost -u gamestore_user -pgamestore_pass --silent 2>/dev/null; then
-        echo "✅ Database is ready! (connected via localhost)"
-        db_ready=true
-        break
-    # Finally try 127.0.0.1
-    elif mysqladmin ping -h 127.0.0.1 -u gamestore_user -pgamestore_pass --silent 2>/dev/null; then
-        echo "✅ Database is ready! (connected via 127.0.0.1)"
-        db_ready=true
-        break
-    fi
+# Get credentials from environment
+DB_USER="${DB_USERNAME:-gamestore_user}"\nDB_PASS="${DB_PASSWORD:-your_password_here}"\n\nwhile [ $attempt -lt $max_attempts ]; do\n    # First try host.docker.internal (external services)\n    if mysqladmin ping -h host.docker.internal -u "$DB_USER" -p"$DB_PASS" --silent 2>/dev/null; then\n        echo "✅ Database is ready! (connected via external services)"\n        db_ready=true\n        break\n    # Then try 'db' service name (old devcontainer setup)\n    elif mysqladmin ping -h db -u "$DB_USER" -p"$DB_PASS" --silent 2>/dev/null; then\n        echo "✅ Database is ready! (connected via 'db' service)"\n        db_ready=true\n        break\n    # Then try localhost\n    elif mysqladmin ping -h localhost -u "$DB_USER" -p"$DB_PASS" --silent 2>/dev/null; then\n        echo "✅ Database is ready! (connected via localhost)"\n        db_ready=true\n        break\n    # Finally try 127.0.0.1\n    elif mysqladmin ping -h 127.0.0.1 -u "$DB_USER" -p"$DB_PASS" --silent 2>/dev/null; then\n        echo "✅ Database is ready! (connected via 127.0.0.1)"\n        db_ready=true\n        break\n    fi
     
     attempt=$((attempt + 1))
     echo "  Waiting for database... (attempt $attempt/$max_attempts)"

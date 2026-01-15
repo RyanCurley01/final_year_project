@@ -21,7 +21,6 @@ services:
           property: host
       - key: VITE_ENVIRONMENT
         value: production
-      - key: VITE_YOUTUBE_CHANNEL_ID
         value: "@Ritrix252"
       - key: VITE_PAYPAL_CLIENT_ID
         value: AXdVCMyFcV5gBpkkWsbmY-H-grAdSXwf7iecD4wC6gkJeUjuNzvY6i_rUo1lKNErJoa-kAbwgFWkoUef
@@ -62,7 +61,6 @@ services:
         value: AKIA35JZMVQNLCI2ZQCE
       - key: AWS_SECRET_ACCESS_KEY
         value: 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
-      - key: YOUTUBE_API_KEY
         value: AIzaSyA_cOSojH1AVc4phKoP14cYPkGUpdWhpuQ
 
   # Accounts Service (Java/Spring Boot)

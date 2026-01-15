@@ -70,8 +70,6 @@ def setup_frontend_environment():
     env_vars['VITE_ENVIRONMENT'] = environment
     
     # Preserve YouTube channel ID
-    if 'VITE_YOUTUBE_CHANNEL_ID' not in env_vars:
-        env_vars['VITE_YOUTUBE_CHANNEL_ID'] = '@Ritrix252'
     
     # Write updated .env file
     with open('.env', 'w') as f:
@@ -81,7 +79,6 @@ def setup_frontend_environment():
         
         # YouTube Configuration
         f.write("# YouTube Configuration\n")
-        f.write(f"VITE_YOUTUBE_CHANNEL_ID={env_vars.get('VITE_YOUTUBE_CHANNEL_ID')}\n\n")
         
         # API Configuration
         f.write("# API Configuration - Dynamically set for current environment\n")
@@ -109,7 +106,6 @@ def create_env_js():
         'VITE_API_BASE_URL': ai_api_url,
         'VITE_BACKEND_API_URL': backend_api_url,
         'VITE_ENVIRONMENT': environment,
-        'VITE_YOUTUBE_CHANNEL_ID': '@Ritrix252'
     }
     
     # Create public/env-config.js for runtime configuration

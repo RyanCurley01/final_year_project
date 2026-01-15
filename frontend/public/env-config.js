@@ -12,7 +12,6 @@
 //   "VITE_BACKEND_API_URL": "https://api.yourdomain.com/accounts",
 //   "VITE_PRODUCTS_API_URL": "https://api.yourdomain.com/products",
 //   "VITE_ENVIRONMENT": "production",
-//   "VITE_YOUTUBE_CHANNEL_ID": "@Ritrix252"
 // };
 
 window.ENV_CONFIG = {
@@ -20,5 +19,4 @@ window.ENV_CONFIG = {
   "VITE_BACKEND_API_URL": "http://localhost:8080",
   "VITE_PRODUCTS_API_URL": "http://localhost:8081",
   "VITE_ENVIRONMENT": "local",
-  "VITE_YOUTUBE_CHANNEL_ID": "@Ritrix252"
 };

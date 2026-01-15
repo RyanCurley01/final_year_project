@@ -10,8 +10,8 @@ Generates code coverage report
 To kill a port
 lsof -i :8086 2>/dev/null | grep -v COMMAND | awk '{print $2}' | xargs kill -9 2>/dev/null && echo "✓ Killed port 8086" || echo "Port 8086 is already free"
 
-Runs MySql queryies in ther terminal with a remote host
-mysql --protocol=TCP -h db -P 3306 -u root -prootpassword Game_Store_System -e "SELECT * FROM Accounts;"
+Runs MySql queries in the terminal with a remote host
+mysql --protocol=TCP -h db -P 3306 -u root -pYOUR_PASSWORD Game_Store_System -e "SELECT * FROM Accounts;"
 
 install all dependencies first, then run the dev server
 npm install 
@@ -88,7 +88,7 @@ docker volume rm gamestore_services_mysql-data
 sleep 30
 
 # Verify it worked
-docker exec gamestore_services-db-1 mysql -u root -prootpassword Game_Store_System -e "SHOW TABLES;"
+docker exec gamestore_services-db-1 mysql -u root -pYOUR_PASSWORD Game_Store_System -e "SHOW TABLES;"
 
 # song features extraction and database insert
 python3 extract_audio_features.py --sql-only --output audio_features_insert.sql
@@ -97,31 +97,31 @@ python3 extract_audio_features.py --sql-only --output audio_features_insert.sql
 # 📊 Better formatted MySQL queries for readability
 
 # Option 1: Use --table flag with column for perfect alignment
-docker exec gamestore_services-db-1 mysql -u root -prootpassword Game_Store_System --table -e "SELECT * FROM Accounts;" | column -t -s $'\t'
+docker exec gamestore_services-db-1 mysql -u root -pYOUR_PASSWORD Game_Store_System --table -e "SELECT * FROM Accounts;" | column -t -s $'\t'
 
 # Option 2: Use less -S for horizontal scrolling on wide tables (recommended for many columns)
-docker exec gamestore_services-db-1 mysql -u root -prootpassword Game_Store_System --table -e "SELECT * FROM Accounts;" | less -S
+docker exec gamestore_services-db-1 mysql -u root -pYOUR_PASSWORD Game_Store_System --table -e "SELECT * FROM Accounts;" | less -S
 
 # Option 3: Format with specific columns for better control
-docker exec gamestore_services-db-1 mysql -u root -prootpassword Game_Store_System --table -e "SELECT AccountID, AccountName, AccountEmail FROM Accounts;"
+docker exec gamestore_services-db-1 mysql -u root -pYOUR_PASSWORD Game_Store_System --table -e "SELECT AccountID, AccountName, AccountEmail FROM Accounts;"
 
 # Option 4: Pretty print with vertical bars (best for narrow terminals)
-docker exec gamestore_services-db-1 mysql -u root -prootpassword Game_Store_System -e "SELECT * FROM Accounts;" | sed 's/\t/  |  /g'
+docker exec gamestore_services-db-1 mysql -u root -pYOUR_PASSWORD Game_Store_System -e "SELECT * FROM Accounts;" | sed 's/\t/  |  /g'
 
 # Show tables with better formatting
-docker exec gamestore_services-db-1 mysql -u root -prootpassword Game_Store_System --table -e "SHOW TABLES;"
+docker exec gamestore_services-db-1 mysql -u root -pYOUR_PASSWORD Game_Store_System --table -e "SHOW TABLES;"
 
 # Query Order_Items table (shows which products are in each order)
-docker exec gamestore_services-db-1 mysql -u root -prootpassword Game_Store_System --table -e "SELECT * FROM Order_Items;"
+docker exec gamestore_services-db-1 mysql -u root -pYOUR_PASSWORD Game_Store_System --table -e "SELECT * FROM Order_Items;"
 
 # Query Order_Items with joined product info
-docker exec gamestore_services-db-1 mysql -u root -prootpassword Game_Store_System --table -e "SELECT oi.*, p.GameTitle, p.AlbumTitle FROM Order_Items oi LEFT JOIN Products p ON oi.ProductID = p.ProductID;"
+docker exec gamestore_services-db-1 mysql -u root -pYOUR_PASSWORD Game_Store_System --table -e "SELECT oi.*, p.GameTitle, p.AlbumTitle FROM Order_Items oi LEFT JOIN Products p ON oi.ProductID = p.ProductID;"
 
 # Query Payments with Order_Items relationship
-docker exec gamestore_services-db-1 mysql -u root -prootpassword Game_Store_System --table -e "SELECT p.PaymentID, p.OrderID, p.PaymentAmount, p.PaymentStatus, COUNT(oi.OrderItemID) as ItemCount FROM Payments p LEFT JOIN Order_Items oi ON p.OrderID = oi.OrderID GROUP BY p.PaymentID;"
+docker exec gamestore_services-db-1 mysql -u root -pYOUR_PASSWORD Game_Store_System --table -e "SELECT p.PaymentID, p.OrderID, p.PaymentAmount, p.PaymentStatus, COUNT(oi.OrderItemID) as ItemCount FROM Payments p LEFT JOIN Order_Items oi ON p.OrderID = oi.OrderID GROUP BY p.PaymentID;"
 
 # Interactive mode for best experience (allows scrolling and formatting)
-docker exec -it gamestore_services-db-1 mysql -u root -prootpassword Game_Store_System
+docker exec -it gamestore_services-db-1 mysql -u root -pYOUR_PASSWORD Game_Store_System
 
 # Tips:
 # - In less: Use arrow keys to scroll, 'q' to quit, Left/Right for horizontal scroll
@@ -156,7 +156,7 @@ python3 extract_audio_features.py
 
 
 To reinsert audio features data in case data is deleted 
-docker exec -i gamestore_services-db-1 mysql -u root -prootpassword Game_Store_System << 'EOF'
+docker exec -i gamestore_services-db-1 mysql -u root -pYOUR_PASSWORD Game_Store_System << 'EOF'
 INSERT INTO AudioFeatures (ProductID, Tempo, Energy, Danceability, Valence, Acousticness, Instrumentalness, Loudness, Speechiness, Genre, Mood, Key_Signature, TimeSignature, Duration, SpectralCentroid, SpectralRolloff, ZeroCrossingRate) VALUES
 (6, 117.45, 0.168, 1.0, 0.584, 1.0, 0.874, -69.04, 0.126, 'Pop', 'Neutral', 'C', '4/4', 30, 1722.19, 3584.83, 0.0632),
 (7, 80.75, 0.318, 1.0, 0.464, 1.0, 0.928, -56.39, 0.072, 'Ambient', 'Neutral', 'G', '4/4', 30, 1121.95, 2261.08, 0.0359),

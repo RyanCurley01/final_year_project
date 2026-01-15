@@ -9,10 +9,10 @@ from urllib.parse import quote, urlparse
 
 # Database configuration
 DB_CONFIG = {
-    'host': 'localhost',
-    'user': 'root',
-    'password': 'rootpassword',
-    'database': 'Game_Store_System'
+    'host': os.getenv('MYSQL_HOST', 'localhost'),
+    'user': os.getenv('MYSQL_USER', 'root'),
+    'password': os.getenv('MYSQL_ROOT_PASSWORD', os.getenv('DB_PASSWORD')),
+    'database': os.getenv('MYSQL_DATABASE', 'Game_Store_System')
 }
 
 def fix_file_urls():

@@ -257,8 +257,6 @@ services:
     ports:
       - "5000:5000"
     environment:
-      YOUTUBE_API_KEY: AIzaSyA_cOSojH1AVc4phKoP14cYPkGUpdWhpuQ
-      YOUTUBE_CHANNEL_ID: "@Ritrix252"
       MODEL_PATH: /app/models/recommendation_model.onnx
       # AWS S3 credentials for presigned URLs
       AWS_REGION: eu-west-1

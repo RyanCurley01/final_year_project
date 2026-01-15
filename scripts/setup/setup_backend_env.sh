@@ -56,8 +56,6 @@ STOCK_SERVICE_URL=https://${CODESPACE_NAME}-8084.${GITHUB_CODESPACES_PORT_FORWAR
 
 # Environment
 ENVIRONMENT=codespaces
-YOUTUBE_API_KEY=${YOUTUBE_API_KEY:-REPLACE_WITH_YOUR_YOUTUBE_API_KEY}
-YOUTUBE_CHANNEL_ID=${YOUTUBE_CHANNEL_ID:-@YourChannel}
 EOF
 
     # Update application.yml files for Codespaces
@@ -140,8 +138,6 @@ STOCK_SERVICE_URL=http://localhost:8084
 
 # Environment
 ENVIRONMENT=local
-YOUTUBE_API_KEY=${YOUTUBE_API_KEY:-REPLACE_WITH_YOUR_YOUTUBE_API_KEY}
-YOUTUBE_CHANNEL_ID=${YOUTUBE_CHANNEL_ID:-@YourChannel}
 EOF
 
     # Update application.yml files for local development

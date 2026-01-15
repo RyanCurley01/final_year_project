@@ -38,16 +38,19 @@ def setup_environment():
                     env_vars[key.strip()] = value.strip()
     
     # Set database URL based on environment
+    db_user = os.getenv('DB_USERNAME', 'gamestore_user')
+    db_pass = os.getenv('DB_PASSWORD', 'your_db_password_here')
+    
     if in_devcontainer:
         # Inside devcontainer - always use 'db' service name
         print("📦 Detected devcontainer environment - using 'db' service for database")
         database_host = "db"
-        database_url = f"mysql+pymysql://gamestore_user:gamestore_pass@{database_host}:3306/Game_Store_System"
+        database_url = f"mysql+pymysql://{db_user}:{db_pass}@{database_host}:3306/Game_Store_System"
     else:
         # Outside devcontainer - use localhost
         print("🏠 Outside devcontainer - using localhost for database")
         database_host = "localhost"
-        database_url = f"mysql+pymysql://gamestore_user:gamestore_pass@{database_host}:3306/Game_Store_System"
+        database_url = f"mysql+pymysql://{db_user}:{db_pass}@{database_host}:3306/Game_Store_System"
     
     # Set backend URL based on Codespaces or local
     if is_codespaces and codespace_name:
@@ -65,12 +68,6 @@ def setup_environment():
     # Update environment variables
     env_vars['BACKEND_API_URL'] = backend_url
     env_vars['DATABASE_URL'] = database_url
-    
-    # Preserve/set API keys with correct values
-    if 'YOUTUBE_API_KEY' not in env_vars or env_vars['YOUTUBE_API_KEY'] == 'your_youtube_api_key_here':
-        env_vars['YOUTUBE_API_KEY'] = 'AIzaSyA_cOSojH1AVc4phKoP14cYPkGUpdWhpuQ'
-    if 'YOUTUBE_CHANNEL_ID' not in env_vars or env_vars['YOUTUBE_CHANNEL_ID'] in ['@YourChannelHandle', 'your_channel_handle_here', '']:
-        env_vars['YOUTUBE_CHANNEL_ID'] = '@Ritrix252'
     
     # Write updated .env file
     with open('.env', 'w') as f:
