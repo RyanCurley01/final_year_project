@@ -32,6 +32,7 @@ allowed_origins = [
     "http://127.0.0.1:3000",
     # Production - Vercel
     "https://final-year-project-two-wine.vercel.app",
+    # Production - Railway (allow all Railway subdomains)
 ]
 
 # Add Codespaces origins if running in Codespaces
@@ -45,9 +46,11 @@ if os.getenv('CODESPACES') == 'true':
         ])
 
 # Production CORS configuration - Restricted to specific frontend domains
+# Use allow_origin_regex to support Railway dynamic subdomains
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=allowed_origins,  # Only allow configured frontend domains
+    allow_origins=allowed_origins,  # Explicit allowed origins
+    allow_origin_regex=r"https://[\w-]+\.up\.railway\.app",  # Railway production domains
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
