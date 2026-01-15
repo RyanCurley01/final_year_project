@@ -8,6 +8,11 @@ const isNgrokHost = () => {
 };
 
 const getAudioServiceBaseUrl = () => {
+  // Check for environment variable first (production/Vercel)
+  if (import.meta.env.VITE_AUDIO_SERVICE_URL) {
+    return `${import.meta.env.VITE_AUDIO_SERVICE_URL}/api`;
+  }
+  
   if (isNgrokHost()) {
     console.log('🎵 Using ngrok proxy for audio service');
     return '/proxy/audio/api';

@@ -55,6 +55,8 @@ class EnvironmentConfig {
     } else if (isNgrok) {
       // Use Vite proxy when accessed via ngrok
       config.apiBaseUrl = '/proxy/audio';
+    } else if (viteEnv.VITE_AUDIO_SERVICE_URL) {
+      config.apiBaseUrl = viteEnv.VITE_AUDIO_SERVICE_URL;
     } else {
       config.apiBaseUrl = 'http://localhost:5000';
     }
