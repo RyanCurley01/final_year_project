@@ -1,6 +1,11 @@
 # Microservices that run OUTSIDE the dev container
 # Use this to run services independently while keeping VS Code lightweight
 # Usage: docker compose -f docker-compose.services.yml up -d
+#
+# PRODUCTION NOTE: Set these environment variables before running:
+#   export MYSQL_ROOT_PASSWORD=<secure_password>
+#   export MYSQL_PASSWORD=<secure_password>
+#   Or use a .env file in the deployment directory
 
 services:
   # Database (shared with dev container)
@@ -8,17 +13,17 @@ services:
     image: mysql:8.0
     restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD must be set}
       MYSQL_DATABASE: Game_Store_System
-      MYSQL_USER: gamestore_user
-      MYSQL_PASSWORD: gamestore_pass
+      MYSQL_USER: ${MYSQL_USER:-gamestore_user}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?MYSQL_PASSWORD must be set}
     volumes:
       - mysql-data:/var/lib/mysql
       - ./init-database.sh:/docker-entrypoint-initdb.d/init-database.sh
     ports:
       - "3306:3306"
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-prootpassword"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD}"]
       interval: 5s
       timeout: 5s
       retries: 20
@@ -34,8 +39,8 @@ services:
       - "8080:8080"
     environment:
       SPRING_DATASOURCE_URL: jdbc:mysql://db:3306/Game_Store_System?createDatabaseIfNotExist=true
-      SPRING_DATASOURCE_USERNAME: gamestore_user
-      SPRING_DATASOURCE_PASSWORD: gamestore_pass
+      SPRING_DATASOURCE_USERNAME: ${MYSQL_USER:-gamestore_user}
+      SPRING_DATASOURCE_PASSWORD: ${MYSQL_PASSWORD}
       JAVA_OPTS: "-Xmx256m -Xms128m -XX:MaxMetaspaceSize=128m -XX:+UseSerialGC"
     depends_on:
       db:
@@ -56,8 +61,8 @@ services:
       - "8081:8081"
     environment:
       SPRING_DATASOURCE_URL: jdbc:mysql://db:3306/Game_Store_System?createDatabaseIfNotExist=true
-      SPRING_DATASOURCE_USERNAME: gamestore_user
-      SPRING_DATASOURCE_PASSWORD: gamestore_pass
+      SPRING_DATASOURCE_USERNAME: ${MYSQL_USER:-gamestore_user}
+      SPRING_DATASOURCE_PASSWORD: ${MYSQL_PASSWORD}
       JAVA_OPTS: "-Xmx256m -Xms128m -XX:MaxMetaspaceSize=128m -XX:+UseSerialGC"
       AWS_REGION: eu-west-1
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
@@ -82,8 +87,8 @@ services:
       - "8082:8082"
     environment:
       SPRING_DATASOURCE_URL: jdbc:mysql://db:3306/Game_Store_System?createDatabaseIfNotExist=true
-      SPRING_DATASOURCE_USERNAME: gamestore_user
-      SPRING_DATASOURCE_PASSWORD: gamestore_pass
+      SPRING_DATASOURCE_USERNAME: ${MYSQL_USER:-gamestore_user}
+      SPRING_DATASOURCE_PASSWORD: ${MYSQL_PASSWORD}
       JAVA_OPTS: "-Xmx256m -Xms128m -XX:MaxMetaspaceSize=128m -XX:+UseSerialGC"
     depends_on:
       db:
@@ -104,8 +109,8 @@ services:
       - "8083:8083"
     environment:
       SPRING_DATASOURCE_URL: jdbc:mysql://db:3306/Game_Store_System?createDatabaseIfNotExist=true
-      SPRING_DATASOURCE_USERNAME: gamestore_user
-      SPRING_DATASOURCE_PASSWORD: gamestore_pass
+      SPRING_DATASOURCE_USERNAME: ${MYSQL_USER:-gamestore_user}
+      SPRING_DATASOURCE_PASSWORD: ${MYSQL_PASSWORD}
       JAVA_OPTS: "-Xmx256m -Xms128m -XX:MaxMetaspaceSize=128m -XX:+UseSerialGC"
     depends_on:
       db:
@@ -126,8 +131,8 @@ services:
       - "8084:8084"
     environment:
       SPRING_DATASOURCE_URL: jdbc:mysql://db:3306/Game_Store_System?createDatabaseIfNotExist=true
-      SPRING_DATASOURCE_USERNAME: gamestore_user
-      SPRING_DATASOURCE_PASSWORD: gamestore_pass
+      SPRING_DATASOURCE_USERNAME: ${MYSQL_USER:-gamestore_user}
+      SPRING_DATASOURCE_PASSWORD: ${MYSQL_PASSWORD}
       JAVA_OPTS: "-Xmx256m -Xms128m -XX:MaxMetaspaceSize=128m -XX:+UseSerialGC"
     depends_on:
       db:
@@ -148,8 +153,8 @@ services:
       - "8085:8085"
     environment:
       SPRING_DATASOURCE_URL: jdbc:mysql://db:3306/Game_Store_System?createDatabaseIfNotExist=true
-      SPRING_DATASOURCE_USERNAME: gamestore_user
-      SPRING_DATASOURCE_PASSWORD: gamestore_pass
+      SPRING_DATASOURCE_USERNAME: ${MYSQL_USER:-gamestore_user}
+      SPRING_DATASOURCE_PASSWORD: ${MYSQL_PASSWORD}
       JAVA_OPTS: "-Xmx256m -Xms128m -XX:MaxMetaspaceSize=128m -XX:+UseSerialGC"
     depends_on:
       db:
@@ -170,8 +175,8 @@ services:
       - "8086:8086"
     environment:
       SPRING_DATASOURCE_URL: jdbc:mysql://db:3306/Game_Store_System?createDatabaseIfNotExist=true
-      SPRING_DATASOURCE_USERNAME: gamestore_user
-      SPRING_DATASOURCE_PASSWORD: gamestore_pass
+      SPRING_DATASOURCE_USERNAME: ${MYSQL_USER:-gamestore_user}
+      SPRING_DATASOURCE_PASSWORD: ${MYSQL_PASSWORD}
       JAVA_OPTS: "-Xmx256m -Xms128m -XX:MaxMetaspaceSize=128m -XX:+UseSerialGC"
     depends_on:
       db:
@@ -192,8 +197,8 @@ services:
       - "8087:8087"
     environment:
       SPRING_DATASOURCE_URL: jdbc:mysql://db:3306/Game_Store_System?createDatabaseIfNotExist=true
-      SPRING_DATASOURCE_USERNAME: gamestore_user
-      SPRING_DATASOURCE_PASSWORD: gamestore_pass
+      SPRING_DATASOURCE_USERNAME: ${MYSQL_USER:-gamestore_user}
+      SPRING_DATASOURCE_PASSWORD: ${MYSQL_PASSWORD}
       JAVA_OPTS: "-Xmx256m -Xms128m -XX:MaxMetaspaceSize=128m -XX:+UseSerialGC"
     depends_on:
       db:
@@ -214,8 +219,8 @@ services:
   #     - "8088:8088"
   #   environment:
   #     SPRING_DATASOURCE_URL: jdbc:mysql://db:3306/Game_Store_System?createDatabaseIfNotExist=true
-  #     SPRING_DATASOURCE_USERNAME: gamestore_user
-  #     SPRING_DATASOURCE_PASSWORD: gamestore_pass
+  #     SPRING_DATASOURCE_USERNAME: ${MYSQL_USER:-gamestore_user}
+  #     SPRING_DATASOURCE_PASSWORD: ${MYSQL_PASSWORD}
   #     JAVA_OPTS: "-Xmx256m -Xms128m -XX:MaxMetaspaceSize=128m -XX:+UseSerialGC"
   #   depends_on:
   #     db:
@@ -236,8 +241,8 @@ services:
       - "8089:8089"
     environment:
       SPRING_DATASOURCE_URL: jdbc:mysql://db:3306/Game_Store_System?createDatabaseIfNotExist=true
-      SPRING_DATASOURCE_USERNAME: gamestore_user
-      SPRING_DATASOURCE_PASSWORD: gamestore_pass
+      SPRING_DATASOURCE_USERNAME: ${MYSQL_USER:-gamestore_user}
+      SPRING_DATASOURCE_PASSWORD: ${MYSQL_PASSWORD}
       JAVA_OPTS: "-Xmx256m -Xms128m -XX:MaxMetaspaceSize=128m -XX:+UseSerialGC"
     depends_on:
       db:

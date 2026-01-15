@@ -52,7 +52,13 @@ export const stockService = {
 
   // WebSocket connection for real-time updates
   connectWebSocket: (onMessage, onError) => {
-    const ws = new WebSocket(`ws://localhost:8086/ws/stock`);
+    // Use environment-aware WebSocket URL
+    const wsBaseUrl = getServiceUrl('STOCK');
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsHost = wsBaseUrl.replace(/^https?:\/\//, '').replace(/\/$/, '');
+    const wsUrl = `${wsProtocol}//${wsHost}/ws/stock`;
+    
+    const ws = new WebSocket(wsUrl);
     
     ws.onopen = () => {
       console.log('Stock WebSocket connected');

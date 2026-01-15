@@ -100,6 +100,16 @@ ENV/
 # Windows Zone Identifier files
 *:Zone.Identifier
 
+# Node modules (never commit)
+node_modules/
+**/node_modules/
+
+# Build artifacts
+bin/
+**/bin/
+build/
+**/build/
+
 # Environment files with secrets
 .env
 .env.*

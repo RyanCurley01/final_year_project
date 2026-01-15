@@ -21,9 +21,8 @@ services:
           property: host
       - key: VITE_ENVIRONMENT
         value: production
-        value: "@Ritrix252"
       - key: VITE_PAYPAL_CLIENT_ID
-        value: AXdVCMyFcV5gBpkkWsbmY-H-grAdSXwf7iecD4wC6gkJeUjuNzvY6i_rUo1lKNErJoa-kAbwgFWkoUef
+        sync: false
 
   # Audio Service (Python/FastAPI)
   - type: web

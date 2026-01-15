@@ -14,9 +14,13 @@
 //   "VITE_ENVIRONMENT": "production",
 // };
 
+// NOTE: In production (Vercel/Railway), these are overridden by environment variables
+// This file is only used as a fallback for local development
+// For production, set these values in your hosting platform's environment variables
 window.ENV_CONFIG = {
-  "VITE_API_BASE_URL": "http://localhost:5000",
-  "VITE_BACKEND_API_URL": "http://localhost:8080",
-  "VITE_PRODUCTS_API_URL": "http://localhost:8081",
-  "VITE_ENVIRONMENT": "local",
+  "VITE_API_BASE_URL": import.meta?.env?.VITE_API_BASE_URL || "",
+  "VITE_BACKEND_API_URL": import.meta?.env?.VITE_BACKEND_API_URL || "",
+  "VITE_PRODUCTS_API_URL": import.meta?.env?.VITE_PRODUCTS_API_URL || "",
+  "VITE_ENVIRONMENT": import.meta?.env?.VITE_ENVIRONMENT || "production",
+  "VITE_PAYPAL_CLIENT_ID": import.meta?.env?.VITE_PAYPAL_CLIENT_ID || "",
 };
