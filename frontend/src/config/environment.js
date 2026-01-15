@@ -11,6 +11,8 @@ class EnvironmentConfig {
     const isCodespaces = hostname.includes('app.github.dev');
     const isNgrok = hostname.includes('ngrok-free.dev') || hostname.includes('ngrok-free.app') || hostname.includes('ngrok.io');
     const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1';
+    // Production is any non-localhost, non-Codespaces, non-ngrok environment
+    const isProduction = !isLocalhost && !isCodespaces && !isNgrok;
     
     // Extract codespace name if in Codespaces
     // Format: didactic-funicular-v47w6vwjq96fwjgg-5173.app.github.dev
@@ -24,53 +26,89 @@ class EnvironmentConfig {
     }
     const codespacesDomain = 'app.github.dev';
     
+    // Get environment variables from different sources
+    // VITE_ vars are baked in at build time, window.ENV_CONFIG can be set at runtime
+    const viteEnv = import.meta.env || {};
+    const runtimeEnv = window.ENV_CONFIG || {};
+    
     console.log('🔍 Environment Detection:', {
       hostname,
       isCodespaces,
       isNgrok,
+      isLocalhost,
+      isProduction,
       codespaceName,
-      codespacesDomain
+      codespacesDomain,
+      viteEnv: { 
+        VITE_API_BASE_URL: viteEnv.VITE_API_BASE_URL,
+        VITE_BACKEND_API_URL: viteEnv.VITE_BACKEND_API_URL,
+        VITE_PRODUCTS_API_URL: viteEnv.VITE_PRODUCTS_API_URL,
+        VITE_ENVIRONMENT: viteEnv.VITE_ENVIRONMENT
+      },
+      runtimeEnv
     });
     
-    // Get environment variables from different sources
-    const viteEnv = import.meta.env || {};
-    const runtimeEnv = window.ENV_CONFIG || {};
-    
     let config = {
-      environment: isCodespaces ? 'codespaces' : (isNgrok ? 'ngrok' : 'local'),
+      environment: isProduction ? 'production' : (isCodespaces ? 'codespaces' : (isNgrok ? 'ngrok' : 'local')),
       isCodespaces,
       isNgrok,
       isLocalhost,
+      isProduction,
       codespaceName,
       codespacesDomain
     };
 
-    // API Base URL (Audio Service)
-    if (viteEnv.VITE_API_BASE_URL) {
-      config.apiBaseUrl = viteEnv.VITE_API_BASE_URL;
-    } else if (runtimeEnv.VITE_API_BASE_URL) {
+    // Helper to check if a URL is a localhost URL (should be overridden in production)
+    const isLocalhostUrl = (url) => url && (url.includes('localhost') || url.includes('127.0.0.1'));
+
+    // API Base URL (Audio Service - port 5000)
+    // Priority: runtime env > vite env (if not localhost in production) > auto-detect
+    if (runtimeEnv.VITE_API_BASE_URL && !(isProduction && isLocalhostUrl(runtimeEnv.VITE_API_BASE_URL))) {
       config.apiBaseUrl = runtimeEnv.VITE_API_BASE_URL;
+    } else if (viteEnv.VITE_API_BASE_URL && !(isProduction && isLocalhostUrl(viteEnv.VITE_API_BASE_URL))) {
+      config.apiBaseUrl = viteEnv.VITE_API_BASE_URL;
     } else if (isCodespaces && codespaceName) {
       config.apiBaseUrl = `https://${codespaceName}-5000.${codespacesDomain}`;
     } else if (isNgrok) {
-      // Use Vite proxy when accessed via ngrok
       config.apiBaseUrl = '/proxy/audio';
+    } else if (isProduction) {
+      // In production without proper config, use relative path (assumes same origin or API gateway)
+      config.apiBaseUrl = '/api';
+      console.warn('⚠️ Production deployment detected but VITE_API_BASE_URL not set! Using /api as fallback.');
     } else {
       config.apiBaseUrl = 'http://localhost:5000';
     }
 
-    // Backend API URL
-    if (viteEnv.VITE_BACKEND_API_URL) {
-      config.backendApiUrl = viteEnv.VITE_BACKEND_API_URL;
-    } else if (runtimeEnv.VITE_BACKEND_API_URL) {
+    // Backend API URL (Accounts Service - port 8080)
+    if (runtimeEnv.VITE_BACKEND_API_URL && !(isProduction && isLocalhostUrl(runtimeEnv.VITE_BACKEND_API_URL))) {
       config.backendApiUrl = runtimeEnv.VITE_BACKEND_API_URL;
+    } else if (viteEnv.VITE_BACKEND_API_URL && !(isProduction && isLocalhostUrl(viteEnv.VITE_BACKEND_API_URL))) {
+      config.backendApiUrl = viteEnv.VITE_BACKEND_API_URL;
     } else if (isCodespaces && codespaceName) {
       config.backendApiUrl = `https://${codespaceName}-8080.${codespacesDomain}`;
     } else if (isNgrok) {
-      // Use Vite proxy when accessed via ngrok
       config.backendApiUrl = '/proxy/backend';
+    } else if (isProduction) {
+      config.backendApiUrl = '/api/accounts';
+      console.warn('⚠️ Production deployment detected but VITE_BACKEND_API_URL not set! Using /api/accounts as fallback.');
     } else {
       config.backendApiUrl = 'http://localhost:8080';
+    }
+
+    // Products API URL (Products Service - port 8081)
+    if (runtimeEnv.VITE_PRODUCTS_API_URL && !(isProduction && isLocalhostUrl(runtimeEnv.VITE_PRODUCTS_API_URL))) {
+      config.productsApiUrl = runtimeEnv.VITE_PRODUCTS_API_URL;
+    } else if (viteEnv.VITE_PRODUCTS_API_URL && !(isProduction && isLocalhostUrl(viteEnv.VITE_PRODUCTS_API_URL))) {
+      config.productsApiUrl = viteEnv.VITE_PRODUCTS_API_URL;
+    } else if (isCodespaces && codespaceName) {
+      config.productsApiUrl = `https://${codespaceName}-8081.${codespacesDomain}`;
+    } else if (isNgrok) {
+      config.productsApiUrl = '/proxy/products';
+    } else if (isProduction) {
+      config.productsApiUrl = '/api/products';
+      console.warn('⚠️ Production deployment detected but VITE_PRODUCTS_API_URL not set! Using /api/products as fallback.');
+    } else {
+      config.productsApiUrl = 'http://localhost:8081';
     }
 
     // Environment
@@ -101,6 +139,15 @@ class EnvironmentConfig {
     return this.config.backendApiUrl;
   }
 
+  getProductsApiUrl() {
+    const hostname = window.location.hostname;
+    const isNgrok = hostname.includes('ngrok-free.dev') || hostname.includes('ngrok-free.app') || hostname.includes('ngrok.io');
+    if (isNgrok) {
+      return '/proxy/products';
+    }
+    return this.config.productsApiUrl;
+  }
+
   getEnvironment() {
     return this.config.environment;
   }
@@ -118,6 +165,10 @@ class EnvironmentConfig {
     return hostname.includes('ngrok-free.dev') || hostname.includes('ngrok-free.app') || hostname.includes('ngrok.io');
   }
 
+  isProduction() {
+    return this.config.isProduction;
+  }
+
   // Get full configuration
   getConfig() {
     const hostname = window.location.hostname;
@@ -127,6 +178,7 @@ class EnvironmentConfig {
       isNgrok,
       apiBaseUrl: isNgrok ? '/proxy/audio' : this.config.apiBaseUrl,
       backendApiUrl: isNgrok ? '/proxy/backend' : this.config.backendApiUrl,
+      productsApiUrl: isNgrok ? '/proxy/products' : this.config.productsApiUrl,
     };
   }
 }
@@ -140,8 +192,10 @@ export default envConfig;
 export const {
   getApiBaseUrl,
   getBackendApiUrl,
+  getProductsApiUrl,
   getEnvironment,
   isCodespaces,
   isLocalhost,
+  isProduction,
   getConfig
 } = envConfig;

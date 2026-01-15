@@ -7,10 +7,11 @@ const BACKEND_BASE_URL = envConfig.getBackendApiUrl();
 console.log('🔧 Backend API Configuration:', {
   baseUrl: BACKEND_BASE_URL,
   environment: envConfig.getEnvironment(),
-  isCodespaces: envConfig.isCodespaces()
+  isCodespaces: envConfig.isCodespaces(),
+  isProduction: envConfig.isProduction()
 });
 
-// Service ports 
+// Service ports (used for Codespaces and local development)
 export const PORTS = {
   ACCOUNTS: 8080,
   PRODUCTS: 8081,  
@@ -24,10 +25,63 @@ export const PORTS = {
   PURCHASED_PRODUCTS: 8089,  
 };
 
+// Environment variable mappings for each service
+// These are read from VITE_* env vars at build time
+const SERVICE_ENV_VARS = {
+  ACCOUNTS: 'VITE_ACCOUNTS_API_URL',
+  PRODUCTS: 'VITE_PRODUCTS_API_URL',
+  ORDERS: 'VITE_ORDERS_API_URL',
+  PAYMENTS: 'VITE_PAYMENTS_API_URL',
+  STOCK: 'VITE_STOCK_API_URL',
+  WISHLIST: 'VITE_WISHLIST_API_URL',
+  ORDER_ITEMS: 'VITE_ORDER_ITEMS_API_URL',
+  CUSTOMER_SUMMARY: 'VITE_CUSTOMER_SUMMARY_API_URL',
+  SOLD_PRODUCTS: 'VITE_SOLD_PRODUCTS_API_URL',
+  PURCHASED_PRODUCTS: 'VITE_PURCHASED_PRODUCTS_API_URL',
+};
+
+// Helper to check if a URL is a localhost URL
+const isLocalhostUrl = (url) => url && (url.includes('localhost') || url.includes('127.0.0.1'));
+
 // Helper function to get full URL
 export const getServiceUrl = (service) => {
   const port = PORTS[service];
   const config = envConfig.getConfig();
+  const viteEnv = import.meta.env || {};
+  const runtimeEnv = window.ENV_CONFIG || {};
+  
+  // Check for service-specific environment variable first
+  const envVarName = SERVICE_ENV_VARS[service];
+  const runtimeUrl = runtimeEnv[envVarName];
+  const viteUrl = viteEnv[envVarName];
+  
+  // In production, prefer env vars over localhost URLs
+  if (config.isProduction) {
+    // Try runtime env first, then vite env
+    if (runtimeUrl && !isLocalhostUrl(runtimeUrl)) {
+      console.log(`🌐 Service URL for ${service} (runtime env):`, runtimeUrl);
+      return runtimeUrl;
+    }
+    if (viteUrl && !isLocalhostUrl(viteUrl)) {
+      console.log(`🌐 Service URL for ${service} (vite env):`, viteUrl);
+      return viteUrl;
+    }
+    
+    // Fallback: Use backend URL as base (assumes API gateway/reverse proxy)
+    const fallbackUrl = config.backendApiUrl;
+    console.warn(`⚠️ No ${envVarName} set for production! Using fallback:`, fallbackUrl);
+    return fallbackUrl;
+  }
+  
+  // Use service-specific env var if available and not localhost in non-local env
+  if (runtimeUrl) {
+    console.log(`🌐 Service URL for ${service} (runtime env):`, runtimeUrl);
+    return runtimeUrl;
+  }
+  if (viteUrl) {
+    console.log(`🌐 Service URL for ${service} (vite env):`, viteUrl);
+    return viteUrl;
+  }
   
   if (envConfig.isCodespaces()) {
     // In Codespaces, each service has its own forwarded port

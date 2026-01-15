@@ -1,5 +1,6 @@
 // src/redux/services/apiService.js
 import { createApi, fetchBaseQuery } from '@reduxjs/toolkit/query/react';
+import envConfig from '../../config/environment.js';
 
 // Check for ngrok at request time
 const isNgrokHost = () => {
@@ -23,7 +24,10 @@ const getAudioServiceBaseUrl = () => {
     return `https://${codespaceName}-5000.app.github.dev/api`;
   }
   
-  return 'http://localhost:5000/api';
+  // Use environment configuration (handles production and local)
+  const apiBaseUrl = envConfig.getApiBaseUrl();
+  console.log('🎵 Using audio service URL from env:', apiBaseUrl);
+  return `${apiBaseUrl}/api`;
 };
 
 // Dynamic base query that gets the URL at request time
