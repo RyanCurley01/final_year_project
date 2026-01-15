@@ -71,7 +71,7 @@ const CustomerScreen = () => {
       <div className="mb-8">
         <h2 className="font-bold text-3xl text-white mb-6">Games</h2>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+        <div className="grid grid-cols-4 gap-6">
           {games.map((product, i) => (
             <SongCard
               key={product.id || `game-${i}`}
@@ -90,7 +90,7 @@ const CustomerScreen = () => {
       <div>
         <h2 className="font-bold text-3xl text-white mb-6">Music</h2>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+        <div className="grid grid-cols-4 gap-6">
           {music.map((product, i) => (
             <SongCard
               key={product.id || `music-${i}`}

@@ -395,7 +395,7 @@ const SimilarSongs = () => {
   }
 
   return (
-    <div className="flex flex-col xl:flex-row gap-6">
+    <div className="flex flex-row gap-6">
       {/* Main Content */}
       <div className="flex-1">
         <div className="mb-6">
@@ -422,7 +422,7 @@ const SimilarSongs = () => {
           </button>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+        <div className="grid grid-cols-4 gap-6">
           {filteredSongs.map((song, i) => (
             <SongCard key={song.id} song={song} isPlaying={isPlaying} activeSong={activeSong} onPlay={handlePlay} onPause={handlePause} index={i} />
           ))}
@@ -430,7 +430,7 @@ const SimilarSongs = () => {
       </div>
 
       {/* Right Sidebar - Real-time Recommendations with Audio Feature Badges */}
-      <div className="xl:w-[400px] 2xl:w-[450px]">
+      <div className="w-[280px] min-w-[280px]">
         {/* Empty State - when no song is playing */}
         {(!activeSong || Object.keys(activeSong).length === 0) && (
           <div className="bg-gradient-to-br from-gray-900 to-black p-6 rounded-lg border border-gray-800">

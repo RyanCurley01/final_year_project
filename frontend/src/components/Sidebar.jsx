@@ -67,35 +67,12 @@ const Sidebar = () => {
   };
 
   return (
-    <>
-    <div className="md:flex hidden flex-col w-[240px] bg-gradient-to-br
+    <div className="flex flex-col w-[200px] min-w-[200px] bg-gradient-to-br
     py-10 px-4 bg-[#252246] relative z-20">
       <img src={logo} alt="logo" className="rounded w-full h-[100px] 
       object-contain" />
       <NavLinks onResetPlayer={handleResetPlayer} />
     </div>
-
-
-    <div className="absolute md:hidden block 
-    top-6 right-3 z-50">
-      {mobileMenuOpen ? (
-        <RiCloseLine className="w-6 h-6 text-white mr-2 cursor-pointer" 
-        onClick={() => setMobileMenuOpen(false)}/>
-      ) : <HiOutlineMenu className="w-6 h-6 text-white
-      mr-2 cursor-pointer" onClick={() => setMobileMenuOpen(true)} />}
-    </div>
-
-
-    <div className={`absolute top-0 h-screen w-2/3
-    bg-gradient-to-tl from-white/10 to-[#483d8b]
-    backdrop-blur-lg z-10 p-6 md:hidden
-    smooth-transition ${mobileMenuOpen ? 'left-0' :
-    '-left-full'}`}>
-      <img src={logo} alt="logo" className="w-full h-[100px] 
-      object-contain" />
-      <NavLinks handleClick={() => setMobileMenuOpen(false)} onResetPlayer={handleResetPlayer} />
-    </div>
-    </>
   );
 };
 
