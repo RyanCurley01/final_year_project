@@ -253,11 +253,21 @@ const SimilarSongs = () => {
         
         const allArtistSongs = [];
         
-        for (const artist of ARTISTS) {
+        for (let i = 0; i < ARTISTS.length; i++) {
+          const artist = ARTISTS[i];
           try {
             console.log(`📱 SimilarSongs: Fetching ${artist}...`);
+            
+            // Add small delay between requests to avoid rate limiting
+            if (i > 0) {
+              await new Promise(resolve => setTimeout(resolve, 300));
+            }
+            
             const response = await fetch(
-              `https://itunes.apple.com/search?term=${encodeURIComponent(artist)}&media=music&entity=song&limit=200`
+              `https://itunes.apple.com/search?term=${encodeURIComponent(artist)}&media=music&entity=song&limit=200`,
+              { 
+                signal: AbortSignal.timeout(10000) // 10 second timeout
+              }
             );
             
             if (!response.ok) {
