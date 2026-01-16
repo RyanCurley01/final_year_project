@@ -44,13 +44,13 @@ const getFeatureColor = (label, value) => {
   return { bg: 'bg-red-900/50', text: 'text-red-300', border: 'border-red-500/50' };
 };
 
-// Feature Badge Component - with dynamic colors
+// Feature Badge Component - with dynamic colors (compact)
 const FeatureBadge = ({ label, value }) => {
   const colors = getFeatureColor(label, value);
   return (
-    <div className={`rounded-lg p-2 text-center border ${colors.bg} ${colors.border}`}>
-      <p className="text-xs text-gray-400">{label}</p>
-      <p className={`text-sm font-bold ${colors.text}`}>{value}</p>
+    <div className={`rounded-md px-1 py-1 text-center border ${colors.bg} ${colors.border}`}>
+      <p className="text-[9px] text-gray-400">{label}</p>
+      <p className={`text-[10px] font-bold ${colors.text}`}>{value}</p>
     </div>
   );
 };
@@ -70,8 +70,8 @@ const SongCard = ({ song, isPlaying, activeSong, onPlay, onPause, index }) => {
           </div>
         )}
 
-        <div className={`absolute top-2 left-1 px-1 py-1 ${getArtistBadgeColor(song.artistName)} rounded-full text-xs font-bold text-white shadow-lg max-w-[60%] truncate`}>
-          {song.artistName}
+        <div className={`absolute top-2 left-2 px-2 py-1 ${getArtistBadgeColor(song.artistName)} rounded-full text-[10px] font-bold text-white shadow-lg max-w-[55%]`}>
+          <p className="truncate">{song.artistName}</p>
         </div>
 
         {/* Popularity Rank Number */}
@@ -90,9 +90,9 @@ const SongCard = ({ song, isPlaying, activeSong, onPlay, onPause, index }) => {
         )}
       </div>
 
-      <div className="mt-3 flex flex-col">
-        <p className="font-semibold text-base text-white truncate">{song.trackName || song.albumTitle}</p>
-        <p className="text-sm text-gray-400 truncate">{song.artistName}</p>
+      <div className="mt-3 flex flex-col gap-1">
+        <p className="font-semibold text-sm text-white truncate leading-tight">{song.trackName || song.albumTitle}</p>
+        <p className="text-xs text-gray-400 truncate">{song.artistName}</p>
         <p className="text-xs text-gray-500 truncate">{song.collectionName}</p>
       </div>
     </div>
@@ -369,41 +369,41 @@ const TopCharts = () => {
       </div>
 
       {/* Right Sidebar - Real-time Recommendations with Audio Feature Badges */}
-      <div className="w-[280px] min-w-[280px]">
+      <div className="w-[280px] min-w-[280px] overflow-y-auto max-h-[calc(100vh-180px)]">
         {/* Empty State - when no song is playing */}
         {(!activeSong || Object.keys(activeSong).length === 0) && (
-          <div className="bg-gradient-to-br from-gray-900 to-black p-6 rounded-lg border border-gray-800">
-            <p className="text-gray-400 text-center">Play a song to see audio-based recommendations</p>
+          <div className="bg-gradient-to-br from-gray-900 to-black p-4 rounded-lg border border-gray-800">
+            <p className="text-gray-400 text-center text-sm">Play a song to see recommendations</p>
           </div>
         )}
 
         {/* Active State - when a song is playing */}
         {activeSong && Object.keys(activeSong).length > 0 && (
-        <div className="bg-gradient-to-br from-gray-900 to-black p-5 rounded-lg border border-gray-800 sticky top-6">
-          <h3 className="text-lg font-bold text-white mb-1">Similar Artist Tracks</h3>
-          <p className="text-xs text-gray-400 mb-4">
-            Real-time suggestions based on <span className="text-cyan-400">{activeSong.trackName || activeSong.albumTitle}</span>'s audio features
+        <div className="bg-gradient-to-br from-gray-900 to-black p-4 rounded-lg border border-gray-800">
+          <h3 className="text-sm font-bold text-white mb-1">Similar Artist Tracks</h3>
+          <p className="text-[10px] text-gray-400 mb-2">
+            Based on <span className="text-cyan-400 truncate">{activeSong.trackName || activeSong.albumTitle}</span>
           </p>
 
           {/* Current Track Analysis */}
-            <div className="mb-4 p-3 bg-gray-800/50 rounded-lg border border-gray-700">
-              <div className="flex items-center gap-3 mb-3">
+            <div className="mb-3 p-2 bg-gray-800/50 rounded-lg border border-gray-700">
+              <div className="flex items-center gap-2 mb-2">
                 {/* Spinning Album Cover */}
-                <div className="relative w-14 h-14 flex-shrink-0">
+                <div className="relative w-10 h-10 flex-shrink-0">
                   <img 
                     src={activeSong.artworkUrl100?.replace('100x100', '200x200') || activeSong.albumCoverImageUrl || fallbackImage}
                     alt={activeSong.trackName || activeSong.albumTitle}
-                    className={`w-14 h-14 rounded-full object-cover border-2 border-cyan-500/50 ${isPlaying ? 'animate-spin' : ''}`}
+                    className={`w-10 h-10 rounded-full object-cover border-2 border-cyan-500/50 ${isPlaying ? 'animate-spin' : ''}`}
                     style={{ animationDuration: '3s' }}
                     onError={(e) => { e.target.src = fallbackImage; }}
                   />
                   <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                    <div className="w-4 h-4 rounded-full bg-gray-900 border border-gray-700"></div>
+                    <div className="w-3 h-3 rounded-full bg-gray-900 border border-gray-700"></div>
                   </div>
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-white truncate">{activeSong.trackName || activeSong.albumTitle}</p>
-                  <p className="text-xs text-gray-400 truncate">{activeSong.artistName || 'Unknown Artist'}</p>
+                  <p className="text-xs font-semibold text-white truncate">{activeSong.trackName || activeSong.albumTitle}</p>
+                  <p className="text-[10px] text-gray-400 truncate">{activeSong.artistName || 'Unknown Artist'}</p>
                 </div>
                 {isPlaying && (
                   <div className="flex gap-0.5">
@@ -416,11 +416,11 @@ const TopCharts = () => {
               
               {/* Audio Feature Badges */}
               {displayedFeatures && (
-                <div className="grid grid-cols-4 gap-2">
-                  <FeatureBadge label="Tempo" value={`${Math.round(displayedFeatures.tempo * (displayedPlaybackRate || 1))} BPM`} />
-                  <FeatureBadge label="Energy" value={`${Math.round(displayedFeatures.energy * 100)}%`} />
-                  <FeatureBadge label="Mood" value={`${Math.round(displayedFeatures.valence * 100)}%`} />
-                  <FeatureBadge label="Dance" value={`${Math.round(displayedFeatures.danceability * 100)}%`} />
+                <div className="grid grid-cols-4 gap-1">
+                  <FeatureBadge label="T" value={`${Math.round(displayedFeatures.tempo * (displayedPlaybackRate || 1))}`} />
+                  <FeatureBadge label="E" value={`${Math.round(displayedFeatures.energy * 100)}%`} />
+                  <FeatureBadge label="M" value={`${Math.round(displayedFeatures.valence * 100)}%`} />
+                  <FeatureBadge label="D" value={`${Math.round(displayedFeatures.danceability * 100)}%`} />
                 </div>
               )}
               
@@ -432,58 +432,66 @@ const TopCharts = () => {
           {/* Recommendations List */}
           {activeSong && recommendations.length > 0 && (
             <>
-              <p className="text-xs text-gray-500 mb-3">{recommendations.length} similar artist tracks • Updates every 3s</p>
-              <div className="space-y-2 max-h-[400px] overflow-y-auto">
+              <p className="text-[10px] text-gray-500 mb-2">{recommendations.length} matches • Updates 3s</p>
+              <div className="space-y-2">
                 {recommendations.map((rec) => (
                   <div 
                     key={rec.id}
                     onClick={() => handleRecommendationClick(rec)}
-                    className="flex items-center gap-3 p-3 rounded-lg bg-white/5 hover:bg-white/10 cursor-pointer transition-all group"
+                    className="relative p-2 bg-gray-800/70 hover:bg-gray-700/70 rounded-lg border border-gray-700 hover:border-cyan-500 transition-all cursor-pointer group"
                   >
-                    <img 
-                      src={rec.artworkUrl100?.replace('100x100', '200x200') || fallbackImage}
-                      alt={rec.trackName}
-                      className="w-12 h-12 rounded-lg object-cover"
-                    />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-white truncate group-hover:text-cyan-400 transition-colors">
-                        {rec.trackName}
-                      </p>
-                      <p className="text-xs text-gray-400 truncate">{rec.artistName}</p>
-                      <p className="text-xs text-gray-500">{rec.match_reason}</p>
-                      {/* Match Badges - Dynamic colors based on match value */}
-                      <div className="flex gap-1 mt-1">
-                        <span className={`px-1.5 py-0.5 rounded text-[13px] ${
-                          rec.tempo_match >= 0.7 ? 'bg-green-500/30 text-green-300' : 
-                          rec.tempo_match >= 0.5 ? 'bg-yellow-500/30 text-yellow-300' : 
-                          'bg-red-500/30 text-red-300'
-                        }`}>
-                          Tempo:{Math.round(rec.tempo_match * 100)}%
-                        </span>
-                        <span className={`px-1.5 py-0.5 rounded text-[13px] ${
-                          rec.energy_match >= 0.7 ? 'bg-green-500/30 text-green-300' : 
-                          rec.energy_match >= 0.5 ? 'bg-yellow-500/30 text-yellow-300' : 
-                          'bg-red-500/30 text-red-300'
-                        }`}>
-                          Energy:{Math.round(rec.energy_match * 100)}%
-                        </span>
-                        <span className={`px-1.5 py-0.5 rounded text-[13px] ${
-                          rec.mood_match >= 0.7 ? 'bg-green-500/30 text-green-300' : 
-                          rec.mood_match >= 0.5 ? 'bg-yellow-500/30 text-yellow-300' : 
-                          'bg-red-500/30 text-red-300'
-                        }`}>
-                          Mood:{Math.round(rec.mood_match * 100)}%
-                        </span>
+                    <div className="flex items-center gap-2">
+                      {/* Album Cover */}
+                      <div className="w-12 h-12 rounded-md overflow-hidden flex-shrink-0 border border-gray-600 group-hover:border-cyan-500 transition-colors">
+                        <img 
+                          src={rec.artworkUrl100?.replace('100x100', '200x200') || fallbackImage}
+                          alt={rec.trackName}
+                          className="w-full h-full object-cover"
+                          onError={(e) => { e.target.src = fallbackImage; }}
+                        />
                       </div>
-                    </div>
-                    <div className="text-right">
-                      <span className={`px-2 py-1 rounded-full text-xs font-bold text-white ${
-                        rec.similarity_score >= 0.7 ? 'bg-green-500' : 
-                        rec.similarity_score >= 0.5 ? 'bg-yellow-500' : 
-                        'bg-red-500'
-                      }`}>
-                        {Math.round(rec.similarity_score * 100)}% Match
-                      </span>
+
+                      {/* Product Info */}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between gap-1">
+                          <h4 className="text-white font-semibold truncate group-hover:text-cyan-400 transition-colors text-xs">
+                            {rec.trackName}
+                          </h4>
+                          <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-bold text-white flex-shrink-0 ${
+                            rec.similarity_score >= 0.7 ? 'bg-green-500' : 
+                            rec.similarity_score >= 0.5 ? 'bg-yellow-500' : 
+                            'bg-red-500'
+                          }`}>
+                            {Math.round(rec.similarity_score * 100)}%
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-gray-400 truncate">{rec.artistName}</p>
+                        
+                        {/* Feature Matches */}
+                        <div className="flex gap-1 mt-1">
+                          <span className={`px-1 py-0.5 rounded text-[9px] ${
+                            rec.tempo_match >= 0.7 ? 'bg-green-500/30 text-green-300' : 
+                            rec.tempo_match >= 0.5 ? 'bg-yellow-500/30 text-yellow-300' : 
+                            'bg-red-500/30 text-red-300'
+                          }`}>
+                            T:{Math.round(rec.tempo_match * 100)}%
+                          </span>
+                          <span className={`px-1 py-0.5 rounded text-[9px] ${
+                            rec.energy_match >= 0.7 ? 'bg-green-500/30 text-green-300' : 
+                            rec.energy_match >= 0.5 ? 'bg-yellow-500/30 text-yellow-300' : 
+                            'bg-red-500/30 text-red-300'
+                          }`}>
+                            E:{Math.round(rec.energy_match * 100)}%
+                          </span>
+                          <span className={`px-1 py-0.5 rounded text-[9px] ${
+                            rec.mood_match >= 0.7 ? 'bg-green-500/30 text-green-300' : 
+                            rec.mood_match >= 0.5 ? 'bg-yellow-500/30 text-yellow-300' : 
+                            'bg-red-500/30 text-red-300'
+                          }`}>
+                            M:{Math.round(rec.mood_match * 100)}%
+                          </span>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 ))}
