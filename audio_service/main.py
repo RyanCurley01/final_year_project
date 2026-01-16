@@ -30,7 +30,7 @@ allowed_origins = [
     "http://127.0.0.1:5174",
     "http://127.0.0.1:5175",
     "http://127.0.0.1:3000",
-    # Production - Vercel
+    # Production - Vercel (main domain)
     "https://final-year-project-two-wine.vercel.app",
     # Production - Railway (allow all Railway subdomains)
 ]
@@ -46,11 +46,11 @@ if os.getenv('CODESPACES') == 'true':
         ])
 
 # Production CORS configuration - Restricted to specific frontend domains
-# Use allow_origin_regex to support Railway dynamic subdomains
+# Use allow_origin_regex to support Railway dynamic subdomains AND Vercel preview deployments
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,  # Explicit allowed origins
-    allow_origin_regex=r"https://[\w-]+\.up\.railway\.app",  # Railway production domains
+    allow_origin_regex=r"https://[\w-]+\.(up\.railway\.app|vercel\.app)",  # Railway + Vercel production domains
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
