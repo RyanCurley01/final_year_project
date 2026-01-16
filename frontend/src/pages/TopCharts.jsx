@@ -334,11 +334,11 @@ const TopCharts = () => {
   }
 
   return (
-    <div className="flex flex-row gap-6">
+    <div className="flex flex-col lg:flex-row gap-6">
       {/* Main Content */}
-      <div className="flex-1">
-        <div className="mb-6">
-          <h1 className="font-bold text-3xl text-white mb-2">Top 50 Popular Songs</h1>
+      <div className="flex-1 min-w-0">
+        <div className="mb-4 sm:mb-6">
+          <h1 className="font-bold text-xl sm:text-2xl md:text-3xl text-white mb-2">Top 50 Popular Songs</h1>
           <p className="text-gray-400">The 50 most popular songs from Aphex Twin, Boards of Canada, and Squarepusher - ordered by popularity</p>
           <p className="text-xs text-cyan-400 mt-1">Powered by iTunes API - {songs.length} artist tracks with 30s previews</p>
         </div>
@@ -361,7 +361,7 @@ const TopCharts = () => {
           </button>
         </div>
 
-        <div className="grid grid-cols-4 gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6">
           {filteredSongs.map((song, i) => (
             <SongCard key={song.id} song={song} isPlaying={isPlaying} activeSong={activeSong} onPlay={handlePlay} onPause={handlePause} index={i} />
           ))}
@@ -369,7 +369,7 @@ const TopCharts = () => {
       </div>
 
       {/* Right Sidebar - Real-time Recommendations with Audio Feature Badges */}
-      <div className="w-[280px] min-w-[280px] overflow-y-auto max-h-[calc(100vh-180px)]">
+      <div className="w-full lg:w-[280px] lg:min-w-[280px] overflow-y-auto lg:max-h-[calc(100vh-180px)]">
         {/* Empty State - when no song is playing */}
         {(!activeSong || Object.keys(activeSong).length === 0) && (
           <div className="bg-gradient-to-br from-gray-900 to-black p-4 rounded-lg border border-gray-800">
