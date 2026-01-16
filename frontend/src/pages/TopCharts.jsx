@@ -393,7 +393,7 @@ const TopCharts = () => {
       </div>
 
       {/* Right Sidebar - Real-time Recommendations with Audio Feature Badges */}
-      <div className="w-full lg:w-[400px] lg:min-w-[400px]">
+      <div className="w-full lg:w-[320px] lg:min-w-[320px]">
         {/* Empty State - when no song is playing */}
         {(!activeSong || Object.keys(activeSong).length === 0) && (
           <div className="bg-gradient-to-br from-gray-900 to-black p-4 rounded-lg border border-gray-800">

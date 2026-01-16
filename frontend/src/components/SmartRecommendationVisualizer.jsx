@@ -360,7 +360,7 @@ const SmartRecommendationVisualizer = ({
 
                   <div className="flex items-start gap-2">
                     {/* Album Cover */}
-                    <div className="w-12 h-12 rounded-lg overflow-hidden flex-shrink-0 border border-gray-600 group-hover:border-cyan-500 transition-colors">
+                    <div className="w-10 h-10 rounded-lg overflow-hidden flex-shrink-0 border border-gray-600 group-hover:border-cyan-500 transition-colors">
                       <AlbumCover url={displayUrl} title={displayTitle} productId={rec.product_id} />
                     </div>
 

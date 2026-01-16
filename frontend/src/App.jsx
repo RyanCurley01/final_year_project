@@ -104,10 +104,10 @@ const AppContent = () => {
           {location.pathname === '/' && (
             <>
               {/* Spacer for fixed sidebar - desktop only */}
-              <div className="hidden lg:block w-[280px] min-w-[280px]"></div>
+              <div className="hidden lg:block w-[390px] min-w-[390px]"></div>
               
               {/* Fixed sidebar - desktop only */}
-              <div className={`hidden lg:block fixed top-0 right-0 w-[280px] ${(activeSong?.albumTitle || activeSong?.gameTitle) ? 'h-[calc(100vh-7rem)]' : 'h-screen'} overflow-y-auto z-40 px-4 pt-4 pb-8`}>
+              <div className={`hidden lg:block fixed top-0 right-0 w-[390px] min-w-[390px] ${(activeSong?.albumTitle || activeSong?.gameTitle) ? 'h-[calc(100vh-7rem)]' : 'h-screen'} overflow-y-auto hide-scrollbar z-40 px-4 pt-4 pb-8`}>
                 {/* TopPlay */}
                 <div className="mb-4">
                   <TopPlay />
