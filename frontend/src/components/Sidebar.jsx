@@ -67,12 +67,45 @@ const Sidebar = () => {
   };
 
   return (
-    <div className="flex flex-col w-[200px] min-w-[200px] bg-gradient-to-br
-    py-10 px-4 bg-[#252246] relative z-20">
-      <img src={logo} alt="logo" className="rounded w-full h-[100px] 
-      object-contain" />
-      <NavLinks onResetPlayer={handleResetPlayer} />
-    </div>
+    <>
+      {/* Desktop Sidebar */}
+      <div className="hidden md:flex flex-col w-[200px] min-w-[200px] bg-gradient-to-br
+      py-10 px-4 bg-[#252246] relative z-20">
+        <img src={logo} alt="logo" className="rounded w-full h-[100px] 
+        object-contain" />
+        <NavLinks onResetPlayer={handleResetPlayer} />
+      </div>
+
+      {/* Mobile Hamburger Button */}
+      <div className="md:hidden absolute top-4 left-4 z-50">
+        {!mobileMenuOpen && (
+          <HiOutlineMenu 
+            className="w-8 h-8 text-white cursor-pointer" 
+            onClick={() => setMobileMenuOpen(true)} 
+          />
+        )}
+      </div>
+
+      {/* Mobile Menu Overlay */}
+      <div className={`md:hidden fixed top-0 left-0 w-2/3 max-w-[250px] h-full bg-gradient-to-br from-[#252246] to-[#1a1a3e] z-50 transform transition-transform duration-300 ${mobileMenuOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+        <div className="p-4">
+          <RiCloseLine 
+            className="w-8 h-8 text-white cursor-pointer mb-4" 
+            onClick={() => setMobileMenuOpen(false)} 
+          />
+          <img src={logo} alt="logo" className="rounded w-full h-[80px] object-contain mb-4" />
+          <NavLinks handleClick={() => setMobileMenuOpen(false)} onResetPlayer={handleResetPlayer} />
+        </div>
+      </div>
+
+      {/* Mobile Overlay Background */}
+      {mobileMenuOpen && (
+        <div 
+          className="md:hidden fixed inset-0 bg-black/50 z-40" 
+          onClick={() => setMobileMenuOpen(false)}
+        />
+      )}
+    </>
   );
 };
 
