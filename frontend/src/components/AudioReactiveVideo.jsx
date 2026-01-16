@@ -410,7 +410,15 @@ const AudioReactiveVideo = ({
         playsInline
         preload="auto"
         loop
-        style={{ display: 'none' }}
+        style={{ 
+          display: 'block', 
+          width: '100%', 
+          height: '100%', 
+          objectFit: 'cover',
+          opacity: videoReady ? 0 : 1,
+          position: videoReady ? 'absolute' : 'relative',
+          zIndex: 0
+        }}
         onError={handleVideoError}
         {...props}
       />
@@ -420,11 +428,15 @@ const AudioReactiveVideo = ({
         ref={canvasRef}
         className={className}
         style={{ 
+          display: 'block',
           width: '100%', 
           height: '100%', 
           objectFit: 'cover',
           borderRadius: 'inherit',
-          pointerEvents: 'none'
+          pointerEvents: 'none',
+          opacity: videoReady ? 1 : 0,
+          position: 'relative',
+          zIndex: 1
         }}
       />
     </div>
