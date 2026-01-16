@@ -202,7 +202,7 @@ const SmartRecommendationVisualizer = ({
   }
 
   return (
-    <div className="bg-gradient-to-br from-gray-900 to-black p-4 rounded-lg border border-gray-800">
+    <div className="bg-gradient-to-br from-gray-900 to-black p-4 rounded-lg border border-gray-800 overflow-x-hidden">
       {/* Header */}
       <div className="mb-3">
         <h3 className="text-sm font-bold text-white mb-1">Smart Audio Recommendations</h3>
@@ -321,7 +321,7 @@ const SmartRecommendationVisualizer = ({
           <motion.div 
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            className="space-y-2"
+            className="space-y-2 overflow-x-hidden"
           >
             {/* Matches count */}
             <p className="text-[10px] text-gray-500 mb-2">

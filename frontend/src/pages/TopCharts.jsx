@@ -358,7 +358,7 @@ const TopCharts = () => {
   }
 
   return (
-    <div className="flex flex-col lg:flex-row gap-6">
+    <div className="flex flex-col lg:flex-row gap-6 scrollbar-hide">
       {/* Main Content */}
       <div className="flex-1 min-w-0">
         <div className="mb-4 sm:mb-6">
@@ -393,7 +393,7 @@ const TopCharts = () => {
       </div>
 
       {/* Right Sidebar - Real-time Recommendations with Audio Feature Badges */}
-      <div className="w-full lg:w-[280px] lg:min-w-[280px] overflow-y-auto lg:max-h-[calc(100vh-180px)]">
+      <div className="w-full lg:w-[400px] lg:min-w-[400px]">
         {/* Empty State - when no song is playing */}
         {(!activeSong || Object.keys(activeSong).length === 0) && (
           <div className="bg-gradient-to-br from-gray-900 to-black p-4 rounded-lg border border-gray-800">

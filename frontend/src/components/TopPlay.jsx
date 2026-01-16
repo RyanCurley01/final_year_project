@@ -144,7 +144,7 @@ const TopPlay = () => {
     flex-1 max-w-full flex flex-col">
       <div className="w-full flex flex-col">
         <div className="flex flex-row justify-between items-center">
-          <h2 className="text-white font-bold text-2xl ml-5">Popular Songs</h2>
+          <h2 className="text-white font-bold text-2xl ml-12">Popular Songs</h2>
         </div>
         {renderContent()}
       </div>
