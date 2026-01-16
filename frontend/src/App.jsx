@@ -57,8 +57,8 @@ const AppContent = () => {
     <div className="relative flex h-screen overflow-hidden">
       <Sidebar />
       <div className="flex-1 flex flex-col bg-gradient-to-br from-[#041529] to-[#2970c2] overflow-hidden">
-        <div className={`px-6 overflow-y-auto flex flex-row ${(activeSong?.albumTitle || activeSong?.gameTitle) ? 'h-[calc(100vh-7rem)]' : 'h-screen'}`}>
-          <div className="flex-1 h-fit pb-4">
+        <div className={`px-6 flex flex-row ${(activeSong?.albumTitle || activeSong?.gameTitle) ? 'h-[calc(100vh-7rem)]' : 'h-screen'}`}>
+          <div className="flex-1 h-full overflow-y-auto pb-4">
             <Searchbar />
 
             <Routes>
@@ -75,20 +75,20 @@ const AppContent = () => {
             </Routes>
           </div>
           
-          {/* Right Sidebar - TopPlay + Visualizer - only on home page */}
+          {/* Right Sidebar - TopPlay + Visualizer - only on home page, hidden on mobile */}
           {location.pathname === '/' && (
             <>
-              {/* Spacer for fixed sidebar */}
-              <div className="w-[280px] min-w-[280px]"></div>
+              {/* Spacer for fixed sidebar - hidden on mobile */}
+              <div className="hidden lg:block w-[280px] min-w-[280px]"></div>
               
-              {/* Fixed sidebar - always visible */}
-              <div className="fixed top-0 right-0 w-[280px] h-[calc(100vh-7rem)] overflow-y-auto z-40 p-4">
+              {/* Fixed sidebar - hidden on mobile */}
+              <div className={`hidden lg:block fixed top-0 right-0 w-[280px] ${(activeSong?.albumTitle || activeSong?.gameTitle) ? 'h-[calc(100vh-7rem)]' : 'h-screen'} overflow-y-auto z-40 px-4 pt-4 pb-8`}>
                 {/* TopPlay */}
                 <div className="mb-4">
                   <TopPlay />
                 </div>
                 {/* Visualizer */}
-                <div>
+                <div className="mb-4">
                   {activeSong?.albumTitle ? (
                     <SmartRecommendationVisualizer 
                       currentProduct={activeSong}
