@@ -113,7 +113,7 @@ const SongCard = ({ song, isPlaying, activeSong, onPlay, onPause, index }) => {
         <img src={albumArt} alt={song.trackName} className="w-full h-full rounded-lg object-cover" onError={(e) => { e.target.src = fallbackImage; }} />
         
         {song.previewUrl && (
-          <div className={`absolute inset-0 rounded-lg flex justify-center items-center bg-black/50 ${isThisSongActive && isPlaying ? 'flex' : 'hidden group-hover:flex'}`}>
+          <div className={`absolute inset-0 rounded-lg flex justify-center items-center bg-black/50 transition-opacity ${isThisSongActive && isPlaying ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 group-active:opacity-100'}`}>
             <PlayPause isPlaying={isPlaying && isThisSongActive} activeSong={activeSong} handlePause={onPause} handlePlay={() => onPlay(song, index)} song={song} />
           </div>
         )}
@@ -245,46 +245,59 @@ const SimilarSongs = () => {
       setError(null);
       
       try {
+        console.log('📱 SimilarSongs: Starting data fetch...');
         const products = await productService.getAllProducts(email, password);
+        console.log('📱 SimilarSongs: Got products:', products?.length);
         const musicProducts = products.filter(p => p.albumTitle && p.fileUrl);
         setDbSongs(musicProducts);
         
         const allArtistSongs = [];
         
         for (const artist of ARTISTS) {
-          const response = await fetch(
-            `https://itunes.apple.com/search?term=${encodeURIComponent(artist)}&media=music&entity=song&limit=200`
-          );
-          
-          if (!response.ok) throw new Error(`Failed to fetch ${artist}`);
-          
-          const data = await response.json();
-          
-          // Filter to only include tracks that have a preview AND match the artist name
-          const artistLower = artist.toLowerCase();
-          const artistSongs = data.results
-            .filter(track => track.previewUrl && track.artistName?.toLowerCase().includes(artistLower))
-            .slice(0, 50) // Take exactly 50 tracks per artist
-            .map(track => ({
-              id: track.trackId,
-              trackName: track.trackName,
-              albumTitle: track.trackName,
-              artistName: track.artistName,
-              collectionName: track.collectionName,
-              artworkUrl100: track.artworkUrl100,
-              previewUrl: track.previewUrl,
-              fileUrl: track.previewUrl,
-              price: track.trackPrice || 1.29
-            }));
-          
-          allArtistSongs.push(...artistSongs);
+          try {
+            console.log(`📱 SimilarSongs: Fetching ${artist}...`);
+            const response = await fetch(
+              `https://itunes.apple.com/search?term=${encodeURIComponent(artist)}&media=music&entity=song&limit=200`
+            );
+            
+            if (!response.ok) {
+              console.error(`📱 SimilarSongs: Failed to fetch ${artist}:`, response.status);
+              continue;
+            }
+            
+            const data = await response.json();
+            console.log(`📱 SimilarSongs: Got ${data.results?.length} results for ${artist}`);
+            
+            // Filter to only include tracks that have a preview AND match the artist name
+            const artistLower = artist.toLowerCase();
+            const artistSongs = data.results
+              .filter(track => track.previewUrl && track.artistName?.toLowerCase().includes(artistLower))
+              .slice(0, 50)
+              .map(track => ({
+                id: track.trackId,
+                trackName: track.trackName,
+                albumTitle: track.trackName,
+                artistName: track.artistName,
+                collectionName: track.collectionName,
+                artworkUrl100: track.artworkUrl100,
+                previewUrl: track.previewUrl,
+                fileUrl: track.previewUrl,
+                price: track.trackPrice || 1.29
+              }));
+            
+            console.log(`📱 SimilarSongs: Filtered to ${artistSongs.length} songs for ${artist}`);
+            allArtistSongs.push(...artistSongs);
+          } catch (artistErr) {
+            console.error(`📱 SimilarSongs: Error fetching ${artist}:`, artistErr);
+          }
         }
         
         const matchedSongs = matchArtistSongsToDbSongs(allArtistSongs, musicProducts);
         matchedSongs.sort((a, b) => b.similarity - a.similarity);
+        console.log(`📱 SimilarSongs: Total songs loaded: ${matchedSongs.length}`);
         setSongs(matchedSongs);
       } catch (err) {
-        console.error('Error fetching songs:', err);
+        console.error('📱 SimilarSongs: Error fetching songs:', err);
         setError(err.message);
       } finally {
         setLoading(false);

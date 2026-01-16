@@ -65,7 +65,7 @@ const SongCard = ({ song, isPlaying, activeSong, onPlay, onPause, index }) => {
         <img src={albumArt} alt={song.trackName} className="w-full h-full rounded-lg object-cover" onError={(e) => { e.target.src = fallbackImage; }} />
         
         {song.previewUrl && (
-          <div className={`absolute inset-0 rounded-lg flex justify-center items-center bg-black/50 ${isThisSongActive && isPlaying ? 'flex' : 'hidden group-hover:flex'}`}>
+          <div className={`absolute inset-0 rounded-lg flex justify-center items-center bg-black/50 transition-opacity ${isThisSongActive && isPlaying ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 group-active:opacity-100'}`}>
             <PlayPause isPlaying={isPlaying && isThisSongActive} activeSong={activeSong} handlePause={onPause} handlePlay={() => onPlay(song, index)} song={song} />
           </div>
         )}
@@ -189,48 +189,62 @@ const TopCharts = () => {
       setError(null);
       
       try {
+        console.log('📱 TopCharts: Starting data fetch...');
         const products = await productService.getAllProducts(email, password);
+        console.log('📱 TopCharts: Got products:', products?.length);
         const musicProducts = products.filter(p => p.albumTitle && p.fileUrl);
         setDbSongs(musicProducts);
         
         const allArtistSongs = [];
         
         for (const artist of ARTISTS) {
-          const response = await fetch(
-            `https://itunes.apple.com/search?term=${encodeURIComponent(artist)}&media=music&entity=song&limit=400`
-          );
-          
-          if (!response.ok) throw new Error(`Failed to fetch ${artist}`);
-          
-          const data = await response.json();
-          
-          // Filter to only include tracks that have a preview AND match the artist name
-          const artistLower = artist.toLowerCase();
-          const artistSongs = data.results
-            .filter(track => track.previewUrl && track.artistName?.toLowerCase().includes(artistLower))
-            .slice(0, 50) // Take only first 50 (most popular)
-            .map((track, artistIndex) => ({
-              id: track.trackId,
-              trackName: track.trackName,
-              albumTitle: track.trackName,
-              artistName: track.artistName,
-              collectionName: track.collectionName,
-              artworkUrl100: track.artworkUrl100,
-              previewUrl: track.previewUrl,
-              fileUrl: track.previewUrl,
-              price: track.trackPrice || 1.29,
-              artistRank: artistIndex + 1, // Track position within artist's results (1-50)
-              popularityScore: 51 - artistIndex // Higher score = more popular (50 for #1, 1 for #50)
-            }));
-          
-          allArtistSongs.push(...artistSongs);
+          try {
+            console.log(`📱 TopCharts: Fetching ${artist}...`);
+            const response = await fetch(
+              `https://itunes.apple.com/search?term=${encodeURIComponent(artist)}&media=music&entity=song&limit=400`
+            );
+            
+            if (!response.ok) {
+              console.error(`📱 TopCharts: Failed to fetch ${artist}:`, response.status);
+              continue; // Skip this artist but continue with others
+            }
+            
+            const data = await response.json();
+            console.log(`📱 TopCharts: Got ${data.results?.length} results for ${artist}`);
+            
+            // Filter to only include tracks that have a preview AND match the artist name
+            const artistLower = artist.toLowerCase();
+            const artistSongs = data.results
+              .filter(track => track.previewUrl && track.artistName?.toLowerCase().includes(artistLower))
+              .slice(0, 50) // Take only first 50 (most popular)
+              .map((track, artistIndex) => ({
+                id: track.trackId,
+                trackName: track.trackName,
+                albumTitle: track.trackName,
+                artistName: track.artistName,
+                collectionName: track.collectionName,
+                artworkUrl100: track.artworkUrl100,
+                previewUrl: track.previewUrl,
+                fileUrl: track.previewUrl,
+                price: track.trackPrice || 1.29,
+                artistRank: artistIndex + 1,
+                popularityScore: 51 - artistIndex
+              }));
+            
+            console.log(`📱 TopCharts: Filtered to ${artistSongs.length} songs for ${artist}`);
+            allArtistSongs.push(...artistSongs);
+          } catch (artistErr) {
+            console.error(`📱 TopCharts: Error fetching ${artist}:`, artistErr);
+            // Continue with other artists
+          }
         }
         
         // Sort by popularity score (most popular first across all artists)
         allArtistSongs.sort((a, b) => b.popularityScore - a.popularityScore);
+        console.log(`📱 TopCharts: Total songs loaded: ${allArtistSongs.length}`);
         setSongs(allArtistSongs);
       } catch (err) {
-        console.error('Error fetching songs:', err);
+        console.error('📱 TopCharts: Error fetching songs:', err);
         setError(err.message);
       } finally {
         setLoading(false);
