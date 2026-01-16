@@ -83,17 +83,26 @@ S3_CONFIG = {
     'url_expiration': 3600  # URLs valid for 1 hour
 }
 
-# Initialize S3 client
+# Initialize S3 client with Signature V4 (required for eu-west-1 and most regions)
 s3_client = None
 try:
     if S3_CONFIG['access_key'] and S3_CONFIG['secret_key']:
+        from botocore.config import Config
+        
+        # Configure S3 client with Signature V4 and proper endpoint
+        s3_config = Config(
+            signature_version='s3v4',
+            s3={'addressing_style': 'virtual'}
+        )
+        
         s3_client = boto3.client(
             's3',
             region_name=S3_CONFIG['region'],
             aws_access_key_id=S3_CONFIG['access_key'],
-            aws_secret_access_key=S3_CONFIG['secret_key']
+            aws_secret_access_key=S3_CONFIG['secret_key'],
+            config=s3_config
         )
-        print("✅ S3 client initialized for presigned URLs")
+        print(f"✅ S3 client initialized for presigned URLs (region: {S3_CONFIG['region']}, signature: v4)")
     else:
         print("⚠️  AWS credentials not found. Presigned URLs will not be generated.")
 except Exception as e:
