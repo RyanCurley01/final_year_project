@@ -57,8 +57,8 @@ const AppContent = () => {
     <div className="relative flex h-screen overflow-hidden">
       <Sidebar />
       <div className="flex-1 flex flex-col bg-gradient-to-br from-[#041529] to-[#2970c2] overflow-hidden">
-        <div className={`px-6 flex flex-row ${(activeSong?.albumTitle || activeSong?.gameTitle) ? 'h-[calc(100vh-7rem)]' : 'h-screen'}`}>
-          <div className="flex-1 h-full overflow-y-auto pb-4">
+        <div className={`px-6 flex flex-col lg:flex-row ${(activeSong?.albumTitle || activeSong?.gameTitle) ? 'h-[calc(100vh-7rem)]' : 'h-screen'} overflow-y-auto`}>
+          <div className="flex-1 pb-4">
             <Searchbar />
 
             <Routes>
@@ -73,15 +73,40 @@ const AppContent = () => {
               {/* Catch-all route for removed/invalid paths */}
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
+            
+            {/* Mobile Visualizer - at bottom of content on mobile only */}
+            {location.pathname === '/' && (
+              <div className="lg:hidden mt-6 pb-4">
+                {/* TopPlay */}
+                <div className="mb-4">
+                  <TopPlay />
+                </div>
+                {/* Visualizer */}
+                <div className="mb-4">
+                  {activeSong?.albumTitle ? (
+                    <SmartRecommendationVisualizer 
+                      currentProduct={activeSong}
+                      products={musicProducts}
+                      sessionId={sessionId}
+                      onRecommendationClick={handleRecommendationClick}
+                    />
+                  ) : (
+                    <div className="bg-gradient-to-br from-gray-900 to-black p-5 rounded-lg border border-gray-800">
+                      <p className="text-gray-400 text-center">Play a song to see audio-based recommendations</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
           
-          {/* Right Sidebar - TopPlay + Visualizer - only on home page, hidden on mobile */}
+          {/* Right Sidebar - TopPlay + Visualizer - only on home page, desktop only */}
           {location.pathname === '/' && (
             <>
-              {/* Spacer for fixed sidebar - hidden on mobile */}
+              {/* Spacer for fixed sidebar - desktop only */}
               <div className="hidden lg:block w-[280px] min-w-[280px]"></div>
               
-              {/* Fixed sidebar - hidden on mobile */}
+              {/* Fixed sidebar - desktop only */}
               <div className={`hidden lg:block fixed top-0 right-0 w-[280px] ${(activeSong?.albumTitle || activeSong?.gameTitle) ? 'h-[calc(100vh-7rem)]' : 'h-screen'} overflow-y-auto z-40 px-4 pt-4 pb-8`}>
                 {/* TopPlay */}
                 <div className="mb-4">
