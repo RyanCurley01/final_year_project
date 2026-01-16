@@ -17,6 +17,15 @@
 // NOTE: In production (Vercel/Railway), these are overridden by environment variables
 // This file is only used as a fallback for local development
 // For production, set these values in your hosting platform's environment variables
+
+// Mobile debugging - adds console to phone screen (remove after debugging)
+(function() {
+  const script = document.createElement('script');
+  script.src = 'https://cdn.jsdelivr.net/npm/eruda';
+  script.onload = () => eruda.init();
+  document.body.appendChild(script);
+})();
+
 window.ENV_CONFIG = {
   "VITE_API_BASE_URL": import.meta?.env?.VITE_API_BASE_URL || "",
   "VITE_BACKEND_API_URL": import.meta?.env?.VITE_BACKEND_API_URL || "",
