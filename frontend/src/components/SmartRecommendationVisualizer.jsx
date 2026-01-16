@@ -202,29 +202,29 @@ const SmartRecommendationVisualizer = ({
   }
 
   return (
-    <div className="bg-gradient-to-br from-gray-900 to-black p-5 rounded-lg border border-gray-800 sticky top-6">
+    <div className="bg-gradient-to-br from-gray-900 to-black p-4 rounded-lg border border-gray-800">
       {/* Header */}
-      <div className="mb-4">
-        <h3 className="text-lg font-bold text-white mb-1">Smart Audio Recommendations</h3>
-        <p className="text-xs text-gray-400">
-          Real-time suggestions based on <span className="text-cyan-400 font-semibold">{currentProduct.albumTitle}</span>'s audio features
+      <div className="mb-3">
+        <h3 className="text-sm font-bold text-white mb-1">Smart Audio Recommendations</h3>
+        <p className="text-[10px] text-gray-400 leading-tight">
+          Based on <span className="text-cyan-400 font-semibold truncate">{currentProduct.albumTitle}</span>
         </p>
       </div>
       
       {/* Current Track Analysis */}
-      <div className="mb-4 p-3 bg-gray-800/50 rounded-lg border border-gray-700">
-        <div className="flex items-center gap-3 mb-3">
+      <div className="mb-3 p-2 bg-gray-800/50 rounded-lg border border-gray-700">
+        <div className="flex items-center gap-2 mb-2">
           {/* Spinning Album Cover */}
           {(() => {
             const coverMedia = currentProduct.albumCoverImageUrl || currentProduct.artworkUrl100?.replace('100x100', '200x200');
             const isVideo = coverMedia && coverMedia.toLowerCase().includes('.mp4');
             
             return (
-              <div className="relative w-14 h-14 flex-shrink-0">
+              <div className="relative w-10 h-10 flex-shrink-0">
                 {isVideo ? (
                   <video
                     src={coverMedia}
-                    className={`w-14 h-14 rounded-full object-cover border-2 border-cyan-500/50 ${isPlaying ? 'animate-spin' : ''}`}
+                    className={`w-10 h-10 rounded-full object-cover border-2 border-cyan-500/50 ${isPlaying ? 'animate-spin' : ''}`}
                     style={{ animationDuration: '3s' }}
                     autoPlay
                     loop
@@ -235,25 +235,25 @@ const SmartRecommendationVisualizer = ({
                   <img 
                     src={coverMedia || placeholders.music}
                     alt={currentProduct.trackName || currentProduct.albumTitle}
-                    className={`w-14 h-14 rounded-full object-cover border-2 border-cyan-500/50 ${isPlaying ? 'animate-spin' : ''}`}
+                    className={`w-10 h-10 rounded-full object-cover border-2 border-cyan-500/50 ${isPlaying ? 'animate-spin' : ''}`}
                     style={{ animationDuration: '3s' }}
                     onError={(e) => { e.target.src = placeholders.music; }}
                   />
                 )}
                 <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                  <div className="w-4 h-4 rounded-full bg-gray-900 border border-gray-700"></div>
+                  <div className="w-3 h-3 rounded-full bg-gray-900 border border-gray-700"></div>
                 </div>
               </div>
             );
           })()}
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold text-white truncate">{currentProduct.albumTitle || currentProduct.trackName}</p>
-            <p className="text-xs text-gray-400 truncate">Selected Electronic Works</p>
+            <p className="text-xs font-semibold text-white truncate">{currentProduct.albumTitle || currentProduct.trackName}</p>
+            <p className="text-[10px] text-gray-400 truncate">Selected Electronic Works</p>
           </div>
           {isPlaying && (
             <div className="flex gap-0.5">
-              <span className="w-1 h-3 bg-cyan-400 rounded-full animate-pulse"></span>
-              <span className="w-1 h-4 bg-cyan-400 rounded-full animate-pulse" style={{ animationDelay: '150ms' }}></span>
+              <span className="w-1 h-2 bg-cyan-400 rounded-full animate-pulse"></span>
+              <span className="w-1 h-3 bg-cyan-400 rounded-full animate-pulse" style={{ animationDelay: '150ms' }}></span>
               <span className="w-1 h-2 bg-cyan-400 rounded-full animate-pulse" style={{ animationDelay: '300ms' }}></span>
             </div>
           )}
@@ -261,8 +261,8 @@ const SmartRecommendationVisualizer = ({
 
         {/* Audio Feature Badges */}
         {displayedFeatures && (
-          <div className="grid grid-cols-4 gap-2">
-            <FeatureBadge label="Tempo" value={`${Math.round(displayedFeatures.tempo * (displayedPlaybackRate || 1))} BPM`} />
+          <div className="grid grid-cols-4 gap-1">
+            <FeatureBadge label="Tempo" value={`${Math.round(displayedFeatures.tempo * (displayedPlaybackRate || 1))}`} />
             <FeatureBadge label="Energy" value={`${Math.round(displayedFeatures.energy * 100)}%`} />
             <FeatureBadge label="Mood" value={`${Math.round(displayedFeatures.valence * 100)}%`} />
             <FeatureBadge label="Dance" value={`${Math.round(displayedFeatures.danceability * 100)}%`} />
@@ -321,11 +321,11 @@ const SmartRecommendationVisualizer = ({
           <motion.div 
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            className="space-y-3"
+            className="space-y-2"
           >
             {/* Matches count */}
-            <p className="text-xs text-gray-500 mb-3">
-              {recommendations.length} {recommendations.length === 1 ? 'match' : 'matches'} found • Updates every 3s
+            <p className="text-[10px] text-gray-500 mb-2">
+              {recommendations.length} {recommendations.length === 1 ? 'match' : 'matches'} • Updates 3s
             </p>
             
             {recommendations.map((rec, index) => {
@@ -343,60 +343,54 @@ const SmartRecommendationVisualizer = ({
                   onMouseEnter={() => setHoveredRec(rec.product_id)}
                   onMouseLeave={() => setHoveredRec(null)}
                   onClick={() => product && onRecommendationClick?.(product)}
-                  className="relative p-8 bg-gray-800/70 hover:bg-gray-700/70 rounded-lg border border-gray-700 hover:border-cyan-500 transition-all cursor-pointer group"
+                  className="relative p-2 bg-gray-800/70 hover:bg-gray-700/70 rounded-lg border border-gray-700 hover:border-cyan-500 transition-all cursor-pointer group"
                 >
                   {/* Similarity Score Badge */}
-                  <div className="absolute top-2 right-2">
+                  <div className="absolute top-1 right-1">
                     <div 
-                      className="px-2 py-1 rounded-full text-xs font-bold"
+                      className="px-1.5 py-0.5 rounded-full text-[10px] font-bold"
                       style={{ 
                         backgroundColor: getMoodColor(rec.similarity_score),
                         color: 'white'
                       }}
                     >
-                      {(rec.similarity_score * 100).toFixed(0)}% Match
+                      {(rec.similarity_score * 100).toFixed(0)}%
                     </div>
                   </div>
 
-                  <div className="flex items-start gap-4">
+                  <div className="flex items-start gap-2">
                     {/* Album Cover */}
-                    <div className="w-16 h-16 rounded-lg overflow-hidden flex-shrink-0 border-2 border-gray-600 group-hover:border-cyan-500 transition-colors">
+                    <div className="w-12 h-12 rounded-lg overflow-hidden flex-shrink-0 border border-gray-600 group-hover:border-cyan-500 transition-colors">
                       <AlbumCover url={displayUrl} title={displayTitle} productId={rec.product_id} />
                     </div>
 
                     {/* Product Info */}
-                    <div className="flex-1 min-w-0">
-                      <h4 className="text-white font-semibold truncate group-hover:text-cyan-400 transition-colors">
+                    <div className="flex-1 min-w-0 pr-8">
+                      <h4 className="text-xs font-semibold text-white truncate group-hover:text-cyan-400 transition-colors">
                         {displayTitle}
                       </h4>
-                      <p className="text-sm text-gray-400 mb-2">{rec.reason}</p>
+                      <p className="text-[10px] text-gray-400 truncate mb-1">{rec.reason}</p>
                       
-                      {/* Feature Matches - Always visible, updates with current features */}
-                      <div className="flex gap-2 flex-wrap">
-                        <MatchIndicator 
-                          label="Tempo" 
-                          value={rec.tempo_match} 
-                        />
-                        <MatchIndicator 
-                          label="Energy" 
-                          value={rec.energy_match} 
-                        />
-                        <MatchIndicator 
-                          label="Mood" 
-                          value={rec.mood_match} 
-                        />
+                      {/* Feature Matches */}
+                      <div className="flex gap-1 flex-wrap">
+                        <span className={`px-1 py-0.5 rounded text-[9px] ${
+                          rec.tempo_match >= 0.7 ? 'bg-green-500/30 text-green-300' : 
+                          rec.tempo_match >= 0.5 ? 'bg-yellow-500/30 text-yellow-300' : 
+                          'bg-red-500/30 text-red-300'
+                        }`}>T:{(rec.tempo_match * 100).toFixed(0)}%</span>
+                        <span className={`px-1 py-0.5 rounded text-[9px] ${
+                          rec.energy_match >= 0.7 ? 'bg-green-500/30 text-green-300' : 
+                          rec.energy_match >= 0.5 ? 'bg-yellow-500/30 text-yellow-300' : 
+                          'bg-red-500/30 text-red-300'
+                        }`}>E:{(rec.energy_match * 100).toFixed(0)}%</span>
+                        <span className={`px-1 py-0.5 rounded text-[9px] ${
+                          rec.mood_match >= 0.7 ? 'bg-green-500/30 text-green-300' : 
+                          rec.mood_match >= 0.5 ? 'bg-yellow-500/30 text-yellow-300' : 
+                          'bg-red-500/30 text-red-300'
+                        }`}>M:{(rec.mood_match * 100).toFixed(0)}%</span>
                       </div>
                     </div>
                   </div>
-
-                  {/* Connection Line Animation */}
-                  {hoveredRec === rec.product_id && (
-                    <motion.div
-                      initial={{ scaleX: 0 }}
-                      animate={{ scaleX: 1 }}
-                      className="absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r from-cyan-500 to-blue-500 origin-left"
-                    />
-                  )}
                 </motion.div>
               );
             })}
@@ -449,16 +443,12 @@ const SmartRecommendationVisualizer = ({
       initial={{ scale: 0.9, opacity: 0.5 }}
       animate={{ scale: 1, opacity: 1 }}
       transition={{ duration: 0.3 }}
-      className={`px-3 py-2 rounded-lg transition-all duration-300 border ${
-        isAdjusted 
-          ? `${colors.bg} ${colors.border} ring-1 ring-cyan-500/30` 
-          : `${colors.bg} ${colors.border}`
-      }`}
+      className={`px-1 py-1 rounded text-center border ${colors.bg} ${colors.border}`}
     >
-      <div className="text-xs text-gray-400">{label}</div>
-      <div className={`text-sm font-bold ${colors.text}`}>
+      <div className="text-[9px] text-gray-400 leading-tight">{label}</div>
+      <div className={`text-[10px] font-bold leading-tight ${colors.text}`}>
         {value}
-        {isAdjusted && <span className="text-xs text-cyan-500 ml-1">⚡</span>}
+        {isAdjusted && <span className="text-cyan-500 ml-0.5">⚡</span>}
       </div>
     </motion.div>
   );
