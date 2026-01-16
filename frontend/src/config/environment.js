@@ -91,8 +91,17 @@ class EnvironmentConfig {
     } else if (isNgrok) {
       config.backendApiUrl = '/proxy/backend';
     } else if (isProduction) {
-      config.backendApiUrl = '/api/accounts';
-      console.warn('⚠️ Production deployment detected but VITE_BACKEND_API_URL not set! Using /api/accounts as fallback.');
+      // In production, try to construct URL from window location  
+      const protocol = window.location.protocol;
+      
+      if (hostname.includes('vercel.app')) {
+        config.backendApiUrl = viteEnv.VITE_BACKEND_API_URL || '/api/accounts';
+      } else if (hostname.includes('railway.app') || hostname.includes('up.railway.app')) {
+        config.backendApiUrl = viteEnv.VITE_BACKEND_API_URL || `${protocol}//${hostname}/api/accounts`;
+      } else {
+        config.backendApiUrl = viteEnv.VITE_BACKEND_API_URL || '/api/accounts';
+      }
+      console.warn('⚠️ Production deployment detected but VITE_BACKEND_API_URL not set! Using fallback:', config.backendApiUrl);
     } else {
       config.backendApiUrl = 'http://localhost:8080';
     }
@@ -107,8 +116,24 @@ class EnvironmentConfig {
     } else if (isNgrok) {
       config.productsApiUrl = '/proxy/products';
     } else if (isProduction) {
-      config.productsApiUrl = '/api/products';
-      console.warn('⚠️ Production deployment detected but VITE_PRODUCTS_API_URL not set! Using /api/products as fallback.');
+      // In production, try to construct URL from window location
+      // Check if we're on a standard deployment (vercel, netlify, railway, render, etc.)
+      const protocol = window.location.protocol;
+      const port = window.location.port;
+      
+      // If there's a specific products service URL pattern, use it
+      // Otherwise fallback to relative path (requires API gateway/reverse proxy)
+      if (hostname.includes('vercel.app')) {
+        // Vercel deployment - use environment API endpoint
+        config.productsApiUrl = viteEnv.VITE_PRODUCTS_API_URL || '/api/products';
+      } else if (hostname.includes('railway.app') || hostname.includes('up.railway.app')) {
+        // Railway deployment - each service should have its own URL
+        config.productsApiUrl = viteEnv.VITE_PRODUCTS_API_URL || `${protocol}//${hostname}/api/products`;
+      } else {
+        // Generic production deployment
+        config.productsApiUrl = viteEnv.VITE_PRODUCTS_API_URL || '/api/products';
+      }
+      console.warn('⚠️ Production deployment detected but VITE_PRODUCTS_API_URL not set! Using fallback:', config.productsApiUrl);
     } else {
       config.productsApiUrl = 'http://localhost:8081';
     }

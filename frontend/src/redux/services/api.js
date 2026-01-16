@@ -169,14 +169,20 @@ export const apiCall = async (url, options = {}) => {
       headers['ngrok-skip-browser-warning'] = 'true';
     }
     
+    console.log('🌐 API Call:', { url, method: options.method || 'GET', headers });
+    
     const response = await fetch(url, {
       ...options,
       headers,
     });
 
+    console.log('📡 API Response:', { url, status: response.status, statusText: response.statusText });
+
     if (!response.ok) {
       const error = await response.json().catch(() => ({}));
-      throw new Error(error.message || `HTTP ${response.status}: ${response.statusText}`);
+      const errorMessage = error.message || `HTTP ${response.status}: ${response.statusText}`;
+      console.error('❌ API Error:', { url, status: response.status, error: errorMessage });
+      throw new Error(errorMessage);
     }
 
     // Handle 204 No Content
@@ -186,7 +192,7 @@ export const apiCall = async (url, options = {}) => {
 
     return await response.json();
   } catch (error) {
-    console.error('API call failed:', error);
+    console.error('❌ API call failed:', { url, error: error.message, stack: error.stack });
     throw error;
   }
 };
