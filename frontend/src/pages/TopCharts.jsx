@@ -6,6 +6,7 @@ import PlayPause from '../components/PlayPause';
 import { useAudioFeatures } from '../context/AudioFeaturesContext';
 import { setActiveSong, playPause } from '../redux/features/playerSlice';
 import { productService } from '../redux/services';
+import { FaPauseCircle, FaPlayCircle } from 'react-icons/fa';
 
 const ARTISTS = ['Aphex Twin', 'Boards of Canada', 'Squarepusher'];
 
@@ -59,19 +60,54 @@ const SongCard = ({ song, isPlaying, activeSong, onPlay, onPause, index }) => {
   const isThisSongActive = activeSong?.id === song.id;
   const albumArt = song.artworkUrl100?.replace('100x100', '600x600') || fallbackImage;
   
+  const [isHovered, setIsHovered] = useState(false);
+
   return (
     <div className="flex flex-col p-4 bg-white/5 backdrop-blur-sm animate-slideup rounded-lg cursor-pointer hover:bg-white/10 transition-all">
-      <div className="relative w-full aspect-square group">
-        <img src={albumArt} alt={song.trackName} className="w-full h-full rounded-lg object-cover" onError={(e) => { e.target.src = fallbackImage; }} />
+      <div 
+        className="relative w-full aspect-square"
+        onMouseEnter={() => setIsHovered(true)}
+        onMouseLeave={() => setIsHovered(false)}
+      >      
+        {/* Album Art */}
+        <img 
+          src={albumArt} 
+          alt={song.trackName} 
+          className="w-full h-full rounded-lg object-cover" 
+          onError={(e) => { e.target.src = fallbackImage; }} 
+        />
         
+        {/* Play/Pause overlay - shows on hover */}
         {song.previewUrl && (
-          <div className={`absolute inset-0 rounded-lg flex justify-center items-center bg-black/50 transition-opacity ${isThisSongActive && isPlaying ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 group-active:opacity-100'}`}>
-            <PlayPause isPlaying={isPlaying && isThisSongActive} activeSong={activeSong} handlePause={onPause} handlePlay={() => onPlay(song, index)} song={song} />
+          <div 
+            className={`absolute inset-0 rounded-lg flex justify-center items-center z-20 ${isHovered ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
+            style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}
+            onClick={(e) => {
+              e.stopPropagation();
+              setIsHovered(false);
+              if (isPlaying && isThisSongActive) {
+                onPause();
+              } else {
+                onPlay(song, index);
+              }
+            }}
+          >
+            {isPlaying && isThisSongActive ? (
+              <FaPauseCircle 
+                size={45}
+                className="text-white drop-shadow-lg cursor-pointer hover:scale-110 transition-transform"
+              />
+            ) : (
+              <FaPlayCircle 
+                size={45}
+                className="text-white drop-shadow-lg cursor-pointer hover:scale-110 transition-transform"
+              />
+            )}
           </div>
         )}
 
-        <div className={`absolute top-2 left-2 px-2 py-1 ${getArtistBadgeColor(song.artistName)} rounded-full text-[10px] font-bold text-white shadow-lg max-w-[55%]`}>
-          <p className="truncate">{song.artistName}</p>
+        <div className={`absolute top-2 left-2 px-2 py-1 ${getArtistBadgeColor(song.artistName)} rounded-full text-[12px] font-bold text-white shadow-lg max-w-[calc(100%-5rem)] truncate`}>
+          {song.artistName}
         </div>
 
         {/* Popularity Rank Number */}
