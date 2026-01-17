@@ -55,6 +55,40 @@ export const getServiceUrl = (service) => {
   const runtimeUrl = runtimeEnv[envVarName];
   const viteUrl = viteEnv[envVarName];
   
+  // IMPORTANT: Check localhost FIRST - always use localhost URLs when running locally
+  // This prevents CORS issues from trying to use production URLs during local development
+  if (config.isLocalhost) {
+    const url = `http://localhost:${port}`;
+    console.log(`🌐 Service URL for ${service} (localhost):`, url);
+    return url;
+  }
+  
+  // In Codespaces, each service has its own forwarded port
+  if (envConfig.isCodespaces()) {
+    const url = `https://${config.codespaceName}-${port}.${config.codespacesDomain}`;
+    console.log(`🌐 Service URL for ${service} (codespaces):`, url);
+    return url;
+  }
+  
+  // In ngrok mode, use proxy paths that map to Docker container names
+  if (config.isNgrok) {
+    const proxyMap = {
+      8080: '/proxy/backend',
+      8081: '/proxy/products',
+      8082: '/proxy/orders',
+      8083: '/proxy/payments',
+      8084: '/proxy/stock',
+      8085: '/proxy/wishlist',
+      8086: '/proxy/order-items',
+      8087: '/proxy/customer-summary',
+      8088: '/proxy/sold-products',
+      8089: '/proxy/sold-products',
+    };
+    const url = proxyMap[port] || `/proxy/backend`;
+    console.log(`🌐 Service URL for ${service} (ngrok):`, url);
+    return url;
+  }
+  
   // In production, prefer env vars over localhost URLs
   if (config.isProduction) {
     // Try runtime env first, then vite env
@@ -73,44 +107,10 @@ export const getServiceUrl = (service) => {
     return fallbackUrl;
   }
   
-  // Use service-specific env var if available and not localhost in non-local env
-  if (runtimeUrl) {
-    console.log(`🌐 Service URL for ${service} (runtime env):`, runtimeUrl);
-    return runtimeUrl;
-  }
-  if (viteUrl) {
-    console.log(`🌐 Service URL for ${service} (vite env):`, viteUrl);
-    return viteUrl;
-  }
-  
-  if (envConfig.isCodespaces()) {
-    // In Codespaces, each service has its own forwarded port
-    const url = `https://${config.codespaceName}-${port}.${config.codespacesDomain}`;
-    console.log(`🌐 Service URL for ${service}:`, url);
-    return url;
-  } else if (config.isNgrok) {
-    // In ngrok mode, use proxy paths that map to Docker container names
-    const proxyMap = {
-      8080: '/proxy/backend',
-      8081: '/proxy/products',
-      8082: '/proxy/orders',
-      8083: '/proxy/payments',
-      8084: '/proxy/stock',
-      8085: '/proxy/wishlist',
-      8086: '/proxy/order-items',
-      8087: '/proxy/customer-summary',
-      8088: '/proxy/sold-products',
-      8089: '/proxy/sold-products',
-    };
-    const url = proxyMap[port] || `/proxy/backend`;
-    console.log(`🌐 Service URL for ${service} (ngrok):`, url);
-    return url;
-  } else {
-    // In localhost, services might be on different ports
-    const url = `http://localhost:${port}`;
-    console.log(`🌐 Service URL for ${service}:`, url);
-    return url;
-  }
+  // Fallback to localhost
+  const url = `http://localhost:${port}`;
+  console.log(`🌐 Service URL for ${service} (fallback):`, url);
+  return url;
 };
 
 // Helper function for authenticated requests

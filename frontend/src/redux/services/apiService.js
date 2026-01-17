@@ -9,9 +9,14 @@ const isNgrokHost = () => {
 };
 
 const getAudioServiceBaseUrl = () => {
-  // Check for environment variable first (production/Vercel)
-  if (import.meta.env.VITE_AUDIO_SERVICE_URL) {
-    return `${import.meta.env.VITE_AUDIO_SERVICE_URL}/api`;
+  const hostname = window.location.hostname;
+  const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1';
+  
+  // IMPORTANT: Check localhost FIRST - always use localhost URLs when running locally
+  // This prevents CORS issues from trying to use production URLs during local development
+  if (isLocalhost) {
+    console.log('🎵 Using localhost for audio service');
+    return 'http://localhost:5000/api';
   }
   
   if (isNgrokHost()) {
@@ -20,13 +25,17 @@ const getAudioServiceBaseUrl = () => {
   }
   
   // Check for Codespaces
-  const hostname = window.location.hostname;
   if (hostname.includes('app.github.dev')) {
     const parts = hostname.split('.');
     const firstPart = parts[0];
     const lastDashIndex = firstPart.lastIndexOf('-');
     const codespaceName = firstPart.substring(0, lastDashIndex);
     return `https://${codespaceName}-5000.app.github.dev/api`;
+  }
+  
+  // In production, check for environment variable
+  if (import.meta.env.VITE_AUDIO_SERVICE_URL) {
+    return `${import.meta.env.VITE_AUDIO_SERVICE_URL}/api`;
   }
   
   // Use environment configuration (handles production and local)

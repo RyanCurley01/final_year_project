@@ -62,30 +62,45 @@ class EnvironmentConfig {
     const isLocalhostUrl = (url) => url && (url.includes('localhost') || url.includes('127.0.0.1'));
 
     // API Base URL (Audio Service - port 5000)
-    // Priority: runtime env > vite env (if not localhost in production) > auto-detect
-    if (runtimeEnv.VITE_API_BASE_URL && !(isProduction && isLocalhostUrl(runtimeEnv.VITE_API_BASE_URL))) {
-      config.apiBaseUrl = runtimeEnv.VITE_API_BASE_URL;
-    } else if (viteEnv.VITE_API_BASE_URL && !(isProduction && isLocalhostUrl(viteEnv.VITE_API_BASE_URL))) {
-      config.apiBaseUrl = viteEnv.VITE_API_BASE_URL;
+    // Priority: current environment > runtime env > vite env
+    if (isLocalhost) {
+      // When running on localhost, ALWAYS use localhost URLs (ignore build-time env vars)
+      // Only respect runtime config if it's explicitly set to a non-localhost URL
+      if (runtimeEnv.VITE_API_BASE_URL && !isLocalhostUrl(runtimeEnv.VITE_API_BASE_URL)) {
+        config.apiBaseUrl = runtimeEnv.VITE_API_BASE_URL;
+      } else {
+        // Force localhost when running locally, regardless of build-time env vars
+        config.apiBaseUrl = 'http://localhost:5000';
+      }
     } else if (isCodespaces && codespaceName) {
       config.apiBaseUrl = `https://${codespaceName}-5000.${codespacesDomain}`;
     } else if (isNgrok) {
       config.apiBaseUrl = '/proxy/audio';
-    } else if (viteEnv.VITE_AUDIO_SERVICE_URL) {
-      config.apiBaseUrl = viteEnv.VITE_AUDIO_SERVICE_URL;
     } else if (isProduction) {
-      // In production without proper config, use relative path (assumes same origin or API gateway)
-      config.apiBaseUrl = '/api';
-      console.warn('⚠️ Production deployment detected but VITE_API_BASE_URL not set! Using /api as fallback.');
+      // In production, use configured URLs or fallback
+      if (runtimeEnv.VITE_API_BASE_URL) {
+        config.apiBaseUrl = runtimeEnv.VITE_API_BASE_URL;
+      } else if (viteEnv.VITE_API_BASE_URL && !isLocalhostUrl(viteEnv.VITE_API_BASE_URL)) {
+        config.apiBaseUrl = viteEnv.VITE_API_BASE_URL;
+      } else if (viteEnv.VITE_AUDIO_SERVICE_URL && !isLocalhostUrl(viteEnv.VITE_AUDIO_SERVICE_URL)) {
+        config.apiBaseUrl = viteEnv.VITE_AUDIO_SERVICE_URL;
+      } else {
+        config.apiBaseUrl = '/api';
+        console.warn('⚠️ Production deployment detected but VITE_API_BASE_URL not set! Using /api as fallback.');
+      }
     } else {
       config.apiBaseUrl = 'http://localhost:5000';
     }
 
     // Backend API URL (Accounts Service - port 8080)
-    if (runtimeEnv.VITE_BACKEND_API_URL && !(isProduction && isLocalhostUrl(runtimeEnv.VITE_BACKEND_API_URL))) {
-      config.backendApiUrl = runtimeEnv.VITE_BACKEND_API_URL;
-    } else if (viteEnv.VITE_BACKEND_API_URL && !(isProduction && isLocalhostUrl(viteEnv.VITE_BACKEND_API_URL))) {
-      config.backendApiUrl = viteEnv.VITE_BACKEND_API_URL;
+    if (isLocalhost) {
+      // When running on localhost, ALWAYS use localhost URLs (ignore build-time env vars)
+      if (runtimeEnv.VITE_BACKEND_API_URL && !isLocalhostUrl(runtimeEnv.VITE_BACKEND_API_URL)) {
+        config.backendApiUrl = runtimeEnv.VITE_BACKEND_API_URL;
+      } else {
+        // Force localhost when running locally, regardless of build-time env vars
+        config.backendApiUrl = 'http://localhost:8080';
+      }
     } else if (isCodespaces && codespaceName) {
       config.backendApiUrl = `https://${codespaceName}-8080.${codespacesDomain}`;
     } else if (isNgrok) {
@@ -94,12 +109,16 @@ class EnvironmentConfig {
       // In production, try to construct URL from window location  
       const protocol = window.location.protocol;
       
-      if (hostname.includes('vercel.app')) {
-        config.backendApiUrl = viteEnv.VITE_BACKEND_API_URL || '/api/accounts';
+      if (runtimeEnv.VITE_BACKEND_API_URL) {
+        config.backendApiUrl = runtimeEnv.VITE_BACKEND_API_URL;
+      } else if (viteEnv.VITE_BACKEND_API_URL && !isLocalhostUrl(viteEnv.VITE_BACKEND_API_URL)) {
+        config.backendApiUrl = viteEnv.VITE_BACKEND_API_URL;
+      } else if (hostname.includes('vercel.app')) {
+        config.backendApiUrl = '/api/accounts';
       } else if (hostname.includes('railway.app') || hostname.includes('up.railway.app')) {
-        config.backendApiUrl = viteEnv.VITE_BACKEND_API_URL || `${protocol}//${hostname}/api/accounts`;
+        config.backendApiUrl = `${protocol}//${hostname}/api/accounts`;
       } else {
-        config.backendApiUrl = viteEnv.VITE_BACKEND_API_URL || '/api/accounts';
+        config.backendApiUrl = '/api/accounts';
       }
       console.warn('⚠️ Production deployment detected but VITE_BACKEND_API_URL not set! Using fallback:', config.backendApiUrl);
     } else {
@@ -107,31 +126,32 @@ class EnvironmentConfig {
     }
 
     // Products API URL (Products Service - port 8081)
-    if (runtimeEnv.VITE_PRODUCTS_API_URL && !(isProduction && isLocalhostUrl(runtimeEnv.VITE_PRODUCTS_API_URL))) {
-      config.productsApiUrl = runtimeEnv.VITE_PRODUCTS_API_URL;
-    } else if (viteEnv.VITE_PRODUCTS_API_URL && !(isProduction && isLocalhostUrl(viteEnv.VITE_PRODUCTS_API_URL))) {
-      config.productsApiUrl = viteEnv.VITE_PRODUCTS_API_URL;
+    if (isLocalhost) {
+      // When running on localhost, ALWAYS use localhost URLs (ignore build-time env vars)
+      if (runtimeEnv.VITE_PRODUCTS_API_URL && !isLocalhostUrl(runtimeEnv.VITE_PRODUCTS_API_URL)) {
+        config.productsApiUrl = runtimeEnv.VITE_PRODUCTS_API_URL;
+      } else {
+        // Force localhost when running locally, regardless of build-time env vars
+        config.productsApiUrl = 'http://localhost:8081';
+      }
     } else if (isCodespaces && codespaceName) {
       config.productsApiUrl = `https://${codespaceName}-8081.${codespacesDomain}`;
     } else if (isNgrok) {
       config.productsApiUrl = '/proxy/products';
     } else if (isProduction) {
       // In production, try to construct URL from window location
-      // Check if we're on a standard deployment (vercel, netlify, railway, render, etc.)
       const protocol = window.location.protocol;
-      const port = window.location.port;
       
-      // If there's a specific products service URL pattern, use it
-      // Otherwise fallback to relative path (requires API gateway/reverse proxy)
-      if (hostname.includes('vercel.app')) {
-        // Vercel deployment - use environment API endpoint
-        config.productsApiUrl = viteEnv.VITE_PRODUCTS_API_URL || '/api/products';
+      if (runtimeEnv.VITE_PRODUCTS_API_URL) {
+        config.productsApiUrl = runtimeEnv.VITE_PRODUCTS_API_URL;
+      } else if (viteEnv.VITE_PRODUCTS_API_URL && !isLocalhostUrl(viteEnv.VITE_PRODUCTS_API_URL)) {
+        config.productsApiUrl = viteEnv.VITE_PRODUCTS_API_URL;
+      } else if (hostname.includes('vercel.app')) {
+        config.productsApiUrl = '/api/products';
       } else if (hostname.includes('railway.app') || hostname.includes('up.railway.app')) {
-        // Railway deployment - each service should have its own URL
-        config.productsApiUrl = viteEnv.VITE_PRODUCTS_API_URL || `${protocol}//${hostname}/api/products`;
+        config.productsApiUrl = `${protocol}//${hostname}/api/products`;
       } else {
-        // Generic production deployment
-        config.productsApiUrl = viteEnv.VITE_PRODUCTS_API_URL || '/api/products';
+        config.productsApiUrl = '/api/products';
       }
       console.warn('⚠️ Production deployment detected but VITE_PRODUCTS_API_URL not set! Using fallback:', config.productsApiUrl);
     } else {
