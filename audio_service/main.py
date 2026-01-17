@@ -392,6 +392,7 @@ class AudioSimilarityResult(BaseModel):
     tempo_match: float
     energy_match: float
     mood_match: float
+    danceability_match: float
     genre_match: bool
     reason: str
 
@@ -511,11 +512,11 @@ async def get_realtime_recommendations(request: RealtimeRecommendationRequest):
             )
             
             if dominant_feature[0] == "tempo":
-                reason = f"Matching rhythm ({product['tempo']} BPM) and energy level"
+                reason = f"Matching rhythm ({product['tempo']} BPM)"
             elif dominant_feature[0] == "energy":
                 reason = f"Similar intensity ({product['energy']:.2f}) and vibe"
             else:
-                reason = f"Comparable mood and emotional tone"
+                reason = f"Comparable mood"
             
             recommendations.append(AudioSimilarityResult(
                 product_id=product["id"],
@@ -523,6 +524,7 @@ async def get_realtime_recommendations(request: RealtimeRecommendationRequest):
                 tempo_match=round(tempo_match, 3),
                 energy_match=round(energy_match, 3),
                 mood_match=round(mood_match, 3),
+                danceability_match=round(dance_match, 3),
                 genre_match=product["genre"] == "Electronic",
                 reason=reason
             ))

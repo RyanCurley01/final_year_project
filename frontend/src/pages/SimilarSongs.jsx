@@ -97,8 +97,8 @@ const FeatureBadge = ({ label, value }) => {
   const colors = getFeatureColor(label, value);
   return (
     <div className={`rounded-md px-1 py-1 text-center border ${colors.bg} ${colors.border}`}>
-      <p className="text-[9px] text-gray-400">{label}</p>
-      <p className={`text-[10px] font-bold ${colors.text}`}>{value}</p>
+      <div className="text-[12px] text-gray-400 leading-tight">{label}</div>
+      <div className={`text-[12px] font-bold leading-tight ${colors.text}`}>{value}</div>
     </div>
   );
 };
@@ -212,13 +212,21 @@ const SimilarSongs = () => {
       // Weighted similarity score
       const similarityScore = (tempoMatch * 0.3) + (energyMatch * 0.25) + (moodMatch * 0.25) + (danceMatch * 0.2);
       
-      // Determine match reason based on strongest match
-      const reasons = [];
-      if (tempoMatch > 0.8) reasons.push('Similar tempo');
-      if (energyMatch > 0.7) reasons.push('Similar energy');
-      if (moodMatch > 0.7) reasons.push('Similar mood');
-      if (danceMatch > 0.7) reasons.push('Similar rhythm');
-      const matchReason = reasons.length > 0 ? reasons.join(', ') : 'Audio similarity';
+      // Generate contextual reason based on dominant feature (backend-style)
+      const dominantFeature = [
+        ['tempo', tempoMatch],
+        ['energy', energyMatch],
+        ['mood', moodMatch]
+      ].reduce((max, curr) => curr[1] > max[1] ? curr : max);
+      
+      let matchReason;
+      if (dominantFeature[0] === 'tempo') {
+        matchReason = `Matching rhythm (${Math.round(pseudoTempo)} BPM)`;
+      } else if (dominantFeature[0] === 'energy') {
+        matchReason = `Similar intensity (${(pseudoEnergy * 100).toFixed(0)}%) and vibe`;
+      } else {
+        matchReason = 'Comparable mood';
+      }
       
       return {
         ...song,
@@ -453,7 +461,7 @@ const SimilarSongs = () => {
       </div>
 
       {/* Right Sidebar - Real-time Recommendations with Audio Feature Badges */}
-      <div className="w-full lg:w-[320px] lg:min-w-[320]">
+      <div className="w-full lg:w-[330px] lg:min-w-[330px]">
         {/* Empty State - when no song is playing */}
         {(!activeSong || Object.keys(activeSong).length === 0) && (
           <div className="bg-gradient-to-br from-gray-900 to-black p-4 rounded-lg border border-gray-800">
@@ -464,35 +472,35 @@ const SimilarSongs = () => {
         {/* Active State - when a song is playing */}
         {activeSong && Object.keys(activeSong).length > 0 && (
         <div className="bg-gradient-to-br from-gray-900 to-black p-4 rounded-lg border border-gray-800">
-          <h3 className="text-sm font-bold text-white mb-1">Similar Artist Tracks</h3>
-          <p className="text-[10px] text-gray-400 mb-2">
-            Based on <span className="text-cyan-400 truncate">{activeSong.trackName || activeSong.albumTitle}</span>
+          <h4 className="text-sm font-bold text-white mb-1">Similar Artist Tracks</h4>
+          <p className="text-[12px] text-gray-400 leading-tight">
+            Based on <span className="text-cyan-400 font-semibold truncate">{activeSong.trackName || activeSong.albumTitle}</span>
           </p>
 
           {/* Current Track Analysis */}
             <div className="mb-3 p-2 bg-gray-800/50 rounded-lg border border-gray-700">
               <div className="flex items-center gap-2 mb-2">
                 {/* Spinning Album Cover */}
-                <div className="relative w-10 h-10 flex-shrink-0">
+                <div className="relative w-12 h-16 flex-shrink-0">
                   <img 
                     src={activeSong.artworkUrl100?.replace('100x100', '200x200') || activeSong.albumCoverImageUrl || fallbackImage}
                     alt={activeSong.trackName || activeSong.albumTitle}
-                    className={`w-10 h-10 rounded-full object-cover border-2 border-cyan-500/50 ${isPlaying ? 'animate-spin' : ''}`}
+                    className={`w-12 h-12 rounded-full object-cover border-2 border-cyan-500/50 ${isPlaying ? 'animate-spin' : ''}`}
                     style={{ animationDuration: '3s' }}
                     onError={(e) => { e.target.src = fallbackImage; }}
                   />
-                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none -mt-4">
                     <div className="w-3 h-3 rounded-full bg-gray-900 border border-gray-700"></div>
                   </div>
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-xs font-semibold text-white truncate">{activeSong.trackName || activeSong.albumTitle}</p>
-                  <p className="text-[10px] text-gray-400 truncate">{activeSong.artistName || 'Unknown Artist'}</p>
+                  <p className="text-[17px] font-semibold text-white truncate leading-tight">{activeSong.trackName || activeSong.albumTitle}</p>
+                  <p className="text-[12px] text-gray-400 truncate -mt-3">{activeSong.artistName || 'Unknown Artist'}</p>
                 </div>
                 {isPlaying && (
                   <div className="flex gap-0.5">
-                    <span className="w-1 h-3 bg-cyan-400 rounded-full animate-pulse"></span>
-                    <span className="w-1 h-4 bg-cyan-400 rounded-full animate-pulse" style={{ animationDelay: '150ms' }}></span>
+                    <span className="w-1 h-2 bg-cyan-400 rounded-full animate-pulse"></span>
+                    <span className="w-1 h-3 bg-cyan-400 rounded-full animate-pulse" style={{ animationDelay: '150ms' }}></span>
                     <span className="w-1 h-2 bg-cyan-400 rounded-full animate-pulse" style={{ animationDelay: '300ms' }}></span>
                   </div>
                 )}
@@ -501,22 +509,22 @@ const SimilarSongs = () => {
               {/* Audio Feature Badges */}
               {displayedFeatures && (
                 <div className="grid grid-cols-4 gap-1">
-                  <FeatureBadge label="T" value={`${Math.round(displayedFeatures.tempo * (displayedPlaybackRate || 1))}`} />
-                  <FeatureBadge label="E" value={`${Math.round(displayedFeatures.energy * 100)}%`} />
-                  <FeatureBadge label="M" value={`${Math.round(displayedFeatures.valence * 100)}%`} />
-                  <FeatureBadge label="D" value={`${Math.round(displayedFeatures.danceability * 100)}%`} />
+                  <FeatureBadge label="Tempo" value={`${Math.round((displayedFeatures.tempo || 0) * (displayedPlaybackRate || 1))}`} />
+                  <FeatureBadge label="Energy" value={`${Math.round((displayedFeatures.energy || 0) * 100)}%`} />
+                  <FeatureBadge label="Mood" value={`${Math.round((displayedFeatures.valence || 0) * 100)}%`} />
+                  <FeatureBadge label="Dance" value={`${Math.round((displayedFeatures.danceability || 0) * 100)}%`} />
                 </div>
               )}
               
               {!displayedFeatures && (
-                <p className="text-xs text-gray-500 text-center">Analyzing audio features...</p>
+                <p className="text-gray-500 text-center">Analyzing audio features...</p>
               )}
             </div>
 
           {/* Recommendations List */}
           {activeSong && recommendations.length > 0 && (
             <>
-              <p className="text-[10px] text-gray-500 mb-2">{recommendations.length} matches • Updates 3s</p>
+              <p className="text-[12px] text-gray-500 mb-2">{recommendations.length} matches • Updates 3s</p>
               <div className="space-y-2">
                 {recommendations.map((rec) => (
                   <div 
@@ -538,10 +546,10 @@ const SimilarSongs = () => {
                       {/* Product Info */}
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center justify-between gap-1">
-                          <h4 className="text-white font-semibold truncate group-hover:text-cyan-400 transition-colors text-xs">
+                          <h4 className="text-white font-semibold truncate group-hover:text-cyan-400 transition-colors text-[12px]">
                             {rec.trackName}
                           </h4>
-                          <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-bold text-white flex-shrink-0 ${
+                          <span className={`px-1.5 py-0.5 rounded-full text-[12px] font-bold text-white flex-shrink-0 ${
                             rec.similarity_score >= 0.7 ? 'bg-green-500' : 
                             rec.similarity_score >= 0.5 ? 'bg-yellow-500' : 
                             'bg-red-500'
@@ -549,30 +557,37 @@ const SimilarSongs = () => {
                             {Math.round(rec.similarity_score * 100)}%
                           </span>
                         </div>
-                        <p className="text-[10px] text-gray-400 truncate">{rec.artistName}</p>
+                        <p className="text-[12px] text-gray-400 truncate">{rec.match_reason}</p>
                         
                         {/* Feature Matches */}
-                        <div className="flex gap-1 mt-1">
-                          <span className={`px-1 py-0.5 rounded text-[9px] ${
+                        <div className="flex gap-1 mt-1 flex-wrap">
+                          <span className={`px-1 py-0.5 rounded text-[12px] ${
                             rec.tempo_match >= 0.7 ? 'bg-green-500/30 text-green-300' : 
                             rec.tempo_match >= 0.5 ? 'bg-yellow-500/30 text-yellow-300' : 
                             'bg-red-500/30 text-red-300'
                           }`}>
-                            T:{Math.round(rec.tempo_match * 100)}%
+                            Tempo:{Math.round(rec.tempo_match * 100)}%
                           </span>
-                          <span className={`px-1 py-0.5 rounded text-[9px] ${
+                          <span className={`px-1 py-0.5 rounded text-[12px] ${
                             rec.energy_match >= 0.7 ? 'bg-green-500/30 text-green-300' : 
                             rec.energy_match >= 0.5 ? 'bg-yellow-500/30 text-yellow-300' : 
                             'bg-red-500/30 text-red-300'
                           }`}>
-                            E:{Math.round(rec.energy_match * 100)}%
+                            Energy:{Math.round(rec.energy_match * 100)}%
                           </span>
-                          <span className={`px-1 py-0.5 rounded text-[9px] ${
+                          <span className={`px-1 py-0.5 rounded text-[12px] ${
                             rec.mood_match >= 0.7 ? 'bg-green-500/30 text-green-300' : 
                             rec.mood_match >= 0.5 ? 'bg-yellow-500/30 text-yellow-300' : 
                             'bg-red-500/30 text-red-300'
                           }`}>
-                            M:{Math.round(rec.mood_match * 100)}%
+                            Mood:{Math.round(rec.mood_match * 100)}%
+                          </span>
+                          <span className={`px-1 py-0.5 rounded text-[12px] ${
+                            rec.dance_match >= 0.7 ? 'bg-green-500/30 text-green-300' : 
+                            rec.dance_match >= 0.5 ? 'bg-yellow-500/30 text-yellow-300' : 
+                            'bg-red-500/30 text-red-300'
+                          }`}>
+                            Dance:{Math.round(rec.dance_match * 100)}%
                           </span>
                         </div>
                       </div>

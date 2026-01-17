@@ -112,12 +112,16 @@ const SmartRecommendationVisualizer = ({
 
     // Helper function to fetch recommendations
     const doFetch = (forceRefresh = false) => {
-      const features = audioFeaturesRef.current || {
-        tempo: 120,
-        energy: 0.5,
-        valence: 0.5,
-        danceability: 0.5
+      const defaultFeatures = {
+        tempo: 0,
+        energy: 0,
+        valence: 0,
+        danceability: 0
       };
+      // Merge with defaults to ensure all fields exist
+      const features = audioFeaturesRef.current 
+        ? { ...defaultFeatures, ...audioFeaturesRef.current }
+        : defaultFeatures;
       const rate = playbackRateRef.current;
       
       console.log('🔄 Fetching recommendations:', {
@@ -205,8 +209,8 @@ const SmartRecommendationVisualizer = ({
     <div className="bg-gradient-to-br from-gray-900 to-black p-4 rounded-lg border border-gray-800 overflow-x-hidden">
       {/* Header */}
       <div className="mb-3">
-        <h3 className="text-sm font-bold text-white mb-1">Smart Audio Recommendations</h3>
-        <p className="text-[10px] text-gray-400 leading-tight">
+        <h5 className="text-sm font-bold text-white mb-1">Smart Audio Recommendations</h5>
+        <p className="text-[12px] text-gray-400 leading-tight">
           Based on <span className="text-cyan-400 font-semibold truncate">{currentProduct.albumTitle}</span>
         </p>
       </div>
@@ -220,11 +224,11 @@ const SmartRecommendationVisualizer = ({
             const isVideo = coverMedia && coverMedia.toLowerCase().includes('.mp4');
             
             return (
-              <div className="relative w-10 h-10 flex-shrink-0">
+              <div className="relative w-12 h-16 flex-shrink-0">
                 {isVideo ? (
                   <video
                     src={coverMedia}
-                    className={`w-10 h-10 rounded-full object-cover border-2 border-cyan-500/50 ${isPlaying ? 'animate-spin' : ''}`}
+                    className={`w-12 h-12 rounded-full object-cover border-2 border-cyan-500/50 ${isPlaying ? 'animate-spin' : ''}`}
                     style={{ animationDuration: '3s' }}
                     autoPlay
                     loop
@@ -235,20 +239,20 @@ const SmartRecommendationVisualizer = ({
                   <img 
                     src={coverMedia || placeholders.music}
                     alt={currentProduct.trackName || currentProduct.albumTitle}
-                    className={`w-10 h-10 rounded-full object-cover border-2 border-cyan-500/50 ${isPlaying ? 'animate-spin' : ''}`}
+                    className={`rounded-full object-cover border-2 border-cyan-500/50 ${isPlaying ? 'animate-spin' : ''}`}
                     style={{ animationDuration: '3s' }}
                     onError={(e) => { e.target.src = placeholders.music; }}
                   />
                 )}
-                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none -mt-4">
                   <div className="w-3 h-3 rounded-full bg-gray-900 border border-gray-700"></div>
                 </div>
               </div>
             );
           })()}
           <div className="flex-1 min-w-0">
-            <p className="text-xs font-semibold text-white truncate">{currentProduct.albumTitle || currentProduct.trackName}</p>
-            <p className="text-[10px] text-gray-400 truncate">Selected Electronic Works</p>
+            <p className="text-[17px] font-semibold text-white truncate leading-tight">{currentProduct.albumTitle || currentProduct.trackName}</p>
+            <p className="text-[12px] text-gray-400 truncate -mt-3">Selected Electronic Works</p>
           </div>
           {isPlaying && (
             <div className="flex gap-0.5">
@@ -262,19 +266,19 @@ const SmartRecommendationVisualizer = ({
         {/* Audio Feature Badges */}
         {displayedFeatures && (
           <div className="grid grid-cols-4 gap-1">
-            <FeatureBadge label="Tempo" value={`${Math.round(displayedFeatures.tempo * (displayedPlaybackRate || 1))}`} />
-            <FeatureBadge label="Energy" value={`${Math.round(displayedFeatures.energy * 100)}%`} />
-            <FeatureBadge label="Mood" value={`${Math.round(displayedFeatures.valence * 100)}%`} />
-            <FeatureBadge label="Dance" value={`${Math.round(displayedFeatures.danceability * 100)}%`} />
+            <FeatureBadge label="Tempo" value={`${Math.round((displayedFeatures.tempo || 0) * (displayedPlaybackRate || 1))}`} />
+            <FeatureBadge label="Energy" value={`${Math.round((displayedFeatures.energy || 0) * 100)}%`} />
+            <FeatureBadge label="Mood" value={`${Math.round((displayedFeatures.valence || 0) * 100)}%`} />
+            <FeatureBadge label="Dance" value={`${Math.round((displayedFeatures.danceability || 0) * 100)}%`} />
           </div>
         )}
         
         {!displayedFeatures && (
-          <p className="text-xs text-gray-500 text-center">Analyzing audio features...</p>
+          <p className="text-[12px] text-gray-500 text-center">Analyzing audio features...</p>
         )}
         
         {displayedPlaybackRate && displayedPlaybackRate !== 1.0 && currentProduct && (activeSong?.albumTitle === currentProduct.albumTitle || activeSong?.id === currentProduct.id) && (
-          <p className="text-xs text-yellow-400 mt-2">
+          <p className="text-[12px] text-yellow-400 mt-2">
             ⚡ Tempo adjusted for {displayedPlaybackRate.toFixed(2)}x speed
           </p>
         )}
@@ -295,8 +299,8 @@ const SmartRecommendationVisualizer = ({
           className="p-6 bg-red-900/30 border border-red-500/50 rounded-lg text-center"
         >
           <div className="text-4xl mb-3">🎵❌</div>
-          <h3 className="text-xl font-bold text-red-400 mb-2">No Match Found</h3>
-          <p className="text-gray-400 text-sm">
+          <h3 className="text-[12px] font-bold text-red-400 mb-2">No Match Found</h3>
+          <p className="text-gray-400 text-[12px]">
             {(audioFeatures?.tempo * playbackRate < 40 || audioFeatures?.tempo * playbackRate > 300) ? (
               <>Tempo {Math.round(audioFeatures?.tempo * playbackRate)} BPM is outside realistic range (40-300 BPM). Adjust the playback speed.</>
             ) : recommendations.length === 0 ? (
@@ -306,7 +310,7 @@ const SmartRecommendationVisualizer = ({
             )}
           </p>
           <div className="mt-4 p-3 bg-gray-800/50 rounded-lg">
-            <p className="text-xs text-gray-500">
+            <p className="text-[12px] text-gray-500">
               Current features: Tempo <span className={audioFeatures?.tempo * playbackRate < 40 || audioFeatures?.tempo * playbackRate > 300 ? 'text-red-400 font-bold' : ''}>{Math.round(audioFeatures?.tempo * playbackRate || 0)} BPM</span>, 
               Energy {Math.min(100, Math.max(0, ((audioFeatures?.energy || 0) * 100 * (playbackRate > 1 ? 1 + (playbackRate - 1) * 0.2 : 1 - (1 - playbackRate) * 0.1)))).toFixed(0)}%, 
               Mood {Math.min(100, Math.max(0, ((audioFeatures?.valence || 0) * 100 * (playbackRate > 1 ? 1 + (playbackRate - 1) * 0.15 : 1 - (1 - playbackRate) * 0.25)))).toFixed(0)}%
@@ -324,7 +328,7 @@ const SmartRecommendationVisualizer = ({
             className="space-y-2 overflow-x-hidden"
           >
             {/* Matches count */}
-            <p className="text-[10px] text-gray-500 mb-2">
+            <p className="text-[12px] text-gray-500 mb-2">
               {recommendations.length} {recommendations.length === 1 ? 'match' : 'matches'} • Updates 3s
             </p>
             
@@ -348,7 +352,7 @@ const SmartRecommendationVisualizer = ({
                   {/* Similarity Score Badge */}
                   <div className="absolute top-1 right-1">
                     <div 
-                      className="px-1.5 py-0.5 rounded-full text-[10px] font-bold"
+                      className="px-2.5 py-0.5 rounded-full text-[12px] font-bold"
                       style={{ 
                         backgroundColor: getMoodColor(rec.similarity_score),
                         color: 'white'
@@ -360,34 +364,39 @@ const SmartRecommendationVisualizer = ({
 
                   <div className="flex items-start gap-2">
                     {/* Album Cover */}
-                    <div className="w-10 h-10 rounded-lg overflow-hidden flex-shrink-0 border border-gray-600 group-hover:border-cyan-500 transition-colors">
+                    <div className="w-12 h-12 rounded-lg overflow-hidden flex-shrink-0 border border-gray-600 group-hover:border-cyan-500 transition-colors">
                       <AlbumCover url={displayUrl} title={displayTitle} productId={rec.product_id} />
                     </div>
 
                     {/* Product Info */}
                     <div className="flex-1 min-w-0 pr-8">
-                      <h4 className="text-xs font-semibold text-white truncate group-hover:text-cyan-400 transition-colors">
+                      <h5 className="font-semibold text-white truncate group-hover:text-cyan-400 transition-colors">
                         {displayTitle}
-                      </h4>
-                      <p className="text-[10px] text-gray-400 truncate mb-1">{rec.reason}</p>
+                      </h5>
+                      <p className="text-[12px] text-gray-400 truncate mb-1">{rec.reason}</p>
                       
                       {/* Feature Matches */}
                       <div className="flex gap-1 flex-wrap">
-                        <span className={`px-1 py-0.5 rounded text-[9px] ${
+                        <span className={`px-1 py-0.5 rounded text-[12px] ${
                           rec.tempo_match >= 0.7 ? 'bg-green-500/30 text-green-300' : 
                           rec.tempo_match >= 0.5 ? 'bg-yellow-500/30 text-yellow-300' : 
                           'bg-red-500/30 text-red-300'
-                        }`}>T:{(rec.tempo_match * 100).toFixed(0)}%</span>
-                        <span className={`px-1 py-0.5 rounded text-[9px] ${
+                        }`}>Tempo:{(rec.tempo_match * 100).toFixed(0)}%</span>
+                        <span className={`px-1 py-0.5 rounded text-[12px] ${
                           rec.energy_match >= 0.7 ? 'bg-green-500/30 text-green-300' : 
                           rec.energy_match >= 0.5 ? 'bg-yellow-500/30 text-yellow-300' : 
                           'bg-red-500/30 text-red-300'
-                        }`}>E:{(rec.energy_match * 100).toFixed(0)}%</span>
-                        <span className={`px-1 py-0.5 rounded text-[9px] ${
+                        }`}>Energy:{(rec.energy_match * 100).toFixed(0)}%</span>
+                        <span className={`px-1 py-0.5 rounded text-[12px] ${
                           rec.mood_match >= 0.7 ? 'bg-green-500/30 text-green-300' : 
                           rec.mood_match >= 0.5 ? 'bg-yellow-500/30 text-yellow-300' : 
                           'bg-red-500/30 text-red-300'
-                        }`}>M:{(rec.mood_match * 100).toFixed(0)}%</span>
+                        }`}>Mood:{(rec.mood_match * 100).toFixed(0)}%</span>
+                        <span className={`px-1 py-0.5 rounded text-[12px] ${
+                          (rec.danceability_match || 0) >= 0.7 ? 'bg-green-500/30 text-green-300' : 
+                          (rec.danceability_match || 0) >= 0.5 ? 'bg-yellow-500/30 text-yellow-300' : 
+                          'bg-red-500/30 text-red-300'
+                        }`}>Danceability:{((rec.danceability_match || 0) * 100).toFixed(0)}%</span>
                       </div>
                     </div>
                   </div>
@@ -445,8 +454,8 @@ const SmartRecommendationVisualizer = ({
       transition={{ duration: 0.3 }}
       className={`px-1 py-1 rounded text-center border ${colors.bg} ${colors.border}`}
     >
-      <div className="text-[9px] text-gray-400 leading-tight">{label}</div>
-      <div className={`text-[10px] font-bold leading-tight ${colors.text}`}>
+      <div className="text-[12px] text-gray-400 leading-tight">{label}</div>
+      <div className={`text-[12px] font-bold leading-tight ${colors.text}`}>
         {value}
         {isAdjusted && <span className="text-cyan-500 ml-0.5">⚡</span>}
       </div>
@@ -497,7 +506,7 @@ const MatchIndicator = ({ label, value }) => {
       animate={{ opacity: 1, scale: 1 }}
       transition={{ duration: 0.3 }}
     >
-      <span className={`px-1.5 py-0.5 rounded text-[13px] ${
+      <span className={`px-1.5 py-0.5 rounded text-[12px] ${
         value >= 0.7 ? 'bg-green-500/30 text-green-300' : 
         value >= 0.5 ? 'bg-yellow-500/30 text-yellow-300' : 
         'bg-red-500/30 text-red-300'
