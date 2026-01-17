@@ -324,10 +324,10 @@ const TopCharts = () => {
     // Helper function to update recommendations
     const updateRecs = () => {
       const features = audioFeaturesRef.current || {
-        tempo: 120,
-        energy: 0.5,
-        valence: 0.5,
-        danceability: 0.5
+        tempo: 0,
+        energy: 0,
+        valence: 0,
+        danceability: 0
       };
       const rate = playbackRateRef.current;
       

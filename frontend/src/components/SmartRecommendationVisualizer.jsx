@@ -5,6 +5,7 @@ import axios from 'axios';
 import { useAudioFeatures } from '../context/AudioFeaturesContext';
 import placeholders from '../utils/placeholderImage';
 import envConfig from '../config/environment';
+import blissImage from '../assets/bliss.png';
 
 /**
  * SmartRecommendationVisualizer (formerly PersonalRecommendations)
@@ -226,20 +227,17 @@ const SmartRecommendationVisualizer = ({
             return (
               <div className="relative w-12 h-16 flex-shrink-0">
                 {isVideo ? (
-                  <video
-                    src={coverMedia}
+                  <img 
+                    src={blissImage}
+                    alt="Album cover"
                     className={`w-12 h-12 rounded-full object-cover border-2 border-cyan-500/50 ${isPlaying ? 'animate-spin' : ''}`}
                     style={{ animationDuration: '3s' }}
-                    autoPlay
-                    loop
-                    muted
-                    playsInline
                   />
                 ) : (
                   <img 
                     src={coverMedia || placeholders.music}
                     alt={currentProduct.trackName || currentProduct.albumTitle}
-                    className={`rounded-full object-cover border-2 border-cyan-500/50 ${isPlaying ? 'animate-spin' : ''}`}
+                    className={`w-12 h-12 rounded-full object-cover border-2 border-cyan-500/50 ${isPlaying ? 'animate-spin' : ''}`}
                     style={{ animationDuration: '3s' }}
                     onError={(e) => { e.target.src = placeholders.music; }}
                   />
