@@ -1,10 +1,12 @@
 import { useState, useEffect } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
+import { useSearchParams } from 'react-router-dom';
 
 import { productService, accountService } from '../redux/services';
 import SongCard from '../components/SongCard';
 import Loader from '../components/Loader';
 import Error from '../components/Error';
+import SmartRecommendationVisualizer from '../components/SmartRecommendationVisualizer';
 import { setActiveSong, playPause } from '../redux/features/playerSlice';
 
 
@@ -14,6 +16,16 @@ const CustomerScreen = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [user, setUser] = useState(null);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const viewMode = searchParams.get('mode') || 'discover'; // 'discover' or 'visualizer'
+
+  const setViewMode = (mode) => {
+    if (mode === 'visualizer') {
+      setSearchParams({ mode: 'visualizer' });
+    } else {
+      setSearchParams({});
+    }
+  };
 
   const dispatch = useDispatch();
   const { activeSong, isPlaying } = useSelector((state) => state.player);
@@ -55,6 +67,20 @@ const CustomerScreen = () => {
   const games = products.filter(product => product.gameTitle);
   const music = products.filter(product => product.albumTitle);
 
+  // Generate a session ID for recommendations
+  const sessionId = `session-${Date.now()}`;
+
+  // In visualizer mode, return nothing (TopPlay and visualizer are in the main layout)
+  if (viewMode === 'visualizer') {
+    return (
+      <div className="mb-4">
+        <button onClick={() => setViewMode('discover')} className="px-4 py-2 rounded-full text-sm font-medium transition-all bg-white/10 text-white hover:bg-white/20">
+          ← Back to Discover
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col">
       <div className="mb-4 sm:mb-8">
@@ -64,6 +90,17 @@ const CustomerScreen = () => {
       <div className="mb-4 sm:mb-6">
         <h2 className="font-bold text-xl sm:text-2xl md:text-3xl text-white mb-4 sm:mb-6">Welcome, {user?.firstName || 'Customer'}!</h2>
         <p className="text-gray-400 text-sm sm:text-base">Explore our collection of games and electronic music</p>
+      </div>
+
+      {/* View Mode Buttons */}
+      <div className="mb-6 flex flex-wrap gap-3">
+        <button onClick={() => setViewMode('discover')} className={`px-4 py-2 rounded-full text-sm font-medium transition-all ${viewMode === 'discover' ? 'bg-white text-black' : 'bg-white/10 text-white hover:bg-white/20'}`}>
+          Discover
+        </button>
+        <button onClick={() => setViewMode('visualizer')} className={`px-4 py-2 rounded-full text-sm font-medium transition-all flex items-center gap-2 ${viewMode === 'visualizer' ? 'bg-gradient-to-r from-cyan-500 to-blue-500 text-white' : 'bg-white/10 text-white hover:bg-gradient-to-r hover:from-cyan-500/30 hover:to-blue-500/30'}`}>
+          <span className="w-2 h-2 rounded-full bg-gradient-to-r from-cyan-400 to-blue-400 animate-pulse"></span>
+          Visualiser Only
+        </button>
       </div>
 
       {/* Games Section */}

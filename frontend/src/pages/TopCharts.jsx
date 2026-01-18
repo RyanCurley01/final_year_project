@@ -382,7 +382,7 @@ const TopCharts = () => {
   return (
     <div className="flex flex-col lg:flex-row gap-6 scrollbar-hide">
       {/* Main Content */}
-      <div className="flex-1 min-w-0">
+      <div className={`flex-1 min-w-0 ${filter === 'visualizer' ? 'hidden lg:block lg:flex-none lg:w-auto' : ''}`}>
         <div className="mb-4 sm:mb-6">
           <h1 className="font-bold text-xl sm:text-2xl md:text-3xl text-white mb-2">Top 50 Popular Songs</h1>
           <p className="text-gray-400">The 50 most popular songs from Aphex Twin, Boards of Canada, and Squarepusher - ordered by popularity</p>
@@ -405,17 +405,32 @@ const TopCharts = () => {
             <span className="w-2 h-2 rounded-full bg-cyan-400"></span>
             Squarepusher ({songs.filter(s => s.artistName?.toLowerCase().includes('squarepusher')).length})
           </button>
+          <button onClick={() => setFilter('visualizer')} className={`px-4 py-2 rounded-full text-sm font-medium transition-all flex items-center gap-2 ${filter === 'visualizer' ? 'bg-gradient-to-r from-cyan-500 to-blue-500 text-white' : 'bg-white/10 text-white hover:bg-gradient-to-r hover:from-cyan-500/30 hover:to-blue-500/30'}`}>
+            <span className="w-2 h-2 rounded-full bg-gradient-to-r from-cyan-400 to-blue-400 animate-pulse"></span>
+            Visualiser Only
+          </button>
         </div>
 
+        {/* Song Grid - Hidden in visualizer mode */}
+        {filter !== 'visualizer' && (
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6">
           {filteredSongs.map((song, i) => (
             <SongCard key={song.id} song={song} isPlaying={isPlaying} activeSong={activeSong} onPlay={handlePlay} onPause={handlePause} index={i} />
           ))}
         </div>
+        )}
       </div>
 
       {/* Right Sidebar - Real-time Recommendations with Audio Feature Badges */}
-      <div className="w-full lg:w-[330px] lg:min-w-[330px]">
+      <div className={`w-full ${filter === 'visualizer' ? 'lg:w-full' : 'lg:w-[330px] lg:min-w-[330px]'}`}>
+        {/* Back button when in visualizer mode */}
+        {filter === 'visualizer' && (
+          <div className="mb-4">
+            <button onClick={() => setFilter('all')} className="px-4 py-2 rounded-full text-sm font-medium transition-all bg-white/10 text-white hover:bg-white/20">
+              ← Back to Top Charts
+            </button>
+          </div>
+        )}
         {/* Empty State - when no song is playing */}
         {(!activeSong || Object.keys(activeSong).length === 0) && (
           <div className="bg-gradient-to-br from-gray-900 to-black p-4 rounded-lg border border-gray-800">

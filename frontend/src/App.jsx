@@ -77,10 +77,12 @@ const AppContent = () => {
             {/* Mobile Visualizer - at bottom of content on mobile only */}
             {location.pathname === '/' && (
               <div className="lg:hidden mt-6 pb-4">
-                {/* TopPlay */}
+                {/* TopPlay - hidden in visualizer mode */}
+                {!location.search.includes('mode=visualizer') && (
                 <div className="mb-4">
                   <TopPlay />
                 </div>
+                )}
                 {/* Visualizer */}
                 <div className="mb-4">
                   {activeSong?.albumTitle ? (
@@ -108,10 +110,12 @@ const AppContent = () => {
               
               {/* Fixed sidebar - desktop only */}
               <div className={`hidden lg:block fixed top-0 right-0 w-[390px] min-w-[390px] ${(activeSong?.albumTitle || activeSong?.gameTitle) ? 'h-[calc(100vh-7rem)]' : 'h-screen'} overflow-y-auto hide-scrollbar z-40 px-4 pt-4 pb-8`}>
-                {/* TopPlay */}
+                {/* TopPlay - hidden in visualizer mode */}
+                {!location.search.includes('mode=visualizer') && (
                 <div className="mb-4">
                   <TopPlay />
                 </div>
+                )}
                 {/* Visualizer */}
                 <div className="mb-4">
                   {activeSong?.albumTitle ? (
