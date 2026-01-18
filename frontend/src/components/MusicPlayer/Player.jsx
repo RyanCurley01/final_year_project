@@ -2,34 +2,37 @@
 import React, { useRef, useEffect } from 'react';
 import globalAudioContext from '../../utils/globalAudioContext';
 
-const Player = ({ activeSong, isPlaying, volume, seekTime, onEnded, onTimeUpdate, onLoadedData, repeat }) => {
+const Player = ({ activeSong, isPlaying, volume, seekTime, onEnded, onTimeUpdate, onLoadedData, repeat, playbackRate = 1 }) => {
   const ref = useRef(null);
   const audioContextInitialized = useRef(false);
-  const lastSongRef = useRef(null);
+  
+  // Apply playback rate
+  useEffect(() => {
+    if (ref.current) {
+      ref.current.playbackRate = playbackRate;
+    }
+  }, [playbackRate]);
   
   useEffect(() => {
     if (ref.current) {
-      // Check if song changed - reset detector state
-      const currentSongId = activeSong?.id || activeSong?.albumTitle;
-      if (currentSongId && currentSongId !== lastSongRef.current) {
-        lastSongRef.current = currentSongId;
-        // Reset onset detector state for the new song
-        globalAudioContext.resetDetector();
-      }
-      
-      if (isPlaying && activeSong?.fileUrl) {
+      if (isPlaying) {
         const playPromise = ref.current.play();
         if (playPromise !== undefined) {
           playPromise
             .then(() => {
+              // Initialize audio context ONLY on very first play ever
               if (!audioContextInitialized.current) {
-                globalAudioContext.initialize(ref.current).catch(() => {});
+                globalAudioContext.initialize(ref.current).catch(() => {
+                  // Could not initialize onset detection
+                });
                 audioContextInitialized.current = true;
+              } else {
+                globalAudioContext.resume();
               }
-              // Always resume after play succeeds to ensure onset detection is running
-              globalAudioContext.resume();
             })
-            .catch(() => {});
+            .catch(() => {
+              // Error playing audio
+            });
         }
       } else {
         ref.current.pause();
@@ -44,24 +47,32 @@ const Player = ({ activeSong, isPlaying, volume, seekTime, onEnded, onTimeUpdate
   }, [volume]);
   
   useEffect(() => {
-    if (ref.current && seekTime !== undefined && !isNaN(seekTime)) {
-      ref.current.currentTime = seekTime;
+    if (ref.current && seekTime !== undefined && seekTime !== null) {
+      const time = parseFloat(seekTime);
+      if (!isNaN(time) && isFinite(time)) {
+        ref.current.currentTime = time;
+      }
     }
   }, [seekTime]);
 
-  // IMPORTANT: Always render the audio element to keep it persistent
-  // This prevents the element from being destroyed/recreated which breaks
-  // the Web Audio API connection (createMediaElementSource can only be called once)
+  if (!activeSong?.fileUrl) {
+    return null;
+  }
+
   return (
     <audio
-      src={activeSong?.fileUrl || ''}
+      src={activeSong.fileUrl}
       ref={ref}
       crossOrigin="anonymous"
       loop={repeat}
       onEnded={onEnded}
       onTimeUpdate={onTimeUpdate}
-      onLoadedData={onLoadedData}
-      onError={() => {}}
+      onLoadedData={(e) => {
+        onLoadedData(e);
+      }}
+      onError={(e) => {
+        // Audio loading error
+      }}
     />
   );
 };

@@ -61,7 +61,7 @@ export const stockService = {
     const ws = new WebSocket(wsUrl);
     
     ws.onopen = () => {
-      console.log('Stock WebSocket connected');
+      // WebSocket connected
     };
     
     ws.onmessage = (event) => {
@@ -70,12 +70,11 @@ export const stockService = {
     };
     
     ws.onerror = (error) => {
-      console.error('Stock WebSocket error:', error);
       if (onError) onError(error);
     };
     
     ws.onclose = () => {
-      console.log('Stock WebSocket disconnected');
+      // WebSocket disconnected
     };
     
     return ws;

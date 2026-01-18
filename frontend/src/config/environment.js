@@ -31,23 +31,6 @@ class EnvironmentConfig {
     const viteEnv = import.meta.env || {};
     const runtimeEnv = window.ENV_CONFIG || {};
     
-    console.log('🔍 Environment Detection:', {
-      hostname,
-      isCodespaces,
-      isNgrok,
-      isLocalhost,
-      isProduction,
-      codespaceName,
-      codespacesDomain,
-      viteEnv: { 
-        VITE_API_BASE_URL: viteEnv.VITE_API_BASE_URL,
-        VITE_BACKEND_API_URL: viteEnv.VITE_BACKEND_API_URL,
-        VITE_PRODUCTS_API_URL: viteEnv.VITE_PRODUCTS_API_URL,
-        VITE_ENVIRONMENT: viteEnv.VITE_ENVIRONMENT
-      },
-      runtimeEnv
-    });
-    
     let config = {
       environment: isProduction ? 'production' : (isCodespaces ? 'codespaces' : (isNgrok ? 'ngrok' : 'local')),
       isCodespaces,
@@ -86,7 +69,6 @@ class EnvironmentConfig {
         config.apiBaseUrl = viteEnv.VITE_AUDIO_SERVICE_URL;
       } else {
         config.apiBaseUrl = '/api';
-        console.warn('⚠️ Production deployment detected but VITE_API_BASE_URL not set! Using /api as fallback.');
       }
     } else {
       config.apiBaseUrl = 'http://localhost:5000';
@@ -120,7 +102,6 @@ class EnvironmentConfig {
       } else {
         config.backendApiUrl = '/api/accounts';
       }
-      console.warn('⚠️ Production deployment detected but VITE_BACKEND_API_URL not set! Using fallback:', config.backendApiUrl);
     } else {
       config.backendApiUrl = 'http://localhost:8080';
     }
@@ -153,7 +134,6 @@ class EnvironmentConfig {
       } else {
         config.productsApiUrl = '/api/products';
       }
-      console.warn('⚠️ Production deployment detected but VITE_PRODUCTS_API_URL not set! Using fallback:', config.productsApiUrl);
     } else {
       config.productsApiUrl = 'http://localhost:8081';
     }
@@ -163,7 +143,6 @@ class EnvironmentConfig {
                         runtimeEnv.VITE_ENVIRONMENT || 
                         config.environment;
 
-    console.log('🔧 Environment Configuration:', config);
     return config;
   }
 

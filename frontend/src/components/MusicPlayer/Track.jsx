@@ -28,8 +28,7 @@ const Track = ({ isPlaying, isActive, activeSong }) => {
     if (videoRef.current && isVideo && !videoError) {
       if (isPlaying && isActive) {
         videoRef.current.loop = true;
-        videoRef.current.play().catch(e => {
-          console.error('Track video play error:', e);
+        videoRef.current.play().catch(() => {
           // If play fails (e.g. not loaded), we might want to fallback? 
           // But usually play() fails due to interruption or permissions.
         });
@@ -43,7 +42,7 @@ const Track = ({ isPlaying, isActive, activeSong }) => {
   useEffect(() => {
     if (videoRef.current && isVideo && songEnded && isActive && !videoError) {
       videoRef.current.currentTime = 0;
-      videoRef.current.play().catch(e => console.error('Video restart error:', e));
+      videoRef.current.play().catch(() => {});
     }
   }, [songEnded, isActive, isVideo, videoError]);
 
@@ -62,7 +61,6 @@ const Track = ({ isPlaying, isActive, activeSong }) => {
           preload="auto"
           style={{ willChange: 'transform' }}
           onError={(e) => {
-            console.error('Track video failed to load:', coverMedia, e);
             setVideoError(true);
           }}
         />

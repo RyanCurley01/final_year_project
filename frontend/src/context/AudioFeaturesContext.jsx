@@ -1,19 +1,17 @@
 import { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { useSelector } from 'react-redux';
+import globalAudioContext from '../utils/globalAudioContext';
 
 const AudioFeaturesContext = createContext(null);
 
 /**
  * AudioFeaturesProvider - Provides real-time audio features to all components
- * Creates its own direct connection to the audio element
+ * Uses the global audio context to avoid "already connected" errors
  */
 export const AudioFeaturesProvider = ({ children }) => {
   const [audioFeatures, setAudioFeatures] = useState(null);
   const animationRef = useRef(null);
-  const audioContextRef = useRef(null);
   const analyserRef = useRef(null);
-  const sourceRef = useRef(null);
-  const connectedElementRef = useRef(null);
   const { isPlaying, activeSong } = useSelector((state) => state.player);
 
   useEffect(() => {
@@ -25,66 +23,32 @@ export const AudioFeaturesProvider = ({ children }) => {
       return;
     }
 
-    // Find the audio element in the DOM
-    const findAndConnect = () => {
-      const audioElement = document.querySelector('audio');
-      if (!audioElement) {
-        console.log('⏳ Waiting for audio element...');
-        setTimeout(findAndConnect, 200);
+    // Wait for global audio context to be initialized, then branch off from it
+    const connectToGlobalContext = () => {
+      if (!globalAudioContext.isInitialized || !globalAudioContext.mediaSource) {
+        setTimeout(connectToGlobalContext, 200);
         return;
       }
 
-      // Check if we're already connected to this element
-      if (connectedElementRef.current === audioElement && analyserRef.current) {
-        console.log('✅ Already connected, starting analysis');
+      // Check if we already have an analyser connected
+      if (analyserRef.current) {
         startAnalysis();
         return;
       }
 
       try {
-        // Create new AudioContext if needed
-        if (!audioContextRef.current) {
-          audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)();
-          console.log('🎵 Created new AudioContext');
-        }
-
-        // Resume if suspended
-        if (audioContextRef.current.state === 'suspended') {
-          audioContextRef.current.resume();
-        }
-
-        // Create analyser
-        analyserRef.current = audioContextRef.current.createAnalyser();
+        // Create a new analyser and branch off from the global audio context's media source
+        analyserRef.current = globalAudioContext.audioContext.createAnalyser();
         analyserRef.current.fftSize = 2048;
         analyserRef.current.smoothingTimeConstant = 0.85;
-
-        // Try to connect (may fail if already connected elsewhere)
-        try {
-          sourceRef.current = audioContextRef.current.createMediaElementSource(audioElement);
-          sourceRef.current.connect(analyserRef.current);
-          analyserRef.current.connect(audioContextRef.current.destination);
-          connectedElementRef.current = audioElement;
-          console.log('✅ AudioFeaturesContext: Direct connection established');
-        } catch (e) {
-          // Already connected - try to tap into existing connection
-          console.log('⚠️ Audio element already connected, using alternative method');
-          
-          // Use captureStream as fallback
-          if (audioElement.captureStream) {
-            const stream = audioElement.captureStream();
-            sourceRef.current = audioContextRef.current.createMediaStreamSource(stream);
-            sourceRef.current.connect(analyserRef.current);
-            connectedElementRef.current = audioElement;
-            console.log('✅ AudioFeaturesContext: Connected via captureStream');
-          } else {
-            console.error('❌ Cannot connect to audio element');
-            return;
-          }
-        }
-
+        
+        // Connect from the global media source (branching the signal)
+        globalAudioContext.mediaSource.connect(analyserRef.current);
+        // Don't connect to destination - globalAudioContext already does that
+        
         startAnalysis();
       } catch (error) {
-        console.error('❌ Error setting up audio analysis:', error);
+        // Error setting up audio analysis - silently fail
       }
     };
 
@@ -111,14 +75,6 @@ export const AudioFeaturesProvider = ({ children }) => {
           if (sum > 100) { // Need some minimum signal
             const features = calculateAudioFeatures(frequencyData, timeData, bufferLength);
             setAudioFeatures(features);
-
-            if (Math.random() < 0.1) {
-              console.log('🎵', {
-                E: (features.energy * 100).toFixed(0) + '%',
-                M: (features.valence * 100).toFixed(0) + '%',
-                D: (features.danceability * 100).toFixed(0) + '%'
-              });
-            }
           }
           lastUpdate = timestamp;
         }
@@ -129,7 +85,7 @@ export const AudioFeaturesProvider = ({ children }) => {
       animationRef.current = requestAnimationFrame(analyze);
     };
 
-    findAndConnect();
+    connectToGlobalContext();
 
     return () => {
       if (animationRef.current) {

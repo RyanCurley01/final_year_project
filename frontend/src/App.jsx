@@ -33,7 +33,7 @@ const AppContent = () => {
         const productData = await productService.getAllProducts(email, password);
         setProducts(productData);
       } catch (error) {
-        console.error('Error fetching products:', error);
+        // Error fetching products
       }
     };
 

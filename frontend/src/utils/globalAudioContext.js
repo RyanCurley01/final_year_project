@@ -1,6 +1,6 @@
 /**
  * Global Audio Context for Onset Detection
- * Provides a single AudioContext instance that connects to the main audio player
+ * To create a singleton (single shared instance) that manages audio analysis for the entire app.
  */
 
 import OnsetDetector from './onsetDetection';
@@ -12,48 +12,65 @@ class GlobalAudioContext {
     this.audioElement = null;
     this.mediaSource = null;
     this.isInitialized = false;
-    this.onsetCallbacks = new Map(); // Use Map with IDs for stable references
-    this.glitchCallbacks = new Map();
-    this.callbackIdCounter = 0;
+    this.onsetCallbacks = [];
+    this.glitchCallbacks = [];
+    // Track elements that have already been connected (can only call createMediaElementSource once per element EVER)
+    this.connectedElements = new WeakSet();
   }
 
   /**
    * Initialize audio context and connect to audio element using captureStream
    */
   async initialize(audioElement) {
+    // If already initialized with this exact element, just ensure detector is running
     if (this.isInitialized && this.audioElement === audioElement) {
-      // Same element, ensure detector is still running
-      console.log('🔄 globalAudioContext: Already initialized, ensuring detector is running');
       if (this.onsetDetector) {
         this.onsetDetector.restart();
       }
       return;
     }
 
-    if (this.isInitialized) {
-      // Different audio element - need to reconnect
-      console.log('🔄 globalAudioContext: Reconnecting to new audio element');
+    // If initialized with a different element, we must cleanup first
+    // because createMediaElementSource can only be called once per element
+    if (this.isInitialized && this.audioElement !== audioElement) {
       this.cleanup();
     }
 
     try {
+      // Create audio context
       this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
       this.audioElement = audioElement;
 
-      try {
-        this.mediaSource = this.audioContext.createMediaElementSource(audioElement);
-        
-        this.onsetDetector = new OnsetDetector(this.audioContext, {
-          threshold: 0.5,
-          fftSize: 2048,
-          hopSize: 256,
-          minTimeBetweenOnsets: 60,
-        });
+      // Check if this element was already connected before (can only use createMediaElementSource once per element EVER)
+      const elementAlreadyConnected = this.connectedElements.has(audioElement);
+      let useMediaElementSource = !elementAlreadyConnected;
 
-        this.mediaSource.connect(this.onsetDetector.analyser);
-        this.onsetDetector.analyser.connect(this.audioContext.destination);
-        
-      } catch (mediaElementError) {
+      // Try createMediaElementSource first (most reliable) - but only if element hasn't been connected before
+      if (useMediaElementSource) {
+        try {
+          this.mediaSource = this.audioContext.createMediaElementSource(audioElement);
+          // Mark this element as connected
+          this.connectedElements.add(audioElement);
+          
+          // Create onset detector with lower threshold for faster detection
+          this.onsetDetector = new OnsetDetector(this.audioContext, {
+            threshold: 0.5,
+            fftSize: 512,
+            minTimeBetweenOnsets: 30,
+          });
+
+          // IMPORTANT: Connect to destination so audio plays!
+          this.mediaSource.connect(this.onsetDetector.analyser);
+          this.onsetDetector.analyser.connect(this.audioContext.destination);
+          
+        } catch (mediaElementError) {
+          useMediaElementSource = false;
+        }
+      }
+      
+      // Use captureStream if createMediaElementSource failed or element was already connected
+      if (!useMediaElementSource) {
+        // Fallback to captureStream
         let stream = audioElement.captureStream ? audioElement.captureStream() : audioElement.mozCaptureStream();
         
         if (!stream) {
@@ -70,28 +87,22 @@ class GlobalAudioContext {
         
         this.onsetDetector = new OnsetDetector(this.audioContext, {
           threshold: 0.5,
-          fftSize: 2048,
-          hopSize: 256,
-          minTimeBetweenOnsets: 60,
+          fftSize: 512,
+          minTimeBetweenOnsets: 30,
         });
 
+        // Connect stream (no need for destination with captureStream)
         this.mediaSource.connect(this.onsetDetector.analyser);
       }
 
+      // Set up onset callback to trigger all registered callbacks
       this.onsetDetector.onOnset((onset) => {
-        this.onsetCallbacks.forEach((callback, id) => {
-          try {
-            callback(onset);
-          } catch (e) {}
-        });
+        this.onsetCallbacks.forEach(callback => callback(onset));
       });
       
+      // Set up glitch callback to trigger all registered glitch callbacks
       this.onsetDetector.onGlitch((glitch) => {
-        this.glitchCallbacks.forEach((callback, id) => {
-          try {
-            callback(glitch);
-          } catch (e) {}
-        });
+        this.glitchCallbacks.forEach(callback => callback(glitch));
       });
 
       this.onsetDetector.start();
@@ -103,71 +114,43 @@ class GlobalAudioContext {
   }
 
   /**
-   * Register a callback for onset events - returns ID for cleanup
+   * Register a callback for onset events
    */
   onOnset(callback) {
-    const id = ++this.callbackIdCounter;
-    this.onsetCallbacks.set(id, callback);
-    return id;
-  }
-
-  offOnset(id) {
-    if (typeof id === 'number') {
-      this.onsetCallbacks.delete(id);
+    if (!this.onsetCallbacks.includes(callback)) {
+      this.onsetCallbacks.push(callback);
     }
   }
 
+  /**
+   * Unregister a callback
+   */
+  offOnset(callback) {
+    this.onsetCallbacks = this.onsetCallbacks.filter(cb => cb !== callback);
+  }
+
+  /**
+   * Register a callback for glitch events (high-frequency transients)
+   */
   onGlitch(callback) {
-    const id = ++this.callbackIdCounter;
-    this.glitchCallbacks.set(id, callback);
-    return id;
+    if (!this.glitchCallbacks.includes(callback)) {
+      this.glitchCallbacks.push(callback);
+    }
   }
 
-  offGlitch(id) {
-    if (typeof id === 'number') {
-      this.glitchCallbacks.delete(id);
-    }
+  /**
+   * Unregister a glitch callback
+   */
+  offGlitch(callback) {
+    this.glitchCallbacks = this.glitchCallbacks.filter(cb => cb !== callback);
   }
 
   /**
    * Resume audio context (needed for autoplay policies)
    */
   resume() {
-    if (this.audioContext) {
-      // Always try to resume, not just when suspended
-      if (this.audioContext.state !== 'running') {
-        this.audioContext.resume();
-      }
-    }
-    // Force restart onset detector loop in case it stopped
-    if (this.onsetDetector) {
-      this.onsetDetector.restart();
-    }
-  }
-
-  /**
-   * Reset onset detector state - call when switching songs
-   */
-  resetDetector() {
-    if (this.onsetDetector) {
-      this.onsetDetector.reset();
-      this.onsetDetector.restart(); // Force loop to restart after reset
-    }
-  }
-
-  /**
-   * Set playback rate for the audio element
-   */
-  setPlaybackRate(rate) {
-    if (this.audioElement) {
-      const clampedRate = Math.max(0.1, Math.min(2.0, rate));
-      this.audioElement.playbackRate = clampedRate;
-      
-      if (this.onsetDetector) {
-        this.onsetDetector.minTimeBetweenOnsets = Math.round(60 / clampedRate);
-        const baseThreshold = 0.8;
-        this.onsetDetector.threshold = baseThreshold * Math.sqrt(clampedRate);
-      }
+    if (this.audioContext && this.audioContext.state === 'suspended') {
+      this.audioContext.resume();
     }
   }
 
@@ -193,8 +176,8 @@ class GlobalAudioContext {
 
     this.audioElement = null;
     this.isInitialized = false;
-    this.onsetCallbacks.clear();
-    this.glitchCallbacks.clear();
+    this.onsetCallbacks = [];
+    this.glitchCallbacks = [];
   }
 }
 

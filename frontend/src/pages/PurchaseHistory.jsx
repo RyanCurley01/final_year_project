@@ -14,7 +14,6 @@ const PurchaseHistory = () => {
       try {
         downloadFile(item.fileUrl, generateFilename(item, item.fileUrl));
       } catch (error) {
-        console.error("Error downloading file:", error);
         alert("Failed to download file. Please try again.");
       }
     } else if (!isMusic && item.fileUrl) {

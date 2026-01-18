@@ -20,10 +20,10 @@ const SmartRecommendationVisualizer = ({
 }) => {
   const [recommendations, setRecommendations] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [hoveredRec, setHoveredRec] = useState(null);
   const [noMatchFound, setNoMatchFound] = useState(false);
   const [displayedFeatures, setDisplayedFeatures] = useState(null);
   const [displayedPlaybackRate, setDisplayedPlaybackRate] = useState(1);
+  const [hoveredRec, setHoveredRec] = useState(null);
   const isInitialLoad = useRef(true);
   const intervalRef = useRef(null);
   
@@ -45,15 +45,8 @@ const SmartRecommendationVisualizer = ({
     // Guard against undefined product or product.id
     const productId = product?.id || product?.productId || product?.ProductID;
     if (!product || !productId || !features) {
-      console.log('fetchRecommendations: Missing product or features', { 
-        product: !!product, 
-        productId: productId,
-        features: !!features 
-      });
       return;
     }
-    
-    console.log('fetchRecommendations: Starting fetch for product', productId, 'rate:', rate);
     
     try {
       // Only show loading spinner on initial load (when no recommendations exist)
@@ -78,14 +71,12 @@ const SmartRecommendationVisualizer = ({
       });
 
       const recs = response.data.recommendations || [];
-      console.log('fetchRecommendations: Received', recs.length, 'recommendations:', recs.map(r => ({ id: r.product_id, score: r.similarity_score })));
       
       setRecommendations(recs);
       setNoMatchFound(recs.length === 0);
       
       isInitialLoad.current = false;
     } catch (error) {
-      console.error('fetchRecommendations: Error fetching recommendations:', error);
       setNoMatchFound(true);
     } finally {
       setLoading(false);
@@ -107,7 +98,6 @@ const SmartRecommendationVisualizer = ({
     // Get product ID (support different field names)
     const productId = currentProduct?.id || currentProduct?.productId || currentProduct?.ProductID;
     if (!productId) {
-      console.log('⚠️ No valid product ID found:', currentProduct);
       return;
     }
 
@@ -125,23 +115,15 @@ const SmartRecommendationVisualizer = ({
         : defaultFeatures;
       const rate = playbackRateRef.current;
       
-      console.log('🔄 Fetching recommendations:', {
-        product: productId,
-        hasRealFeatures: !!audioFeaturesRef.current,
-        playbackRate: rate
-      });
-      
       setDisplayedFeatures(features);
       setDisplayedPlaybackRate(rate);
       fetchRecommendations(currentProduct, features, rate, sessionId, forceRefresh);
     };
 
     // Immediate fetch
-    console.log('⚡ INSTANT fetch for product:', productId);
     doFetch(true);
 
     // Set up polling interval (3 seconds)
-    console.log('⏱️ Starting 3s polling interval');
     intervalRef.current = setInterval(() => doFetch(false), 3000);
 
     // Cleanup
@@ -179,9 +161,6 @@ const SmartRecommendationVisualizer = ({
       p.id === String(productId) ||
       String(p.id) === String(productId)
     );
-    if (!product) {
-      console.warn(`Product not found for ID: ${productId}. Available IDs:`, products?.slice(0, 10).map(p => ({ id: p.id, type: typeof p.id, albumTitle: p.albumTitle })));
-    }
     return product;
   };
 
@@ -376,18 +355,18 @@ const SmartRecommendationVisualizer = ({
                       {/* Feature Matches */}
                       <div className="flex gap-1 flex-wrap">
                         <span className={`px-1 py-0.5 rounded text-[12px] ${
-                          rec.tempo_match >= 0.7 ? 'bg-green-500/30 text-green-300' : 
-                          rec.tempo_match >= 0.5 ? 'bg-yellow-500/30 text-yellow-300' : 
+                          (rec.tempo_match || 0) >= 0.7 ? 'bg-green-500/30 text-green-300' : 
+                          (rec.tempo_match || 0) >= 0.5 ? 'bg-yellow-500/30 text-yellow-300' : 
                           'bg-red-500/30 text-red-300'
                         }`}>Tempo:{(rec.tempo_match * 100).toFixed(0)}%</span>
                         <span className={`px-1 py-0.5 rounded text-[12px] ${
-                          rec.energy_match >= 0.7 ? 'bg-green-500/30 text-green-300' : 
-                          rec.energy_match >= 0.5 ? 'bg-yellow-500/30 text-yellow-300' : 
+                          (rec.energy_match || 0) >= 0.7 ? 'bg-green-500/30 text-green-300' : 
+                          (rec.energy_match || 0) >= 0.5 ? 'bg-yellow-500/30 text-yellow-300' : 
                           'bg-red-500/30 text-red-300'
                         }`}>Energy:{(rec.energy_match * 100).toFixed(0)}%</span>
                         <span className={`px-1 py-0.5 rounded text-[12px] ${
-                          rec.mood_match >= 0.7 ? 'bg-green-500/30 text-green-300' : 
-                          rec.mood_match >= 0.5 ? 'bg-yellow-500/30 text-yellow-300' : 
+                          (rec.mood_match || 0) >= 0.7 ? 'bg-green-500/30 text-green-300' : 
+                          (rec.mood_match || 0) >= 0.5 ? 'bg-yellow-500/30 text-yellow-300' : 
                           'bg-red-500/30 text-red-300'
                         }`}>Mood:{(rec.mood_match * 100).toFixed(0)}%</span>
                         <span className={`px-1 py-0.5 rounded text-[12px] ${

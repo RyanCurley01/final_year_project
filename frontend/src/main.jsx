@@ -22,8 +22,6 @@ if (import.meta.env.DEV) {
   window.paymentService = paymentService;
   window.wishlistService = wishlistService;
   window.stockService = stockService;
-  console.log('✅ Services loaded! Available: accountService, productService, orderService, paymentService, wishlistService, stockService');
-  console.log('Test with: await window.accountService.login("email", "password")');
 }
 
 // PayPal configuration

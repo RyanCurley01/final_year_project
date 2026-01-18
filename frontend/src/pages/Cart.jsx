@@ -42,7 +42,6 @@ const Cart = () => {
       };
       
       const order = await orderService.createOrder(orderData, email, password);
-      console.log('✅ Order created:', order);
       
       // Step 2: Create Order_Items for each cart item
       for (const item of items) {
@@ -54,7 +53,6 @@ const Cart = () => {
         };
         await orderItemService.createOrderItem(orderItemData, email, password);
       }
-      console.log('✅ Order items created for', items.length, 'products');
       
       // Step 3: Create PayPal order (use first product ID for backward compatibility)
       const paypalOrderData = {
@@ -73,7 +71,6 @@ const Cart = () => {
       const response = await paymentService.createPayPalOrder(paypalOrderData, email, password);
       return response.id;
     } catch (error) {
-      console.error("Error creating PayPal order:", error);
       setProcessingPayment(false);
       throw error;
     }
@@ -82,7 +79,6 @@ const Cart = () => {
   const handleApprove = async (data, actions) => {
     try {
       const response = await paymentService.capturePayPalOrder(data.orderID, email, password);
-      console.log("Payment successful:", response);
       
       // Add to purchase history
       dispatch(addPurchase({
@@ -109,12 +105,10 @@ const Cart = () => {
         }));
       
       if (filesToDownload.length > 0) {
-        console.log(`Starting download of ${filesToDownload.length} file(s)...`);
         try {
           await downloadMultipleFiles(filesToDownload);
           alert("Payment successful! Your files are downloading. Check your purchase history for details.");
         } catch (downloadError) {
-          console.error("Error downloading files:", downloadError);
           alert("Payment successful! However, some files failed to download. Check your purchase history to download them manually.");
         }
       } else {
@@ -123,7 +117,6 @@ const Cart = () => {
       
       setShowPayPal(false);
     } catch (error) {
-      console.error("Error capturing PayPal order:", error);
       alert("Payment failed!");
     } finally {
       setProcessingPayment(false);

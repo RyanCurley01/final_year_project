@@ -289,9 +289,7 @@ const SimilarSongs = () => {
       setError(null);
       
       try {
-        console.log('📱 SimilarSongs: Starting data fetch...');
         const products = await productService.getAllProducts(email, password);
-        console.log('📱 SimilarSongs: Got products:', products?.length);
         const musicProducts = products.filter(p => p.albumTitle && p.fileUrl);
         setDbSongs(musicProducts);
         
@@ -300,8 +298,6 @@ const SimilarSongs = () => {
         for (let i = 0; i < ARTISTS.length; i++) {
           const artist = ARTISTS[i];
           try {
-            console.log(`📱 SimilarSongs: Fetching ${artist}...`);
-            
             // Add small delay between requests to avoid rate limiting
             if (i > 0) {
               await new Promise(resolve => setTimeout(resolve, 300));
@@ -315,12 +311,10 @@ const SimilarSongs = () => {
             );
             
             if (!response.ok) {
-              console.error(`📱 SimilarSongs: Failed to fetch ${artist}:`, response.status);
               continue;
             }
             
             const data = await response.json();
-            console.log(`📱 SimilarSongs: Got ${data.results?.length} results for ${artist}`);
             
             // Filter to only include tracks that have a preview AND match the artist name
             const artistLower = artist.toLowerCase();
@@ -339,19 +333,16 @@ const SimilarSongs = () => {
                 price: track.trackPrice || 1.29
               }));
             
-            console.log(`📱 SimilarSongs: Filtered to ${artistSongs.length} songs for ${artist}`);
             allArtistSongs.push(...artistSongs);
           } catch (artistErr) {
-            console.error(`📱 SimilarSongs: Error fetching ${artist}:`, artistErr);
+            // Error fetching artist
           }
         }
         
         const matchedSongs = matchArtistSongsToDbSongs(allArtistSongs, musicProducts);
         matchedSongs.sort((a, b) => b.similarity - a.similarity);
-        console.log(`📱 SimilarSongs: Total songs loaded: ${matchedSongs.length}`);
         setSongs(matchedSongs);
       } catch (err) {
-        console.error('📱 SimilarSongs: Error fetching songs:', err);
         setError(err.message);
       } finally {
         setLoading(false);
@@ -384,13 +375,6 @@ const SimilarSongs = () => {
       };
       const rate = playbackRateRef.current;
       
-      console.log('🔄 Updating recommendations:', {
-        song: activeSong.trackName || activeSong.albumTitle,
-        hasRealFeatures: !!audioFeaturesRef.current,
-        tempo: features.tempo,
-        playbackRate: rate
-      });
-      
       const recs = findSimilarArtistSongs(activeSong, features, songs, rate);
       setRecommendations(recs);
       setDisplayedFeatures(features);
@@ -398,13 +382,11 @@ const SimilarSongs = () => {
     };
 
     // Immediate update
-    console.log('⚡ INSTANT UPDATE for:', activeSong.trackName || activeSong.albumTitle);
     setRecLoading(true);
     updateRecs();
     setRecLoading(false);
 
     // Set up polling interval (3 seconds)
-    console.log('⏱️ Starting 3s polling interval');
     intervalRef.current = setInterval(updateRecs, 3000);
 
     // Cleanup

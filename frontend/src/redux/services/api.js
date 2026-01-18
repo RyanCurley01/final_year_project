@@ -4,13 +4,6 @@ import envConfig from '../../config/environment.js';
 // Get backend base URL using our environment configuration
 const BACKEND_BASE_URL = envConfig.getBackendApiUrl();
 
-console.log('🔧 Backend API Configuration:', {
-  baseUrl: BACKEND_BASE_URL,
-  environment: envConfig.getEnvironment(),
-  isCodespaces: envConfig.isCodespaces(),
-  isProduction: envConfig.isProduction()
-});
-
 // Service ports (used for Codespaces and local development)
 export const PORTS = {
   ACCOUNTS: 8080,
@@ -59,14 +52,12 @@ export const getServiceUrl = (service) => {
   // This prevents CORS issues from trying to use production URLs during local development
   if (config.isLocalhost) {
     const url = `http://localhost:${port}`;
-    console.log(`🌐 Service URL for ${service} (localhost):`, url);
     return url;
   }
   
   // In Codespaces, each service has its own forwarded port
   if (envConfig.isCodespaces()) {
     const url = `https://${config.codespaceName}-${port}.${config.codespacesDomain}`;
-    console.log(`🌐 Service URL for ${service} (codespaces):`, url);
     return url;
   }
   
@@ -85,7 +76,6 @@ export const getServiceUrl = (service) => {
       8089: '/proxy/sold-products',
     };
     const url = proxyMap[port] || `/proxy/backend`;
-    console.log(`🌐 Service URL for ${service} (ngrok):`, url);
     return url;
   }
   
@@ -93,23 +83,19 @@ export const getServiceUrl = (service) => {
   if (config.isProduction) {
     // Try runtime env first, then vite env
     if (runtimeUrl && !isLocalhostUrl(runtimeUrl)) {
-      console.log(`🌐 Service URL for ${service} (runtime env):`, runtimeUrl);
       return runtimeUrl;
     }
     if (viteUrl && !isLocalhostUrl(viteUrl)) {
-      console.log(`🌐 Service URL for ${service} (vite env):`, viteUrl);
       return viteUrl;
     }
     
     // Fallback: Use backend URL as base (assumes API gateway/reverse proxy)
     const fallbackUrl = config.backendApiUrl;
-    console.warn(`⚠️ No ${envVarName} set for production! Using fallback:`, fallbackUrl);
     return fallbackUrl;
   }
   
   // Fallback to localhost
   const url = `http://localhost:${port}`;
-  console.log(`🌐 Service URL for ${service} (fallback):`, url);
   return url;
 };
 
@@ -169,19 +155,14 @@ export const apiCall = async (url, options = {}) => {
       headers['ngrok-skip-browser-warning'] = 'true';
     }
     
-    console.log('🌐 API Call:', { url, method: options.method || 'GET', headers });
-    
     const response = await fetch(url, {
       ...options,
       headers,
     });
 
-    console.log('📡 API Response:', { url, status: response.status, statusText: response.statusText });
-
     if (!response.ok) {
       const error = await response.json().catch(() => ({}));
       const errorMessage = error.message || `HTTP ${response.status}: ${response.statusText}`;
-      console.error('❌ API Error:', { url, status: response.status, error: errorMessage });
       throw new Error(errorMessage);
     }
 
@@ -192,7 +173,6 @@ export const apiCall = async (url, options = {}) => {
 
     return await response.json();
   } catch (error) {
-    console.error('❌ API call failed:', { url, error: error.message, stack: error.stack });
     throw error;
   }
 };

@@ -28,11 +28,9 @@ class SkySegmentation {
       this.isInitialized = true;
       // Only log once across all instances
       if (!hasLoggedInit) {
-        console.log('Sky segmentation initialized');
         hasLoggedInit = true;
       }
     } catch (error) {
-      console.error('Failed to initialize TensorFlow.js:', error);
       throw error;
     }
   }
@@ -75,7 +73,7 @@ class SkySegmentation {
       skyMask = skyMask.clipByValue(0, 1);
       
       // Apply lower threshold for more visible effect
-      const threshold = 1.2; // Lowered from 1.8 to detect more sky
+      const threshold = 0.9; // Lowered from 1.8 to detect more sky
       skyMask = skyMask.greater(threshold).toFloat();
       
       return skyMask;
@@ -114,8 +112,12 @@ class SkySegmentation {
   
   /**
    * Process video frame with sky color change (detects blue sky, excludes clouds)
+   * @param {HTMLVideoElement} videoElement - The video element to process
+   * @param {HTMLCanvasElement} canvas - The canvas to draw to
+   * @param {Array} color - RGB color array for sky [r, g, b]
+   * @param {boolean} applyGlitch - Whether to apply glitch distortion to sky pixels
    */
-  async processFrame(videoElement, canvas, color) {
+  async processFrame(videoElement, canvas, color, applyGlitch = false) {
     if (!this.isInitialized) {
       await this.initialize();
     }
@@ -179,10 +181,32 @@ class SkySegmentation {
       
       if (isSky) {
         // Blend the sky pixel with the target color
-        const blendFactor = 0.6;
-        data[i] = Math.round(r * (1 - blendFactor) + color[0] * blendFactor);
-        data[i + 1] = Math.round(g * (1 - blendFactor) + color[1] * blendFactor);
-        data[i + 2] = Math.round(b * (1 - blendFactor) + color[2] * blendFactor);
+        let blendFactor = 0.6;
+        let finalR = color[0];
+        let finalG = color[1];
+        let finalB = color[2];
+        
+        // Apply glitch distortion only to sky pixels
+        if (applyGlitch) {
+          // Increase saturation and apply color shift for glitch effect
+          blendFactor = 0.85; // Stronger blend during glitch
+          
+          // Hue rotation effect - shift RGB channels
+          const hueShift = Math.random() * 0.3 + 0.7; // Random shift factor
+          finalR = Math.min(255, color[2] * hueShift + 50); // Swap and shift
+          finalG = Math.min(255, color[0] * hueShift);
+          finalB = Math.min(255, color[1] * hueShift + 80);
+          
+          // Add some noise/grain to sky pixels during glitch
+          const noise = (Math.random() - 0.5) * 40;
+          finalR = Math.max(0, Math.min(255, finalR + noise));
+          finalG = Math.max(0, Math.min(255, finalG + noise));
+          finalB = Math.max(0, Math.min(255, finalB + noise));
+        }
+        
+        data[i] = Math.round(r * (1 - blendFactor) + finalR * blendFactor);
+        data[i + 1] = Math.round(g * (1 - blendFactor) + finalG * blendFactor);
+        data[i + 2] = Math.round(b * (1 - blendFactor) + finalB * blendFactor);
       }
     }
     

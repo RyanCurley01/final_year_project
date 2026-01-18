@@ -233,9 +233,7 @@ const TopCharts = () => {
       setError(null);
       
       try {
-        console.log('📱 TopCharts: Starting data fetch...');
         const products = await productService.getAllProducts(email, password);
-        console.log('📱 TopCharts: Got products:', products?.length);
         const musicProducts = products.filter(p => p.albumTitle && p.fileUrl);
         setDbSongs(musicProducts);
         
@@ -244,8 +242,6 @@ const TopCharts = () => {
         for (let i = 0; i < ARTISTS.length; i++) {
           const artist = ARTISTS[i];
           try {
-            console.log(`📱 TopCharts: Fetching ${artist}...`);
-            
             // Add small delay between requests to avoid rate limiting
             if (i > 0) {
               await new Promise(resolve => setTimeout(resolve, 300));
@@ -259,12 +255,10 @@ const TopCharts = () => {
             );
             
             if (!response.ok) {
-              console.error(`📱 TopCharts: Failed to fetch ${artist}:`, response.status);
               continue; // Skip this artist but continue with others
             }
             
             const data = await response.json();
-            console.log(`📱 TopCharts: Got ${data.results?.length} results for ${artist}`);
             
             // Filter to only include tracks that have a preview AND match the artist name
             const artistLower = artist.toLowerCase();
@@ -285,20 +279,16 @@ const TopCharts = () => {
                 popularityScore: 51 - artistIndex
               }));
             
-            console.log(`📱 TopCharts: Filtered to ${artistSongs.length} songs for ${artist}`);
             allArtistSongs.push(...artistSongs);
           } catch (artistErr) {
-            console.error(`📱 TopCharts: Error fetching ${artist}:`, artistErr);
             // Continue with other artists
           }
         }
         
         // Sort by popularity score (most popular first across all artists)
         allArtistSongs.sort((a, b) => b.popularityScore - a.popularityScore);
-        console.log(`📱 TopCharts: Total songs loaded: ${allArtistSongs.length}`);
         setSongs(allArtistSongs);
       } catch (err) {
-        console.error('📱 TopCharts: Error fetching songs:', err);
         setError(err.message);
       } finally {
         setLoading(false);
@@ -331,13 +321,6 @@ const TopCharts = () => {
       };
       const rate = playbackRateRef.current;
       
-      console.log('🔄 Updating recommendations:', {
-        song: activeSong.trackName || activeSong.albumTitle,
-        hasRealFeatures: !!audioFeaturesRef.current,
-        tempo: features.tempo,
-        playbackRate: rate
-      });
-      
       const recs = findSimilarArtistSongs(activeSong, features, songs, rate);
       setRecommendations(recs);
       setDisplayedFeatures(features);
@@ -345,13 +328,11 @@ const TopCharts = () => {
     };
 
     // Immediate update
-    console.log('⚡ INSTANT UPDATE for:', activeSong.trackName || activeSong.albumTitle);
     setRecLoading(true);
     updateRecs();
     setRecLoading(false);
 
     // Set up polling interval (3 seconds)
-    console.log('⏱️ Starting 3s polling interval');
     intervalRef.current = setInterval(updateRecs, 3000);
 
     // Cleanup

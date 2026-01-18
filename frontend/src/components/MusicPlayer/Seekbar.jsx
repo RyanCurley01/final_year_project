@@ -1,6 +1,6 @@
 import React from 'react';
 
-const Seekbar = ({ value, min, max, onInput, setSeekTime, appTime }) => {
+const Seekbar = ({ value, min, max, onInput, setSeekTime, appTime, onSeekStart, onSeekEnd }) => {
   // converts the time to format 0:00
   const getTime = (time) => `${Math.floor(time / 60)}:${(`0${Math.floor(time % 60)}`).slice(-2)}`;
 
@@ -16,6 +16,10 @@ const Seekbar = ({ value, min, max, onInput, setSeekTime, appTime }) => {
         value={value}
         min={min}
         max={max}
+        onMouseDown={onSeekStart}
+        onMouseUp={onSeekEnd}
+        onTouchStart={onSeekStart}
+        onTouchEnd={onSeekEnd}
         onChange={onInput}
         className="flex-1 min-w-[60px] h-1 mx-2 rounded-lg cursor-pointer"
       />

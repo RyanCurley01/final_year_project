@@ -16,13 +16,13 @@ const SongBar = ({ song, i, artistId, isPlaying, activeSong, handlePauseClick, h
     if (videoRef.current && isVideo) {
       if (isThisSongActive && isPlaying) {
         videoRef.current.loop = true;
-        videoRef.current.play().catch(e => console.error('Video play error:', e));
+        videoRef.current.play().catch(() => {});
       } else if (isThisSongActive && !isPlaying) {
         videoRef.current.pause();
       } else {
         videoRef.current.loop = false;
         if (videoRef.current.paused) {
-          videoRef.current.play().catch(e => console.error('Video play error:', e));
+          videoRef.current.play().catch(() => {});
         }
       }
     }
@@ -48,12 +48,11 @@ const SongBar = ({ song, i, artistId, isPlaying, activeSong, handlePauseClick, h
               if (!isThisSongActive || !isPlaying) {
                 if (videoRef.current) {
                   videoRef.current.currentTime = 0;
-                  videoRef.current.play().catch(e => console.error('Video restart error:', e));
+                  videoRef.current.play().catch(() => {});
                 }
               }
             }}
             onError={(e) => {
-              console.error('Video failed to load:', coverMedia, e);
               e.target.style.display = 'none';
               e.target.nextElementSibling?.classList.remove('hidden');
             }}

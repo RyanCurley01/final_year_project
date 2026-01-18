@@ -15,12 +15,10 @@ const getAudioServiceBaseUrl = () => {
   // IMPORTANT: Check localhost FIRST - always use localhost URLs when running locally
   // This prevents CORS issues from trying to use production URLs during local development
   if (isLocalhost) {
-    console.log('🎵 Using localhost for audio service');
     return 'http://localhost:5000/api';
   }
   
   if (isNgrokHost()) {
-    console.log('🎵 Using ngrok proxy for audio service');
     return '/proxy/audio/api';
   }
   
@@ -40,7 +38,6 @@ const getAudioServiceBaseUrl = () => {
   
   // Use environment configuration (handles production and local)
   const apiBaseUrl = envConfig.getApiBaseUrl();
-  console.log('🎵 Using audio service URL from env:', apiBaseUrl);
   return `${apiBaseUrl}/api`;
 };
 
@@ -56,8 +53,6 @@ const dynamicBaseQuery = async (args, api, extraOptions) => {
   const adjustedArgs = typeof args === 'string'
     ? adjustedUrl
     : { ...args, url: adjustedUrl };
-  
-  console.log('🎵 Audio Service Request:', adjustedArgs);
   
   // Build headers with ngrok bypass if needed
   const headers = {};

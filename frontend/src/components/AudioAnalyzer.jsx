@@ -40,14 +40,12 @@ const AudioAnalyzer = ({ audioElement, onFeaturesExtracted, isPlaying }) => {
           // Don't connect to destination - the global context already does that
           
           setAnalyser(analyserNode);
-          console.log('✅ AudioAnalyzer connected to global audio context');
         } else {
           // Global context not ready yet, try again shortly
-          console.log('⏳ Waiting for global audio context...');
           setTimeout(initAnalyser, 100);
         }
       } catch (error) {
-        console.error('Error initializing AudioAnalyzer:', error);
+        // Error initializing AudioAnalyzer
       }
     };
 
@@ -87,7 +85,6 @@ const AudioAnalyzer = ({ audioElement, onFeaturesExtracted, isPlaying }) => {
       const shouldCallback = !hasCalledInitially || (timestamp - lastCallbackTime >= CALLBACK_THROTTLE_MS);
       
       if (onFeaturesExtractedRef.current && shouldCallback) {
-        console.log('🎵 AudioAnalyzer sending features:', extractedFeatures);
         onFeaturesExtractedRef.current(extractedFeatures);
         lastCallbackTime = timestamp;
         hasCalledInitially = true;
@@ -112,7 +109,7 @@ const AudioAnalyzer = ({ audioElement, onFeaturesExtracted, isPlaying }) => {
 /**
  * Calculate audio features from frequency and time domain data
  */
-function calculateAudioFeatures(frequencyData, timeData, bufferLength) {
+function calculateAudioFeatures(frequencyData, timeData) {
   // Energy: Overall amplitude/loudness
   const energy = calculateEnergy(frequencyData);
   

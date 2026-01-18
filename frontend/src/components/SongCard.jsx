@@ -99,28 +99,36 @@ const SongCard = ({ product, payment, i, data }) => {
         {/* Play/Pause overlay - shows on hover */}
         {isPlayableSong && (
           <div 
-            className={`absolute inset-0 rounded-lg flex justify-center items-center z-20 ${isHovered ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
-            style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}
-            onClick={(e) => {
-              e.stopPropagation();
-              if (isPlaying && isThisSongActive) {
-                handlePauseClick();
-              } else {
-                handlePlayClick();
-              }
+            className={`absolute inset-0 rounded-lg flex justify-center items-center ${isHovered ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
+            style={{ 
+              backgroundColor: 'rgba(0, 0, 0, 0.5)',
+              zIndex: 10
             }}
           >
-            {isPlaying && isThisSongActive ? (
-              <FaPauseCircle 
-                size={45}
-                className="text-white drop-shadow-lg cursor-pointer hover:scale-110 transition-transform"
-              />
-            ) : (
-              <FaPlayCircle 
-                size={45}
-                className="text-white drop-shadow-lg cursor-pointer hover:scale-110 transition-transform"
-              />
-            )}
+            <div
+              className="cursor-pointer"
+              style={{ pointerEvents: 'auto' }}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (isPlaying && isThisSongActive) {
+                  handlePauseClick();
+                } else {
+                  handlePlayClick();
+                }
+              }}
+            >
+              {isPlaying && isThisSongActive ? (
+                <FaPauseCircle 
+                  size={45}
+                  className="text-white drop-shadow-lg hover:scale-110 transition-transform"
+                />
+              ) : (
+                <FaPlayCircle 
+                  size={45}
+                  className="text-white drop-shadow-lg hover:scale-110 transition-transform"
+                />
+              )}
+            </div>
           </div>
         )}
 

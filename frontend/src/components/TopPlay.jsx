@@ -30,7 +30,7 @@ const TopChartCard = ({ song, i, isPlaying, activeSong, handlePauseClick, handle
             isPlaying={isPlaying && isThisSongActive}
             isActive={isThisSongActive}
             onError={(e) => {
-              console.error('Video failed to load:', coverMedia, e);
+              // Video failed to load
             }}
           />
         ) : (
@@ -82,18 +82,14 @@ const TopPlay = () => {
   const topPlays = topSongs;
   
   const handlePauseClick = () => {
-    console.log('🔴 TopPlay pause clicked');
     dispatch(playPause(false));
   };
 
   const handlePlayClick = (song, i) => {
-    console.log('▶️ TopPlay play clicked for:', song.albumTitle, 'fileUrl:', song.fileUrl);
     // Only play if the song has a fileUrl (matched with database)
     if (song.fileUrl) {
       dispatch(setActiveSong({ song, data: topSongs, i }));
       dispatch(playPause(true));
-    } else {
-      console.warn('⚠️ No fileUrl available for song:', song.albumTitle);
     }
   };
 

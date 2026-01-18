@@ -10,10 +10,11 @@ import Track from './Track';
 import VolumeBar from './VolumeBar';
 
 const MusicPlayer = () => {
-  const { activeSong, currentSongs, currentIndex, isActive, isPlaying } = useSelector((state) => state.player);
+  const { activeSong, currentSongs, currentIndex, isActive, isPlaying, playbackRate } = useSelector((state) => state.player);
   const [duration, setDuration] = useState(0);
   const [seekTime, setSeekTime] = useState(0);
   const [appTime, setAppTime] = useState(0);
+  const [isSeeking, setIsSeeking] = useState(false);
   const [volume, setVolume] = useState(0.3);
   const [repeat, setRepeat] = useState(false);
   const [shuffle, setShuffle] = useState(false);
@@ -101,9 +102,14 @@ const MusicPlayer = () => {
           value={appTime}
           min="0"
           max={duration}
-          onInput={(event) => setSeekTime(event.target.value)}
+          onInput={(event) => {
+            setAppTime(parseFloat(event.target.value));
+            setSeekTime(parseFloat(event.target.value));
+          }}
           setSeekTime={setSeekTime}
           appTime={appTime}
+          onSeekStart={() => setIsSeeking(true)}
+          onSeekEnd={() => setIsSeeking(false)}
         />
         <Player
           activeSong={activeSong}
@@ -111,9 +117,14 @@ const MusicPlayer = () => {
           isPlaying={isPlaying}
           seekTime={seekTime}
           repeat={repeat}
+          playbackRate={playbackRate}
           currentIndex={currentIndex}
           onEnded={handleNextSong}
-          onTimeUpdate={(event) => setAppTime(event.target.currentTime)}
+          onTimeUpdate={(event) => {
+            if (!isSeeking) {
+              setAppTime(event.target.currentTime);
+            }
+          }}
           onLoadedData={(event) => setDuration(event.target.duration)}
         />
       </div>
