@@ -385,19 +385,13 @@ const SmartRecommendationVisualizer = ({
         )}
       </AnimatePresence>
 
-      {/* Empty State */}
+      {/* No matches state */}
       {!loading && recommendations.length === 0 && audioFeatures && (
-        <div className="text-center py-8">
-          <p className="text-gray-400">No similar tracks found. Keep listening!</p>
+        <div className="text-center py-6">
+          <p className="text-gray-400 text-sm">Finding similar artist tracks...</p>
+          <p className="text-xs text-gray-500 mt-2">Analyzing audio features</p>
         </div>
       )}
-
-      {/* Algorithm Info */}
-      <div className="mt-4 pt-4 border-t border-gray-800">
-        <p className="text-xs text-gray-500 text-center">
-          Powered by real-time audio feature similarity matching
-        </p>
-      </div>
     </div>
   );
 };
@@ -471,27 +465,6 @@ const AlbumCover = ({ url, title, productId }) => {
       className="w-full h-full object-cover"
       onError={() => setError(true)}
     />
-  );
-};
-
-const MatchIndicator = ({ label, value }) => {
-  const percentage = (value * 100).toFixed(0);
-  
-  return (
-    <motion.div
-      key={`${label}-${percentage}`}
-      initial={{ opacity: 0.5, scale: 0.95 }}
-      animate={{ opacity: 1, scale: 1 }}
-      transition={{ duration: 0.3 }}
-    >
-      <span className={`px-1.5 py-0.5 rounded text-[12px] ${
-        value >= 0.7 ? 'bg-green-500/30 text-green-300' : 
-        value >= 0.5 ? 'bg-yellow-500/30 text-yellow-300' : 
-        'bg-red-500/30 text-red-300'
-      }`}>
-        {label}:{percentage}%
-      </span>
-    </motion.div>
   );
 };
 

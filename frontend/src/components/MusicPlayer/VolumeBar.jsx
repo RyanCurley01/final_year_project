@@ -10,7 +10,7 @@ const VolumeBar = ({ value, min, max, onChange, setVolume }) => {
     return (
       <div className="flex items-center justify-end flex-shrink-0">
         <BsFillVolumeUpFill size={20} color="#888" className="flex-shrink-0" />
-        <span className="text-xs text-gray-500 ml-2 whitespace-nowrap">Use device buttons</span>
+        <span className="text-xs text-black-500 ml-2 whitespace-nowrap">Use device buttons</span>
       </div>
     );
   }
