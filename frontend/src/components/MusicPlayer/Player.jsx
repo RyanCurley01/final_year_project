@@ -6,11 +6,13 @@ const Player = ({ activeSong, isPlaying, volume, seekTime, onEnded, onTimeUpdate
   const ref = useRef(null);
   const audioContextInitialized = useRef(false);
   
-  // Apply playback rate
+  // Apply playback rate to audio element AND onset detector
   useEffect(() => {
     if (ref.current) {
       ref.current.playbackRate = playbackRate;
     }
+    // Sync playback rate with onset detector so detection timing matches audio speed
+    globalAudioContext.setPlaybackRate(playbackRate);
   }, [playbackRate]);
   
   useEffect(() => {

@@ -52,11 +52,13 @@ class GlobalAudioContext {
           // Mark this element as connected
           this.connectedElements.add(audioElement);
           
-          // Create onset detector with lower threshold for faster detection
+          // Create onset detector with kick-focused settings
           this.onsetDetector = new OnsetDetector(this.audioContext, {
-            threshold: 0.5,
+            threshold: 0.3,       // General onset threshold (normalized 0-1)
+            kickThreshold: 0.4,   // Kick detection threshold
+            snareThreshold: 0.3,  // Snare/hi-hat threshold
             fftSize: 512,
-            minTimeBetweenOnsets: 30,
+            minTimeBetweenOnsets: 100,  // Slower detection (100ms between onsets)
           });
 
           // IMPORTANT: Connect to destination so audio plays!
@@ -86,9 +88,11 @@ class GlobalAudioContext {
         this.mediaSource = this.audioContext.createMediaStreamSource(stream);
         
         this.onsetDetector = new OnsetDetector(this.audioContext, {
-          threshold: 0.5,
+          threshold: 0.3,       // General onset threshold (normalized 0-1)
+          kickThreshold: 0.4,   // Kick detection threshold
+          snareThreshold: 0.3,  // Snare/hi-hat threshold
           fftSize: 512,
-          minTimeBetweenOnsets: 30,
+          minTimeBetweenOnsets: 100,  // Slower detection (100ms between onsets)
         });
 
         // Connect stream (no need for destination with captureStream)
@@ -151,6 +155,15 @@ class GlobalAudioContext {
   resume() {
     if (this.audioContext && this.audioContext.state === 'suspended') {
       this.audioContext.resume();
+    }
+  }
+
+  /**
+   * Set playback rate - adjusts detection timing to match audio speed
+   */
+  setPlaybackRate(rate) {
+    if (this.onsetDetector) {
+      this.onsetDetector.setPlaybackRate(rate);
     }
   }
 

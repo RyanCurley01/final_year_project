@@ -41,12 +41,20 @@ const SmartRecommendationVisualizer = ({
   const audioFeaturesRef = useRef(audioFeatures);
   audioFeaturesRef.current = audioFeatures;
 
+  // Reset state when current product changes
+  useEffect(() => {
+    setRecommendations([]); // Clear old recommendations
+    setNoMatchFound(false); // Reset no match state
+    isInitialLoad.current = true;
+  }, [currentProduct?.id, currentProduct?.productId, currentProduct?.ProductID]);
+
   const fetchRecommendations = async (product, features, rate, session, forceRefresh = false) => {
     // Guard against undefined product or product.id
     const productId = product?.id || product?.productId || product?.ProductID;
     if (!product || !productId || !features) {
       return;
     }
+
     
     try {
       // Only show loading spinner on initial load (when no recommendations exist)
@@ -103,17 +111,10 @@ const SmartRecommendationVisualizer = ({
 
     // Helper function to fetch recommendations
     const doFetch = (forceRefresh = false) => {
-      const defaultFeatures = {
-        tempo: 0,
-        energy: 0,
-        valence: 0,
-        danceability: 0
-      };
-      // Merge with defaults to ensure all fields exist
-      const features = audioFeaturesRef.current 
-        ? { ...defaultFeatures, ...audioFeaturesRef.current }
-        : defaultFeatures;
+      const features = audioFeaturesRef.current;
       const rate = playbackRateRef.current;
+      
+      if (!features) return;
       
       setDisplayedFeatures(features);
       setDisplayedPlaybackRate(rate);

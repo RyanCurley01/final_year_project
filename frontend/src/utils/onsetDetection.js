@@ -12,9 +12,10 @@ class OnsetDetector {
     // 1. Number of audio samples to analyze at once - MUST be set before creating analyser
     this.fftSize = options.fftSize || 512;
     this.hopSize = options.hopSize || 128;
-    this.threshold = options.threshold || 1; // Very low for fast detection
-    this.glitchThreshold = options.glitchThreshold || 0.6; // Threshold for glitch detection
+    this.threshold = options.threshold || 0.5;  // For general onset (normalized values ~0-1)
+    this.glitchThreshold = options.glitchThreshold || 0.9; // Threshold for glitch detection
     this.sampleRate = audioContext.sampleRate;
+    this.playbackRate = options.playbackRate || 1.0; // Playback speed multiplier
 
     // 2. Create analyzer to break down audio into different frequencies
     this.analyser = audioContext.createAnalyser();
@@ -33,17 +34,39 @@ class OnsetDetector {
     // To store glitch effect detection patterns
     this.spectralCentroidHistory = []; // Track pitch/centroid changes for tape stop
     this.energyHistory = []; // Track energy for gates/stutters
-    this.historySize = 20; // Longer history for more accurate detection
+    this.historySize = 20 // Longer history for more accurate detection
 
     this.lastGlitchTime = 0;
     
     // Onset detection state
-    this.onsetCallbacks = [];
+    this.onsetCallbacks = [];      // General onset with type field ('kick', 'snare', 'unknown')
     this.glitchCallbacks = [];
     this.isRunning = false;
     this.lastOnsetTime = 0;
-    this.minTimeBetweenOnsets = options.minTimeBetweenOnsets || 30; // Fast response
+    this.baseMinTimeBetweenOnsets = options.minTimeBetweenOnsets || 100; // Base time between detections (ms)
+    this.minTimeBetweenOnsets = this.baseMinTimeBetweenOnsets; // Adjusted by playback rate
     this.minTimeBetweenGlitches = options.minTimeBetweenGlitches || 500; // Much longer gap - glitches are rare events
+    
+    // Previous values for peak detection
+    this.previousKickScore = 0;
+    this.previousSnareScore = 0;
+    
+    // Thresholds for drum type classification
+    this.kickThreshold = options.kickThreshold || 0.5;
+    this.snareThreshold = options.snareThreshold || 0.9;
+  }
+  
+  /**
+   * Set playback rate - adjusts detection timing
+   * Slower playback = slower detection, faster playback = faster detection
+   */
+  setPlaybackRate(rate) {
+    this.playbackRate = rate || 1.0;
+    // Adjust minTimeBetweenOnsets based on playback rate
+    // At 0.5x speed, wait 2x longer between detections
+    // At 2.0x speed, wait 0.5x as long
+    this.minTimeBetweenOnsets = this.baseMinTimeBetweenOnsets / this.playbackRate;
+    return this;
   }
   
   /**
@@ -55,10 +78,18 @@ class OnsetDetector {
   }
   
   /**
-   * Add callback for onset events
+   * Add callback for onset events (includes type: 'kick', 'snare', or 'unknown')
    */
   onOnset(callback) {
     this.onsetCallbacks.push(callback);
+    return this;
+  }
+  
+  /**
+   * Remove onset callback
+   */
+  offOnset(callback) {
+    this.onsetCallbacks = this.onsetCallbacks.filter(cb => cb !== callback);
     return this;
   }
   
@@ -79,14 +110,33 @@ class OnsetDetector {
   }
   
   /**
-   * High-Frequency Content (HFC) onset detection function
-   * Good for detecting percussive sounds like drums
-   * O(n) = sum(k * |X(k)|^2) where X(k) is the magnitude spectrum
+   * Low-Frequency Content (LFC) - Modified HFC for KICK detection
+   * Weights LOW frequencies more heavily (kicks are in 40-150Hz range)
+   * Bins 0-20 contain most kick drum energy
+   * O(n) = sum((maxBin - k) * |X(k)|^2) - inverted weighting
+   */
+  calculateLFC(spectrum) {
+    let lfc = 0;
+    const kickBinEnd = 25; // Focus on bins 0-25 (~0-2000Hz at 44.1kHz)
+    
+    for (let k = 0; k < kickBinEnd; k++) {
+      const magnitude = spectrum[k] / 255.0; // Normalize 0-255 to 0-1
+      // Weight low frequencies MORE (inverse of HFC)
+      // Bin 0 gets weight 25, bin 24 gets weight 1
+      const weight = kickBinEnd - k;
+      lfc += weight * magnitude * magnitude;
+    }
+    return lfc;
+  }
+  
+  /**
+   * High-Frequency Content (HFC) - for snare/hi-hat detection (kept for reference)
+   * Good for detecting high-frequency percussive sounds
    */
   calculateHFC(spectrum) {
     let hfc = 0;
     for (let k = 0; k < spectrum.length; k++) {
-      const magnitude = spectrum[k] / 255.0; // Normalize 0-255 to 0-1
+      const magnitude = spectrum[k] / 255.0;
       hfc += k * magnitude * magnitude;
     }
     return hfc;
@@ -302,21 +352,28 @@ class OnsetDetector {
       return;
     }
     
-    // Calculate onset detection function (HFC for drums)
+    // ============ CALCULATE ALL DETECTION FUNCTIONS ============
+    
+    // 1. LFC (Low-Frequency Content) - for KICK detection
+    const lfc = this.calculateLFC(this.frequencyData);
+    
+    // 2. HFC (High-Frequency Content) - for SNARE/HI-HAT detection  
     const hfc = this.calculateHFC(this.frequencyData);
     
-    // Alternative: Spectral Flux
+    // 3. Spectral Flux - measures CHANGE in spectrum (good for any transient)
     const flux = this.calculateSpectralFlux(this.frequencyData, this.previousSpectrum);
     
-    // Calculate tracker glitch detection metrics
+    // 4. Spectral Centroid - "brightness" of sound (used for glitch detection)
     const spectralCentroid = this.calculateSpectralCentroid(this.frequencyData);
+    
+    // 5. Energy - total signal power (used for glitch detection)
     const energy = this.calculateEnergy(this.frequencyData);
     
-    // Update history for glitch detection
+    // ============ UPDATE HISTORY FOR GLITCH DETECTION ============
     this.spectralCentroidHistory.push(spectralCentroid);
     this.energyHistory.push(energy);
     
-    // Sliding window of the most recent 20 frames to remove the first old frame
+    // Sliding window - keep only recent frames
     if (this.spectralCentroidHistory.length > this.historySize) {
       this.spectralCentroidHistory.shift();
     }
@@ -324,18 +381,35 @@ class OnsetDetector {
       this.energyHistory.shift();
     }
     
-    // Combine both methods
-    const onsetFunction = (0.7 * hfc / 1000) + (0.3 * flux / 10);
+    // ============ NORMALIZE VALUES ============
+    const normalizedLFC = lfc / 500;
+    const normalizedHFC = hfc / 10000;
+    const normalizedFlux = flux / 10;
+    const now = Date.now();
     
-    // Detect onset (drum hits)
+    // ============ CLASSIFY DRUM TYPE ============
+    // Calculate scores to determine if this is a kick or snare
+    const kickScore = (0.7 * normalizedLFC) + (0.3 * normalizedFlux);
+    const snareScore = (0.6 * normalizedHFC) + (0.4 * normalizedFlux);
+    
+    // Determine drum type based on which score is higher and above threshold
+    const isKick = kickScore > this.previousKickScore && kickScore > this.kickThreshold;
+    const isSnare = snareScore > this.previousSnareScore && snareScore > this.snareThreshold;
+    
+    // ============ GENERAL ONSET (ALL FUNCTIONS COMBINED) ============
+    // Weighted combination of all detection methods
+    const onsetFunction = (0.4 * normalizedLFC) + (0.3 * normalizedHFC) + (0.3 * normalizedFlux);
+    
     if (this.detectOnset(onsetFunction)) {
-      /* loop through all registered callback functions
-         cb(...) - Call each callback with:
-         time: Exact moment the drum hit occurred (in seconds)
-         strength: How strong the drum hit was */
       this.onsetCallbacks.forEach(cb => cb({
         time: this.audioContext.currentTime,
-        strength: onsetFunction
+        strength: onsetFunction,
+        type: isKick ? 'kick' : (isSnare ? 'snare' : 'unknown'),
+        lfc: normalizedLFC,
+        hfc: normalizedHFC,
+        flux: normalizedFlux,
+        energy: energy,
+        spectralCentroid: spectralCentroid
       }));
     }
     
@@ -360,6 +434,8 @@ class OnsetDetector {
     // Copies all 256 frequency bin values efficiently
     this.previousSpectrum.set(this.frequencyData);
     this.previousOnsetFunction = onsetFunction;
+    this.previousKickScore = kickScore;   // Store kickScore, not just LFC
+    this.previousSnareScore = snareScore; // Store snareScore, not just HFC
     
     // To call processFrame again on the next animation frame
     requestAnimationFrame(() => this.processFrame());

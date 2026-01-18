@@ -70,7 +70,7 @@ const SongCard = ({ product, payment, i, data }) => {
      */
     <div className="flex flex-col p-4 bg-white/5 backdrop-blur-sm animate-slideup rounded-lg cursor-pointer hover:bg-white/10 transition-all">
       <div 
-        className="relative w-full aspect-square"
+        className="relative w-full aspect-square rounded-lg overflow-hidden outline-none border-none"
         onMouseEnter={() => setIsHovered(true)}
         onMouseLeave={() => setIsHovered(false)}
       >
@@ -78,7 +78,7 @@ const SongCard = ({ product, payment, i, data }) => {
           <AudioReactiveVideo
             src={coverMedia}
             alt={productName}
-            className="w-full h-full rounded-lg object-cover"
+            className="w-full h-full object-cover"
             isPlaying={isPlaying && isThisSongActive}
             isActive={isThisSongActive}
             playbackRate={isThisSongActive ? playbackRate : 1.0}
@@ -87,7 +87,7 @@ const SongCard = ({ product, payment, i, data }) => {
           <img
             src={coverMedia || placeholders.large}
             alt={productName}
-            className="w-full h-full rounded-lg object-cover"
+            className="w-full h-full object-cover"
             onError={(e) => {
               if (e.target.src !== placeholders.large) {
                 e.target.src = placeholders.large;

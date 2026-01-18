@@ -30,10 +30,14 @@ export const AudioFeaturesProvider = ({ children }) => {
         return;
       }
 
-      // Check if we already have an analyser connected
+      // If analyser exists and song changed, disconnect and recreate
       if (analyserRef.current) {
-        startAnalysis();
-        return;
+        try {
+          analyserRef.current.disconnect();
+        } catch (e) {
+          // Already disconnected
+        }
+        analyserRef.current = null;
       }
 
       try {
@@ -72,7 +76,8 @@ export const AudioFeaturesProvider = ({ children }) => {
 
           const sum = frequencyData.reduce((a, b) => a + b, 0);
           
-          if (sum > 100) { // Need some minimum signal
+          // Lower threshold - even quiet audio should register
+          if (sum > 10) {
             const features = calculateAudioFeatures(frequencyData, timeData, bufferLength);
             setAudioFeatures(features);
           }

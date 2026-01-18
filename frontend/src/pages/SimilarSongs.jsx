@@ -367,13 +367,10 @@ const SimilarSongs = () => {
 
     // Helper function to update recommendations
     const updateRecs = () => {
-      const features = audioFeaturesRef.current || {
-        tempo: 0,
-        energy: 0,
-        valence: 0,
-        danceability: 0
-      };
+      const features = audioFeaturesRef.current;
       const rate = playbackRateRef.current;
+      
+      if (!features) return; // Don't update if no features available yet
       
       const recs = findSimilarArtistSongs(activeSong, features, songs, rate);
       setRecommendations(recs);

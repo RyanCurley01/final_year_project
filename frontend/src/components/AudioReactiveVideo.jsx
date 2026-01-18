@@ -69,7 +69,20 @@ const AudioReactiveVideo = ({
     }
     
     const handleOnset = (onset) => {
-      const randomColor = SKY_COLORS[Math.floor(Math.random() * SKY_COLORS.length)];
+      // Get a random color that's DIFFERENT from the current one
+      let randomColor;
+      let attempts = 0;
+      do {
+        randomColor = SKY_COLORS[Math.floor(Math.random() * SKY_COLORS.length)];
+        attempts++;
+        // Compare RGB arrays - if same, pick again (max 10 attempts to avoid infinite loop)
+      } while (
+        attempts < 10 &&
+        currentSkyColorRef.current[0] === randomColor[0] &&
+        currentSkyColorRef.current[1] === randomColor[1] &&
+        currentSkyColorRef.current[2] === randomColor[2]
+      );
+      
       // Update ref directly for immediate use in animation loop
       currentSkyColorRef.current = randomColor;
       // Also update shared context so other components can react
