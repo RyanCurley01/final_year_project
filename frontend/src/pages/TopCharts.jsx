@@ -7,6 +7,7 @@ import { useAudioFeatures } from '../context/AudioFeaturesContext';
 import { setActiveSong, playPause } from '../redux/features/playerSlice';
 import { productService } from '../redux/services';
 import { FaPauseCircle, FaPlayCircle } from 'react-icons/fa';
+import envConfig from '../config/environment';
 
 const ARTISTS = ['Aphex Twin', 'Boards of Canada', 'Squarepusher'];
 
@@ -232,6 +233,9 @@ const TopCharts = () => {
       setLoading(true);
       setError(null);
       
+      // Get API URL from environment config (no hardcoding)
+      const apiBaseUrl = envConfig.getApiBaseUrl();
+      
       try {
         const products = await productService.getAllProducts(email, password);
         const musicProducts = products.filter(p => p.albumTitle && p.fileUrl);
@@ -247,14 +251,16 @@ const TopCharts = () => {
               await new Promise(resolve => setTimeout(resolve, 300));
             }
             
+            // Use audio service proxy for iTunes API (no hardcoded URLs)
             const response = await fetch(
-              `https://itunes.apple.com/search?term=${encodeURIComponent(artist)}&media=music&entity=song&limit=200`,
+              `${apiBaseUrl}/api/itunes/search?term=${encodeURIComponent(artist)}&media=music&entity=song&limit=200`,
               { 
-                signal: AbortSignal.timeout(10000) // 10 second timeout
+                signal: AbortSignal.timeout(15000) // 15 second timeout
               }
             );
             
             if (!response.ok) {
+              console.warn(`iTunes proxy failed for ${artist}, status: ${response.status}`);
               continue; // Skip this artist but continue with others
             }
             
