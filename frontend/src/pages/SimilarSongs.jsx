@@ -104,7 +104,7 @@ const FeatureBadge = ({ label, value }) => {
   );
 };
 
-const SongCard = ({ song, isPlaying, activeSong, onPlay, onPause, index, allSongs, onSongNameClick }) => {
+const SongCard = ({ song, isPlaying, activeSong, onPlay, onPause, index, allSongs, onSongNameClick, onArtistClick, onAlbumClick }) => {
   const isThisSongActive = activeSong?.id === song.id;
   const albumArt = song.artworkUrl100?.replace('100x100', '600x600') || fallbackImage;
 
@@ -115,6 +115,22 @@ const SongCard = ({ song, isPlaying, activeSong, onPlay, onPause, index, allSong
     e.stopPropagation();
     if (onSongNameClick) {
       onSongNameClick(song);
+    }
+  };
+
+  // Handle clicking on artist name - navigate to artist details
+  const handleArtistClick = (e) => {
+    e.stopPropagation();
+    if (onArtistClick) {
+      onArtistClick(song.artistName);
+    }
+  };
+
+  // Handle clicking on album name - navigate to album details
+  const handleAlbumClick = (e) => {
+    e.stopPropagation();
+    if (onAlbumClick && song.collectionName) {
+      onAlbumClick(song.collectionName, song);
     }
   };
   
@@ -130,7 +146,6 @@ const SongCard = ({ song, isPlaying, activeSong, onPlay, onPause, index, allSong
           src={albumArt} 
           alt={song.trackName} 
           className="w-full h-full rounded-lg object-cover" 
-          loading="lazy"
           onError={(e) => { e.target.src = fallbackImage; }} 
         />
         
@@ -186,14 +201,26 @@ const SongCard = ({ song, isPlaying, activeSong, onPlay, onPause, index, allSong
 
       <div className="mt-3 flex flex-col gap-1">
         <p 
-          className="font-semibold text-sm text-white truncate leading-tight hover:text-cyan-400 transition-colors cursor-pointer"
+          className="font-semibold text-sm text-gray-300 truncate leading-tight hover:text-cyan-400 transition-colors cursor-pointer"
           onClick={handleSongNameClick}
           title="Click to see similar songs by this artist"
         >
           {song.trackName || song.albumTitle}
         </p>
-        <p className="text-xs text-gray-400 truncate">{song.artistName}</p>
-        <p className="text-xs text-gray-500 truncate">{song.collectionName}</p>
+        <p 
+          className="text-xs text-gray-400 truncate hover:text-cyan-400 transition-colors cursor-pointer"
+          onClick={handleArtistClick}
+          title="Click to view artist details"
+        >
+          {song.artistName}
+        </p>
+        <p 
+          className="text-xs text-gray-500 truncate hover:text-cyan-400 transition-colors cursor-pointer"
+          onClick={handleAlbumClick}
+          title="Click to view album songs and similarity"
+        >
+          {song.collectionName}
+        </p>
       </div>
 
       {song.matchedDbSong && (
@@ -300,9 +327,7 @@ const SimilarSongs = () => {
   };
 
   // Initial data fetch
-  useEffect(() => {
-    const abortController = new AbortController();
-    
+  useEffect(() => {   
     const fetchAllSongs = async () => {
       setLoading(true);
       setError(null);
@@ -325,19 +350,8 @@ const SimilarSongs = () => {
               await new Promise(resolve => setTimeout(resolve, 300));
             }
             
-            // Use audio service proxy for iTunes API (no hardcoded URLs)
             const response = await fetch(
-              `${apiBaseUrl}/api/itunes/search?term=${encodeURIComponent(artist)}&media=music&entity=song&limit=200`,
-              { 
-                signal: abortController.signal
-              }
-            );
-            
-            if (!response.ok) {
-              console.warn(`iTunes proxy failed for ${artist}, status: ${response.status}`);
-              continue;
-            }
-            
+              `${apiBaseUrl}/api/itunes/search?term=${encodeURIComponent(artist)}&media=music&entity=song&limit=200`);
             const data = await response.json();
             
             // Filter to only include tracks that have a preview AND match the artist name
@@ -382,10 +396,6 @@ const SimilarSongs = () => {
     };
 
     fetchAllSongs();
-    
-    return () => {
-      abortController.abort();
-    };
   }, []);
 
   // Single useEffect to handle all recommendation updates
@@ -419,8 +429,8 @@ const SimilarSongs = () => {
     updateRecs();
     setRecLoading(false);
 
-    // Set up polling interval (5 seconds) - reduced frequency for performance
-    intervalRef.current = setInterval(updateRecs, 5000);
+    // Set up polling interval (3 seconds) - same as SmartRecommendationVisualizer
+    intervalRef.current = setInterval(updateRecs, 3000);
 
     // Cleanup
     return () => {
@@ -431,7 +441,7 @@ const SimilarSongs = () => {
     };
   }, [activeSong?.id, songs]);
 
-  // Randomize display order - shuffle songs so different artists are mixed
+  // Filter songs and shuffle selection for variety, then sort by similarity
   const filteredSongs = useMemo(() => {
     let filtered;
     if (filter === 'all') {
@@ -439,8 +449,13 @@ const SimilarSongs = () => {
     } else {
       filtered = songs.filter(song => song.artistName?.toLowerCase().includes(filter.toLowerCase()));
     }
-    // Shuffle the array for randomized display (different artists appear mixed)
-    return shuffleArray(filtered);
+    
+    // Shuffle to randomize which songs appear, then take first N songs
+    const shuffled = shuffleArray(filtered);
+    const selected = shuffled.slice(0, Math.min(100, filtered.length));
+    
+    // Sort selected songs by similarity (highest first) for display
+    return selected.sort((a, b) => (b.similarity || 0) - (a.similarity || 0));
   }, [songs, filter]);
 
   const handlePlay = (song, index) => {
@@ -461,6 +476,22 @@ const SimilarSongs = () => {
         song: song,
         artistSongs: songs, // Pass all songs for ML similarity
         from: '/similar-songs'
+      }
+    });
+  };
+
+  // Handle clicking on artist name - navigate to artist details page
+  const handleArtistClick = (artistName) => {
+    const slug = artistName.toLowerCase().replace(/\s+/g, '-');
+    navigate(`/artists/${slug}`);
+  };
+
+  // Handle clicking on album name - navigate to album details page
+  const handleAlbumClick = (albumName, song) => {
+    navigate(`/albums/${encodeURIComponent(albumName)}`, {
+      state: {
+        song: song,
+        albumArtwork: song.artworkUrl100?.replace('100x100', '600x600')
       }
     });
   };
@@ -488,9 +519,9 @@ const SimilarSongs = () => {
   }
 
   return (
-    <div className="flex flex-col lg:flex-row gap-6 scrollbar-hide">
+    <div className="flex flex-col lg:flex-row gap-6 scrollbar-hide overflow-x-hidden">
       {/* Main Content */}
-      <div className={`flex-1 min-w-0 ${filter === 'visualizer' ? 'hidden lg:block lg:flex-none lg:w-auto' : ''}`}>
+      <div className={`flex-1 min-w-0 ${filter === 'visualizer' ? 'hidden' : ''}`}>
         <div className="mb-4 sm:mb-6">
           <h1 className="font-bold text-xl sm:text-2xl md:text-3xl text-white mb-2">Similar Track Information</h1>
           <p className="text-gray-400">Aphex Twin, Squarepusher and Boards of Canada songs matched to the {dbSongs.length} library tracks using ML-based cosine similarity on audio features (tempo, energy, valence, danceability)</p>
@@ -523,14 +554,14 @@ const SimilarSongs = () => {
         {filter !== 'visualizer' && (
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6">
           {filteredSongs.map((song, i) => (
-            <SongCard key={song.id} song={song} isPlaying={isPlaying} activeSong={activeSong} onPlay={handlePlay} onPause={handlePause} index={i} allSongs={songs} onSongNameClick={handleSongNameClick} />
+            <SongCard key={song.id} song={song} isPlaying={isPlaying} activeSong={activeSong} onPlay={handlePlay} onPause={handlePause} index={i} allSongs={songs} onSongNameClick={handleSongNameClick} onArtistClick={handleArtistClick} onAlbumClick={handleAlbumClick} />
           ))}
         </div>
         )}
       </div>
 
       {/* Right Sidebar - Real-time Recommendations with Audio Feature Badges */}
-      <div className={`w-full ${filter === 'visualizer' ? 'lg:w-full' : 'lg:w-[330px] lg:min-w-[330px]'}`}>
+      <div className={`w-full ${filter === 'visualizer' ? 'lg:w-full lg:max-w-full' : 'lg:w-[330px] lg:min-w-[330px]'}`}>
         {/* Back button when in visualizer mode */}
         {filter === 'visualizer' && (
           <div className="mb-4">
@@ -548,7 +579,7 @@ const SimilarSongs = () => {
 
         {/* Active State - when a song is playing */}
         {activeSong && Object.keys(activeSong).length > 0 && (
-        <div className="bg-gradient-to-br from-gray-900 to-black p-4 rounded-lg border border-gray-800">
+        <div className="bg-gradient-to-br from-gray-900 to-black p-4 rounded-lg border border-gray-800 overflow-x-hidden">
           <h4 className="text-sm font-bold text-white mb-1">Similar Artist Tracks</h4>
           <p className="text-[12px] text-gray-400 leading-tight">
             Based on <span className="text-cyan-400 font-semibold truncate">{activeSong.trackName || activeSong.albumTitle}</span>

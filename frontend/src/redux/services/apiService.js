@@ -81,8 +81,8 @@ export const musicServiceApi = createApi({
     getTopPlayedSongs: builder.query({
       query: (limit = 1) => `/songs/top-played?limit=${limit}`,
       providesTags: ['TopPlayedSongs'],
-      // Refresh every 1 second to reflect new plays
-      pollingInterval: 1000,
+      // Refresh every 30 seconds instead of 1 second to reduce load
+      pollingInterval: 30000,
     }),
     recordInteraction: builder.mutation({
       query: (interaction) => ({
@@ -90,7 +90,8 @@ export const musicServiceApi = createApi({
         method: 'POST',
         body: interaction,
       }),
-      invalidatesTags: ['TopPlayedSongs'], // Force immediate refetch of top played songs
+      // Don't invalidate tags to avoid constant refetching on errors
+      // invalidatesTags: ['TopPlayedSongs'],
     }),
   }),
 });

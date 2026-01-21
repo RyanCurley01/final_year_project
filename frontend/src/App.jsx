@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 
 import { Searchbar, Sidebar, MusicPlayer, TopPlay } from './components';
 import { ArtistDetails, CustomerScreen, Search, SongDetails, TopCharts, SimilarSongs } from './pages';
+import AlbumDetails from './pages/AlbumDetails';
 import Cart from './pages/Cart';
 import PurchaseHistory from './pages/PurchaseHistory';
 import SmartRecommendationVisualizer from './components/SmartRecommendationVisualizer';
@@ -65,27 +66,22 @@ const AppContent = () => {
               <Route path="/" element={<CustomerScreen />} />
               <Route path="/top-charts" element={<TopCharts />} />
               <Route path="/similar-songs" element={<SimilarSongs />} />
-              <Route path="/artists/:id" element={<ArtistDetails />} />
               <Route path="/songs/:songid" element={<SongDetails />} />
               <Route path="/search/:searchTerm" element={<Search />} />
               <Route path="/cart" element={<Cart />} />
               <Route path="/purchase-history" element={<PurchaseHistory />} />
-              <Route path="/artists/:id" element={<ArtistDetails />} />
-              <Route path="/songs/:songid" element={<SongDetails />} />
-              <Route path="/search/:searchTerm" element={<Search />} />
+              <Route path="/artists/:artistName" element={<ArtistDetails />} />
+              <Route path="/albums/:albumName" element={<AlbumDetails />} />
               {/* Catch-all route for removed/invalid paths */}
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
             
-            {/* Mobile Visualizer - at bottom of content on mobile only */}
-            {location.pathname === '/' && (
-              <div className="lg:hidden mt-6 pb-4">
-                {/* TopPlay - hidden in visualizer mode */}
-                {!location.search.includes('mode=visualizer') && (
+            {/* Mobile Visualizer - at bottom of content on mobile only, hidden in visualizer mode */}
+            {location.pathname === '/' && !location.search.includes('mode=visualizer') && (
+              <div className="lg:hidden mt-6 pb-4 overflow-x-hidden">
                 <div className="mb-4">
                   <TopPlay />
                 </div>
-                )}
                 {/* Visualizer */}
                 <div className="mb-4">
                   {activeSong?.albumTitle ? (
@@ -105,20 +101,17 @@ const AppContent = () => {
             )}
           </div>
           
-          {/* Right Sidebar - TopPlay + Visualizer - only on home page, desktop only */}
-          {location.pathname === '/' && (
+          {/* Right Sidebar - TopPlay + Visualizer - only on home page, desktop only, hidden in visualizer mode */}
+          {location.pathname === '/' && !location.search.includes('mode=visualizer') && (
             <>
               {/* Spacer for fixed sidebar - desktop only */}
               <div className="hidden lg:block w-[390px] min-w-[390px]"></div>
               
               {/* Fixed sidebar - desktop only */}
-              <div className={`hidden lg:block fixed top-0 right-0 w-[390px] min-w-[390px] ${(activeSong?.albumTitle || activeSong?.gameTitle) ? 'h-[calc(100vh-7rem)]' : 'h-screen'} overflow-y-auto hide-scrollbar z-40 px-4 pt-4 pb-8`}>
-                {/* TopPlay - hidden in visualizer mode */}
-                {!location.search.includes('mode=visualizer') && (
+              <div className={`hidden lg:block fixed top-0 right-0 w-[390px] min-w-[390px] ${(activeSong?.albumTitle || activeSong?.gameTitle) ? 'h-[calc(100vh-7rem)]' : 'h-screen'} overflow-y-auto overflow-x-hidden hide-scrollbar z-40 px-4 pt-4 pb-8`}>
                 <div className="mb-4">
                   <TopPlay />
                 </div>
-                )}
                 {/* Visualizer */}
                 <div className="mb-4">
                   {activeSong?.albumTitle ? (

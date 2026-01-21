@@ -70,13 +70,35 @@ const CustomerScreen = () => {
   // Generate a session ID for recommendations
   const sessionId = `session-${Date.now()}`;
 
-  // In visualizer mode, return nothing (TopPlay and visualizer are in the main layout)
+  // In visualizer mode, show full-width visualizer
   if (viewMode === 'visualizer') {
     return (
-      <div className="mb-4">
-        <button onClick={() => setViewMode('discover')} className="px-4 py-2 rounded-full text-sm font-medium transition-all bg-white/10 text-white hover:bg-white/20">
-          ← Back to Discover
-        </button>
+      <div className="w-full overflow-x-hidden">
+        {/* Back button */}
+        <div className="mb-4">
+          <button onClick={() => setViewMode('discover')} className="px-4 py-2 rounded-full text-sm font-medium transition-all bg-white/10 text-white hover:bg-white/20">
+            ← Back to Discover
+          </button>
+        </div>
+        
+        {/* Full-width Visualizer */}
+        <div className="w-full">
+          {activeSong?.albumTitle ? (
+            <SmartRecommendationVisualizer 
+              currentProduct={activeSong}
+              products={music}
+              sessionId={sessionId}
+              onRecommendationClick={(product) => {
+                dispatch(setActiveSong({ song: product, data: music, i: music.findIndex(p => p.id === product.id) }));
+                dispatch(playPause(true));
+              }}
+            />
+          ) : (
+            <div className="bg-gradient-to-br from-gray-900 to-black p-5 rounded-lg border border-gray-800">
+              <p className="text-gray-400 text-center">Play a song to see audio-based recommendations</p>
+            </div>
+          )}
+        </div>
       </div>
     );
   }

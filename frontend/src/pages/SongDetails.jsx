@@ -5,6 +5,7 @@ import { FaPauseCircle, FaPlayCircle, FaArrowLeft, FaMusic } from 'react-icons/f
 
 import { setActiveSong, playPause } from '../redux/features/playerSlice';
 import Loader from '../components/Loader';
+import AudioReactiveVideo from '../components/AudioReactiveVideo';
 import envConfig from '../config/environment';
 
 // Fallback image for missing album art
@@ -45,33 +46,47 @@ const FeatureBadge = ({ label, value }) => {
 };
 
 // Similar Song Card Component
-const SimilarSongCard = ({ song, isPlaying, activeSong, onPlay, onPause, rank }) => {
+const SimilarSongCard = ({ song, isPlaying, activeSong, onPlay, onPause, rank, playbackRate }) => {
   const isThisSongActive = activeSong?.trackId === song.trackId || activeSong?.id === song.trackId;
-  const albumArt = song.artworkUrl100?.replace('100x100', '600x600') || fallbackImage;
+  const albumArt = song.artworkUrl100?.replace('100x100', '600x600') || song.albumCoverImageUrl || fallbackImage;
   const [isHovered, setIsHovered] = useState(false);
+  
+  // Check if the cover media is a video
+  const isVideo = albumArt && albumArt.toLowerCase().includes('.mp4');
 
   return (
     <div className="flex flex-col p-4 bg-white/5 backdrop-blur-sm rounded-lg cursor-pointer hover:bg-white/10 transition-all">
       <div 
-        className="relative w-full aspect-square"
+        className="relative w-full aspect-square rounded-lg overflow-hidden"
         onMouseEnter={() => setIsHovered(true)}
         onMouseLeave={() => setIsHovered(false)}
       >
-        <img 
-          src={albumArt} 
-          alt={song.trackName} 
-          className="w-full h-full rounded-lg object-cover" 
-          loading="lazy"
-          onError={(e) => { e.target.src = fallbackImage; }} 
-        />
+        {isVideo ? (
+          <AudioReactiveVideo
+            src={albumArt}
+            alt={song.trackName}
+            className="w-full h-full object-cover"
+            isPlaying={isPlaying && isThisSongActive}
+            isActive={isThisSongActive}
+            playbackRate={isThisSongActive ? playbackRate : 1.0}
+          />
+        ) : (
+          <img 
+            src={albumArt} 
+            alt={song.trackName} 
+            className="w-full h-full object-cover" 
+            onError={(e) => { e.target.src = fallbackImage; }} 
+          />
+        )}
         
         {/* Play/Pause overlay */}
-        {song.previewUrl && (
+        {(song.previewUrl || song.fileUrl) && (
           <div 
             className={`absolute inset-0 rounded-lg flex justify-center items-center z-20 ${isHovered ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
             style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}
             onClick={(e) => {
               e.stopPropagation();
+              setIsHovered(false);
               if (isPlaying && isThisSongActive) {
                 onPause();
               } else {
@@ -158,7 +173,7 @@ const SongDetails = () => {
   const dispatch = useDispatch();
   const { songid } = useParams();
   const location = useLocation();
-  const { activeSong, isPlaying } = useSelector((state) => state.player);
+  const { activeSong, isPlaying, playbackRate } = useSelector((state) => state.player);
   
   // State
   const [loading, setLoading] = useState(true);
@@ -168,6 +183,7 @@ const SongDetails = () => {
   const [similarSongs, setSimilarSongs] = useState([]);
   const [targetFeatures, setTargetFeatures] = useState(null);
   const [mlInfo, setMlInfo] = useState(null);
+  const [isHeaderHovered, setIsHeaderHovered] = useState(false);
 
   // Parse song data from URL state or fetch it
   useEffect(() => {
@@ -176,33 +192,45 @@ const SongDetails = () => {
       setError(null);
       
       try {
-        // Get song data from location state (passed from SimilarSongs/TopCharts)
+        // Get song data from location state (passed from SimilarSongs/TopCharts/Discover)
         const songData = location.state?.song;
         const allArtistSongsData = location.state?.artistSongs || [];
+        const fromDiscover = location.state?.fromDiscover || false;
         
         if (!songData) {
-          setError('Song data not found. Please navigate from the Similar Songs or Top Charts page.');
+          setError('Song data not found. Please navigate from the Similar Songs, Top Charts, or Discover page.');
           setLoading(false);
           return;
         }
         
         setTargetSong(songData);
         
-        // Filter artist songs to only include songs from the same artist
-        const artistName = songData.artistName?.toLowerCase() || '';
-        const filteredArtistSongs = allArtistSongsData.filter(s => 
-          s.artistName?.toLowerCase().includes(artistName.split(' ')[0]) && // Match by first name (e.g., "Aphex")
-          s.trackId !== songData.trackId
-        );
-        
-        setArtistSongs(filteredArtistSongs);
-        
-        // Compute ML similarity if we have artist songs
-        if (filteredArtistSongs.length > 0) {
-          await computeMLSimilarity(songData, filteredArtistSongs);
+        // If coming from Discover page, use provided songs for similarity
+        if (fromDiscover) {
+          setArtistSongs(allArtistSongsData);
+          if (allArtistSongsData.length > 0) {
+            await computeMLSimilarity(songData, allArtistSongsData);
+          } else {
+            setLoading(false);
+            setError('No other songs available for comparison.');
+          }
         } else {
-          setLoading(false);
-          setError('No other songs from this artist available for comparison.');
+          // Filter artist songs to only include songs from the same artist
+          const artistName = songData.artistName?.toLowerCase() || '';
+          const filteredArtistSongs = allArtistSongsData.filter(s => 
+            s.artistName?.toLowerCase().includes(artistName.split(' ')[0]) && // Match by first name (e.g., "Aphex")
+            s.trackId !== songData.trackId
+          );
+          
+          setArtistSongs(filteredArtistSongs);
+          
+          // Compute ML similarity if we have artist songs
+          if (filteredArtistSongs.length > 0) {
+            await computeMLSimilarity(songData, filteredArtistSongs);
+          } else {
+            setLoading(false);
+            setError('No other songs from this artist available for comparison.');
+          }
         }
       } catch (err) {
         console.error('Error initializing page:', err);
@@ -380,8 +408,9 @@ const SongDetails = () => {
       albumTitle: song.trackName,
       artistName: song.artistName,
       artworkUrl100: song.artworkUrl100,
-      previewUrl: song.previewUrl,
-      fileUrl: song.previewUrl,
+      albumCoverImageUrl: song.albumCoverImageUrl || song.artworkUrl100?.replace('100x100', '600x600'),
+      previewUrl: song.previewUrl || song.fileUrl,
+      fileUrl: song.previewUrl || song.fileUrl,
       collectionName: song.collectionName
     };
     
@@ -392,8 +421,9 @@ const SongDetails = () => {
       albumTitle: s.trackName,
       artistName: s.artistName,
       artworkUrl100: s.artworkUrl100,
-      previewUrl: s.previewUrl,
-      fileUrl: s.previewUrl,
+      albumCoverImageUrl: s.albumCoverImageUrl || s.artworkUrl100?.replace('100x100', '600x600'),
+      previewUrl: s.previewUrl || s.fileUrl,
+      fileUrl: s.previewUrl || s.fileUrl,
       collectionName: s.collectionName
     })), i: similarSongs.findIndex(s => s.trackId === song.trackId) }));
     dispatch(playPause(true));
@@ -415,6 +445,7 @@ const SongDetails = () => {
       albumTitle: targetSong.trackName || targetSong.albumTitle,
       artistName: targetSong.artistName,
       artworkUrl100: targetSong.artworkUrl100,
+      albumCoverImageUrl: targetSong.albumCoverImageUrl || targetSong.artworkUrl100?.replace('100x100', '600x600'),
       previewUrl: targetSong.previewUrl || targetSong.fileUrl,
       fileUrl: targetSong.previewUrl || targetSong.fileUrl,
       collectionName: targetSong.collectionName
@@ -469,31 +500,54 @@ const SongDetails = () => {
           </div>
 
           {/* Album Art with Play */}
-          <div className="relative w-48 h-48 flex-shrink-0 mx-auto md:mx-0">
-            <img 
-              src={targetSong?.artworkUrl100?.replace('100x100', '600x600') || fallbackImage}
-              alt={targetSong?.trackName}
-              className="w-full h-full rounded-lg object-cover shadow-xl"
-              loading="lazy"
-              onError={(e) => { e.target.src = fallbackImage; }}
-            />
-            {/* Play button overlay */}
-            <div 
-              className="absolute inset-0 flex items-center justify-center bg-black/40 rounded-lg cursor-pointer hover:bg-black/50 transition-colors"
-              onClick={() => {
-                if (isPlaying && isTargetPlaying) {
-                  handlePause();
-                } else {
-                  handlePlayTarget();
-                }
-              }}
-            >
-              {isPlaying && isTargetPlaying ? (
-                <FaPauseCircle size={45} className="text-white drop-shadow-lg hover:scale-110 transition-transform" />
+          <div 
+            className="relative w-48 h-48 flex-shrink-0 mx-auto md:mx-0"
+            onMouseEnter={() => setIsHeaderHovered(true)}
+            onMouseLeave={() => setIsHeaderHovered(false)}
+          >
+            {(() => {
+              const coverMedia = targetSong?.albumCoverImageUrl || targetSong?.artworkUrl100?.replace('100x100', '600x600') || fallbackImage;
+              const isVideo = coverMedia && coverMedia.toLowerCase().includes('.mp4');
+              
+              return isVideo ? (
+                <AudioReactiveVideo
+                  src={coverMedia}
+                  alt={targetSong?.trackName}
+                  className="w-full h-full rounded-lg object-cover shadow-xl"
+                  isPlaying={isPlaying && isTargetPlaying}
+                  isActive={isTargetPlaying}
+                  playbackRate={playbackRate}
+                />
               ) : (
-                <FaPlayCircle size={45} className="text-white drop-shadow-lg hover:scale-110 transition-transform" />
-              )}
-            </div>
+                <img 
+                  src={coverMedia}
+                  alt={targetSong?.trackName}
+                  className="w-full h-full rounded-lg object-cover shadow-xl"
+                  onError={(e) => { e.target.src = fallbackImage; }}
+                />
+              );
+            })()}
+            {/* Play button overlay - only shows on hover */}
+            {isHeaderHovered && (
+              <div 
+                className="absolute inset-0 flex items-center justify-center bg-black/40 rounded-lg cursor-pointer hover:bg-black/50 transition-colors z-20"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setIsHeaderHovered(false);
+                  if (isPlaying && isTargetPlaying) {
+                    handlePause();
+                  } else {
+                    handlePlayTarget();
+                  }
+                }}
+              >
+                {isPlaying && isTargetPlaying ? (
+                  <FaPauseCircle size={45} className="text-white drop-shadow-lg hover:scale-110 transition-transform" />
+                ) : (
+                  <FaPlayCircle size={45} className="text-white drop-shadow-lg hover:scale-110 transition-transform" />
+                )}
+              </div>
+            )}
             {/* Artist badge */}
             <div className={`absolute -bottom-2 left-1/2 -translate-x-1/2 px-3 py-1 ${getArtistBadgeColor(targetSong?.artistName)} rounded-full text-[12px] font-bold text-white shadow-lg whitespace-nowrap`}>
               {targetSong?.artistName}
@@ -524,6 +578,7 @@ const SongDetails = () => {
                 onPlay={handlePlay}
                 onPause={handlePause}
                 rank={index + 1}
+                playbackRate={playbackRate}
               />
             ))}
           </div>

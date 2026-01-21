@@ -41,13 +41,18 @@ const MusicPlayer = () => {
     
     // Record if we just started playing and have a valid song
     if (justStartedPlaying && activeSong && songProductId) {
-      recordInteraction({
-        account_id: 1,
-        product_id: songProductId,
-        interaction_type: 'play',
-        duration_seconds: Math.floor(duration),
-        session_id: sessionStorage.getItem('sessionId') || `session-${Date.now()}`
-      }).catch(() => {});
+      // Fire and forget - don't wait for response or let errors affect playback
+      try {
+        recordInteraction({
+          account_id: 1,
+          product_id: songProductId,
+          interaction_type: 'play',
+          duration_seconds: Math.floor(duration),
+          session_id: sessionStorage.getItem('sessionId') || `session-${Date.now()}`
+        });
+      } catch {
+        // Silently ignore interaction recording errors
+      }
     }
   }, [isPlaying, activeSong?.productId, activeSong?.ProductID, activeSong?.id, recordInteraction, duration]);
 

@@ -1,4 +1,4 @@
-import {Link } from 'react-router-dom';
+import {Link, useNavigate } from 'react-router-dom';
 import {useDispatch, useSelector } from 'react-redux';
 import { useRef, useEffect, useState } from 'react';
 import { FiShoppingCart } from 'react-icons/fi';
@@ -31,6 +31,7 @@ const SongCard = ({ product, payment, i, data }) => {
   const [isHovered, setIsHovered] = useState(false);
 
   const dispatch = useDispatch();
+  const navigate = useNavigate();
   const { activeSong, isPlaying, songEnded, playbackRate } = useSelector((state) => state.player);
   
   // Handle playback rate change - dispatch to Redux for recommendations update
@@ -61,6 +62,40 @@ const SongCard = ({ product, payment, i, data }) => {
 
   const handleAddToCart = () => {
     dispatch(addToCart(product));
+  };
+
+  // Handle song title click for music items
+  const handleSongTitleClick = async () => {
+    if (!isMusic) return;
+    
+    // Navigate to SongDetails with product data and all music products for similarity
+    navigate(`/songs/${product.id}`, {
+      state: {
+        song: {
+          trackId: product.id,
+          trackName: product.albumTitle,
+          artistName: 'Selected Electronic Works',
+          collectionName: product.albumTitle,
+          artworkUrl100: product.albumCoverImageUrl,
+          previewUrl: product.fileUrl,
+          fileUrl: product.fileUrl,
+          price: product.albumPrice,
+          primaryGenreName: 'Electronic'
+        },
+        artistSongs: data.filter(p => p.id !== product.id).map(p => ({
+          trackId: p.id,
+          trackName: p.albumTitle,
+          artistName: 'Selected Electronic Works',
+          collectionName: p.albumTitle,
+          artworkUrl100: p.albumCoverImageUrl,
+          previewUrl: p.fileUrl,
+          fileUrl: p.fileUrl,
+          price: p.albumPrice,
+          primaryGenreName: 'Electronic'
+        })),
+        fromDiscover: true
+      }
+    });
   };
 
 
@@ -175,7 +210,7 @@ const SongCard = ({ product, payment, i, data }) => {
       )}
 
       <div className="flex flex-col mt-4">
-        <p className="font-semibold text-lg text-white">
+        <p className="font-semibold text-lg text-gray-300">
           {isGame && product.fileUrl ? (
             <a
               href={product.fileUrl}
@@ -186,6 +221,14 @@ const SongCard = ({ product, payment, i, data }) => {
             >
               {productName || 'Unknown'}
             </a>
+          ) : isMusic ? (
+            <span 
+              onClick={handleSongTitleClick}
+              className="block break-words hover:text-cyan-400 transition-colors cursor-pointer"
+              title="Click to see 20 most similar songs"
+            >
+              {productName || 'Unknown'}
+            </span>
           ) : (
             <span className="block break-words">
               {productName || 'Unknown'}

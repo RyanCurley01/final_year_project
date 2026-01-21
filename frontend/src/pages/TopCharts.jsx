@@ -104,7 +104,7 @@ const FeatureBadge = ({ label, value }) => {
   );
 };
 
-const SongCard = ({ song, isPlaying, activeSong, onPlay, onPause, index, onSongNameClick }) => {
+const SongCard = ({ song, isPlaying, activeSong, onPlay, onPause, index, onSongNameClick, onArtistClick, onAlbumClick }) => {
   const isThisSongActive = activeSong?.id === song.id;
   const albumArt = song.artworkUrl100?.replace('100x100', '600x600') || fallbackImage;
   
@@ -115,6 +115,22 @@ const SongCard = ({ song, isPlaying, activeSong, onPlay, onPause, index, onSongN
     e.stopPropagation();
     if (onSongNameClick) {
       onSongNameClick(song);
+    }
+  };
+
+  // Handle clicking on artist name - navigate to artist details
+  const handleArtistClick = (e) => {
+    e.stopPropagation();
+    if (onArtistClick) {
+      onArtistClick(song.artistName);
+    }
+  };
+
+  // Handle clicking on album name - navigate to album details
+  const handleAlbumClick = (e) => {
+    e.stopPropagation();
+    if (onAlbumClick && song.collectionName) {
+      onAlbumClick(song.collectionName, song);
     }
   };
 
@@ -130,7 +146,6 @@ const SongCard = ({ song, isPlaying, activeSong, onPlay, onPause, index, onSongN
           src={albumArt} 
           alt={song.trackName} 
           className="w-full h-full rounded-lg object-cover" 
-          loading="lazy"
           onError={(e) => { e.target.src = fallbackImage; }} 
         />
         
@@ -185,14 +200,26 @@ const SongCard = ({ song, isPlaying, activeSong, onPlay, onPause, index, onSongN
 
       <div className="mt-3 flex flex-col gap-1">
         <p 
-          className="font-semibold text-sm text-white truncate leading-tight hover:text-cyan-400 transition-colors cursor-pointer"
+          className="font-semibold text-sm text-gray-300 truncate leading-tight hover:text-cyan-400 transition-colors cursor-pointer"
           onClick={handleSongNameClick}
           title="Click to see similar songs by this artist"
         >
           {song.trackName || song.albumTitle}
         </p>
-        <p className="text-xs text-gray-400 truncate">{song.artistName}</p>
-        <p className="text-xs text-gray-500 truncate">{song.collectionName}</p>
+        <p 
+          className="text-xs text-gray-400 truncate hover:text-cyan-400 transition-colors cursor-pointer"
+          onClick={handleArtistClick}
+          title="Click to see artist details"
+        >
+          {song.artistName}
+        </p>
+        <p 
+          className="text-xs text-gray-500 truncate hover:text-cyan-400 transition-colors cursor-pointer"
+          onClick={handleAlbumClick}
+          title="Click to view album songs and similarity"
+        >
+          {song.collectionName}
+        </p>
       </div>
     </div>
   );
@@ -316,19 +343,9 @@ const TopCharts = () => {
               await new Promise(resolve => setTimeout(resolve, 300));
             }
             
-            // Use audio service proxy for iTunes API (no hardcoded URLs)
             const response = await fetch(
-              `${apiBaseUrl}/api/itunes/search?term=${encodeURIComponent(artist)}&media=music&entity=song&limit=200`,
-              { 
-                signal: abortController.signal
-              }
+              `https://itunes.apple.com/search?term=${encodeURIComponent(artist)}&media=music&entity=song&limit=200`
             );
-            
-            if (!response.ok) {
-              console.warn(`iTunes proxy failed for ${artist}, status: ${response.status}`);
-              continue; // Skip this artist but continue with others
-            }
-            
             const data = await response.json();
             
             // Filter to only include tracks that have a preview AND match the artist name
@@ -413,8 +430,8 @@ const TopCharts = () => {
     updateRecs();
     setRecLoading(false);
 
-    // Set up polling interval (5 seconds) - reduced frequency for performance
-    intervalRef.current = setInterval(updateRecs, 5000);
+    // Set up polling interval (3 seconds) - same as SmartRecommendationVisualizer
+    intervalRef.current = setInterval(updateRecs, 3000);
 
     // Cleanup
     return () => {
@@ -452,6 +469,22 @@ const TopCharts = () => {
     });
   };
 
+  // Handle clicking on artist name - navigate to artist details page
+  const handleArtistClick = (artistName) => {
+    const slug = artistName.toLowerCase().replace(/\s+/g, '-');
+    navigate(`/artists/${slug}`);
+  };
+
+  // Handle clicking on album name - navigate to album details page
+  const handleAlbumClick = (albumName, song) => {
+    navigate(`/albums/${encodeURIComponent(albumName)}`, {
+      state: {
+        song: song,
+        albumArtwork: song.artworkUrl100?.replace('100x100', '600x600')
+      }
+    });
+  };
+
   // Handle clicking on a recommended artist song
   const handleRecommendationClick = (song) => {
     if (song?.fileUrl) {
@@ -475,9 +508,9 @@ const TopCharts = () => {
   }
 
   return (
-    <div className="flex flex-col lg:flex-row gap-6 scrollbar-hide">
+    <div className="flex flex-col lg:flex-row gap-6 scrollbar-hide overflow-x-hidden">
       {/* Main Content */}
-      <div className={`flex-1 min-w-0 ${filter === 'visualizer' ? 'hidden lg:block lg:flex-none lg:w-auto' : ''}`}>
+      <div className={`flex-1 min-w-0 ${filter === 'visualizer' ? 'hidden' : ''}`}>
         <div className="mb-4 sm:mb-6">
           <h1 className="font-bold text-xl sm:text-2xl md:text-3xl text-white mb-2">Top 50 Popular Songs</h1>
           <p className="text-gray-400">The 50 most popular songs from Aphex Twin, Boards of Canada, and Squarepusher - ordered by popularity</p>
@@ -510,14 +543,14 @@ const TopCharts = () => {
         {filter !== 'visualizer' && (
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6">
           {filteredSongs.map((song, i) => (
-            <SongCard key={song.id} song={song} isPlaying={isPlaying} activeSong={activeSong} onPlay={handlePlay} onPause={handlePause} index={i} onSongNameClick={handleSongNameClick} />
+            <SongCard key={song.id} song={song} isPlaying={isPlaying} activeSong={activeSong} onPlay={handlePlay} onPause={handlePause} index={i} onSongNameClick={handleSongNameClick} onArtistClick={handleArtistClick} onAlbumClick={handleAlbumClick} />
           ))}
         </div>
         )}
       </div>
 
       {/* Right Sidebar - Real-time Recommendations with Audio Feature Badges */}
-      <div className={`w-full ${filter === 'visualizer' ? 'lg:w-full' : 'lg:w-[330px] lg:min-w-[330px]'}`}>
+      <div className={`w-full ${filter === 'visualizer' ? 'lg:w-full lg:max-w-full' : 'lg:w-[330px] lg:min-w-[330px]'}`}>
         {/* Back button when in visualizer mode */}
         {filter === 'visualizer' && (
           <div className="mb-4">
@@ -535,7 +568,7 @@ const TopCharts = () => {
 
         {/* Active State - when a song is playing */}
         {activeSong && Object.keys(activeSong).length > 0 && (
-        <div className="bg-gradient-to-br from-gray-900 to-black p-4 rounded-lg border border-gray-800">
+        <div className="bg-gradient-to-br from-gray-900 to-black p-4 rounded-lg border border-gray-800 overflow-x-hidden">
           <h3 className="text-sm font-bold text-white mb-1">Similar Artist Tracks</h3>
           <p className="text-[12px] text-gray-400 leading-tight">
             Based on <span className="text-cyan-400 font-semibold truncate">{activeSong.trackName || activeSong.albumTitle}</span>

@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { useSelector } from 'react-redux';
+import { useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import axios from 'axios';
 import { useAudioFeatures } from '../context/AudioFeaturesContext';
@@ -26,6 +27,10 @@ const SmartRecommendationVisualizer = ({
   const [hoveredRec, setHoveredRec] = useState(null);
   const isInitialLoad = useRef(true);
   const intervalRef = useRef(null);
+  const lastSongIdRef = useRef(null);
+  
+  // Get location to detect page changes
+  const location = useLocation();
   
   // Get audio features from shared context
   const { audioFeatures } = useAudioFeatures();
@@ -41,12 +46,21 @@ const SmartRecommendationVisualizer = ({
   const audioFeaturesRef = useRef(audioFeatures);
   audioFeaturesRef.current = audioFeatures;
 
-  // Reset state when current product changes
+  // Get current song ID for comparison
+  const currentSongId = activeSong?.id || activeSong?.productId || activeSong?.trackId;
+
+  // Reset state when active song changes (including from other pages)
   useEffect(() => {
-    setRecommendations([]); // Clear old recommendations
-    setNoMatchFound(false); // Reset no match state
-    isInitialLoad.current = true;
-  }, [currentProduct?.id, currentProduct?.productId, currentProduct?.ProductID]);
+    // Only reset if song actually changed
+    if (currentSongId !== lastSongIdRef.current) {
+      lastSongIdRef.current = currentSongId;
+      setRecommendations([]); // Clear old recommendations
+      setNoMatchFound(false); // Reset no match state
+      setDisplayedFeatures(null); // Clear displayed features
+      setLoading(true); // Show loading state
+      isInitialLoad.current = true;
+    }
+  }, [currentSongId, location.pathname]);
 
   const fetchRecommendations = async (product, features, rate, session, forceRefresh = false) => {
     // Guard against undefined product or product.id
@@ -121,8 +135,10 @@ const SmartRecommendationVisualizer = ({
       fetchRecommendations(currentProduct, features, rate, sessionId, forceRefresh);
     };
 
-    // Immediate fetch
-    doFetch(true);
+    // Immediate fetch if features available
+    if (audioFeaturesRef.current) {
+      doFetch(true);
+    }
 
     // Set up polling interval (3 seconds)
     intervalRef.current = setInterval(() => doFetch(false), 3000);
@@ -134,7 +150,7 @@ const SmartRecommendationVisualizer = ({
         intervalRef.current = null;
       }
     };
-  }, [currentProduct?.id, currentProduct?.productId, currentProduct?.ProductID, sessionId]);
+  }, [currentProduct, sessionId, currentSongId, location.pathname]); // Don't include audioFeatures - use ref instead
 
   // Calculate real-time match values based on current audio features
   const calculateLiveMatch = (recProductId) => {
