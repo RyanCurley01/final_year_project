@@ -70,6 +70,9 @@ const AppContent = () => {
               <Route path="/search/:searchTerm" element={<Search />} />
               <Route path="/cart" element={<Cart />} />
               <Route path="/purchase-history" element={<PurchaseHistory />} />
+              <Route path="/artists/:id" element={<ArtistDetails />} />
+              <Route path="/songs/:songid" element={<SongDetails />} />
+              <Route path="/search/:searchTerm" element={<Search />} />
               {/* Catch-all route for removed/invalid paths */}
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>

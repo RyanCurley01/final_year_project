@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
+import { useNavigate } from 'react-router-dom';
 
 import Loader from '../components/Loader';
 import PlayPause from '../components/PlayPause';
@@ -31,6 +32,52 @@ const hashCode = (str) => {
   return Math.abs(hash);
 };
 
+// Shuffle array helper
+const shuffleArray = (array) => {
+  const shuffled = [...array];
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+  return shuffled;
+};
+
+// Match artist songs to db songs with randomization and hash-based similarity
+const matchArtistSongsToDbSongs = (artistSongs, dbSongs) => {
+  if (!dbSongs.length) return artistSongs.map(s => ({ ...s, matchedDbSong: null, similarity: 0.75 }));
+  
+  const shuffledDbSongs = shuffleArray(dbSongs);
+  const usedDbIndices = new Set();
+  const matched = [];
+  
+  artistSongs.forEach((artistSong) => {
+    let dbIndex = Math.floor(Math.random() * shuffledDbSongs.length);
+    let attempts = 0;
+    
+    while (usedDbIndices.has(dbIndex) && attempts < shuffledDbSongs.length) {
+      dbIndex = (dbIndex + 1) % shuffledDbSongs.length;
+      attempts++;
+    }
+    
+    if (attempts >= shuffledDbSongs.length) {
+      usedDbIndices.clear();
+      dbIndex = Math.floor(Math.random() * shuffledDbSongs.length);
+    }
+    
+    usedDbIndices.add(dbIndex);
+    const hash = hashCode(artistSong.trackName + artistSong.artistName);
+    const similarity = 0.55 + ((hash % 40) / 100);
+    
+    matched.push({
+      ...artistSong,
+      matchedDbSong: shuffledDbSongs[dbIndex],
+      similarity
+    });
+  });
+  
+  return matched;
+};
+
 // Helper function for mood-based colors - same as SmartRecommendationVisualizer
 const getFeatureColor = (label, value) => {
   const numericValue = parseInt(value);
@@ -57,11 +104,19 @@ const FeatureBadge = ({ label, value }) => {
   );
 };
 
-const SongCard = ({ song, isPlaying, activeSong, onPlay, onPause, index }) => {
+const SongCard = ({ song, isPlaying, activeSong, onPlay, onPause, index, onSongNameClick }) => {
   const isThisSongActive = activeSong?.id === song.id;
   const albumArt = song.artworkUrl100?.replace('100x100', '600x600') || fallbackImage;
   
   const [isHovered, setIsHovered] = useState(false);
+
+  // Handle clicking on song name - navigate to details
+  const handleSongNameClick = (e) => {
+    e.stopPropagation();
+    if (onSongNameClick) {
+      onSongNameClick(song);
+    }
+  };
 
   return (
     <div className="flex flex-col p-4 bg-white/5 backdrop-blur-sm animate-slideup rounded-lg cursor-pointer hover:bg-white/10 transition-all">
@@ -75,6 +130,7 @@ const SongCard = ({ song, isPlaying, activeSong, onPlay, onPause, index }) => {
           src={albumArt} 
           alt={song.trackName} 
           className="w-full h-full rounded-lg object-cover" 
+          loading="lazy"
           onError={(e) => { e.target.src = fallbackImage; }} 
         />
         
@@ -128,7 +184,13 @@ const SongCard = ({ song, isPlaying, activeSong, onPlay, onPause, index }) => {
       </div>
 
       <div className="mt-3 flex flex-col gap-1">
-        <p className="font-semibold text-sm text-white truncate leading-tight">{song.trackName || song.albumTitle}</p>
+        <p 
+          className="font-semibold text-sm text-white truncate leading-tight hover:text-cyan-400 transition-colors cursor-pointer"
+          onClick={handleSongNameClick}
+          title="Click to see similar songs by this artist"
+        >
+          {song.trackName || song.albumTitle}
+        </p>
         <p className="text-xs text-gray-400 truncate">{song.artistName}</p>
         <p className="text-xs text-gray-500 truncate">{song.collectionName}</p>
       </div>
@@ -149,6 +211,7 @@ const TopCharts = () => {
   
   const intervalRef = useRef(null);
   const dispatch = useDispatch();
+  const navigate = useNavigate();
   const { activeSong, isPlaying, playbackRate } = useSelector((state) => state.player);
   
   // Get audio features from shared context
@@ -229,6 +292,8 @@ const TopCharts = () => {
 
   // Initial data fetch
   useEffect(() => {
+    const abortController = new AbortController();
+    
     const fetchAllSongs = async () => {
       setLoading(true);
       setError(null);
@@ -255,7 +320,7 @@ const TopCharts = () => {
             const response = await fetch(
               `${apiBaseUrl}/api/itunes/search?term=${encodeURIComponent(artist)}&media=music&entity=song&limit=200`,
               { 
-                signal: AbortSignal.timeout(15000) // 15 second timeout
+                signal: abortController.signal
               }
             );
             
@@ -273,6 +338,7 @@ const TopCharts = () => {
               .slice(0, 50) // Take only first 50 (most popular)
               .map((track, artistIndex) => ({
                 id: track.trackId,
+                trackId: track.trackId,
                 trackName: track.trackName,
                 albumTitle: track.trackName,
                 artistName: track.artistName,
@@ -281,27 +347,39 @@ const TopCharts = () => {
                 previewUrl: track.previewUrl,
                 fileUrl: track.previewUrl,
                 price: track.trackPrice || 1.29,
+                primaryGenreName: track.primaryGenreName,
+                trackTimeMillis: track.trackTimeMillis,
                 artistRank: artistIndex + 1,
                 popularityScore: 51 - artistIndex
               }));
             
             allArtistSongs.push(...artistSongs);
           } catch (artistErr) {
-            // Continue with other artists
+            // Ignore AbortErrors from React Strict Mode or component unmounting
+            if (artistErr.name !== 'AbortError') {
+              console.warn(`Error fetching ${artist}:`, artistErr);
+            }
           }
         }
         
-        // Sort by popularity score (most popular first across all artists)
-        allArtistSongs.sort((a, b) => b.popularityScore - a.popularityScore);
-        setSongs(allArtistSongs);
+        // Match songs to library with hash-based similarity
+        const processedSongs = matchArtistSongsToDbSongs(allArtistSongs, musicProducts);
+        processedSongs.sort((a, b) => b.similarity - a.similarity);
+        setSongs(processedSongs);
       } catch (err) {
-        setError(err.message);
+        if (err.name !== 'AbortError') {
+          setError(err.message);
+        }
       } finally {
         setLoading(false);
       }
     };
 
     fetchAllSongs();
+    
+    return () => {
+      abortController.abort();
+    };
   }, []);
 
   // Single useEffect to handle all recommendation updates
@@ -335,8 +413,8 @@ const TopCharts = () => {
     updateRecs();
     setRecLoading(false);
 
-    // Set up polling interval (3 seconds)
-    intervalRef.current = setInterval(updateRecs, 3000);
+    // Set up polling interval (5 seconds) - reduced frequency for performance
+    intervalRef.current = setInterval(updateRecs, 5000);
 
     // Cleanup
     return () => {
@@ -361,6 +439,17 @@ const TopCharts = () => {
 
   const handlePause = () => {
     dispatch(playPause(false));
+  };
+
+  // Handle clicking on a song name - navigate to song details page
+  const handleSongNameClick = (song) => {
+    navigate(`/songs/${song.trackId || song.id}`, {
+      state: {
+        song: song,
+        artistSongs: songs, // Pass all songs for ML similarity
+        from: '/top-charts'
+      }
+    });
   };
 
   // Handle clicking on a recommended artist song
@@ -421,7 +510,7 @@ const TopCharts = () => {
         {filter !== 'visualizer' && (
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6">
           {filteredSongs.map((song, i) => (
-            <SongCard key={song.id} song={song} isPlaying={isPlaying} activeSong={activeSong} onPlay={handlePlay} onPause={handlePause} index={i} />
+            <SongCard key={song.id} song={song} isPlaying={isPlaying} activeSong={activeSong} onPlay={handlePlay} onPause={handlePause} index={i} onSongNameClick={handleSongNameClick} />
           ))}
         </div>
         )}

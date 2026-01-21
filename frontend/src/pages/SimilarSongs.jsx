@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
+import { useNavigate } from 'react-router-dom';
 
 import Loader from '../components/Loader';
 import PlayPause from '../components/PlayPause';
@@ -41,58 +42,15 @@ const shuffleArray = (array) => {
   return shuffled;
 };
 
-// Compute ML-based similarity between iTunes songs and library using backend service
-const computeMLSimilarity = async (itunesSongs, apiBaseUrl) => {
-  try {
-    // Prepare songs for similarity computation
-    const songsForAnalysis = itunesSongs.map(song => ({
-      trackId: song.trackId,
-      trackName: song.trackName,
-      artistName: song.artistName,
-      collectionName: song.collectionName,
-      artworkUrl100: song.artworkUrl100,
-      previewUrl: song.previewUrl,
-      trackPrice: song.trackPrice || 1.29,
-      primaryGenreName: song.primaryGenreName || 'Electronic',
-      trackTimeMillis: song.trackTimeMillis
-    }));
-
-    const response = await fetch(`${apiBaseUrl}/api/itunes/compute-similarity`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        itunes_songs: songsForAnalysis,
-        analyze_audio: false // Use metadata-based estimation for speed
-      }),
-      signal: AbortSignal.timeout(30000)
-    });
-
-    if (!response.ok) {
-      console.warn('ML similarity service unavailable, using fallback');
-      return null;
-    }
-
-    const data = await response.json();
-    return data.results;
-  } catch (error) {
-    console.warn('Error computing ML similarity:', error);
-    return null;
-  }
-};
-
-// Fallback: Match each artist song to a unique db song with randomization (used if ML service unavailable)
-const matchArtistSongsToDbSongsFallback = (artistSongs, dbSongs) => {
+// Match artist songs to db songs with randomization and hash-based similarity
+const matchArtistSongsToDbSongs = (artistSongs, dbSongs) => {
   if (!dbSongs.length) return artistSongs.map(s => ({ ...s, matchedDbSong: null, similarity: 0.75 }));
   
-  // Shuffle both arrays for randomized matching each time
   const shuffledDbSongs = shuffleArray(dbSongs);
   const usedDbIndices = new Set();
   const matched = [];
   
-  artistSongs.forEach((artistSong, artistIndex) => {
-    // Use random index with fallback to sequential if all used
+  artistSongs.forEach((artistSong) => {
     let dbIndex = Math.floor(Math.random() * shuffledDbSongs.length);
     let attempts = 0;
     
@@ -107,9 +65,8 @@ const matchArtistSongsToDbSongsFallback = (artistSongs, dbSongs) => {
     }
     
     usedDbIndices.add(dbIndex);
-    // Use hash-based similarity for fallback (deterministic per song)
     const hash = hashCode(artistSong.trackName + artistSong.artistName);
-    const similarity = 0.55 + ((hash % 40) / 100); // 55-95% range
+    const similarity = 0.55 + ((hash % 40) / 100);
     
     matched.push({
       ...artistSong,
@@ -147,11 +104,19 @@ const FeatureBadge = ({ label, value }) => {
   );
 };
 
-const SongCard = ({ song, isPlaying, activeSong, onPlay, onPause, index }) => {
+const SongCard = ({ song, isPlaying, activeSong, onPlay, onPause, index, allSongs, onSongNameClick }) => {
   const isThisSongActive = activeSong?.id === song.id;
   const albumArt = song.artworkUrl100?.replace('100x100', '600x600') || fallbackImage;
 
   const [isHovered, setIsHovered] = useState(false);
+  
+  // Handle clicking on song name - navigate to details
+  const handleSongNameClick = (e) => {
+    e.stopPropagation();
+    if (onSongNameClick) {
+      onSongNameClick(song);
+    }
+  };
   
   return (
     <div className="flex flex-col p-4 bg-white/5 backdrop-blur-sm animate-slideup rounded-lg cursor-pointer hover:bg-white/10 transition-all">
@@ -165,6 +130,7 @@ const SongCard = ({ song, isPlaying, activeSong, onPlay, onPause, index }) => {
           src={albumArt} 
           alt={song.trackName} 
           className="w-full h-full rounded-lg object-cover" 
+          loading="lazy"
           onError={(e) => { e.target.src = fallbackImage; }} 
         />
         
@@ -219,27 +185,21 @@ const SongCard = ({ song, isPlaying, activeSong, onPlay, onPause, index }) => {
       </div>
 
       <div className="mt-3 flex flex-col gap-1">
-        <p className="font-semibold text-sm text-white truncate leading-tight">{song.trackName || song.albumTitle}</p>
+        <p 
+          className="font-semibold text-sm text-white truncate leading-tight hover:text-cyan-400 transition-colors cursor-pointer"
+          onClick={handleSongNameClick}
+          title="Click to see similar songs by this artist"
+        >
+          {song.trackName || song.albumTitle}
+        </p>
         <p className="text-xs text-gray-400 truncate">{song.artistName}</p>
         <p className="text-xs text-gray-500 truncate">{song.collectionName}</p>
       </div>
 
       {song.matchedDbSong && (
         <div className="mt-2 pt-2 border-t border-gray-700">
-          <p className="text-[10px] text-cyan-400">ML-matched to library:</p>
+          <p className="text-[10px] text-cyan-400">Matched to library:</p>
           <p className="text-xs text-white truncate">{song.matchedDbSong.albumTitle}</p>
-          {song.mlComputed && (
-            <div className="flex gap-1 mt-1 flex-wrap">
-              <span className="px-1 py-0.5 rounded text-[10px] bg-green-500/20 text-green-300">
-                ML Score
-              </span>
-              {song.tempo && (
-                <span className="px-1 py-0.5 rounded text-[10px] bg-blue-500/20 text-blue-300">
-                  {Math.round(song.tempo)} BPM
-                </span>
-              )}
-            </div>
-          )}
         </div>
       )}
     </div>
@@ -259,6 +219,7 @@ const SimilarSongs = () => {
   
   const intervalRef = useRef(null);
   const dispatch = useDispatch();
+  const navigate = useNavigate();
   const { activeSong, isPlaying, playbackRate } = useSelector((state) => state.player);
 
   // Get audio features from shared context
@@ -288,31 +249,20 @@ const SimilarSongs = () => {
     const otherSongs = allSongs.filter(s => s.id !== currentSong.id);
     
     const scoredSongs = otherSongs.map(song => {
-      // Use ML-computed features if available, otherwise estimate from hash
-      let songTempo, songEnergy, songValence, songDanceability;
+      // Generate pseudo audio features based on song characteristics
+      const songHash = hashCode(song.trackName + song.artistName);
+      const songTempo = 80 + (songHash % 100); // 80-180 BPM range
+      const songEnergy = (songHash % 100) / 100;
+      const songValence = ((songHash >> 8) % 100) / 100;
+      const songDanceability = ((songHash >> 16) % 100) / 100;
       
-      if (song.mlComputed && song.tempo) {
-        // Use real ML-extracted features
-        songTempo = song.tempo;
-        songEnergy = song.energy || 0.5;
-        songValence = song.valence || 0.5;
-        songDanceability = song.danceability || 0.5;
-      } else {
-        // Fallback: Generate pseudo audio features based on song characteristics (as estimate)
-        const songHash = hashCode(song.trackName + song.artistName);
-        songTempo = 80 + (songHash % 100); // 80-180 BPM range
-        songEnergy = (songHash % 100) / 100;
-        songValence = ((songHash >> 8) % 100) / 100;
-        songDanceability = ((songHash >> 16) % 100) / 100;
-      }
-      
-      // Calculate match scores using REAL audio features from analyzer
+      // Calculate match scores using audio features from analyzer
       const tempoMatch = 1 - Math.min(Math.abs(effectiveTempo - songTempo) / 100, 1);
       const energyMatch = 1 - Math.abs(currentEnergy - songEnergy);
       const moodMatch = 1 - Math.abs(currentValence - songValence);
       const danceMatch = 1 - Math.abs(currentDanceability - songDanceability);
       
-      // Weighted similarity score (industry-standard weights)
+      // Weighted similarity score
       const similarityScore = (tempoMatch * 0.25) + (energyMatch * 0.35) + (moodMatch * 0.20) + (danceMatch * 0.20);
       
       // Generate contextual reason based on dominant feature
@@ -329,11 +279,6 @@ const SimilarSongs = () => {
         matchReason = `Similar intensity (${(songEnergy * 100).toFixed(0)}%)`;
       } else {
         matchReason = 'Comparable mood';
-      }
-      
-      // Add ML indicator if features were ML-computed
-      if (song.mlComputed) {
-        matchReason += ' • ML';
       }
       
       return {
@@ -356,6 +301,8 @@ const SimilarSongs = () => {
 
   // Initial data fetch
   useEffect(() => {
+    const abortController = new AbortController();
+    
     const fetchAllSongs = async () => {
       setLoading(true);
       setError(null);
@@ -382,7 +329,7 @@ const SimilarSongs = () => {
             const response = await fetch(
               `${apiBaseUrl}/api/itunes/search?term=${encodeURIComponent(artist)}&media=music&entity=song&limit=200`,
               { 
-                signal: AbortSignal.timeout(15000) // 15 second timeout
+                signal: abortController.signal
               }
             );
             
@@ -415,55 +362,15 @@ const SimilarSongs = () => {
             
             allArtistSongs.push(...artistSongs);
           } catch (artistErr) {
-            console.warn(`Error fetching ${artist}:`, artistErr);
+            // Ignore AbortErrors from React Strict Mode or component unmounting
+            if (artistErr.name !== 'AbortError') {
+              console.warn(`Error fetching ${artist}:`, artistErr);
+            }
           }
         }
         
-        // Use ML-based similarity service to compute real similarity scores
-        console.log(`Computing ML similarity for ${allArtistSongs.length} songs...`);
-        const mlResults = await computeMLSimilarity(allArtistSongs, apiBaseUrl);
-        
-        let matchedSongs;
-        if (mlResults && mlResults.length > 0) {
-          // Use ML-computed similarity scores (industry standard)
-          console.log(`✅ ML similarity computed for ${mlResults.length} songs`);
-          matchedSongs = mlResults.map(result => ({
-            id: result.trackId,
-            trackId: result.trackId,
-            trackName: result.trackName,
-            albumTitle: result.trackName,
-            artistName: result.artistName,
-            collectionName: result.collectionName,
-            artworkUrl100: result.artworkUrl100,
-            previewUrl: result.previewUrl,
-            fileUrl: result.previewUrl,
-            price: result.trackPrice || 1.29,
-            // ML-computed audio features
-            tempo: result.tempo,
-            energy: result.energy,
-            valence: result.valence,
-            danceability: result.danceability,
-            acousticness: result.acousticness,
-            featuresSource: result.features_source,
-            // ML-computed similarity (cosine similarity in feature space)
-            similarity: result.similarity_score,
-            matchedDbSong: result.matched_library_song_id ? {
-              productId: result.matched_library_song_id,
-              albumTitle: result.matched_library_song_title
-            } : null,
-            // Individual feature matches
-            tempoMatch: result.tempo_match,
-            energyMatch: result.energy_match,
-            moodMatch: result.mood_match,
-            danceMatch: result.dance_match,
-            mlComputed: true // Flag to indicate ML-based scoring
-          }));
-        } else {
-          // Fallback to simple matching if ML service unavailable
-          console.warn('⚠️ ML service unavailable, using fallback similarity');
-          matchedSongs = matchArtistSongsToDbSongsFallback(allArtistSongs, musicProducts);
-        }
-        
+        // Match songs to library with hash-based similarity
+        const matchedSongs = matchArtistSongsToDbSongs(allArtistSongs, musicProducts);
         matchedSongs.sort((a, b) => b.similarity - a.similarity);
         setSongs(matchedSongs);
       } catch (err) {
@@ -475,6 +382,10 @@ const SimilarSongs = () => {
     };
 
     fetchAllSongs();
+    
+    return () => {
+      abortController.abort();
+    };
   }, []);
 
   // Single useEffect to handle all recommendation updates
@@ -508,8 +419,8 @@ const SimilarSongs = () => {
     updateRecs();
     setRecLoading(false);
 
-    // Set up polling interval (3 seconds)
-    intervalRef.current = setInterval(updateRecs, 3000);
+    // Set up polling interval (5 seconds) - reduced frequency for performance
+    intervalRef.current = setInterval(updateRecs, 5000);
 
     // Cleanup
     return () => {
@@ -541,6 +452,17 @@ const SimilarSongs = () => {
 
   const handlePause = () => {
     dispatch(playPause(false));
+  };
+
+  // Handle clicking on a song name - navigate to song details page
+  const handleSongNameClick = (song) => {
+    navigate(`/songs/${song.trackId || song.id}`, {
+      state: {
+        song: song,
+        artistSongs: songs, // Pass all songs for ML similarity
+        from: '/similar-songs'
+      }
+    });
   };
 
   // Handle clicking on a recommended artist song
@@ -601,7 +523,7 @@ const SimilarSongs = () => {
         {filter !== 'visualizer' && (
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6">
           {filteredSongs.map((song, i) => (
-            <SongCard key={song.id} song={song} isPlaying={isPlaying} activeSong={activeSong} onPlay={handlePlay} onPause={handlePause} index={i} />
+            <SongCard key={song.id} song={song} isPlaying={isPlaying} activeSong={activeSong} onPlay={handlePlay} onPause={handlePause} index={i} allSongs={songs} onSongNameClick={handleSongNameClick} />
           ))}
         </div>
         )}

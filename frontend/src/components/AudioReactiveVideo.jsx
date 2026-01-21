@@ -156,7 +156,7 @@ const AudioReactiveVideo = ({
     
     const renderInitialFrame = async () => {
       // Wait for video to have loaded enough data
-      if (videoRef.current.readyState >= 2) {
+      if (videoRef.current && canvasRef.current && videoRef.current.readyState >= 2) {
         await skySegmentation.processFrame(
           videoRef.current,
           canvasRef.current,

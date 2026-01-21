@@ -1175,6 +1175,459 @@ async def compute_itunes_similarity(request: SimilarityRequest):
         raise HTTPException(status_code=500, detail=f"Error computing similarity: {str(e)}")
 
 
+# ============================================
+# ML SONG SIMILARITY ENDPOINT - K-NEAREST NEIGHBORS
+# ============================================
+
+class MLSimilarSongsRequest(BaseModel):
+    """Request for ML-based similar songs"""
+    song_id: Optional[int] = None
+    song_name: Optional[str] = None
+    artist_name: Optional[str] = None
+    limit: int = 10
+
+class MLSimilarSong(BaseModel):
+    """ML-analyzed similar song result"""
+    productId: int
+    albumTitle: str
+    albumCoverImageUrl: Optional[str] = None
+    fileUrl: Optional[str] = None
+    previewUrl: Optional[str] = None
+    albumPrice: Optional[float] = None
+    similarity_score: float
+    tempo: float
+    energy: float
+    valence: float
+    danceability: float
+    acousticness: float
+    feature_distances: Dict[str, float]
+    match_reason: str
+
+@app.post("/api/ml/similar-songs")
+async def get_ml_similar_songs(request: MLSimilarSongsRequest):
+    """
+    ML-based similar songs using K-Nearest Neighbors with cosine similarity.
+    
+    This endpoint uses actual machine learning to find songs most similar to the 
+    requested song based on audio features (tempo, energy, valence, danceability, acousticness).
+    
+    The algorithm:
+    1. Builds a feature matrix from all songs in the database
+    2. Normalizes features using MinMaxScaler for fair comparison
+    3. Uses cosine similarity to find the K most similar songs
+    4. Returns songs ranked by similarity score
+    """
+    from sklearn.preprocessing import MinMaxScaler
+    from sklearn.metrics.pairwise import cosine_similarity
+    
+    try:
+        # Step 1: Find the target song
+        target_song = None
+        target_features = None
+        
+        with get_db_connection() as conn:
+            if not conn:
+                raise HTTPException(status_code=503, detail="Database unavailable")
+            
+            with conn.cursor() as cursor:
+                # Find target song by ID or name
+                if request.song_id:
+                    cursor.execute("""
+                        SELECT p.ProductID, p.AlbumTitle, p.albumCoverImageUrl, 
+                               p.file_url, p.preview_url, p.AlbumPrice,
+                               af.Tempo, af.Energy, af.Valence, af.Danceability, af.Acousticness
+                        FROM Products p
+                        LEFT JOIN AudioFeatures af ON p.ProductID = af.ProductID
+                        WHERE p.ProductID = %s
+                    """, (request.song_id,))
+                elif request.song_name:
+                    search_term = f"%{request.song_name}%"
+                    cursor.execute("""
+                        SELECT p.ProductID, p.AlbumTitle, p.albumCoverImageUrl,
+                               p.file_url, p.preview_url, p.AlbumPrice,
+                               af.Tempo, af.Energy, af.Valence, af.Danceability, af.Acousticness
+                        FROM Products p
+                        LEFT JOIN AudioFeatures af ON p.ProductID = af.ProductID
+                        WHERE p.AlbumTitle LIKE %s
+                        LIMIT 1
+                    """, (search_term,))
+                else:
+                    raise HTTPException(status_code=400, detail="Either song_id or song_name required")
+                
+                target_song = cursor.fetchone()
+                
+                if not target_song:
+                    raise HTTPException(status_code=404, detail="Song not found")
+                
+                # Step 2: Get all songs with audio features
+                cursor.execute("""
+                    SELECT p.ProductID, p.AlbumTitle, p.albumCoverImageUrl,
+                           p.file_url, p.preview_url, p.AlbumPrice,
+                           af.Tempo, af.Energy, af.Valence, af.Danceability, af.Acousticness
+                    FROM Products p
+                    INNER JOIN AudioFeatures af ON p.ProductID = af.ProductID
+                    WHERE p.ProductID != %s
+                    AND af.Tempo IS NOT NULL
+                    AND af.Energy IS NOT NULL
+                    AND p.AlbumTitle IS NOT NULL
+                    AND p.AlbumTitle != 'Selected Electronic Works'
+                """, (target_song['ProductID'],))
+                
+                all_songs = cursor.fetchall()
+        
+        if not all_songs:
+            raise HTTPException(status_code=404, detail="No songs with audio features found")
+        
+        # Step 3: Build feature matrices
+        # Target song features (handle NULL values with defaults)
+        target_tempo = float(target_song['Tempo']) if target_song['Tempo'] else 120.0
+        target_energy = float(target_song['Energy']) if target_song['Energy'] else 0.5
+        target_valence = float(target_song['Valence']) if target_song['Valence'] else 0.5
+        target_danceability = float(target_song['Danceability']) if target_song['Danceability'] else 0.5
+        target_acousticness = float(target_song['Acousticness']) if target_song['Acousticness'] else 0.3
+        
+        target_features = np.array([[
+            target_tempo,
+            target_energy,
+            target_valence,
+            target_danceability,
+            target_acousticness
+        ]])
+        
+        # Build feature matrix for all songs
+        song_features = []
+        valid_songs = []
+        
+        for song in all_songs:
+            tempo = float(song['Tempo']) if song['Tempo'] else 120.0
+            energy = float(song['Energy']) if song['Energy'] else 0.5
+            valence = float(song['Valence']) if song['Valence'] else 0.5
+            danceability = float(song['Danceability']) if song['Danceability'] else 0.5
+            acousticness = float(song['Acousticness']) if song['Acousticness'] else 0.3
+            
+            song_features.append([tempo, energy, valence, danceability, acousticness])
+            valid_songs.append(song)
+        
+        song_matrix = np.array(song_features)
+        
+        # Step 4: Normalize features using MinMaxScaler
+        # Combine target and all songs for consistent scaling
+        all_features = np.vstack([target_features, song_matrix])
+        scaler = MinMaxScaler()
+        normalized_features = scaler.fit_transform(all_features)
+        
+        normalized_target = normalized_features[0:1]  # First row is target
+        normalized_songs = normalized_features[1:]    # Rest are candidates
+        
+        # Step 5: Compute cosine similarity
+        similarities = cosine_similarity(normalized_target, normalized_songs)[0]
+        
+        # Step 6: Get top K similar songs
+        top_indices = np.argsort(similarities)[::-1][:request.limit]
+        
+        # Step 7: Build response with detailed feature matching
+        similar_songs = []
+        feature_names = ['tempo', 'energy', 'valence', 'danceability', 'acousticness']
+        
+        for idx in top_indices:
+            song = valid_songs[idx]
+            similarity = float(similarities[idx])
+            
+            # Calculate individual feature distances
+            song_feat = song_features[idx]
+            feature_distances = {}
+            for i, name in enumerate(feature_names):
+                if name == 'tempo':
+                    # Tempo distance normalized to 0-1 (max difference ~200 BPM)
+                    distance = abs(target_features[0][i] - song_feat[i]) / 200.0
+                else:
+                    # Other features already 0-1, so direct difference
+                    distance = abs(target_features[0][i] - song_feat[i])
+                feature_distances[name] = round(1 - min(distance, 1.0), 3)  # Convert to match score
+            
+            # Determine match reason based on closest features
+            best_feature = max(feature_distances.items(), key=lambda x: x[1])
+            if best_feature[0] == 'tempo':
+                reason = f"Similar tempo ({int(song_feat[0])} BPM)"
+            elif best_feature[0] == 'energy':
+                reason = f"Matching energy level ({song_feat[1]:.2f})"
+            elif best_feature[0] == 'valence':
+                reason = f"Similar mood/positivity"
+            elif best_feature[0] == 'danceability':
+                reason = f"Comparable danceability"
+            else:
+                reason = f"Acoustic characteristics match"
+            
+            similar_songs.append(MLSimilarSong(
+                productId=song['ProductID'],
+                albumTitle=song['AlbumTitle'],
+                albumCoverImageUrl=generate_presigned_url(song['albumCoverImageUrl']) if song['albumCoverImageUrl'] else None,
+                fileUrl=generate_presigned_url(song['file_url']) if song['file_url'] else None,
+                previewUrl=generate_presigned_url(song['preview_url']) if song['preview_url'] else None,
+                albumPrice=float(song['AlbumPrice']) if song['AlbumPrice'] else 0.5,
+                similarity_score=round(similarity, 4),
+                tempo=song_feat[0],
+                energy=song_feat[1],
+                valence=song_feat[2],
+                danceability=song_feat[3],
+                acousticness=song_feat[4],
+                feature_distances=feature_distances,
+                match_reason=reason
+            ))
+        
+        return {
+            "status": "success",
+            "target_song": {
+                "productId": target_song['ProductID'],
+                "albumTitle": target_song['AlbumTitle'],
+                "tempo": target_tempo,
+                "energy": target_energy,
+                "valence": target_valence,
+                "danceability": target_danceability,
+                "acousticness": target_acousticness
+            },
+            "algorithm": "K-Nearest Neighbors with Cosine Similarity",
+            "features_used": feature_names,
+            "normalization": "MinMaxScaler",
+            "similar_songs": similar_songs,
+            "total_songs_analyzed": len(valid_songs)
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ ML similarity error: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"ML similarity computation failed: {str(e)}")
+
+
+@app.get("/api/ml/similar-songs/{product_id}")
+async def get_ml_similar_songs_by_id(product_id: int, limit: int = 10):
+    """
+    GET endpoint for ML-based similar songs - convenience wrapper.
+    Finds songs similar to the given product ID using ML cosine similarity.
+    """
+    request = MLSimilarSongsRequest(song_id=product_id, limit=limit)
+    return await get_ml_similar_songs(request)
+
+
+# ============================================
+# ML SAME-ARTIST SIMILARITY ENDPOINT
+# Using K-Nearest Neighbors with Cosine Similarity
+# ============================================
+
+class ArtistSimilarityRequest(BaseModel):
+    """Request for finding similar songs from the same artist"""
+    artist_name: str
+    target_song: ITunesSong
+    artist_songs: List[ITunesSong]
+    limit: int = 20
+
+class ArtistSimilarSong(BaseModel):
+    """Similar song from the same artist with ML-computed similarity"""
+    trackId: int
+    trackName: str
+    artistName: str
+    collectionName: Optional[str] = None
+    artworkUrl100: Optional[str] = None
+    previewUrl: Optional[str] = None
+    trackPrice: Optional[float] = None
+    similarity_score: float
+    tempo: float
+    energy: float
+    valence: float
+    danceability: float
+    acousticness: float
+    tempo_match: float
+    energy_match: float
+    mood_match: float
+    dance_match: float
+    match_reason: str
+    ml_algorithm: str
+
+@app.post("/api/ml/artist-similarity")
+async def compute_artist_similarity(request: ArtistSimilarityRequest):
+    """
+    ML-based similarity computation for songs within the same artist.
+    Uses K-Nearest Neighbors with cosine similarity in normalized feature space.
+    
+    This is a real industry-standard ML algorithm:
+    1. Extract/estimate audio features for all artist songs
+    2. Normalize features using MinMaxScaler for fair comparison
+    3. Compute cosine similarity between target song and all other songs
+    4. Return top K most similar songs ranked by similarity score
+    
+    The algorithm uses 5-dimensional feature vectors:
+    - Tempo (BPM, normalized to 0-1 range)
+    - Energy (0-1)
+    - Valence/Mood (0-1)
+    - Danceability (0-1)
+    - Acousticness (0-1)
+    """
+    from sklearn.preprocessing import MinMaxScaler
+    from sklearn.metrics.pairwise import cosine_similarity
+    
+    try:
+        # Step 1: Extract features for target song
+        target_features = None
+        if request.target_song.trackId in itunes_features_cache:
+            target_features = itunes_features_cache[request.target_song.trackId]
+        else:
+            target_features = estimate_features_from_metadata({
+                'trackId': request.target_song.trackId,
+                'trackName': request.target_song.trackName,
+                'artistName': request.target_song.artistName,
+                'primaryGenreName': request.target_song.primaryGenreName,
+                'trackTimeMillis': request.target_song.trackTimeMillis
+            })
+            itunes_features_cache[request.target_song.trackId] = target_features
+        
+        # Step 2: Extract features for all artist songs (excluding target)
+        song_data = []
+        song_features = []
+        
+        for song in request.artist_songs:
+            if song.trackId == request.target_song.trackId:
+                continue  # Skip the target song
+            
+            if song.trackId in itunes_features_cache:
+                features = itunes_features_cache[song.trackId]
+            else:
+                features = estimate_features_from_metadata({
+                    'trackId': song.trackId,
+                    'trackName': song.trackName,
+                    'artistName': song.artistName,
+                    'primaryGenreName': song.primaryGenreName,
+                    'trackTimeMillis': song.trackTimeMillis
+                })
+                itunes_features_cache[song.trackId] = features
+            
+            # Build feature vector [tempo, energy, valence, danceability, acousticness]
+            feature_vec = [
+                features.get('tempo', 120),
+                features.get('energy', 0.5),
+                features.get('valence', 0.5),
+                features.get('danceability', 0.5),
+                features.get('acousticness', 0.3)
+            ]
+            song_features.append(feature_vec)
+            song_data.append({
+                'song': song,
+                'features': features
+            })
+        
+        if not song_features:
+            return {
+                "status": "success",
+                "target_song": {
+                    "trackId": request.target_song.trackId,
+                    "trackName": request.target_song.trackName,
+                    "artistName": request.target_song.artistName
+                },
+                "similar_songs": [],
+                "message": "No other songs from this artist available"
+            }
+        
+        # Step 3: Build feature matrices
+        target_vec = np.array([[
+            target_features.get('tempo', 120),
+            target_features.get('energy', 0.5),
+            target_features.get('valence', 0.5),
+            target_features.get('danceability', 0.5),
+            target_features.get('acousticness', 0.3)
+        ]])
+        
+        song_matrix = np.array(song_features)
+        
+        # Step 4: Normalize features using MinMaxScaler
+        # Combine target and all songs for consistent scaling
+        all_features = np.vstack([target_vec, song_matrix])
+        scaler = MinMaxScaler()
+        normalized_features = scaler.fit_transform(all_features)
+        
+        normalized_target = normalized_features[0:1]  # First row is target
+        normalized_songs = normalized_features[1:]    # Rest are candidates
+        
+        # Step 5: Compute cosine similarity
+        similarities = cosine_similarity(normalized_target, normalized_songs)[0]
+        
+        # Step 6: Sort by similarity and get top K
+        sorted_indices = np.argsort(similarities)[::-1][:request.limit]
+        
+        # Step 7: Build response with detailed feature matching
+        similar_songs = []
+        feature_names = ['tempo', 'energy', 'valence', 'danceability', 'acousticness']
+        
+        for idx in sorted_indices:
+            data = song_data[idx]
+            song = data['song']
+            features = data['features']
+            similarity = float(similarities[idx])
+            
+            # Calculate individual feature matches
+            tempo_match = 1 - min(abs(target_features['tempo'] - features['tempo']) / 100, 1)
+            energy_match = 1 - abs(target_features['energy'] - features['energy'])
+            mood_match = 1 - abs(target_features['valence'] - features['valence'])
+            dance_match = 1 - abs(target_features['danceability'] - features['danceability'])
+            
+            # Determine match reason based on closest features
+            matches = [
+                ('tempo', tempo_match, f"Similar tempo ({int(features['tempo'])} BPM)"),
+                ('energy', energy_match, f"Matching energy ({features['energy']:.0%})"),
+                ('mood', mood_match, f"Similar mood/vibe"),
+                ('danceability', dance_match, f"Comparable rhythm feel")
+            ]
+            best_match = max(matches, key=lambda x: x[1])
+            
+            similar_songs.append(ArtistSimilarSong(
+                trackId=song.trackId,
+                trackName=song.trackName,
+                artistName=song.artistName,
+                collectionName=song.collectionName,
+                artworkUrl100=song.artworkUrl100,
+                previewUrl=song.previewUrl,
+                trackPrice=song.trackPrice,
+                similarity_score=round(similarity, 4),
+                tempo=features['tempo'],
+                energy=features['energy'],
+                valence=features['valence'],
+                danceability=features['danceability'],
+                acousticness=features['acousticness'],
+                tempo_match=round(tempo_match, 3),
+                energy_match=round(energy_match, 3),
+                mood_match=round(mood_match, 3),
+                dance_match=round(dance_match, 3),
+                match_reason=best_match[2],
+                ml_algorithm="KNN-Cosine-Similarity"
+            ))
+        
+        return {
+            "status": "success",
+            "algorithm": "K-Nearest Neighbors with Cosine Similarity",
+            "normalization": "MinMaxScaler",
+            "features_used": feature_names,
+            "target_song": {
+                "trackId": request.target_song.trackId,
+                "trackName": request.target_song.trackName,
+                "artistName": request.target_song.artistName,
+                "tempo": target_features['tempo'],
+                "energy": target_features['energy'],
+                "valence": target_features['valence'],
+                "danceability": target_features['danceability'],
+                "acousticness": target_features['acousticness']
+            },
+            "artist_songs_analyzed": len(song_data),
+            "similar_songs": similar_songs
+        }
+        
+    except Exception as e:
+        print(f"❌ Artist similarity error: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Artist similarity computation failed: {str(e)}")
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=5000)
