@@ -28,6 +28,8 @@ const playerSlice = createSlice({
 
       state.currentIndex = action.payload.i;
       state.isActive = true;
+      // Reset playback rate to 1.0 when a new song starts playing
+      state.playbackRate = 1.0;
     },
 
     nextSong: (state, action) => {
@@ -39,6 +41,8 @@ const playerSlice = createSlice({
 
       state.currentIndex = action.payload;
       state.isActive = true;
+      // Reset playback rate to 1.0 when moving to next song
+      state.playbackRate = 1.0;
     },
 
     prevSong: (state, action) => {
@@ -50,6 +54,8 @@ const playerSlice = createSlice({
 
       state.currentIndex = action.payload;
       state.isActive = true;
+      // Reset playback rate to 1.0 when moving to previous song
+      state.playbackRate = 1.0;
     },
 
     playPause: (state, action) => {

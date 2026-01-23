@@ -52,7 +52,8 @@ const Searchbar = () => {
           <button
             type="button"
             onClick={handleClear}
-            className="mr-4 text-white hover:text-cyan-400 transition-colors text-xl font-bold"
+            className="mr-4 text-white hover:text-cyan-400 transition-colors font-bold flex items-center justify-center"
+            style={{ fontSize: '32px', lineHeight: '1' }}
             title="Clear search"
           >
             ×
