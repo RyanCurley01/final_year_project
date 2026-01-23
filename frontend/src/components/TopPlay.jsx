@@ -1,5 +1,6 @@
 import { useRef } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
+import { Link } from 'react-router-dom';
 
 import PlayPause from './PlayPause';  
 import AudioReactiveVideo from './AudioReactiveVideo';

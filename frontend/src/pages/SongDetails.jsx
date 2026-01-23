@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useParams, useLocation, Link } from 'react-router-dom';
+import { useParams, useLocation, useNavigate } from 'react-router-dom';
 import { useSelector, useDispatch } from 'react-redux';
 import { FaPauseCircle, FaPlayCircle, FaArrowLeft, FaMusic } from 'react-icons/fa';
 
@@ -171,6 +171,7 @@ const SimilarSongCard = ({ song, isPlaying, activeSong, onPlay, onPause, rank, p
 
 const SongDetails = () => {
   const dispatch = useDispatch();
+  const navigate = useNavigate();
   const { songid } = useParams();
   const location = useLocation();
   const { activeSong, isPlaying, playbackRate } = useSelector((state) => state.player);
@@ -467,90 +468,91 @@ const SongDetails = () => {
       <div className="flex flex-col items-center justify-center min-h-[400px]">
         <FaMusic className="text-gray-500 text-6xl mb-4" />
         <p className="text-red-400 text-lg mb-4 text-center">{error}</p>
-        <Link 
-          to="/similar-songs"
+        <button 
+          onClick={() => navigate(-1)}
           className="px-4 py-2 bg-cyan-500 text-white rounded-lg hover:bg-cyan-600 transition-colors"
         >
-          Back to Similar Songs
-        </Link>
+          ← Back
+        </button>
       </div>
     );
   }
 
   return (
-    <div className="flex flex-col gap-6 pb-6">
+    <div className="flex flex-col">
       {/* Back navigation */}
-      <Link 
-        to={location.state?.from || '/similar-songs'}
-        className="flex items-center gap-2 text-gray-400 hover:text-white transition-colors w-fit"
-      >
-        <FaArrowLeft />
-        <span>Back to {location.state?.from === '/top-charts' ? 'Top Charts' : 'Similar Songs'}</span>
-      </Link>
+      <div className="mb-6">
+        <button
+          onClick={() => navigate(-1)}
+          className="mb-4 px-4 py-2 bg-white/10 text-white rounded-lg hover:bg-white/20 transition-all"
+        >
+          ← Back
+        </button>
 
-      {/* Header Section - Target Song */}
-      <div className="bg-gradient-to-r from-gray-900/80 to-gray-800/50 rounded-xl p-6 border border-gray-700">
-        <div className="flex flex-col md:flex-row gap-1">
-          {/* Song Info */}
-          <div className="flex-1">
-            <h1 className="text-2xl md:text-3xl font-bold text-white mb-2">
-              {targetSong?.trackName || targetSong?.albumTitle}
-            </h1>
-            <p className="text-gray-400 mb-1">{targetSong?.collectionName}</p>
-          </div>
+        {/* Header Section - Target Song */}
+        <div className="bg-gradient-to-r from-gray-900/80 to-gray-800/50 rounded-xl p-6 border border-gray-700">
+          <div className="flex flex-col md:flex-row gap-1">
+            {/* Song Info */}
+            <div className="flex-1">
+              <h1 className="text-2xl md:text-3xl font-bold text-white mb-2">
+                {targetSong?.trackName || targetSong?.albumTitle}
+              </h1>
+              <p className="text-gray-400 mb-1">{targetSong?.collectionName}</p>
+            </div>
 
-          {/* Album Art with Play */}
-          <div 
-            className="relative w-48 h-48 flex-shrink-0 mx-auto md:mx-0"
-            onMouseEnter={() => setIsHeaderHovered(true)}
-            onMouseLeave={() => setIsHeaderHovered(false)}
-          >
-            {(() => {
-              const coverMedia = targetSong?.albumCoverImageUrl || targetSong?.artworkUrl100?.replace('100x100', '600x600') || fallbackImage;
-              const isVideo = coverMedia && coverMedia.toLowerCase().includes('.mp4');
-              
-              return isVideo ? (
-                <AudioReactiveVideo
-                  src={coverMedia}
-                  alt={targetSong?.trackName}
-                  className="w-full h-full rounded-lg object-cover shadow-xl"
-                  isPlaying={isPlaying && isTargetPlaying}
-                  isActive={isTargetPlaying}
-                  playbackRate={playbackRate}
-                />
-              ) : (
-                <img 
-                  src={coverMedia}
-                  alt={targetSong?.trackName}
-                  className="w-full h-full rounded-lg object-cover shadow-xl"
-                  onError={(e) => { e.target.src = fallbackImage; }}
-                />
-              );
-            })()}
-            {/* Play button overlay - only shows on hover */}
-            {isHeaderHovered && (
-              <div 
-                className="absolute inset-0 flex items-center justify-center bg-black/40 rounded-lg cursor-pointer hover:bg-black/50 transition-colors z-20"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setIsHeaderHovered(false);
-                  if (isPlaying && isTargetPlaying) {
-                    handlePause();
-                  } else {
-                    handlePlayTarget();
-                  }
-                }}
-              >
-                {isPlaying && isTargetPlaying ? (
-                  <FaPauseCircle size={45} className="text-white drop-shadow-lg hover:scale-110 transition-transform" />
+            {/* Album Art with Play */}
+            <div 
+              className="relative w-48 h-48 flex-shrink-0 mx-auto md:mx-0"
+              onMouseEnter={() => setIsHeaderHovered(true)}
+              onMouseLeave={() => setIsHeaderHovered(false)}
+            >
+              {(() => {
+                const coverMedia = targetSong?.albumCoverImageUrl || targetSong?.artworkUrl100?.replace('100x100', '600x600') || fallbackImage;
+                const isVideo = coverMedia && coverMedia.toLowerCase().includes('.mp4');
+                
+                return isVideo ? (
+                  <AudioReactiveVideo
+                    src={coverMedia}
+                    alt={targetSong?.trackName}
+                    className="w-full h-full rounded-lg object-cover shadow-xl"
+                    isPlaying={isPlaying && isTargetPlaying}
+                    isActive={isTargetPlaying}
+                    playbackRate={playbackRate}
+                  />
                 ) : (
-                  <FaPlayCircle size={45} className="text-white drop-shadow-lg hover:scale-110 transition-transform" />
-                )}
+                  <img 
+                    src={coverMedia}
+                    alt={targetSong?.trackName}
+                    className="w-full h-full rounded-lg object-cover shadow-xl"
+                    onError={(e) => { e.target.src = fallbackImage; }}
+                  />
+                );
+              })()}
+              {/* Play button overlay - only shows on hover */}
+              {isHeaderHovered && (
+                <div 
+                  className="absolute inset-0 flex items-center justify-center bg-black/40 rounded-lg cursor-pointer hover:bg-black/50 transition-colors z-20"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setIsHeaderHovered(false);
+                    if (isPlaying && isTargetPlaying) {
+                      handlePause();
+                    } else {
+                      handlePlayTarget();
+                    }
+                  }}
+                >
+                  {isPlaying && isTargetPlaying ? (
+                    <FaPauseCircle size={45} className="text-white drop-shadow-lg hover:scale-110 transition-transform" />
+                  ) : (
+                    <FaPlayCircle size={45} className="text-white drop-shadow-lg hover:scale-110 transition-transform" />
+                  )}
+                </div>
+              )}
+              {/* Artist badge */}
+              <div className={`absolute -bottom-2 left-1/2 -translate-x-1/2 px-3 py-1 ${getArtistBadgeColor(targetSong?.artistName)} rounded-full text-[12px] font-bold text-white shadow-lg whitespace-nowrap`}>
+                {targetSong?.artistName}
               </div>
-            )}
-            {/* Artist badge */}
-            <div className={`absolute -bottom-2 left-1/2 -translate-x-1/2 px-3 py-1 ${getArtistBadgeColor(targetSong?.artistName)} rounded-full text-[12px] font-bold text-white shadow-lg whitespace-nowrap`}>
-              {targetSong?.artistName}
             </div>
           </div>
         </div>

@@ -8,9 +8,14 @@ const Track = ({ isPlaying, isActive, activeSong }) => {
   const { songEnded } = useSelector((state) => state.player);
   
   // Support both database songs (albumCoverImageUrl) and iTunes songs (artworkUrl100)
+  // Also check matchedDbSong for songs from Search page that have matched database songs
   const getCoverMedia = () => {
+    // First check if there's a matched database song (from Search page iTunes songs)
+    if (activeSong?.matchedDbSong?.albumCoverImageUrl) return activeSong.matchedDbSong.albumCoverImageUrl;
+    // Then check direct album cover (from Discover page database songs)
     if (activeSong?.albumCoverImageUrl) return activeSong.albumCoverImageUrl;
     if (activeSong?.gameCoverImageUrl) return activeSong.gameCoverImageUrl;
+    // Finally fall back to iTunes artwork
     if (activeSong?.artworkUrl100) return activeSong.artworkUrl100.replace('100x100', '400x400');
     return null;
   };
