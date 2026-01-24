@@ -10,22 +10,17 @@ import { addToCart } from '../redux/features/cartSlice';
 import placeholders from '../utils/placeholderImage';
 
 const SongCard = ({ product, payment, i, data }) => {
-  // Determine if it's a game or music based on which fields are populated
-  const isMusic = product.albumTitle !== null && product.albumTitle !== undefined;
-  const isGame = product.gameTitle !== null && product.gameTitle !== undefined;
   const isPaid = payment !== null && payment !== undefined;
 
-  const productName = isMusic ? product.albumTitle : product.gameTitle;
-  const price = isMusic ? product.albumPrice : product.gamePrice;
-  const coverMedia = isMusic ? product.albumCoverImageUrl : product.gameCoverImageUrl;
+  const productName = product.albumTitle;
+  const price = product.albumPrice;
+  const coverMedia = product.albumCoverImageUrl;
 
   // Check if the cover media is a video (mp4)
   const isVideo = coverMedia && coverMedia.toLowerCase().includes('.mp4');
   
-
-
   // Check if current song is a playable song 
-  const isPlayableSong = isMusic && product.albumTitle !== 'Selected Electronic Works';
+  const isPlayableSong = product.albumTitle !== 'Selected Electronic Works';
   
   // Hover state for showing play button
   const [isHovered, setIsHovered] = useState(false);
@@ -66,8 +61,6 @@ const SongCard = ({ product, payment, i, data }) => {
 
   // Handle song title click for music items
   const handleSongTitleClick = async () => {
-    if (!isMusic) return;
-    
     // Navigate to SongDetails with product data and all music products for similarity
     navigate(`/songs/${product.id}`, {
       state: {
@@ -211,61 +204,29 @@ const SongCard = ({ product, payment, i, data }) => {
 
       <div className="flex flex-col mt-4">
         <p className="font-semibold text-lg text-gray-300">
-          {isGame && product.fileUrl && product.fileUrl.includes('itch.io') ? (
-            <a
-              href={product.fileUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              title={`View ${productName || 'Unknown'} on itch.io`}
-              className="block break-words hover:text-blue-400 transition-colors"
-            >
-              {productName || 'Unknown'}
-            </a>
-          ) : isMusic ? (
-            <span 
-              onClick={handleSongTitleClick}
-              className="block break-words hover:text-cyan-400 transition-colors cursor-pointer"
-              title="Click to see 20 most similar songs"
-            >
-              {productName || 'Unknown'}
-            </span>
-          ) : (
-            <span className="block break-words">
-              {productName || 'Unknown'}
-            </span>
-          )}
+          <span 
+            onClick={handleSongTitleClick}
+            className="block break-words hover:text-cyan-400 transition-colors cursor-pointer"
+            title="Click to see 20 most similar songs"
+          >
+            {productName || 'Unknown'}
+          </span>
         </p>
         <div className="flex justify-between items-center mt-2">
           <p className="text-sm text-white">
-            {isMusic ? 'Music' : 'Game'}
+            Music
           </p>
           <p className="text-sm font-bold text-white">
             ${price?.toFixed(2) || '0.00'}
           </p>
         </div>
-        {isGame && (
-          <>
-            <p className="text-xs text-gray-400 mt-1">
-              {product.platform ? `Platform: ${product.platform}` : ''}
-            </p>
-            <button 
-              onClick={handleAddToCart}
-              className="mt-2 w-full px-3 py-2 bg-blue-700 hover:bg-blue-800 rounded font-semibold text-white text-sm leading-none flex items-center justify-center gap-2"
-            >
-              <FiShoppingCart />
-              Add to Cart
-            </button>
-          </>
-        )}
-        {isMusic && (
-          <button 
-            onClick={handleAddToCart}
-            className="mt-2 w-full px-3 py-2 bg-blue-700 hover:bg-blue-800 rounded font-semibold text-white text-sm leading-none flex items-center justify-center gap-2"
-          >
-            <FiShoppingCart />
-            Add to Cart
-          </button>
-        )}
+        <button 
+          onClick={handleAddToCart}
+          className="mt-2 w-full px-3 py-2 bg-blue-700 hover:bg-blue-800 rounded font-semibold text-white text-sm leading-none flex items-center justify-center gap-2"
+        >
+          <FiShoppingCart />
+          Add to Cart
+        </button>
       </div>
     </div>
   );

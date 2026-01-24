@@ -14,7 +14,6 @@ const Track = ({ isPlaying, isActive, activeSong }) => {
     if (activeSong?.matchedDbSong?.albumCoverImageUrl) return activeSong.matchedDbSong.albumCoverImageUrl;
     // Then check direct album cover (from Discover page database songs)
     if (activeSong?.albumCoverImageUrl) return activeSong.albumCoverImageUrl;
-    if (activeSong?.gameCoverImageUrl) return activeSong.gameCoverImageUrl;
     // Finally fall back to iTunes artwork
     if (activeSong?.artworkUrl100) return activeSong.artworkUrl100.replace('100x100', '400x400');
     return null;
@@ -85,10 +84,10 @@ const Track = ({ isPlaying, isActive, activeSong }) => {
     </div>
     <div className="min-w-0">
       <p className="text-white font-bold text-sm sm:text-base truncate">
-        {activeSong?.trackName || activeSong?.albumTitle || activeSong?.gameTitle || 'No active Song'}
+        {activeSong?.trackName || activeSong?.albumTitle || 'No active Song'}
       </p>
       <p className="text-gray-300 text-xs sm:text-sm truncate">
-        {activeSong?.artistName || (activeSong?.albumPrice ? `$${activeSong.albumPrice.toFixed(2)}` : activeSong?.gamePrice ? `$${activeSong.gamePrice.toFixed(2)}` : 'Select a song')}
+        {activeSong?.artistName || (activeSong?.albumPrice ? `$${activeSong.albumPrice.toFixed(2)}` : 'Select a song')}
       </p>
     </div>
   </div>

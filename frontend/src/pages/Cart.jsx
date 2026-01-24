@@ -49,7 +49,7 @@ const Cart = () => {
           orderId: order.id,
           productId: item.id,
           quantity: item.quantity,
-          unitPrice: item.albumPrice || item.gamePrice
+          unitPrice: item.albumPrice
         };
         await orderItemService.createOrderItem(orderItemData, email, password);
       }
@@ -64,7 +64,7 @@ const Cart = () => {
         items: items.map(item => ({
           productId: item.id,
           quantity: item.quantity,
-          price: item.albumPrice || item.gamePrice
+          price: item.albumPrice
         }))
       };
       
@@ -94,7 +94,7 @@ const Cart = () => {
       // Trigger automatic downloads for purchased items
       const filesToDownload = items
         .filter(item => {
-          // Download both music files and games from S3
+          // Download music files from S3
           return item.fileUrl;
         })
         .map(item => ({
@@ -145,10 +145,9 @@ const Cart = () => {
         
         <div className="space-y-4">
           {items.map((item) => {
-            const isMusic = item.albumTitle !== null && item.albumTitle !== undefined;
-            const productName = isMusic ? item.albumTitle : item.gameTitle;
-            const price = isMusic ? item.albumPrice : item.gamePrice;
-            const coverMedia = isMusic ? item.albumCoverImageUrl : item.gameCoverImageUrl;
+            const productName = item.albumTitle;
+            const price = item.albumPrice;
+            const coverMedia = item.albumCoverImageUrl;
             const isVideo = coverMedia && coverMedia.toLowerCase().includes('.mp4');
 
             return (
@@ -181,7 +180,7 @@ const Cart = () => {
                 <div className="flex-1">
                   <h3 className="text-white font-semibold text-lg mb-1">{productName}</h3>
                   <p className="text-gray-400 text-sm mb-2">
-                    {isMusic ? 'Music' : 'Game'} {item.platform && `• Platform: ${item.platform}`}
+                    Music
                   </p>
                   <p className="text-white font-bold">${price?.toFixed(2)}</p>
                 </div>

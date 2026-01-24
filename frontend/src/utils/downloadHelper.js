@@ -40,8 +40,7 @@ export const downloadMultipleFiles = async (files, delay = 500) => {
  * @returns {string} - Generated filename
  */
 export const generateFilename = (product, url) => {
-  const isMusic = product.albumTitle !== null && product.albumTitle !== undefined;
-  const productName = isMusic ? product.albumTitle : product.gameTitle;
+  const productName = product.albumTitle;
   
   // Try to extract extension from URL
   let extension = '';
@@ -54,7 +53,7 @@ export const generateFilename = (product, url) => {
     }
   } catch (e) {
     // If URL parsing fails, default extension
-    extension = isMusic ? '.wav' : '.zip';
+    extension = '.wav';
   }
   
   // Sanitize filename

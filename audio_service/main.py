@@ -20,7 +20,8 @@ from concurrent.futures import ThreadPoolExecutor
 load_dotenv()
 
 # Thread pool for audio analysis
-executor = ThreadPoolExecutor(max_workers=4)
+# Increased workers to 15 to handle parallel downloads and analysis faster
+executor = ThreadPoolExecutor(max_workers=15)
 
 app = FastAPI(
     title="Audio Feature Similarity Service",
@@ -175,43 +176,56 @@ async def startup_cache():
     global audio_features_cache, cache_loaded
     
     # Load audio features into cache for fast recommendations
-    try:
-        with get_db_connection() as conn:
-            if conn:
-                with conn.cursor() as cursor:
-                    sql = """
-                        SELECT 
-                            ProductID,
-                            Tempo,
-                            Energy,
-                            Valence,
-                            Danceability,
-                            Acousticness,
-                            Genre
-                        FROM AudioFeatures
-                        WHERE Tempo IS NOT NULL
-                        AND Energy IS NOT NULL
-                    """
-                    cursor.execute(sql)
-                    results = cursor.fetchall()
-                    
-                    # Build cache dictionary
-                    for row in results:
-                        audio_features_cache[row['ProductID']] = {
-                            'id': row['ProductID'],
-                            'tempo': row['Tempo'],
-                            'energy': row['Energy'],
-                            'valence': row['Valence'],
-                            'danceability': row['Danceability'],
-                            'acousticness': row['Acousticness'],
-                            'genre': row['Genre']
-                        }
-                    
-                    cache_loaded = True
-                    print(f"✅ Cached {len(audio_features_cache)} audio features for fast recommendations")
-    except Exception as e:
-        print(f"❌ Failed to load audio features cache: {e}")
-        raise RuntimeError(f"Audio features cache required but failed to load: {e}")
+    # Retry connection if database isn't ready yet
+    max_retries = 5
+    retry_delay = 2
+    
+    for attempt in range(max_retries):
+        try:
+            with get_db_connection() as conn:
+                if conn:
+                    with conn.cursor() as cursor:
+                        sql = """
+                            SELECT 
+                                ProductID,
+                                Tempo,
+                                Energy,
+                                Valence,
+                                Danceability,
+                                Acousticness,
+                                Genre
+                            FROM AudioFeatures
+                            WHERE Tempo IS NOT NULL
+                            AND Energy IS NOT NULL
+                        """
+                        cursor.execute(sql)
+                        results = cursor.fetchall()
+                        
+                        # Build cache dictionary
+                        for row in results:
+                            audio_features_cache[row['ProductID']] = {
+                                'id': row['ProductID'],
+                                'tempo': row['Tempo'],
+                                'energy': row['Energy'],
+                                'valence': row['Valence'],
+                                'danceability': row['Danceability'],
+                                'acousticness': row['Acousticness'],
+                                'genre': row['Genre']
+                            }
+                        
+                        cache_loaded = True
+                        print(f"✅ Cached {len(audio_features_cache)} audio features for fast recommendations")
+                        return  # Success - exit retry loop
+        except Exception as e:
+            print(f"⚠️ Attempt {attempt + 1}/{max_retries} - Failed to load audio features cache: {e}")
+            if attempt < max_retries - 1:
+                print(f"   Retrying in {retry_delay} seconds...")
+                await asyncio.sleep(retry_delay)
+            else:
+                # Last attempt failed - log warning but don't crash
+                print(f"❌ Could not load audio features cache after {max_retries} attempts")
+                print(f"   Service will start but similarity will be slower (real-time analysis)")
+                cache_loaded = False
 
 @app.get("/")
 async def root():
@@ -803,12 +817,29 @@ def extract_audio_features_from_preview(audio_url: str, track_id: int) -> Option
     Returns features in Spotify-like format for compatibility.
     """
     try:
+        # Validate URL format
+        parsed_url = urlparse(audio_url)
+        path = parsed_url.path.lower()
+        
+        # Skip non-audio files (ZIP, etc.)
+        if path.endswith('.zip') or path.endswith('.rar') or path.endswith('.7z'):
+            print(f"⚠️ Skipping audio analysis for archive file: {audio_url}")
+            return None
+
         import librosa
         
         # Download the preview audio
-        response = httpx.get(audio_url, timeout=30.0, follow_redirects=True)
-        if response.status_code != 200:
-            print(f"⚠️ Failed to download preview for track {track_id}: {response.status_code}")
+        # Download the preview audio with longer timeout for S3 presigned URLs
+        try:
+            response = httpx.get(audio_url, timeout=15.0, follow_redirects=True)
+            if response.status_code != 200:
+                print(f"⚠️ Failed to download preview for track {track_id}: {response.status_code}")
+                return None
+        except httpx.TimeoutException:
+            print(f"⚠️ Timeout downloading preview for track {track_id}")
+            return None
+        except Exception as e:
+            print(f"⚠️ Network error downloading preview for track {track_id}: {e}")
             return None
         
         # Save to temp file and load with librosa
@@ -1362,10 +1393,33 @@ async def compute_artist_similarity(request: ArtistSimilarityRequest):
     try:
         skipped_songs = []
         
-        # Step 1: Extract features for target song (require real audio analysis)
+        # Check if database cache is loaded - fail fast if not
+        if not cache_loaded or len(audio_features_cache) == 0:
+            raise HTTPException(
+                status_code=503,
+                detail="Audio features cache not available. Service is still initializing or database connection failed. Please try again in a few seconds."
+            )
+        
+        # Step 1: Check if target song features are in database cache first
         target_features = None
-        if request.target_song.trackId in itunes_features_cache:
-            target_features = itunes_features_cache[request.target_song.trackId]
+        target_id = int(request.target_song.trackId)  # Ensure integer for cache lookup
+        
+        print(f"🔍 Looking up target song {target_id} in cache ({len(audio_features_cache)} items)")
+        print(f"🔍 Cache keys sample: {list(audio_features_cache.keys())[:5]}")
+        
+        if target_id in audio_features_cache:
+            # Use pre-computed features from database
+            cached = audio_features_cache[target_id]
+            target_features = {
+                'tempo': cached['tempo'],
+                'energy': cached['energy'],
+                'valence': cached['valence'],
+                'danceability': cached['danceability'],
+                'acousticness': cached['acousticness']
+            }
+            print(f"✅ Using cached DB features for target song {target_id}")
+        elif target_id in itunes_features_cache:
+            target_features = itunes_features_cache[target_id]
         else:
             # Require preview URL for real audio analysis
             if not request.target_song.previewUrl:
@@ -1376,17 +1430,26 @@ async def compute_artist_similarity(request: ArtistSimilarityRequest):
             
             # Perform real audio analysis
             loop = asyncio.get_event_loop()
-            target_features = await loop.run_in_executor(
-                executor,
-                extract_audio_features_from_preview,
-                request.target_song.previewUrl,
-                request.target_song.trackId
-            )
+            try:
+                target_features = await loop.run_in_executor(
+                    executor,
+                    extract_audio_features_from_preview,
+                    request.target_song.previewUrl,
+                    request.target_song.trackId
+                )
+            except Exception as e:
+                print(f"❌ Audio analysis execution error: {e}")
+                target_features = None
             
             if target_features is None:
+                is_zip = request.target_song.previewUrl and request.target_song.previewUrl.lower().endswith('.zip')
+                msg = f"Audio analysis failed for target song '{request.target_song.trackName}'"
+                if is_zip:
+                    msg += ". The file format (ZIP) is not supported for audio analysis."
+                
                 raise HTTPException(
-                    status_code=500,
-                    detail=f"Audio analysis failed for target song '{request.target_song.trackName}'"
+                    status_code=422,
+                    detail=msg
                 )
             
             itunes_features_cache[request.target_song.trackId] = target_features
@@ -1394,55 +1457,172 @@ async def compute_artist_similarity(request: ArtistSimilarityRequest):
         # Step 2: Extract features for all artist songs (excluding target)
         song_data = []
         song_features = []
+        skipped_songs = []
         
+        # Prepare list of songs to process
+        songs_to_process = []
         for song in request.artist_songs:
             if song.trackId == request.target_song.trackId:
-                continue  # Skip the target song
-            
-            if song.trackId in itunes_features_cache:
-                features = itunes_features_cache[song.trackId]
+                continue
+            songs_to_process.append(song)
+        
+        # Check if ALL songs are in database cache - if so, skip async processing entirely
+        # Convert IDs to integers for consistent cache lookup
+        # Also include iTunes cache in fast path logic
+        cachable_ids = set()
+        for song in songs_to_process:
+            try:
+                cachable_ids.add(int(song.trackId))
+            except:
+                cachable_ids.add(song.trackId)
+                
+        # Count how many are in either cache
+        cached_count = sum(1 for sid in cachable_ids if sid in audio_features_cache or sid in itunes_features_cache)
+        all_in_cache = cached_count == len(songs_to_process)
+        
+        print(f"🔍 Checking {len(songs_to_process)} songs against cache. In cache: {cached_count}/{len(songs_to_process)}")
+        
+        if all_in_cache:
+            # Fast path - all songs are pre-analyzed in database
+            print(f"✅ Fast path: All {len(songs_to_process)} songs found in (DB/iTunes) cache")
+            for song in songs_to_process:
+                try:
+                    tid = int(song.trackId)
+                except:
+                    tid = song.trackId
+
+                # Prioritize DB cache
+                if tid in audio_features_cache:
+                    cached = audio_features_cache[tid]
+                    features = {
+                        'tempo': cached['tempo'],
+                        'energy': cached['energy'],
+                        'valence': cached['valence'],
+                        'danceability': cached['danceability'],
+                        'acousticness': cached['acousticness']
+                    }
+                elif tid in itunes_features_cache:
+                    features = itunes_features_cache[tid]
+                else:
+                    # Should not exist if logic holds, but safe fallback
+                    continue
+                
+                feature_vec = [
+                    features['tempo'],
+                    features['energy'],
+                    features['valence'],
+                    features['danceability'],
+                    features['acousticness']
+                ]
+                song_features.append(feature_vec)
+                song_data.append({
+                    'song': song,
+                    'features': features
+                })
+        else:
+            # Slow path - need to analyze some songs
+            print(f"⚠️ Slow path: Some songs need analysis")
+            # Parallelize audio analysis for songs not in cache
+            tasks = []
+            for song in songs_to_process:
+                # First check database cache
+                # Ensure we use integer ID for lookup
+                try:
+                    tid = int(song.trackId)
+                except:
+                    tid = song.trackId
+                
+                if tid in audio_features_cache:
+                    # Already in DB cache, use it immediately
+                    cached = audio_features_cache[tid]
+                    tasks.append(asyncio.sleep(0, result={
+                        'tempo': cached['tempo'],
+                        'energy': cached['energy'],
+                        'valence': cached['valence'],
+                        'danceability': cached['danceability'],
+                        'acousticness': cached['acousticness']
+                    }))
+                elif tid in itunes_features_cache:
+                    # Already cached from iTunes, use it
+                    tasks.append(asyncio.sleep(0, result=itunes_features_cache[tid]))
+                elif song.previewUrl:
+                    # If user demands real data immediately, we should skip live analysis if it takes too long
+                    # But ML needs data. We will rely on robustness fix for ZIP files
+                    loop = asyncio.get_event_loop()
+                    tasks.append(
+                        loop.run_in_executor(
+                            executor,
+                            extract_audio_features_from_preview,
+                            song.previewUrl,
+                            tid
+                        )
+                    )
+                else:
+                    # No preview URL, skip this song
+                    tasks.append(asyncio.sleep(0, result=None))
+
+            # Wait for all analysis tasks to complete
+            if tasks:
+                results = await asyncio.gather(*tasks, return_exceptions=True)
             else:
-                # Require preview URL for real audio analysis
-                if not song.previewUrl:
+                results = []
+
+            # Process results
+            for i, song in enumerate(songs_to_process):
+                features = None
+                try:
+                    tid = int(song.trackId)
+                except:
+                    tid = song.trackId
+                
+                # Check database cache first
+                if tid in audio_features_cache:
+                    cached = audio_features_cache[tid]
+                    features = {
+                        'tempo': cached['tempo'],
+                        'energy': cached['energy'],
+                        'valence': cached['valence'],
+                        'danceability': cached['danceability'],
+                        'acousticness': cached['acousticness']
+                    }
+                elif song.trackId in itunes_features_cache:
+                    features = itunes_features_cache[song.trackId]
+                else:
+                    # Get result from parallel execution
+                    res = results[i] if i < len(results) else None
+                    
+                    # Check if result is an exception or valid data
+                    if isinstance(res, Exception):
+                        print(f"Error processing song {song.trackId}: {res}")
+                        features = None
+                    else:
+                        features = res
+                    
+                    # Cache if valid
+                    if features:
+                        itunes_features_cache[song.trackId] = features
+
+                if not features:
                     skipped_songs.append({
                         'trackId': song.trackId,
                         'trackName': song.trackName,
-                        'reason': 'No preview URL available for audio analysis'
+                        'reason': 'Audio analysis failed or no preview URL'
                     })
                     continue
                 
-                # Perform real audio analysis
-                loop = asyncio.get_event_loop()
-                features = await loop.run_in_executor(
-                    executor,
-                    extract_audio_features_from_preview,
-                    song.previewUrl,
-                    song.trackId
-                )
-                
-                if features is None:
-                    skipped_songs.append({
-                        'trackId': song.trackId,
-                        'trackName': song.trackName,
-                        'reason': 'Audio analysis failed'
-                    })
-                    continue
-                
-                itunes_features_cache[song.trackId] = features
-            
-            # Build feature vector [tempo, energy, valence, danceability, acousticness]
-            feature_vec = [
-                features.get('tempo', 120),
-                features.get('energy', 0.5),
-                features.get('valence', 0.5),
-                features.get('danceability', 0.5),
-                features.get('acousticness', 0.3)
-            ]
-            song_features.append(feature_vec)
-            song_data.append({
-                'song': song,
-                'features': features
-            })
+                # Build feature vector [tempo, energy, valence, danceability, acousticness]
+                feature_vec = [
+                    features.get('tempo', 120),
+                    features.get('energy', 0.5),
+                    features.get('valence', 0.5),
+                    features.get('danceability', 0.5),
+                    features.get('acousticness', 0.3)
+                ]
+                song_features.append(feature_vec)
+                song_data.append({
+                    'song': song,
+                    'features': features
+                })
         
         if not song_features:
             return {

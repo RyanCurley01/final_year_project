@@ -30,17 +30,13 @@ USE Game_Store_System;
     -- Products Table (must be created before Orders, Stock, etc.)
     CREATE TABLE IF NOT EXISTS Products (
         ProductID INT AUTO_INCREMENT PRIMARY KEY,
-        GameTitle VARCHAR(255),
         AlbumTitle VARCHAR(255),
-        Platform VARCHAR(50),
-        GamePrice DECIMAL(10, 2),
         AlbumPrice DECIMAL(10, 2),
         albumCoverImageUrl VARCHAR(255),
-        gameCoverImageUrl VARCHAR(255),
         file_url VARCHAR(255),
         preview_url VARCHAR(255),
         StockQuantity INT UNSIGNED DEFAULT 0
-    );
+    ) AUTO_INCREMENT = 5;
 
     -- Orders Table
     CREATE TABLE IF NOT EXISTS Orders (
@@ -111,8 +107,8 @@ USE Game_Store_System;
         FOREIGN KEY(ProductID) REFERENCES Products(ProductID)
     );
 
-    -- GameWishlist Table
-    CREATE TABLE IF NOT EXISTS GameWishlist (
+    -- Wishlist Table
+    CREATE TABLE IF NOT EXISTS Wishlist (
         WishlistID INT AUTO_INCREMENT PRIMARY KEY,
         AccountID BIGINT,
         ProductID INT,
@@ -243,71 +239,62 @@ USE Game_Store_System;
 
     -- Insert Products (Games and Music Albums)
     -- Note: albumCoverImageUrl for music uses the cloud animation video from S3
-    INSERT INTO Products (GameTitle, AlbumTitle, Platform, GamePrice, AlbumPrice, albumCoverImageUrl, gameCoverImageUrl, file_url, preview_url, StockQuantity) VALUES
-    -- Games
-    ('Jimmy Jungle', NULL, 'PC', 2.00, NULL, NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Game Cover Images/Jimmy Jungle Cover Image.png', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Game%20Executables/Jimmy%20Jungle.exe', NULL, 100),
-    ('Midnight Haunt', NULL, 'PC', 2.00, NULL, NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Game Cover Images/Midnight Haunt Cover Image.png', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Game%20Executables/Midnight%20Haunt.exe', NULL, 100),
-    ('Protectors', NULL, 'PC', 5.00, NULL, NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Game Cover Images/Protectors Cover Image.png', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Game%20Executables/Protectors.exe', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Protectors video game trailer.mp4', 100),
-    ('Platform Game', NULL, 'PC', 1.50, NULL, NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Game Cover Images/Red Hood Cover Image.png', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Game%20Executables/Platform%20Game.exe', NULL, 100),
+    INSERT INTO Products (AlbumTitle, AlbumPrice, albumCoverImageUrl, file_url, preview_url, StockQuantity) VALUES
 
     -- Music Albums (using cloud animation video as cover)
-    (NULL, 'Selected Electronic Works', NULL, NULL, 5.00, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Selected_Electronic_Works - Album.zip', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Selected_Electronic_Works - Album.zip', 200),
+    ('Selected Electronic Works', 5.00, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Selected_Electronic_Works - Album.zip', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Selected_Electronic_Works - Album.zip', 200),
     
     -- Individual Songs from Selected Electronic Works (using cloud animation video as cover)
-    (NULL, 'Alien Acid', NULL, NULL, 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Acid.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Acid.wav', 200),
-    (NULL, 'Alien Action', NULL, NULL, 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Action.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Action.wav', 200),
-    (NULL, 'Alien Amen Break Beat', NULL, NULL, 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Amen%20Break%20Beat.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Amen%20Break%20Beat.wav', 200),
-    (NULL, 'Alien Amp Up', NULL, NULL, 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Amp%20Up.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Amp%20Up.wav', 200),
-    (NULL, 'Alien Bars', NULL, NULL, 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Bars.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Bars.wav', 200),
-    (NULL, 'Alien Business', NULL, NULL, 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Business.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Business.wav', 200),
-    (NULL, 'Alien Chilling', NULL, NULL, 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Chilling.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Chilling.wav', 200),
-    (NULL, 'Alien Essence', NULL, NULL, 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Essence.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Essence.wav', 200),
-    (NULL, 'Alien Euphoria', NULL, NULL, 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Euphoria.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Euphoria.wav', 200),
-    (NULL, 'Alien Feels', NULL, NULL, 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Feels.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Feels.wav', 200),
-    (NULL, 'Alien Flow State', NULL, NULL, 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Flow%20State.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Flow%20State.wav', 200),
-    (NULL, 'Alien Grind', NULL, NULL, 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Grind.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Grind.wav', 200),
-    (NULL, 'Alien Harmony', NULL, NULL, 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Harmony.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Harmony.wav', 200),
-    (NULL, 'Alien Hyperness', NULL, NULL, 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Hyperness.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Hyperness.wav', 200),
-    (NULL, 'Alien Joy', NULL, NULL, 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Joy.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Joy.wav', 200),
-    (NULL, 'Alien Memories', NULL, NULL, 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Memories.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Memories.wav', 200),
-    (NULL, 'Alien Mode', NULL, NULL, 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Mode.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Mode.wav', 200),
-    (NULL, 'Alien Nature', NULL, NULL, 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Nature.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Nature.wav', 200),
-    (NULL, 'Alien Project Meeting', NULL, NULL, 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Project%20Meeting.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Project%20Meeting.wav', 200),
-    (NULL, 'Alien Ragebait', NULL, NULL, 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Ragebait.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Ragebait.wav', 200),
-    (NULL, 'Alien Realm', NULL, NULL, 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Realm.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Realm.wav', 200),
-    (NULL, 'Alien Sense', NULL, NULL, 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Sense.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Sense.wav', 200),
-    (NULL, 'Alien Singing', NULL, NULL, 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Singing.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Singing.wav', 200),
-    (NULL, 'Alien Soul', NULL, NULL, 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Soul.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Soul.wav', 200),
-    (NULL, 'Alien Translation', NULL, NULL, 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Translation.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Translation.wav', 200),
-    (NULL, 'Alien Turn Up', NULL, NULL, 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Turn%20Up.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Turn%20Up.wav', 200),
-    (NULL, 'Alien Upgrade', NULL, NULL, 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Upgrade.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Upgrade.wav', 200),
-    (NULL, 'Alien Utopia', NULL, NULL, 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Utopia.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Utopia.wav', 200),
-    (NULL, 'Alien Wonder', NULL, NULL, 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Wonder.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Wonder.wav', 200),
-    (NULL, 'Breakcore Bear Hug', NULL, NULL, 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Breakcore%20Bear%20Hug.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Breakcore%20Bear%20Hug.wav', 200),
-    (NULL, 'Drunk House', NULL, NULL, 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Drunk%20House.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Drunk%20House.wav', 200),
-    (NULL, 'Extraterrestrial Rave', NULL, NULL, 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Extraterrestrial%20Rave.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Extraterrestrial%20Rave.wav', 200),
-    (NULL, 'Green Bear', NULL, NULL, 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Green%20Bear.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Green%20Bear.wav', 200),
-    (NULL, 'Green God', NULL, NULL, 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Green%20God.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Green%20God.wav', 200),
-    (NULL, 'Intergalactic Rave', NULL, NULL, 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Intergalactic%20Rave.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Intergalactic%20Rave.wav', 200),
-    (NULL, 'Soft Chaos', NULL, NULL, 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Soft%20Chaos.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Soft%20Chaos.wav', 200),
-    (NULL, 'Ted Chilling', NULL, NULL, 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%20Chilling.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%20Chilling.wav', 200),
-    (NULL, 'Teddy Emotion', NULL, NULL, 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Teddy%20Emotion.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Teddy%20Emotion.wav', 200),
-    (NULL, 'Ted''s Awakening', NULL, NULL, 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Awakening.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Awakening.wav', 200),
-    (NULL, 'Ted''s Beautiful Anger', NULL, NULL, 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Beautiful%20Anger.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Beautiful%20Anger.wav', 200),
-    (NULL, 'Ted''s Chillness', NULL, NULL, 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Chillness.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Chillness.wav', 200),
-    (NULL, 'Ted''s Deepness', NULL, NULL, 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Deepness.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Deepness.wav', 200),
-    (NULL, 'Ted''s Dream', NULL, NULL, 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Dream.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Dream.wav', 200),
-    (NULL, 'Ted''s Energy', NULL, NULL, 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Energy.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Energy.wav', 200),
-    (NULL, 'Ted''s Green Machine', NULL, NULL, 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Green%20Machine.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Green%20Machine.wav', 200),
-    (NULL, 'Ted''s Rush Up', NULL, NULL, 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Rush%20Up.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Rush%20Up.wav', 200),
-    (NULL, 'Ted''s Utopia', NULL, NULL, 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Utopia.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Utopia.wav', 200);
+    ('Alien Acid', 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Acid.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Acid.wav', 200),
+    ('Alien Action', 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Action.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Action.wav', 200),
+    ('Alien Amen Break Beat', 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Amen%20Break%20Beat.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Amen%20Break%20Beat.wav', 200),
+    ('Alien Amp Up', 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Amp%20Up.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Amp%20Up.wav', 200),
+    ('Alien Bars', 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Bars.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Bars.wav', 200),
+    ('Alien Business', 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Business.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Business.wav', 200),
+    ('Alien Chilling', 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Chilling.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Chilling.wav', 200),
+    ('Alien Essence', 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Essence.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Essence.wav', 200),
+    ('Alien Euphoria', 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Euphoria.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Euphoria.wav', 200),
+    ('Alien Feels', 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Feels.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Feels.wav', 200),
+    ('Alien Flow State', 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Flow%20State.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Flow%20State.wav', 200),
+    ('Alien Grind', 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Grind.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Grind.wav', 200),
+    ('Alien Harmony', 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Harmony.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Harmony.wav', 200),
+    ('Alien Hyperness', 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Hyperness.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Hyperness.wav', 200),
+    ('Alien Joy', 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Joy.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Joy.wav', 200),
+    ('Alien Memories', 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Memories.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Memories.wav', 200),
+    ('Alien Mode', 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Mode.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Mode.wav', 200),
+    ('Alien Nature', 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Nature.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Nature.wav', 200),
+    ('Alien Project Meeting', 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Project%20Meeting.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Project%20Meeting.wav', 200),
+    ('Alien Ragebait', 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Ragebait.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Ragebait.wav', 200),
+    ('Alien Realm', 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Realm.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Realm.wav', 200),
+    ('Alien Sense', 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Sense.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Sense.wav', 200),
+    ('Alien Singing', 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Singing.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Singing.wav', 200),
+    ('Alien Soul', 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Soul.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Soul.wav', 200),
+    ('Alien Translation', 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Translation.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Translation.wav', 200),
+    ('Alien Turn Up', 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Turn%20Up.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Turn%20Up.wav', 200),
+    ('Alien Upgrade', 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Upgrade.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Upgrade.wav', 200),
+    ('Alien Utopia', 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Utopia.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Utopia.wav', 200),
+    ('Alien Wonder', 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Wonder.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Alien%20Wonder.wav', 200),
+    ('Breakcore Bear Hug', 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Breakcore%20Bear%20Hug.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Breakcore%20Bear%20Hug.wav', 200),
+    ('Drunk House', 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Drunk%20House.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Drunk%20House.wav', 200),
+    ('Extraterrestrial Rave', 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Extraterrestrial%20Rave.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Extraterrestrial%20Rave.wav', 200),
+    ('Green Bear', 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Green%20Bear.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Green%20Bear.wav', 200),
+    ('Green God', 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Green%20God.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Green%20God.wav', 200),
+    ('Intergalactic Rave', 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Intergalactic%20Rave.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Intergalactic%20Rave.wav', 200),
+    ('Soft Chaos', 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Soft%20Chaos.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Soft%20Chaos.wav', 200),
+    ('Ted Chilling', 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%20Chilling.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%20Chilling.wav', 200),
+    ('Teddy Emotion', 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Teddy%20Emotion.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Teddy%20Emotion.wav', 200),
+    ('Ted''s Awakening', 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Awakening.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Awakening.wav', 200),
+    ('Ted''s Beautiful Anger', 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Beautiful%20Anger.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Beautiful%20Anger.wav', 200),
+    ('Ted''s Chillness', 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Chillness.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Chillness.wav', 200),
+    ('Ted''s Deepness', 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Deepness.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Deepness.wav', 200),
+    ('Ted''s Dream', 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Dream.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Dream.wav', 200),
+    ('Ted''s Energy', 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Energy.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Energy.wav', 200),
+    ('Ted''s Green Machine', 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Green%20Machine.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Green%20Machine.wav', 200),
+    ('Ted''s Rush Up', 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Rush%20Up.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Rush%20Up.wav', 200),
+    ('Ted''s Utopia', 0.5, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Utopia.wav', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/Ted%E2%80%99s%20Utopia.wav', 200);
 
     -- Insert Stock entries 
     INSERT INTO Stock (StockQuantity, ProductID) VALUES
-    (100, 1),  -- Jimmy Jungle
-    (100, 2),  -- Midnight Haunt
-    (100, 3),  -- Protectors
-    (100, 4),  -- Red Hood
     (200, 5),  -- Selected Electronic Works (full album ZIP)
     -- Individual songs (Product IDs 6-52)
     (200, 6), (200, 7), (200, 8), (200, 9), (200, 10),
@@ -323,71 +310,28 @@ USE Game_Store_System;
 
     -- Insert Orders
     INSERT INTO Orders (AccountID, orderDate, TotalAmount) VALUES
-    (4, '2025-10-01 10:30:00', 4.00),    -- Alice Brown
-    (5, '2025-10-02 14:15:00', 7.00),    -- Bob Davis
-    (6, '2025-10-03 16:45:00', 3.50),    -- Carol White
-    (7, '2025-10-05 11:20:00', 10.00),   -- David Lee
     (8, '2025-10-07 09:00:00', 5.00);    -- Emma Garcia
 
     -- Insert Order_Items (only referencing products 1-5)
     INSERT INTO Order_Items (OrderID, ProductID, Quantity, UnitPrice) VALUES
-    -- Order 1 (Alice Brown)
-    (1, 1, 2, 2.00),    -- Jimmy Jungle x2
-    -- Order 2 (Bob Davis)
-    (2, 2, 2, 2.00),    -- Midnight Haunt x2
-    (2, 3, 1, 5.00),    -- Protectors
-    (2, 1, 1, 2.00),    -- Jimmy Jungle
-    -- Order 3 (Carol White)
-    (3, 4, 1, 1.50),    -- Red Hood
-    (3, 1, 1, 2.00),    -- Jimmy Jungle
-    -- Order 4 (David Lee)
-    (4, 3, 2, 5.00),    -- Protectors x2
-    -- Order 5 (Emma Garcia)
-    (5, 5, 1, 5.00);    -- Selected Electronic Works
+    -- Order 1 (Emma Garcia)
+    (1, 5, 1, 5.00);    -- Selected Electronic Works
 
     -- Insert CustomerSummary (matching the updated orders)
     INSERT INTO CustomerSummary (AccountID, ProductID, OrderID) VALUES
-    (4, 1, 1),
-    (5, 2, 2),
-    (5, 3, 2),
-    (5, 1, 2),
-    (6, 4, 3),
-    (6, 1, 3),
-    (7, 3, 4),
-    (8, 5, 5);
+    (8, 5, 1);
 
     -- Insert Sold_Products (matching the updated order items)
     INSERT INTO Sold_Products (OrderItemID, ProductID) VALUES
-    (1, 1),
-    (2, 2),
-    (3, 3),
-    (4, 1),
-    (5, 4),
-    (6, 1),
-    (7, 3),
-    (8, 5);
+    (1, 5);
 
     -- Insert Purchased_Products (matching the updated order items)
     INSERT INTO Purchased_Products (OrderItemID, ProductID) VALUES
-    (1, 1),
-    (2, 2),
-    (3, 3),
-    (4, 1),
-    (5, 4),
-    (6, 1),
-    (7, 3),
-    (8, 5);
+    (1, 5);
 
-    -- Insert GameWishlist (only referencing products 1-5)
-    INSERT INTO GameWishlist (AccountID, ProductID) VALUES
-    (4, 2),   -- Alice wants Midnight Haunt
-    (4, 3),   -- Alice wants Protectors
-    (5, 1),   -- Bob wants Jimmy Jungle
-    (6, 3),   -- Carol wants Protectors
-    (7, 4),   -- David wants Red Hood
-    (8, 5),   -- Emma wants Selected Electronic Works
-    (9, 3),   -- Frank wants Protectors
-    (10, 2);  -- Grace wants Midnight Haunt
+    -- Insert Wishlist (only referencing products 1-5)
+    INSERT INTO Wishlist (AccountID, ProductID) VALUES
+    (8, 5);   -- Emma wants Selected Electronic Works
 
     -- Insert AudioFeatures for music products (extracted from S3 WAV files)
     INSERT INTO AudioFeatures (ProductID, Tempo, Energy, Danceability, Valence, Acousticness, Instrumentalness, Loudness, Speechiness, Genre, Mood, Key_Signature, TimeSignature, Duration, SpectralCentroid, SpectralRolloff, ZeroCrossingRate, MfccMean, ChromaMean) VALUES

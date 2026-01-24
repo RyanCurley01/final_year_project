@@ -43,7 +43,10 @@ const AppContent = () => {
 
   // Handle recommendation click
   const handleRecommendationClick = (product) => {
-    const music = products.filter(p => p.albumTitle);
+    const music = products.filter(p => {
+       const isAudio = p.fileUrl && !p.fileUrl.toLowerCase().includes('.zip');
+       return p.albumTitle && isAudio;
+    });
     const index = music.findIndex(p => p.id === product.id);
     
     if (index !== -1) {
@@ -52,13 +55,16 @@ const AppContent = () => {
     }
   };
 
-  const musicProducts = products.filter(product => product.albumTitle);
+  const musicProducts = products.filter(p => {
+     const isAudio = p.fileUrl && !p.fileUrl.toLowerCase().includes('.zip');
+     return p.albumTitle && isAudio;
+  });
 
   return (
     <div className="relative flex h-screen overflow-hidden">
       <Sidebar />
       <div className="flex-1 flex flex-col bg-gradient-to-br from-[#041529] to-[#2970c2] overflow-hidden">
-        <div className={`px-6 flex flex-col lg:flex-row ${(activeSong?.albumTitle || activeSong?.gameTitle) ? 'h-[calc(100vh-7rem)]' : 'h-screen'} overflow-y-auto`}>
+        <div className={`px-6 flex flex-col lg:flex-row ${(activeSong?.albumTitle) ? 'h-[calc(100vh-7rem)]' : 'h-screen'} overflow-y-auto`}>
           <div className="flex-1 pb-4">
             <Searchbar />
 
@@ -108,7 +114,7 @@ const AppContent = () => {
               <div className="hidden lg:block w-[390px] min-w-[390px]"></div>
               
               {/* Fixed sidebar - desktop only */}
-              <div className={`hidden lg:block fixed top-0 right-0 w-[390px] min-w-[390px] ${(activeSong?.albumTitle || activeSong?.gameTitle) ? 'h-[calc(100vh-7rem)]' : 'h-screen'} overflow-y-auto overflow-x-hidden hide-scrollbar z-40 px-4 pt-4 pb-8`}>
+              <div className={`hidden lg:block fixed top-0 right-0 w-[390px] min-w-[390px] ${(activeSong?.albumTitle) ? 'h-[calc(100vh-7rem)]' : 'h-screen'} overflow-y-auto overflow-x-hidden hide-scrollbar z-40 px-4 pt-4 pb-8`}>
                 <div className="mb-4">
                   <TopPlay />
                 </div>
@@ -134,7 +140,7 @@ const AppContent = () => {
       </div>
 
       {/* Music Player - Fixed at bottom */}
-      {(activeSong?.albumTitle || activeSong?.gameTitle) && (
+      {(activeSong?.albumTitle) && (
         <div className="absolute h-28 bottom-0 left-0 right-0 flex animate-slideup bg-gradient-to-br from-white/10 to-[#cf616a] backdrop-blur-lg block-t-3xl z-50">
           <MusicPlayer />
         </div>

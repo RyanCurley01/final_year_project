@@ -28,48 +28,16 @@ public class ProductService {
                 .collect(Collectors.toList());
     }
 
-    public List<Product> getProductsByGameCoverImageUrl(String gameImageUrlString) {
-        return productRepository.findByGameCoverImageUrl(gameImageUrlString);
-    }
-
     public List<Product> getProductsByAlbumCoverImageUrl(String albumImageUrlString) {
         return productRepository.findByAlbumCoverImageUrl(albumImageUrlString);
     }
 
-    public List<Product> getProductsByPlatform(String platform) {
-        return productRepository.findByPlatform(platform);
-    }
-
     private ProductResponse toProductResponse(Product product) {
-        String originalFileUrl = product.getFileUrl();
-        
-        // Fix for legacy itch.io URLs - map to S3 executables
-        if (originalFileUrl != null && originalFileUrl.contains("itch.io")) {
-            if (product.getGameTitle() != null) {
-                switch (product.getGameTitle()) {
-                    case "Jimmy Jungle":
-                        originalFileUrl = "https://game-and-music-files.s3.eu-west-1.amazonaws.com/Game%20Executables/Jimmy%20Jungle.exe";
-                        break;
-                    case "Midnight Haunt":
-                        originalFileUrl = "https://game-and-music-files.s3.eu-west-1.amazonaws.com/Game%20Executables/Midnight%20Haunt.exe";
-                        break;
-                    case "Protectors":
-                        originalFileUrl = "https://game-and-music-files.s3.eu-west-1.amazonaws.com/Game%20Executables/Protectors.exe";
-                        break;
-                    case "Platform Game":
-                    case "Red Hood":
-                        originalFileUrl = "https://game-and-music-files.s3.eu-west-1.amazonaws.com/Game%20Executables/Platform%20Game.exe";
-                        break;
-                }
-            }
-        }
-
-        String signedGameCoverUrl = s3Service.generatePresignedUrl(product.getGameCoverImageUrl());
         String signedAlbumCoverUrl = s3Service.generatePresignedUrl(product.getAlbumCoverImageUrl());
-        String signedFileUrl = s3Service.generatePresignedUrl(originalFileUrl);
+        String signedFileUrl = s3Service.generatePresignedUrl(product.getFileUrl());
         String signedPreviewUrl = s3Service.generatePresignedUrl(product.getPreviewUrl());
 
-        return ProductResponse.fromProduct(product, signedGameCoverUrl, signedAlbumCoverUrl, 
+        return ProductResponse.fromProduct(product, signedAlbumCoverUrl, 
                                           signedFileUrl, signedPreviewUrl);
     }
 
@@ -83,23 +51,11 @@ public class ProductService {
         Product product = productRepository.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Product not found with id: " + id));
 
-        if (productDetails.getGameTitle() != null) {
-            product.setGameTitle(productDetails.getGameTitle());
-        }
         if (productDetails.getAlbumTitle() != null) {
             product.setAlbumTitle(productDetails.getAlbumTitle());
         }
-        if (productDetails.getPlatform() != null) {
-            product.setPlatform(productDetails.getPlatform());
-        }
-        if (productDetails.getGameCoverImageUrl() != null) {
-            product.setGameCoverImageUrl(productDetails.getGameCoverImageUrl());
-        }
         if (productDetails.getAlbumCoverImageUrl() != null) {
             product.setAlbumCoverImageUrl(productDetails.getAlbumCoverImageUrl());
-        }
-        if (productDetails.getGamePrice() != null) {
-            product.setGamePrice(productDetails.getGamePrice());
         }
         if (productDetails.getAlbumPrice() != null) {
             product.setAlbumPrice(productDetails.getAlbumPrice());

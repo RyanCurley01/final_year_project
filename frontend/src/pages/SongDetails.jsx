@@ -208,29 +208,54 @@ const SongDetails = () => {
         
         // If coming from Discover page, use provided songs for similarity
         if (fromDiscover) {
-          setArtistSongs(allArtistSongsData);
-          if (allArtistSongsData.length > 0) {
-            await computeMLSimilarity(songData, allArtistSongsData);
+          // Filter out zip files and non-audio content
+          const validSongs = allArtistSongsData.filter(s => {
+             const url = s.previewUrl || s.fileUrl;
+             return url && !url.toLowerCase().includes('.zip');
+          });
+
+          const targetUrl = songData.previewUrl || songData.fileUrl;
+          const isTargetAudio = targetUrl && !targetUrl.toLowerCase().includes('.zip');
+
+          setArtistSongs(validSongs);
+          if (validSongs.length > 0 && isTargetAudio) {
+            await computeMLSimilarity(songData, validSongs);
           } else {
+            console.log("Skipping ML similarity: Target is not audio or no valid comparison songs");
             setLoading(false);
-            setError('No other songs available for comparison.');
+            if (!isTargetAudio) {
+                 setError('ML Similarity not available for non-audio (ZIP) content.');
+            } else {
+                 setError('No other songs available for comparison.');
+            }
           }
         } else {
           // Filter artist songs to only include songs from the same artist
           const artistName = songData.artistName?.toLowerCase() || '';
-          const filteredArtistSongs = allArtistSongsData.filter(s => 
-            s.artistName?.toLowerCase().includes(artistName.split(' ')[0]) && // Match by first name (e.g., "Aphex")
-            s.trackId !== songData.trackId
-          );
+          const filteredArtistSongs = allArtistSongsData.filter(s => {
+            const url = s.previewUrl || s.fileUrl;
+            const isAudio = url && !url.toLowerCase().includes('.zip');
+            const isSameArtist = s.artistName?.toLowerCase().includes(artistName.split(' ')[0]);
+            
+            return isAudio && isSameArtist && s.trackId !== songData.trackId;
+          });
           
           setArtistSongs(filteredArtistSongs);
+
+          const targetUrl = songData.previewUrl || songData.fileUrl;
+          const isTargetAudio = targetUrl && !targetUrl.toLowerCase().includes('.zip');
           
           // Compute ML similarity if we have artist songs
-          if (filteredArtistSongs.length > 0) {
+          if (filteredArtistSongs.length > 0 && isTargetAudio) {
             await computeMLSimilarity(songData, filteredArtistSongs);
           } else {
+            console.log("Skipping ML similarity: Target is not audio or no valid comparison songs");
             setLoading(false);
-            setError('No other songs from this artist available for comparison.');
+            if (!isTargetAudio) {
+                setError('ML Similarity not available for non-audio (ZIP) content.');
+            } else {
+                setError('No other songs from this artist available for comparison.');
+            }
           }
         }
       } catch (err) {
@@ -266,7 +291,7 @@ const SongDetails = () => {
             primaryGenreName: targetSong.primaryGenreName || 'Electronic',
             trackTimeMillis: targetSong.trackTimeMillis
           },
-          artist_songs: artistSongs.map(song => ({
+          artist_songs: artistSongs.slice(0, 5).map(song => ({
             trackId: song.trackId || song.id,
             trackName: song.trackName || song.albumTitle,
             artistName: song.artistName,
@@ -277,10 +302,16 @@ const SongDetails = () => {
             primaryGenreName: song.primaryGenreName || 'Electronic',
             trackTimeMillis: song.trackTimeMillis
           })),
-          limit: 20
+          limit: 10  // Reduced from 20 to 10 for faster results
         }),
+        // Reduce timeout to 30 seconds - should be instant with database cache
         signal: AbortSignal.timeout(30000)
       });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || `ML service returned ${response.status}`);
+      }
 
       if (!response.ok) {
         throw new Error(`ML service returned ${response.status}`);
@@ -312,92 +343,10 @@ const SongDetails = () => {
       
     } catch (err) {
       console.error('ML similarity computation failed:', err);
-      // Fall back to simple similarity if ML fails
-      computeFallbackSimilarity(targetSong, artistSongs);
+      setError(err.message);
     } finally {
       setLoading(false);
     }
-  };
-
-  // Fallback similarity computation (client-side)
-  const computeFallbackSimilarity = (targetSong, artistSongs) => {
-    // Hash function for pseudo-random but consistent features
-    const hashCode = (str) => {
-      let hash = 0;
-      for (let i = 0; i < str.length; i++) {
-        const char = str.charCodeAt(i);
-        hash = ((hash << 5) - hash) + char;
-        hash = hash & hash;
-      }
-      return Math.abs(hash);
-    };
-
-    // Generate pseudo features for target
-    const targetHash = hashCode(targetSong.trackName + targetSong.artistName);
-    const targetFeat = {
-      tempo: 80 + (targetHash % 120),
-      energy: (targetHash % 100) / 100,
-      valence: ((targetHash >> 8) % 100) / 100,
-      danceability: ((targetHash >> 16) % 100) / 100,
-      acousticness: ((targetHash >> 24) % 50) / 100
-    };
-    setTargetFeatures(targetFeat);
-
-    // Compute similarity for each artist song
-    const results = artistSongs.map(song => {
-      const songHash = hashCode(song.trackName + song.artistName);
-      const songFeat = {
-        tempo: 80 + (songHash % 120),
-        energy: (songHash % 100) / 100,
-        valence: ((songHash >> 8) % 100) / 100,
-        danceability: ((songHash >> 16) % 100) / 100
-      };
-
-      // Calculate match scores
-      const tempoMatch = 1 - Math.min(Math.abs(targetFeat.tempo - songFeat.tempo) / 100, 1);
-      const energyMatch = 1 - Math.abs(targetFeat.energy - songFeat.energy);
-      const moodMatch = 1 - Math.abs(targetFeat.valence - songFeat.valence);
-      const danceMatch = 1 - Math.abs(targetFeat.danceability - songFeat.danceability);
-
-      // Weighted similarity score
-      const similarity = (tempoMatch * 0.25) + (energyMatch * 0.35) + (moodMatch * 0.20) + (danceMatch * 0.20);
-
-      // Determine match reason
-      const matches = [
-        ['tempo', tempoMatch, `Similar tempo (${Math.round(songFeat.tempo)} BPM)`],
-        ['energy', energyMatch, `Matching energy (${Math.round(songFeat.energy * 100)}%)`],
-        ['mood', moodMatch, 'Comparable mood'],
-        ['dance', danceMatch, 'Similar rhythm feel']
-      ];
-      const bestMatch = matches.reduce((max, curr) => curr[1] > max[1] ? curr : max);
-
-      return {
-        ...song,
-        trackId: song.trackId || song.id,
-        similarity_score: similarity,
-        tempo: songFeat.tempo,
-        energy: songFeat.energy,
-        valence: songFeat.valence,
-        danceability: songFeat.danceability,
-        tempo_match: tempoMatch,
-        energy_match: energyMatch,
-        mood_match: moodMatch,
-        dance_match: danceMatch,
-        match_reason: bestMatch[2],
-        ml_algorithm: 'Fallback-Estimation'
-      };
-    });
-
-    // Sort by similarity and take top 20
-    results.sort((a, b) => b.similarity_score - a.similarity_score);
-    setSimilarSongs(results.slice(0, 20));
-    
-    setMlInfo({
-      algorithm: 'Fallback Estimation (ML service unavailable)',
-      normalization: 'Hash-based',
-      features_used: ['tempo', 'energy', 'valence', 'danceability'],
-      songs_analyzed: artistSongs.length
-    });
   };
 
   // Handle play

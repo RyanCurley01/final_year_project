@@ -21,9 +21,7 @@ public class ProductController {
 
     @GetMapping("/getAllProducts")
     public ResponseEntity<List<ProductResponse>> getAllProducts(
-            @RequestParam(required = false) String gameCoverImageUrl,
-            @RequestParam(required = false) String albumCoverImageUrl,
-            @RequestParam(required = false) String platform) {
+            @RequestParam(required = false) String albumCoverImageUrl) {
 
         // Always return all products with signed URLs (filtering handled in the service layer if needed)
         return ResponseEntity.ok(productService.getAllProductsWithSignedUrls());

@@ -20,26 +20,14 @@ public class Product {
     @Column(name = "ProductID")
     private Long id;
 
-    @Column(name = "GameTitle", length = 10)
-    private String gameTitle;
-
-    @Column(name = "AlbumTitle", length = 10)
+    @Column(name = "AlbumTitle", length = 100)
     private String albumTitle;
 
-    @Column(name = "Platform", length = 10)
-    private String platform; 
-
-    @Column(name = "GamePrice", precision = 4, scale = 2)
-    private BigDecimal gamePrice;
-
-    @Column(name = "AlbumPrice", precision = 4, scale = 2)
+    @Column(name = "AlbumPrice", precision = 6, scale = 2)
     private BigDecimal albumPrice;
 
     @Column(name = "albumCoverImageUrl", length = 255)
     private String albumCoverImageUrl; // For albums
-
-    @Column(name = "gameCoverImageUrl", length = 255)
-    private String gameCoverImageUrl;
 
     @Column(name = "file_url", length = 255)
     private String fileUrl; // URL to download full game/album

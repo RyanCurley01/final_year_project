@@ -29,7 +29,7 @@ const cartSlice = createSlice({
       // Recalculate totals
       state.totalItems = state.items.reduce((sum, item) => sum + item.quantity, 0);
       state.totalAmount = state.items.reduce((sum, item) => {
-        const price = item.albumPrice || item.gamePrice || 0;
+        const price = item.albumPrice || 0;
         return sum + (price * item.quantity);
       }, 0);
     },
@@ -41,7 +41,7 @@ const cartSlice = createSlice({
       // Recalculate totals
       state.totalItems = state.items.reduce((sum, item) => sum + item.quantity, 0);
       state.totalAmount = state.items.reduce((sum, item) => {
-        const price = item.albumPrice || item.gamePrice || 0;
+        const price = item.albumPrice || 0;
         return sum + (price * item.quantity);
       }, 0);
     },
@@ -61,7 +61,7 @@ const cartSlice = createSlice({
         // Recalculate totals
         state.totalItems = state.items.reduce((sum, item) => sum + item.quantity, 0);
         state.totalAmount = state.items.reduce((sum, item) => {
-          const price = item.albumPrice || item.gamePrice || 0;
+          const price = item.albumPrice || 0;
           return sum + (price * item.quantity);
         }, 0);
       }

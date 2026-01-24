@@ -72,10 +72,9 @@ const PurchaseHistory = () => {
             <div className="space-y-3">
               <h4 className="text-white font-semibold mb-2">Items:</h4>
               {purchase.items.map((item, index) => {
-                const isMusic = item.albumTitle !== null && item.albumTitle !== undefined;
-                const productName = isMusic ? item.albumTitle : item.gameTitle;
-                const price = isMusic ? item.albumPrice : item.gamePrice;
-                const coverMedia = isMusic ? item.albumCoverImageUrl : item.gameCoverImageUrl;
+                const productName = item.albumTitle;
+                const price = item.albumPrice;
+                const coverMedia = item.albumCoverImageUrl;
                 const isVideo = coverMedia && coverMedia.toLowerCase().includes('.mp4');
 
                 return (
