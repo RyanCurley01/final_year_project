@@ -8,17 +8,12 @@ const PurchaseHistory = () => {
   const { purchases } = useSelector((state) => state.purchase);
 
   const handleDownload = (item) => {
-    const isMusic = item.albumTitle !== null && item.albumTitle !== undefined;
-    
-    if (isMusic && item.fileUrl) {
+    if (item.fileUrl) {
       try {
         downloadFile(item.fileUrl, generateFilename(item, item.fileUrl));
       } catch (error) {
         alert("Failed to download file. Please try again.");
       }
-    } else if (!isMusic && item.fileUrl) {
-      // For games, open itch.io link in new tab
-      window.open(item.fileUrl, '_blank', 'noopener,noreferrer');
     }
   };
 
@@ -126,10 +121,10 @@ const PurchaseHistory = () => {
                       <button
                         onClick={() => handleDownload(item)}
                         className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
-                        title={isMusic ? "Download file" : "View on itch.io"}
+                        title="Download file"
                       >
                         <FaDownload />
-                        {isMusic ? "Download" : "View"}
+                        Download
                       </button>
                     )}
                   </div>

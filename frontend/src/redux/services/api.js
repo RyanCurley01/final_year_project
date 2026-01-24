@@ -48,6 +48,29 @@ export const getServiceUrl = (service) => {
   const runtimeUrl = runtimeEnv[envVarName];
   const viteUrl = viteEnv[envVarName];
   
+  // Check if proxy mode is forced (for dev containers)
+  const useProxy = viteEnv.VITE_USE_PROXY === 'true';
+
+  // Proxy mode (Ngrok or VITE_USE_PROXY)
+  // Maps ports to proxy paths that redirect to Docker/Host containers
+  if (config.isNgrok || useProxy) {
+    const proxyMap = {
+      8080: '/proxy/backend',
+      8081: '/proxy/products',
+      8082: '/proxy/orders',
+      8083: '/proxy/payments',
+      8084: '/proxy/stock',
+      8085: '/proxy/wishlist',
+      8086: '/proxy/order-items',
+      8087: '/proxy/customer-summary',
+      8088: '/proxy/sold-products',
+      8089: '/proxy/purchased-products', // Fixed mapping
+    };
+    // Default to backend if port not found
+    const url = proxyMap[port] || `/proxy/backend`;
+    return url;
+  }
+  
   // IMPORTANT: Check localhost FIRST - always use localhost URLs when running locally
   // This prevents CORS issues from trying to use production URLs during local development
   if (config.isLocalhost) {

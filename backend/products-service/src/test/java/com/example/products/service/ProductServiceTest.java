@@ -47,7 +47,7 @@ class ProductServiceTest {
         jimmyJungle.setPlatform("PC");
         jimmyJungle.setGamePrice(new BigDecimal("2.00"));
         jimmyJungle.setGameCoverImageUrl("https://game-and-music-files.s3.eu-west-1.amazonaws.com/Game Cover Images/Jimmy Jungle Cover Image.png");
-        jimmyJungle.setFileUrl("https://jimmywheezer.itch.io/jimmy-jungle");
+        jimmyJungle.setFileUrl("https://game-and-music-files.s3.eu-west-1.amazonaws.com/Game%20Executables/Jimmy%20Jungle.exe");
         jimmyJungle.setStockQuantity(100);
 
         // Product 2: Midnight Haunt (Game)
@@ -57,7 +57,7 @@ class ProductServiceTest {
         midnightHaunt.setPlatform("PC");
         midnightHaunt.setGamePrice(new BigDecimal("2.00"));
         midnightHaunt.setGameCoverImageUrl("https://game-and-music-files.s3.eu-west-1.amazonaws.com/Game Cover Images/Midnight Haunt Cover Image.png");
-        midnightHaunt.setFileUrl("https://jimmywheezer.itch.io/midnight-haunt");
+        midnightHaunt.setFileUrl("https://game-and-music-files.s3.eu-west-1.amazonaws.com/Game%20Executables/Midnight%20Haunt.exe");
         midnightHaunt.setStockQuantity(100);
 
         // Product 3: Protectors (Game with preview)
@@ -67,7 +67,7 @@ class ProductServiceTest {
         protectors.setPlatform("PC");
         protectors.setGamePrice(new BigDecimal("5.00"));
         protectors.setGameCoverImageUrl("https://game-and-music-files.s3.eu-west-1.amazonaws.com/Game Cover Images/Protectors Cover Image.png");
-        protectors.setFileUrl("https://jimmywheezer.itch.io/protectors");
+        protectors.setFileUrl("https://game-and-music-files.s3.eu-west-1.amazonaws.com/Game%20Executables/Protectors.exe");
         protectors.setPreviewUrl("https://game-and-music-files.s3.eu-west-1.amazonaws.com/Protectors video game trailer.mp4");
         protectors.setStockQuantity(100);
 
@@ -78,7 +78,7 @@ class ProductServiceTest {
         redHood.setPlatform("PC");
         redHood.setGamePrice(new BigDecimal("1.50"));
         redHood.setGameCoverImageUrl("https://game-and-music-files.s3.eu-west-1.amazonaws.com/Game Cover Images/Red Hood Cover Image.png");
-        redHood.setFileUrl("https://jimmywheezer.itch.io/red-hood");
+        redHood.setFileUrl("https://game-and-music-files.s3.eu-west-1.amazonaws.com/Game%20Executables/Platform%20Game.exe");
         redHood.setStockQuantity(100);
 
         // Product 5: Selected Electronic Works (Music Album)
@@ -473,7 +473,7 @@ class ProductServiceTest {
         existingProduct.setPlatform("PC");
         existingProduct.setGamePrice(new BigDecimal("1.50"));
         existingProduct.setStockQuantity(100);
-        existingProduct.setFileUrl("https://jimmywheezer.itch.io/red-hood");
+        existingProduct.setFileUrl("https://game-and-music-files.s3.eu-west-1.amazonaws.com/Game%20Executables/Platform%20Game.exe");
 
         when(productRepository.findById(4L)).thenReturn(java.util.Optional.of(existingProduct));
         when(productRepository.save(any(Product.class))).thenAnswer(invocation -> invocation.getArgument(0));

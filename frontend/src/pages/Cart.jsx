@@ -94,10 +94,8 @@ const Cart = () => {
       // Trigger automatic downloads for purchased items
       const filesToDownload = items
         .filter(item => {
-          // Only download music files (WAV files from S3)
-          // Skip games since they link to itch.io
-          const isMusic = item.albumTitle !== null && item.albumTitle !== undefined;
-          return isMusic && item.fileUrl;
+          // Download both music files and games from S3
+          return item.fileUrl;
         })
         .map(item => ({
           url: item.fileUrl,

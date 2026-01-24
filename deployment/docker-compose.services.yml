@@ -112,6 +112,9 @@ services:
       SPRING_DATASOURCE_USERNAME: ${MYSQL_USER:-gamestore_user}
       SPRING_DATASOURCE_PASSWORD: ${MYSQL_PASSWORD}
       JAVA_OPTS: "-Xmx256m -Xms128m -XX:MaxMetaspaceSize=128m -XX:+UseSerialGC"
+      PAYPAL_CLIENT_ID: ${PAYPAL_CLIENT_ID}
+      PAYPAL_CLIENT_SECRET: ${PAYPAL_CLIENT_SECRET}
+      PAYPAL_MODE: ${PAYPAL_MODE:-sandbox}
     depends_on:
       db:
         condition: service_healthy

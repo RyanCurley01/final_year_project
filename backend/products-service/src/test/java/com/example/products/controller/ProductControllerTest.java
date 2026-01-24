@@ -289,7 +289,7 @@ class ProductControllerTest {
         updatedJimmyJungle.setPlatform("PC");
         updatedJimmyJungle.setGamePrice(new BigDecimal("2.99")); // Price updated
         updatedJimmyJungle.setGameCoverImageUrl("INSERT AWS S3 FILE KEY FOR GAME COVER IMAGE URL HERE");
-        updatedJimmyJungle.setFileUrl("https://jimmywheezer.itch.io/jimmy-jungle");
+        updatedJimmyJungle.setFileUrl("https://game-and-music-files.s3.eu-west-1.amazonaws.com/Game%20Executables/Jimmy%20Jungle.exe");
         updatedJimmyJungle.setStockQuantity(100);
 
         when(productService.updateProduct(eq(1L), any(Product.class))).thenReturn(updatedJimmyJungle);

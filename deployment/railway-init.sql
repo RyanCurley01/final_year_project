@@ -213,10 +213,10 @@ INSERT INTO Accounts (AccountName, AccountPhoneNumber, AccountEmailAddress, Acco
 -- Insert Products (Games and Music Albums)
 INSERT INTO Products (GameTitle, AlbumTitle, Platform, GamePrice, AlbumPrice, albumCoverImageUrl, gameCoverImageUrl, file_url, preview_url, StockQuantity) VALUES
 -- Games
-('Jimmy Jungle', NULL, 'PC', 2.00, NULL, NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Game%20Cover%20Images/Jimmy%20Jungle%20Cover%20Image.png', 'https://jimmywheezer.itch.io/jimmy-jungle', NULL, 100),
-('Midnight Haunt', NULL, 'PC', 2.00, NULL, NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Game%20Cover%20Images/Midnight%20Haunt%20Cover%20Image.png', 'https://jimmywheezer.itch.io/midnight-haunt', NULL, 100),
-('Protectors', NULL, 'PC', 5.00, NULL, NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Game%20Cover%20Images/Protectors%20Cover%20Image.png', 'https://jimmywheezer.itch.io/protectors', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Protectors%20video%20game%20trailer.mp4', 100),
-('Red Hood', NULL, 'PC', 1.50, NULL, NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Game%20Cover%20Images/Red%20Hood%20Cover%20Image.png', 'https://jimmywheezer.itch.io/red-hood', NULL, 100),
+('Jimmy Jungle', NULL, 'PC', 2.00, NULL, NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Game%20Cover%20Images/Jimmy%20Jungle%20Cover%20Image.png', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Game%20Executables/Jimmy%20Jungle.exe', NULL, 100),
+('Midnight Haunt', NULL, 'PC', 2.00, NULL, NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Game%20Cover%20Images/Midnight%20Haunt%20Cover%20Image.png', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Game%20Executables/Midnight%20Haunt.exe', NULL, 100),
+('Protectors', NULL, 'PC', 5.00, NULL, NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Game%20Cover%20Images/Protectors%20Cover%20Image.png', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Game%20Executables/Protectors.exe', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Protectors%20video%20game%20trailer.mp4', 100),
+('Red Hood', NULL, 'PC', 1.50, NULL, NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Game%20Cover%20Images/Red%20Hood%20Cover%20Image.png', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Game%20Executables/Platform%20Game.exe', NULL, 100),
 
 -- Music Albums
 (NULL, 'Selected Electronic Works', NULL, NULL, 5.00, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/cloud-animation.mp4', NULL, 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Selected_Electronic_Works%20-%20Album.zip', 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Selected_Electronic_Works%20-%20Album.zip', 200),

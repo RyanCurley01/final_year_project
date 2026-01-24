@@ -211,7 +211,7 @@ const SongCard = ({ product, payment, i, data }) => {
 
       <div className="flex flex-col mt-4">
         <p className="font-semibold text-lg text-gray-300">
-          {isGame && product.fileUrl ? (
+          {isGame && product.fileUrl && product.fileUrl.includes('itch.io') ? (
             <a
               href={product.fileUrl}
               target="_blank"

@@ -41,9 +41,32 @@ public class ProductService {
     }
 
     private ProductResponse toProductResponse(Product product) {
+        String originalFileUrl = product.getFileUrl();
+        
+        // Fix for legacy itch.io URLs - map to S3 executables
+        if (originalFileUrl != null && originalFileUrl.contains("itch.io")) {
+            if (product.getGameTitle() != null) {
+                switch (product.getGameTitle()) {
+                    case "Jimmy Jungle":
+                        originalFileUrl = "https://game-and-music-files.s3.eu-west-1.amazonaws.com/Game%20Executables/Jimmy%20Jungle.exe";
+                        break;
+                    case "Midnight Haunt":
+                        originalFileUrl = "https://game-and-music-files.s3.eu-west-1.amazonaws.com/Game%20Executables/Midnight%20Haunt.exe";
+                        break;
+                    case "Protectors":
+                        originalFileUrl = "https://game-and-music-files.s3.eu-west-1.amazonaws.com/Game%20Executables/Protectors.exe";
+                        break;
+                    case "Platform Game":
+                    case "Red Hood":
+                        originalFileUrl = "https://game-and-music-files.s3.eu-west-1.amazonaws.com/Game%20Executables/Platform%20Game.exe";
+                        break;
+                }
+            }
+        }
+
         String signedGameCoverUrl = s3Service.generatePresignedUrl(product.getGameCoverImageUrl());
         String signedAlbumCoverUrl = s3Service.generatePresignedUrl(product.getAlbumCoverImageUrl());
-        String signedFileUrl = s3Service.generatePresignedUrl(product.getFileUrl());
+        String signedFileUrl = s3Service.generatePresignedUrl(originalFileUrl);
         String signedPreviewUrl = s3Service.generatePresignedUrl(product.getPreviewUrl());
 
         return ProductResponse.fromProduct(product, signedGameCoverUrl, signedAlbumCoverUrl, 
