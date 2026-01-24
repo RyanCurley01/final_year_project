@@ -7,13 +7,11 @@ from dotenv import load_dotenv
 import pymysql
 from contextlib import contextmanager
 import boto3
-from botocore.exceptions import ClientError
 from urllib.parse import urlparse, unquote
 import httpx
 import numpy as np
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.metrics.pairwise import cosine_similarity
-import io
 import tempfile
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
@@ -212,8 +210,8 @@ async def startup_cache():
                     cache_loaded = True
                     print(f"✅ Cached {len(audio_features_cache)} audio features for fast recommendations")
     except Exception as e:
-        print(f"⚠️  Could not load audio features cache: {e}")
-        print("⚠️  Will use fallback data for recommendations")
+        print(f"❌ Failed to load audio features cache: {e}")
+        raise RuntimeError(f"Audio features cache required but failed to load: {e}")
 
 @app.get("/")
 async def root():
@@ -418,40 +416,15 @@ async def get_realtime_recommendations(request: RealtimeRecommendationRequest):
     try:
         recommendations = []
         
-        # Use cached audio features for instant response (no DB query!)
-        if cache_loaded and audio_features_cache:
-            products = [
-                product for pid, product in audio_features_cache.items() 
-                if pid != request.current_product_id
-            ]
-            print(f"✅ Using cached features for {len(products)} products (no DB query)")
-        else:
-            # Fallback: Query audio features from database
-            products = []
-            with get_db_connection() as conn:
-                if conn:
-                    try:
-                        with conn.cursor() as cursor:
-                            # Query all products with audio features except the current one
-                            sql = """
-                                SELECT 
-                                    ProductID as id,
-                                    Tempo as tempo,
-                                    Energy as energy,
-                                    Valence as valence,
-                                    Danceability as danceability,
-                                    Acousticness as acousticness,
-                                    Genre as genre
-                                FROM AudioFeatures
-                                WHERE ProductID != %s
-                                AND Tempo IS NOT NULL
-                                AND Energy IS NOT NULL
-                            """
-                            cursor.execute(sql, (request.current_product_id,))
-                            products = cursor.fetchall()
-                            print(f"✅ Loaded {len(products)} products from AudioFeatures table (DB query)")
-                    except Exception as db_error:
-                        print(f"⚠️ Database query failed: {db_error}")
+        # Require cached audio features - no fallback data
+        if not cache_loaded or not audio_features_cache:
+            raise HTTPException(status_code=503, detail="Audio features cache not loaded. Database connection required.")
+        
+        products = [
+            product for pid, product in audio_features_cache.items() 
+            if pid != request.current_product_id
+        ]
+        print(f"✅ Using cached features for {len(products)} products")
                         
         
         # Extract features with defaults
@@ -619,42 +592,15 @@ async def get_similar_artist_songs(request: SimilarArtistSongsRequest):
     try:
         results = []
         
-        # Use cached audio features for instant response
-        if cache_loaded and audio_features_cache:
-            products = [
-                product for pid, product in audio_features_cache.items() 
-                if pid != request.current_product_id
-            ]
-            print(f"✅ Similar artist search using {len(products)} cached products")
-        else:
-            # Fallback: Query audio features from database
-            products = []
-            with get_db_connection() as conn:
-                if conn:
-                    try:
-                        with conn.cursor() as cursor:
-                            sql = """
-                                SELECT 
-                                    af.ProductID as id,
-                                    p.AlbumTitle as albumTitle,
-                                    af.Tempo as tempo,
-                                    af.Energy as energy,
-                                    af.Valence as valence,
-                                    af.Danceability as danceability,
-                                    af.Acousticness as acousticness,
-                                    af.Genre as genre
-                                FROM AudioFeatures af
-                                JOIN Products p ON af.ProductID = p.ProductID
-                                WHERE af.ProductID != %s
-                                AND af.Tempo IS NOT NULL
-                                AND af.Energy IS NOT NULL
-                                AND p.AlbumTitle IS NOT NULL
-                            """
-                            cursor.execute(sql, (request.current_product_id,))
-                            products = cursor.fetchall()
-                            print(f"✅ Loaded {len(products)} products from DB for artist matching")
-                    except Exception as db_error:
-                        print(f"⚠️ Database query failed: {db_error}")
+        # Require cached audio features - no fallback data
+        if not cache_loaded or not audio_features_cache:
+            raise HTTPException(status_code=503, detail="Audio features cache not loaded. Database connection required.")
+        
+        products = [
+            product for pid, product in audio_features_cache.items() 
+            if pid != request.current_product_id
+        ]
+        print(f"✅ Similar artist search using {len(products)} cached products")
 
         # Extract current features
         current_tempo = request.audio_features.effective_tempo or request.audio_features.tempo or 120
@@ -920,75 +866,11 @@ def extract_audio_features_from_preview(audio_url: str, track_id: int) -> Option
             os.unlink(tmp_path)
             
     except ImportError as e:
-        print(f"⚠️ librosa not available, using fallback: {e}")
-        return None
+        print(f"❌ librosa required but not available: {e}")
+        raise HTTPException(status_code=503, detail="Audio analysis library (librosa) not available")
     except Exception as e:
-        print(f"⚠️ Error extracting audio features for track {track_id}: {e}")
-        return None
-
-
-def estimate_features_from_metadata(track: Dict) -> Dict:
-    """
-    Estimate audio features from track metadata when audio analysis isn't available.
-    """
-    track_id = track.get('trackId', 0)
-    artist_name = track.get('artistName', '').lower()
-    genre = track.get('primaryGenreName', '').lower()
-    duration_ms = track.get('trackTimeMillis', 180000)
-    
-    np.random.seed(track_id)  # Consistent per track
-    
-    # Genre-based tempo estimation
-    if 'ambient' in genre or 'chill' in genre:
-        tempo = np.random.uniform(60, 100)
-        energy = np.random.uniform(0.1, 0.4)
-        valence = np.random.uniform(0.3, 0.6)
-    elif 'electronic' in genre or 'dance' in genre or 'techno' in genre:
-        tempo = np.random.uniform(120, 160)
-        energy = np.random.uniform(0.6, 0.9)
-        valence = np.random.uniform(0.4, 0.8)
-    elif 'idm' in genre or 'experimental' in genre:
-        tempo = np.random.uniform(100, 180)
-        energy = np.random.uniform(0.4, 0.8)
-        valence = np.random.uniform(0.2, 0.6)
-    else:
-        tempo = np.random.uniform(90, 140)
-        energy = np.random.uniform(0.4, 0.7)
-        valence = np.random.uniform(0.4, 0.7)
-    
-    # Artist-specific adjustments
-    if 'aphex' in artist_name:
-        tempo = np.random.uniform(120, 175)
-        energy = np.random.uniform(0.5, 0.9)
-        valence = np.random.uniform(0.2, 0.5)
-    elif 'boards of canada' in artist_name:
-        tempo = np.random.uniform(70, 110)
-        energy = np.random.uniform(0.2, 0.5)
-        valence = np.random.uniform(0.4, 0.7)
-    elif 'squarepusher' in artist_name:
-        tempo = np.random.uniform(140, 200)
-        energy = np.random.uniform(0.6, 0.95)
-        valence = np.random.uniform(0.4, 0.7)
-    
-    duration_factor = min(1.0, duration_ms / 300000)
-    energy = energy * (1 - duration_factor * 0.2)
-    
-    danceability = (tempo / 200) * 0.5 + energy * 0.3 + np.random.uniform(0, 0.2)
-    danceability = min(1.0, max(0.0, danceability))
-    
-    acousticness = np.random.uniform(0.1, 0.4)
-    if 'acoustic' in genre:
-        acousticness = np.random.uniform(0.6, 0.9)
-    
-    return {
-        'track_id': track_id,
-        'tempo': round(tempo, 1),
-        'energy': round(energy, 3),
-        'valence': round(valence, 3),
-        'danceability': round(danceability, 3),
-        'acousticness': round(acousticness, 3),
-        'estimated': True
-    }
+        print(f"❌ Error extracting audio features for track {track_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Audio feature extraction failed: {e}")
 
 
 class ITunesSong(BaseModel):
@@ -1005,9 +887,9 @@ class ITunesSong(BaseModel):
 
 
 class SimilarityRequest(BaseModel):
-    """Request for computing similarity between iTunes songs and library"""
+    """Request for computing similarity between iTunes songs and library.
+    Audio analysis is always performed - songs without preview URLs will be skipped."""
     itunes_songs: List[ITunesSong]
-    analyze_audio: bool = False
 
 
 class SongWithSimilarity(BaseModel):
@@ -1089,29 +971,37 @@ async def compute_itunes_similarity(request: SimilarityRequest):
         
         library_matrix = np.array(library_features)
         results = []
+        skipped_songs = []
         
         for itunes_song in request.itunes_songs:
             if itunes_song.trackId in itunes_features_cache:
                 features = itunes_features_cache[itunes_song.trackId]
             else:
-                features = None
-                if request.analyze_audio and itunes_song.previewUrl:
-                    loop = asyncio.get_event_loop()
-                    features = await loop.run_in_executor(
-                        executor,
-                        extract_audio_features_from_preview,
-                        itunes_song.previewUrl,
-                        itunes_song.trackId
-                    )
-                
-                if features is None:
-                    features = estimate_features_from_metadata({
+                # Require real audio analysis - no fallback estimation
+                if not itunes_song.previewUrl:
+                    skipped_songs.append({
                         'trackId': itunes_song.trackId,
                         'trackName': itunes_song.trackName,
-                        'artistName': itunes_song.artistName,
-                        'primaryGenreName': itunes_song.primaryGenreName,
-                        'trackTimeMillis': itunes_song.trackTimeMillis
+                        'reason': 'No preview URL available for audio analysis'
                     })
+                    continue
+                
+                # Perform real audio analysis
+                loop = asyncio.get_event_loop()
+                features = await loop.run_in_executor(
+                    executor,
+                    extract_audio_features_from_preview,
+                    itunes_song.previewUrl,
+                    itunes_song.trackId
+                )
+                
+                if features is None:
+                    skipped_songs.append({
+                        'trackId': itunes_song.trackId,
+                        'trackName': itunes_song.trackName,
+                        'reason': 'Audio analysis failed'
+                    })
+                    continue
                 
                 itunes_features_cache[itunes_song.trackId] = features
             
@@ -1148,7 +1038,7 @@ async def compute_itunes_similarity(request: SimilarityRequest):
                 valence=features.get('valence', 0.5),
                 danceability=features.get('danceability', 0.5),
                 acousticness=features.get('acousticness', 0.3),
-                features_source='analyzed' if features.get('estimated') != True else 'estimated',
+                features_source='analyzed',
                 similarity_score=round(best_similarity, 3),
                 matched_library_song_id=best_library_id,
                 matched_library_song_title=best_library_song.get('albumTitle'),
@@ -1165,7 +1055,8 @@ async def compute_itunes_similarity(request: SimilarityRequest):
             "algorithm": "cosine-similarity-multi-dimensional",
             "features_used": ["tempo", "energy", "valence", "danceability", "acousticness"],
             "library_songs_compared": len(library_songs),
-            "results": results
+            "results": results,
+            "skipped_songs": skipped_songs
         }
         
     except HTTPException:
@@ -1469,18 +1360,35 @@ async def compute_artist_similarity(request: ArtistSimilarityRequest):
     from sklearn.metrics.pairwise import cosine_similarity
     
     try:
-        # Step 1: Extract features for target song
+        skipped_songs = []
+        
+        # Step 1: Extract features for target song (require real audio analysis)
         target_features = None
         if request.target_song.trackId in itunes_features_cache:
             target_features = itunes_features_cache[request.target_song.trackId]
         else:
-            target_features = estimate_features_from_metadata({
-                'trackId': request.target_song.trackId,
-                'trackName': request.target_song.trackName,
-                'artistName': request.target_song.artistName,
-                'primaryGenreName': request.target_song.primaryGenreName,
-                'trackTimeMillis': request.target_song.trackTimeMillis
-            })
+            # Require preview URL for real audio analysis
+            if not request.target_song.previewUrl:
+                raise HTTPException(
+                    status_code=400, 
+                    detail=f"Target song '{request.target_song.trackName}' has no preview URL for audio analysis"
+                )
+            
+            # Perform real audio analysis
+            loop = asyncio.get_event_loop()
+            target_features = await loop.run_in_executor(
+                executor,
+                extract_audio_features_from_preview,
+                request.target_song.previewUrl,
+                request.target_song.trackId
+            )
+            
+            if target_features is None:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Audio analysis failed for target song '{request.target_song.trackName}'"
+                )
+            
             itunes_features_cache[request.target_song.trackId] = target_features
         
         # Step 2: Extract features for all artist songs (excluding target)
@@ -1494,13 +1402,32 @@ async def compute_artist_similarity(request: ArtistSimilarityRequest):
             if song.trackId in itunes_features_cache:
                 features = itunes_features_cache[song.trackId]
             else:
-                features = estimate_features_from_metadata({
-                    'trackId': song.trackId,
-                    'trackName': song.trackName,
-                    'artistName': song.artistName,
-                    'primaryGenreName': song.primaryGenreName,
-                    'trackTimeMillis': song.trackTimeMillis
-                })
+                # Require preview URL for real audio analysis
+                if not song.previewUrl:
+                    skipped_songs.append({
+                        'trackId': song.trackId,
+                        'trackName': song.trackName,
+                        'reason': 'No preview URL available for audio analysis'
+                    })
+                    continue
+                
+                # Perform real audio analysis
+                loop = asyncio.get_event_loop()
+                features = await loop.run_in_executor(
+                    executor,
+                    extract_audio_features_from_preview,
+                    song.previewUrl,
+                    song.trackId
+                )
+                
+                if features is None:
+                    skipped_songs.append({
+                        'trackId': song.trackId,
+                        'trackName': song.trackName,
+                        'reason': 'Audio analysis failed'
+                    })
+                    continue
+                
                 itunes_features_cache[song.trackId] = features
             
             # Build feature vector [tempo, energy, valence, danceability, acousticness]
@@ -1618,9 +1545,12 @@ async def compute_artist_similarity(request: ArtistSimilarityRequest):
                 "acousticness": target_features['acousticness']
             },
             "artist_songs_analyzed": len(song_data),
-            "similar_songs": similar_songs
+            "similar_songs": similar_songs,
+            "skipped_songs": skipped_songs
         }
         
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"❌ Artist similarity error: {e}")
         import traceback

@@ -3,7 +3,6 @@ import { useDispatch, useSelector } from 'react-redux';
 import { useNavigate, useParams } from 'react-router-dom';
 
 import Loader from '../components/Loader';
-import PlayPause from '../components/PlayPause';
 import AudioReactiveVideo from '../components/AudioReactiveVideo';
 import { useAudioFeatures } from '../context/AudioFeaturesContext';
 import { setActiveSong, playPause, setPlaybackRate } from '../redux/features/playerSlice';

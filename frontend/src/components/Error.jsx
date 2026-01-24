@@ -1,5 +1,3 @@
-import React from 'react';
-
 const Error = () => (
   <div className="w-full flex justify-center item-center">
     <h1 className="font-bold text-2x1 text-white 

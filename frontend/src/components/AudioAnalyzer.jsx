@@ -11,7 +11,6 @@ import globalAudioContext from '../utils/globalAudioContext';
  */
 const AudioAnalyzer = ({ audioElement, onFeaturesExtracted, isPlaying }) => {
   const [analyser, setAnalyser] = useState(null);
-  const [features, setFeatures] = useState(null);
   const animationFrameRef = useRef(null);
   const onFeaturesExtractedRef = useRef(onFeaturesExtracted);
 
@@ -77,9 +76,6 @@ const AudioAnalyzer = ({ audioElement, onFeaturesExtracted, isPlaying }) => {
 
       // Calculate features
       const extractedFeatures = calculateAudioFeatures(dataArray, timeDataArray, bufferLength);
-      
-      // Always update local state for smooth UI
-      setFeatures(extractedFeatures);
       
       // Call immediately on first valid extraction, then throttle
       const shouldCallback = !hasCalledInitially || (timestamp - lastCallbackTime >= CALLBACK_THROTTLE_MS);

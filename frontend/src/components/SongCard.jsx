@@ -1,6 +1,6 @@
-import {Link, useNavigate } from 'react-router-dom';
-import {useDispatch, useSelector } from 'react-redux';
-import { useRef, useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useDispatch, useSelector } from 'react-redux';
+import { useEffect, useState } from 'react';
 import { FiShoppingCart } from 'react-icons/fi';
 import { FaPauseCircle, FaPlayCircle } from 'react-icons/fa';
 
