@@ -201,7 +201,7 @@ async def startup_cache():
                         cursor.execute(sql)
                         results = cursor.fetchall()
                         
-                        # Build cache dictionary
+                        # Sets the database rows data to the dictionary keys
                         for row in results:
                             audio_features_cache[row['ProductID']] = {
                                 'id': row['ProductID'],
@@ -277,7 +277,8 @@ async def get_top_played_songs(limit: int = 5):
         with get_db_connection() as conn:
             if conn:
                 with conn.cursor() as cursor:
-                    # Query top played songs by counting 'play' interactions
+                    # Joins Products and UserInteractions tables to show most played songs
+                    # Renames columns to variable names for the Python dictionary
                     sql = """
                         SELECT 
                             p.ProductID as productId,
@@ -301,7 +302,7 @@ async def get_top_played_songs(limit: int = 5):
                     cursor.execute(sql, (limit,))
                     results = cursor.fetchall()
                     
-                    # Format response with presigned URLs
+                    # Map database table (with presigned URLs) to array variables so variables can be used directly in frontend
                     songs = []
                     for row in results:
                         songs.append({
@@ -347,6 +348,8 @@ async def record_interaction(interaction: UserInteractionRequest):
         with get_db_connection() as conn:
             if conn:
                 with conn.cursor() as cursor:
+                    # Maps the object models fields to the database columns so the interaction type of a product can be recorded
+                    # Adds the new row to the UserInteractions table so a new interaction can keep being recorded
                     sql = """
                         INSERT INTO UserInteractions 
                         (AccountID, ProductID, InteractionType, DurationSeconds, SessionID)
@@ -372,18 +375,6 @@ async def record_interaction(interaction: UserInteractionRequest):
         print(f"Error recording interaction: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/config/check")
-async def check_config():
-    """
-    Check the current configuration without making external API calls
-    """
-    return {
-        "environment": os.getenv('ENVIRONMENT', 'unknown'),
-        "codespaces": os.getenv('CODESPACES') == 'true',
-        "codespace_name": os.getenv('CODESPACE_NAME', 'not_set'),
-        "cache_loaded": cache_loaded,
-        "s3_configured": s3_client is not None
-    }
 
 
 # ============================================
@@ -419,6 +410,8 @@ class AudioSimilarityResult(BaseModel):
     genre_match: bool
     reason: str
 
+# Manual "Heuristic" Logic for discover pages songs for speed as all database songs are always cached
+# so building numpy matrices and running scikit-learn models is unnsecessary overhead here.
 @app.post("/api/audio/realtime-recommendations")
 async def get_realtime_recommendations(request: RealtimeRecommendationRequest):
     """
@@ -441,15 +434,13 @@ async def get_realtime_recommendations(request: RealtimeRecommendationRequest):
         print(f"✅ Using cached features for {len(products)} products")
                         
         
-        # Extract features with defaults
-        # Use effective_tempo (adjusted by playback rate) if provided, otherwise use base tempo
-        # Check explicitly for None since 0 is a valid (though unusual) tempo
+        # Sets whatever audio features are available from the 
+        # request as the current audio features of the currently playing song
         if request.audio_features.effective_tempo is not None:
             current_tempo = request.audio_features.effective_tempo
         elif request.audio_features.tempo is not None:
-            current_tempo = request.audio_features.tempo
-        else:
-            current_tempo = 120
+            rate = request.audio_features.playback_rate if request.audio_features.playback_rate else 1.0
+            current_tempo = request.audio_features.tempo * rate
             
         current_energy = request.audio_features.energy if request.audio_features.energy is not None else 0.5
         current_valence = request.audio_features.valence if request.audio_features.valence is not None else 0.5
@@ -459,13 +450,12 @@ async def get_realtime_recommendations(request: RealtimeRecommendationRequest):
         playback_rate = request.audio_features.playback_rate if request.audio_features.playback_rate is not None else 1.0
         print(f"🎵 Calculating similarity with tempo: {current_tempo} BPM (effective_tempo: {request.audio_features.effective_tempo}, base_tempo: {request.audio_features.tempo}, playback rate: {playback_rate}x)")
         
+        
         for product in products:
             if product["id"] == request.current_product_id:
                 continue
             
-            # Multi-dimensional feature similarity calculation
-            # Tempo similarity - use ratio-based matching for better accuracy
-            # A song at 120 BPM vs 12 BPM should have ~10% match, not 0%
+            # Tempo: Uses a ratio comparison (min/max) so that 60 vs 120 BPM is a 50% match
             product_tempo = product["tempo"]
             if current_tempo > 0 and product_tempo > 0:
                 tempo_ratio = min(current_tempo, product_tempo) / max(current_tempo, product_tempo)
@@ -473,6 +463,11 @@ async def get_realtime_recommendations(request: RealtimeRecommendationRequest):
             else:
                 tempo_match = 0
             
+
+            # Subtracts the current audio feature of the currently playing song 
+            # from the cached database audio feature to get a difference
+            # to be minused from 1 to get a similarity score of (1 = identical or 0 = completely different)
+
             # Energy similarity
             energy_diff = abs(product["energy"] - current_energy)
             energy_match = max(0, 1 - energy_diff)
@@ -489,8 +484,9 @@ async def get_realtime_recommendations(request: RealtimeRecommendationRequest):
             acoustic_diff = abs(product.get("acousticness", 0.1) - current_acousticness)
             acoustic_match = max(0, 1 - acoustic_diff)
             
-            # Weighted similarity score (production algorithm)
-            # Weights based on research: energy and tempo most important for perceived similarity
+
+            # Weights applied to each similarity score
+            # Energy and tempo weights are hightest for perceived similarity
             similarity = (
                 tempo_match * 0.25 +      # Tempo match weight
                 energy_match * 0.35 +     # Energy match weight (highest)
@@ -498,27 +494,34 @@ async def get_realtime_recommendations(request: RealtimeRecommendationRequest):
                 dance_match * 0.15 +      # Danceability weight
                 acoustic_match * 0.05     # Acousticness weight
             )
+
             
             # Genre bonus (same genre gets small boost)
             if product["genre"] == "Electronic":
                 similarity = min(1.0, similarity + 0.05)
             
-            # Generate contextual reason
+            # Max functions chooses ONE tuple based on it's highest similarity score
             dominant_feature = max(
                 [("tempo", tempo_match), ("energy", energy_match), ("mood", mood_match)],
+
+                # Uses the lambda function to get the second item in the tuple
+                # for determining the maximum similarity score of an audio feature 
+                # for choosing the correct reason
                 key=lambda x: x[1]
             )
             
+            # If any feature is the highest, generate reason with that feature
             if dominant_feature[0] == "tempo":
                 reason = f"Matching rhythm ({product['tempo']} BPM)"
             elif dominant_feature[0] == "energy":
                 reason = f"Similar intensity ({product['energy']:.2f}) and vibe"
             else:
                 reason = f"Comparable mood"
-            
+
+
             recommendations.append(AudioSimilarityResult(
                 product_id=product["id"],
-                similarity_score=round(similarity, 3),
+                similarity_score=round(similarity, 3), # Makes the result strictly between 0.000 and 1.000.
                 tempo_match=round(tempo_match, 3),
                 energy_match=round(energy_match, 3),
                 mood_match=round(mood_match, 3),
@@ -527,10 +530,13 @@ async def get_realtime_recommendations(request: RealtimeRecommendationRequest):
                 reason=reason
             ))
         
-        # Sort by similarity (descending) and apply limit
+        # Sorts the recommendend products by similarity score of the current song 
+        # in descending order with a limit of 5
         recommendations.sort(key=lambda x: x.similarity_score, reverse=True)
         recommendations = recommendations[:request.limit]
         
+        # recommendations dictionary is automatically converted into JSON by FastAPI 
+        # and sent as the HTTP response for the frontend
         return {
             "recommendations": recommendations,
             "session_id": request.session_id,
@@ -541,260 +547,6 @@ async def get_realtime_recommendations(request: RealtimeRecommendationRequest):
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error generating recommendations: {str(e)}")
-
-# ============================================
-# SIMILAR ARTIST SONGS ENDPOINT
-# ============================================
-
-class SimilarArtistSongsRequest(BaseModel):
-    """Request for songs similar to specific artists based on audio features"""
-    current_product_id: int
-    audio_features: AudioFeatures
-    session_id: str
-    artists: List[str] = ["aphex-twin", "squarepusher", "boards-of-canada"]
-    limit: int = 12
-
-class SimilarArtistSong(BaseModel):
-    """Song result with artist similarity info"""
-    id: int
-    productId: int
-    albumTitle: Optional[str] = None
-    similarity_score: float
-    tempo_match: float
-    energy_match: float
-    mood_match: float
-    artist_style_match: str
-    reason: str
-
-# Artist audio profiles - typical characteristics of each artist's sound
-ARTIST_PROFILES = {
-    "aphex-twin": {
-        "name": "Aphex Twin",
-        "tempo_range": (120, 180),
-        "energy_range": (0.5, 0.9),
-        "valence_range": (0.2, 0.6),
-        "acousticness_max": 0.3,
-        "style": "IDM / Glitch / Experimental"
-    },
-    "squarepusher": {
-        "name": "Squarepusher", 
-        "tempo_range": (140, 200),
-        "energy_range": (0.6, 0.95),
-        "valence_range": (0.4, 0.8),
-        "acousticness_max": 0.25,
-        "style": "Drill n Bass / Jazz-Influenced IDM"
-    },
-    "boards-of-canada": {
-        "name": "Boards of Canada",
-        "tempo_range": (60, 120),
-        "energy_range": (0.2, 0.5),
-        "valence_range": (0.3, 0.6),
-        "acousticness_max": 0.6,
-        "style": "Ambient / Downtempo / Nostalgic"
-    }
-}
-
-@app.post("/api/audio/similar-artist-songs")
-async def get_similar_artist_songs(request: SimilarArtistSongsRequest):
-    """
-    Get songs that match the audio characteristics of similar artists
-    (Aphex Twin, Squarepusher, Boards of Canada)
-    
-    Uses the current playing song's audio features to find tracks that 
-    would fit the style of these IDM/electronic artists.
-    """
-    try:
-        results = []
-        
-        # Require cached audio features - no fallback data
-        if not cache_loaded or not audio_features_cache:
-            raise HTTPException(status_code=503, detail="Audio features cache not loaded. Database connection required.")
-        
-        products = [
-            product for pid, product in audio_features_cache.items() 
-            if pid != request.current_product_id
-        ]
-        print(f"✅ Similar artist search using {len(products)} cached products")
-
-        # Extract current features
-        current_tempo = request.audio_features.effective_tempo or request.audio_features.tempo or 120
-        current_energy = request.audio_features.energy or 0.5
-        current_valence = request.audio_features.valence or 0.5
-        current_acousticness = request.audio_features.acousticness or 0.3
-        
-        print(f"🎵 Finding songs similar to artists with current features: tempo={current_tempo}, energy={current_energy}")
-        
-        # Determine which artist profile best matches current features
-        best_artist_match = None
-        best_artist_score = 0
-        
-        for artist_id in request.artists:
-            if artist_id in ARTIST_PROFILES:
-                profile = ARTIST_PROFILES[artist_id]
-                
-                # Calculate how well current song matches this artist's style
-                tempo_in_range = profile["tempo_range"][0] <= current_tempo <= profile["tempo_range"][1]
-                energy_in_range = profile["energy_range"][0] <= current_energy <= profile["energy_range"][1]
-                valence_in_range = profile["valence_range"][0] <= current_valence <= profile["valence_range"][1]
-                acousticness_ok = current_acousticness <= profile["acousticness_max"]
-                
-                score = (
-                    (0.35 if tempo_in_range else 0) +
-                    (0.30 if energy_in_range else 0) +
-                    (0.20 if valence_in_range else 0) +
-                    (0.15 if acousticness_ok else 0)
-                )
-                
-                if score > best_artist_score:
-                    best_artist_score = score
-                    best_artist_match = artist_id
-        
-        # Find songs that match the artist style(s)
-        for product in products:
-            if product["id"] == request.current_product_id:
-                continue
-            
-            product_tempo = product["tempo"]
-            product_energy = product["energy"]
-            product_valence = product["valence"]
-            product_acousticness = product.get("acousticness", 0.3)
-            
-            # Calculate similarity to each artist profile
-            artist_scores = {}
-            for artist_id in request.artists:
-                if artist_id in ARTIST_PROFILES:
-                    profile = ARTIST_PROFILES[artist_id]
-                    
-                    # Tempo fit
-                    if profile["tempo_range"][0] <= product_tempo <= profile["tempo_range"][1]:
-                        tempo_fit = 1.0 - abs(product_tempo - (profile["tempo_range"][0] + profile["tempo_range"][1])/2) / (profile["tempo_range"][1] - profile["tempo_range"][0])
-                    else:
-                        tempo_fit = 0.2
-                    
-                    # Energy fit
-                    if profile["energy_range"][0] <= product_energy <= profile["energy_range"][1]:
-                        energy_fit = 1.0
-                    else:
-                        energy_fit = max(0, 1 - abs(product_energy - (profile["energy_range"][0] + profile["energy_range"][1])/2))
-                    
-                    # Valence fit
-                    if profile["valence_range"][0] <= product_valence <= profile["valence_range"][1]:
-                        valence_fit = 1.0
-                    else:
-                        valence_fit = max(0, 1 - abs(product_valence - (profile["valence_range"][0] + profile["valence_range"][1])/2))
-                    
-                    artist_scores[artist_id] = (tempo_fit * 0.35 + energy_fit * 0.35 + valence_fit * 0.30)
-            
-            # Get best matching artist for this song
-            if artist_scores:
-                best_match = max(artist_scores.items(), key=lambda x: x[1])
-                artist_style = ARTIST_PROFILES[best_match[0]]["style"]
-                artist_name = ARTIST_PROFILES[best_match[0]]["name"]
-            else:
-                artist_style = "Electronic"
-                artist_name = "Similar Artist"
-            
-            # Calculate overall similarity (combination of current song match + artist style match)
-            tempo_match = min(current_tempo, product_tempo) / max(current_tempo, product_tempo) if current_tempo > 0 and product_tempo > 0 else 0
-            energy_match = max(0, 1 - abs(product_energy - current_energy))
-            mood_match = max(0, 1 - abs(product_valence - current_valence))
-            
-            overall_similarity = (
-                tempo_match * 0.25 +
-                energy_match * 0.30 +
-                mood_match * 0.20 +
-                max(artist_scores.values() if artist_scores else [0]) * 0.25
-            )
-            
-            # Only include songs above threshold
-            if overall_similarity >= 0.15:
-                # Generate contextual reason
-                if tempo_match > 0.8:
-                    reason = f"Matching rhythm at {int(product_tempo)} BPM - {artist_name} style"
-                elif energy_match > 0.8:
-                    reason = f"Similar intensity level - fits {artist_style}"
-                else:
-                    reason = f"Comparable vibe to {artist_name}"
-                
-                results.append(SimilarArtistSong(
-                    id=product["id"],
-                    productId=product["id"],
-                    albumTitle=product.get("albumTitle"),
-                    similarity_score=round(overall_similarity, 3),
-                    tempo_match=round(tempo_match, 3),
-                    energy_match=round(energy_match, 3),
-                    mood_match=round(mood_match, 3),
-                    artist_style_match=best_match[0] if artist_scores else "electronic",
-                    reason=reason
-                ))
-        
-        # Sort by similarity and limit
-        results.sort(key=lambda x: x.similarity_score, reverse=True)
-        results = results[:request.limit]
-        
-        return {
-            "songs": results,
-            "session_id": request.session_id,
-            "current_product_id": request.current_product_id,
-            "best_artist_match": best_artist_match,
-            "best_artist_score": round(best_artist_score, 3),
-            "artists_analyzed": request.artists,
-            "algorithm": "multi-artist-audio-similarity"
-        }
-        
-    except Exception as e:
-        print(f"❌ Error in similar artist songs: {e}")
-        raise HTTPException(status_code=500, detail=f"Error finding similar artist songs: {str(e)}")
-
-
-@app.get("/api/audio/features/{product_id}")
-async def get_product_audio_features(product_id: int):
-    """
-    Get stored audio features for a specific product from database
-    """
-    try:
-        # Check cache first
-        if cache_loaded and product_id in audio_features_cache:
-            return {
-                "product_id": product_id,
-                "features": audio_features_cache[product_id],
-                "status": "success",
-                "data_source": "cache"
-            }
-        
-        # Query from AudioFeatures table
-        with get_db_connection() as conn:
-            if conn:
-                with conn.cursor() as cursor:
-                    sql = """
-                        SELECT 
-                            Tempo as tempo,
-                            Energy as energy,
-                            Valence as valence,
-                            Danceability as danceability,
-                            Acousticness as acousticness,
-                            Genre as genre
-                        FROM AudioFeatures
-                        WHERE ProductID = %s
-                    """
-                    cursor.execute(sql, (product_id,))
-                    features_data = cursor.fetchone()
-                    
-                    if features_data:
-                        return {
-                            "product_id": product_id,
-                            "features": features_data,
-                            "status": "success",
-                            "data_source": "database"
-                        }
-                    else:
-                        raise HTTPException(status_code=404, detail=f"No audio features found for product {product_id}")
-            else:
-                raise HTTPException(status_code=503, detail="Database connection unavailable")
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error retrieving audio features: {str(e)}")
 
 
 # ============================================
@@ -810,6 +562,7 @@ itunes_features_cache: Dict[int, Dict] = {}
 # Trained feature scaler for normalization (will be fit on first use)
 feature_scaler = None
 
+# To extract audio features from iTunes preview URLs using librosa
 def extract_audio_features_from_preview(audio_url: str, track_id: int) -> Optional[Dict]:
     """
     Extract audio features from iTunes preview URL using librosa.
@@ -916,37 +669,6 @@ class ITunesSong(BaseModel):
     primaryGenreName: Optional[str] = None
     trackTimeMillis: Optional[int] = None
 
-
-class SimilarityRequest(BaseModel):
-    """Request for computing similarity between iTunes songs and library.
-    Audio analysis is always performed - songs without preview URLs will be skipped."""
-    itunes_songs: List[ITunesSong]
-
-
-class SongWithSimilarity(BaseModel):
-    """iTunes song with similarity score to library"""
-    trackId: int
-    trackName: str
-    artistName: str
-    collectionName: Optional[str] = None
-    artworkUrl100: Optional[str] = None
-    previewUrl: Optional[str] = None
-    trackPrice: Optional[float] = None
-    tempo: float
-    energy: float
-    valence: float
-    danceability: float
-    acousticness: float
-    features_source: str
-    similarity_score: float
-    matched_library_song_id: Optional[int] = None
-    matched_library_song_title: Optional[str] = None
-    tempo_match: float
-    energy_match: float
-    mood_match: float
-    dance_match: float
-
-
 @app.get("/api/itunes/search")
 async def search_itunes(term: str, limit: int = 200, media: str = "music", entity: str = "song"):
     """Proxy endpoint for iTunes Search API."""
@@ -967,371 +689,6 @@ async def search_itunes(term: str, limit: int = 200, media: str = "music", entit
     except Exception as e:
         print(f"❌ iTunes search error: {e}")
         raise HTTPException(status_code=500, detail=f"Error searching iTunes: {str(e)}")
-
-
-@app.post("/api/itunes/compute-similarity")
-async def compute_itunes_similarity(request: SimilarityRequest):
-    """
-    Compute ML-based similarity scores between iTunes songs and library songs.
-    Uses cosine similarity in a multi-dimensional audio feature space.
-    """
-    try:
-        from sklearn.metrics.pairwise import cosine_similarity
-        
-        # Get library songs with audio features from cache
-        if not cache_loaded or not audio_features_cache:
-            raise HTTPException(status_code=503, detail="Library audio features not loaded")
-        
-        library_songs = list(audio_features_cache.values())
-        if not library_songs:
-            raise HTTPException(status_code=404, detail="No library songs with audio features")
-        
-        # Prepare library feature matrix
-        library_features = []
-        library_ids = []
-        for song in library_songs:
-            features = [
-                song.get('tempo', 120) / 200,
-                song.get('energy', 0.5),
-                song.get('valence', 0.5),
-                song.get('danceability', 0.5),
-                song.get('acousticness', 0.3)
-            ]
-            library_features.append(features)
-            library_ids.append(song['id'])
-        
-        library_matrix = np.array(library_features)
-        results = []
-        skipped_songs = []
-        
-        for itunes_song in request.itunes_songs:
-            if itunes_song.trackId in itunes_features_cache:
-                features = itunes_features_cache[itunes_song.trackId]
-            else:
-                # Require real audio analysis - no fallback estimation
-                if not itunes_song.previewUrl:
-                    skipped_songs.append({
-                        'trackId': itunes_song.trackId,
-                        'trackName': itunes_song.trackName,
-                        'reason': 'No preview URL available for audio analysis'
-                    })
-                    continue
-                
-                # Perform real audio analysis
-                loop = asyncio.get_event_loop()
-                features = await loop.run_in_executor(
-                    executor,
-                    extract_audio_features_from_preview,
-                    itunes_song.previewUrl,
-                    itunes_song.trackId
-                )
-                
-                if features is None:
-                    skipped_songs.append({
-                        'trackId': itunes_song.trackId,
-                        'trackName': itunes_song.trackName,
-                        'reason': 'Audio analysis failed'
-                    })
-                    continue
-                
-                itunes_features_cache[itunes_song.trackId] = features
-            
-            itunes_feature_vec = np.array([[
-                features.get('tempo', 120) / 200,
-                features.get('energy', 0.5),
-                features.get('valence', 0.5),
-                features.get('danceability', 0.5),
-                features.get('acousticness', 0.3)
-            ]])
-            
-            similarities = cosine_similarity(itunes_feature_vec, library_matrix)[0]
-            
-            best_idx = np.argmax(similarities)
-            best_similarity = float(similarities[best_idx])
-            best_library_id = library_ids[best_idx]
-            best_library_song = library_songs[best_idx]
-            
-            tempo_match = 1 - min(abs(features.get('tempo', 120) - best_library_song.get('tempo', 120)) / 100, 1)
-            energy_match = 1 - abs(features.get('energy', 0.5) - best_library_song.get('energy', 0.5))
-            mood_match = 1 - abs(features.get('valence', 0.5) - best_library_song.get('valence', 0.5))
-            dance_match = 1 - abs(features.get('danceability', 0.5) - best_library_song.get('danceability', 0.5))
-            
-            results.append(SongWithSimilarity(
-                trackId=itunes_song.trackId,
-                trackName=itunes_song.trackName,
-                artistName=itunes_song.artistName,
-                collectionName=itunes_song.collectionName,
-                artworkUrl100=itunes_song.artworkUrl100,
-                previewUrl=itunes_song.previewUrl,
-                trackPrice=itunes_song.trackPrice,
-                tempo=features.get('tempo', 120),
-                energy=features.get('energy', 0.5),
-                valence=features.get('valence', 0.5),
-                danceability=features.get('danceability', 0.5),
-                acousticness=features.get('acousticness', 0.3),
-                features_source='analyzed',
-                similarity_score=round(best_similarity, 3),
-                matched_library_song_id=best_library_id,
-                matched_library_song_title=best_library_song.get('albumTitle'),
-                tempo_match=round(tempo_match, 3),
-                energy_match=round(energy_match, 3),
-                mood_match=round(mood_match, 3),
-                dance_match=round(dance_match, 3)
-            ))
-        
-        results.sort(key=lambda x: x.similarity_score, reverse=True)
-        
-        return {
-            "status": "success",
-            "algorithm": "cosine-similarity-multi-dimensional",
-            "features_used": ["tempo", "energy", "valence", "danceability", "acousticness"],
-            "library_songs_compared": len(library_songs),
-            "results": results,
-            "skipped_songs": skipped_songs
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        print(f"❌ Error computing similarity: {e}")
-        raise HTTPException(status_code=500, detail=f"Error computing similarity: {str(e)}")
-
-
-# ============================================
-# ML SONG SIMILARITY ENDPOINT - K-NEAREST NEIGHBORS
-# ============================================
-
-class MLSimilarSongsRequest(BaseModel):
-    """Request for ML-based similar songs"""
-    song_id: Optional[int] = None
-    song_name: Optional[str] = None
-    artist_name: Optional[str] = None
-    limit: int = 10
-
-class MLSimilarSong(BaseModel):
-    """ML-analyzed similar song result"""
-    productId: int
-    albumTitle: str
-    albumCoverImageUrl: Optional[str] = None
-    fileUrl: Optional[str] = None
-    previewUrl: Optional[str] = None
-    albumPrice: Optional[float] = None
-    similarity_score: float
-    tempo: float
-    energy: float
-    valence: float
-    danceability: float
-    acousticness: float
-    feature_distances: Dict[str, float]
-    match_reason: str
-
-@app.post("/api/ml/similar-songs")
-async def get_ml_similar_songs(request: MLSimilarSongsRequest):
-    """
-    ML-based similar songs using K-Nearest Neighbors with cosine similarity.
-    
-    This endpoint uses actual machine learning to find songs most similar to the 
-    requested song based on audio features (tempo, energy, valence, danceability, acousticness).
-    
-    The algorithm:
-    1. Builds a feature matrix from all songs in the database
-    2. Normalizes features using MinMaxScaler for fair comparison
-    3. Uses cosine similarity to find the K most similar songs
-    4. Returns songs ranked by similarity score
-    """
-    from sklearn.preprocessing import MinMaxScaler
-    from sklearn.metrics.pairwise import cosine_similarity
-    
-    try:
-        # Step 1: Find the target song
-        target_song = None
-        target_features = None
-        
-        with get_db_connection() as conn:
-            if not conn:
-                raise HTTPException(status_code=503, detail="Database unavailable")
-            
-            with conn.cursor() as cursor:
-                # Find target song by ID or name
-                if request.song_id:
-                    cursor.execute("""
-                        SELECT p.ProductID, p.AlbumTitle, p.albumCoverImageUrl, 
-                               p.file_url, p.preview_url, p.AlbumPrice,
-                               af.Tempo, af.Energy, af.Valence, af.Danceability, af.Acousticness
-                        FROM Products p
-                        LEFT JOIN AudioFeatures af ON p.ProductID = af.ProductID
-                        WHERE p.ProductID = %s
-                    """, (request.song_id,))
-                elif request.song_name:
-                    search_term = f"%{request.song_name}%"
-                    cursor.execute("""
-                        SELECT p.ProductID, p.AlbumTitle, p.albumCoverImageUrl,
-                               p.file_url, p.preview_url, p.AlbumPrice,
-                               af.Tempo, af.Energy, af.Valence, af.Danceability, af.Acousticness
-                        FROM Products p
-                        LEFT JOIN AudioFeatures af ON p.ProductID = af.ProductID
-                        WHERE p.AlbumTitle LIKE %s
-                        LIMIT 1
-                    """, (search_term,))
-                else:
-                    raise HTTPException(status_code=400, detail="Either song_id or song_name required")
-                
-                target_song = cursor.fetchone()
-                
-                if not target_song:
-                    raise HTTPException(status_code=404, detail="Song not found")
-                
-                # Step 2: Get all songs with audio features
-                cursor.execute("""
-                    SELECT p.ProductID, p.AlbumTitle, p.albumCoverImageUrl,
-                           p.file_url, p.preview_url, p.AlbumPrice,
-                           af.Tempo, af.Energy, af.Valence, af.Danceability, af.Acousticness
-                    FROM Products p
-                    INNER JOIN AudioFeatures af ON p.ProductID = af.ProductID
-                    WHERE p.ProductID != %s
-                    AND af.Tempo IS NOT NULL
-                    AND af.Energy IS NOT NULL
-                    AND p.AlbumTitle IS NOT NULL
-                    AND p.AlbumTitle != 'Selected Electronic Works'
-                """, (target_song['ProductID'],))
-                
-                all_songs = cursor.fetchall()
-        
-        if not all_songs:
-            raise HTTPException(status_code=404, detail="No songs with audio features found")
-        
-        # Step 3: Build feature matrices
-        # Target song features (handle NULL values with defaults)
-        target_tempo = float(target_song['Tempo']) if target_song['Tempo'] else 120.0
-        target_energy = float(target_song['Energy']) if target_song['Energy'] else 0.5
-        target_valence = float(target_song['Valence']) if target_song['Valence'] else 0.5
-        target_danceability = float(target_song['Danceability']) if target_song['Danceability'] else 0.5
-        target_acousticness = float(target_song['Acousticness']) if target_song['Acousticness'] else 0.3
-        
-        target_features = np.array([[
-            target_tempo,
-            target_energy,
-            target_valence,
-            target_danceability,
-            target_acousticness
-        ]])
-        
-        # Build feature matrix for all songs
-        song_features = []
-        valid_songs = []
-        
-        for song in all_songs:
-            tempo = float(song['Tempo']) if song['Tempo'] else 120.0
-            energy = float(song['Energy']) if song['Energy'] else 0.5
-            valence = float(song['Valence']) if song['Valence'] else 0.5
-            danceability = float(song['Danceability']) if song['Danceability'] else 0.5
-            acousticness = float(song['Acousticness']) if song['Acousticness'] else 0.3
-            
-            song_features.append([tempo, energy, valence, danceability, acousticness])
-            valid_songs.append(song)
-        
-        song_matrix = np.array(song_features)
-        
-        # Step 4: Normalize features using MinMaxScaler
-        # Combine target and all songs for consistent scaling
-        all_features = np.vstack([target_features, song_matrix])
-        scaler = MinMaxScaler()
-        normalized_features = scaler.fit_transform(all_features)
-        
-        normalized_target = normalized_features[0:1]  # First row is target
-        normalized_songs = normalized_features[1:]    # Rest are candidates
-        
-        # Step 5: Compute cosine similarity
-        similarities = cosine_similarity(normalized_target, normalized_songs)[0]
-        
-        # Step 6: Get top K similar songs
-        top_indices = np.argsort(similarities)[::-1][:request.limit]
-        
-        # Step 7: Build response with detailed feature matching
-        similar_songs = []
-        feature_names = ['tempo', 'energy', 'valence', 'danceability', 'acousticness']
-        
-        for idx in top_indices:
-            song = valid_songs[idx]
-            similarity = float(similarities[idx])
-            
-            # Calculate individual feature distances
-            song_feat = song_features[idx]
-            feature_distances = {}
-            for i, name in enumerate(feature_names):
-                if name == 'tempo':
-                    # Tempo distance normalized to 0-1 (max difference ~200 BPM)
-                    distance = abs(target_features[0][i] - song_feat[i]) / 200.0
-                else:
-                    # Other features already 0-1, so direct difference
-                    distance = abs(target_features[0][i] - song_feat[i])
-                feature_distances[name] = round(1 - min(distance, 1.0), 3)  # Convert to match score
-            
-            # Determine match reason based on closest features
-            best_feature = max(feature_distances.items(), key=lambda x: x[1])
-            if best_feature[0] == 'tempo':
-                reason = f"Similar tempo ({int(song_feat[0])} BPM)"
-            elif best_feature[0] == 'energy':
-                reason = f"Matching energy level ({song_feat[1]:.2f})"
-            elif best_feature[0] == 'valence':
-                reason = f"Similar mood/positivity"
-            elif best_feature[0] == 'danceability':
-                reason = f"Comparable danceability"
-            else:
-                reason = f"Acoustic characteristics match"
-            
-            similar_songs.append(MLSimilarSong(
-                productId=song['ProductID'],
-                albumTitle=song['AlbumTitle'],
-                albumCoverImageUrl=generate_presigned_url(song['albumCoverImageUrl']) if song['albumCoverImageUrl'] else None,
-                fileUrl=generate_presigned_url(song['file_url']) if song['file_url'] else None,
-                previewUrl=generate_presigned_url(song['preview_url']) if song['preview_url'] else None,
-                albumPrice=float(song['AlbumPrice']) if song['AlbumPrice'] else 0.5,
-                similarity_score=round(similarity, 4),
-                tempo=song_feat[0],
-                energy=song_feat[1],
-                valence=song_feat[2],
-                danceability=song_feat[3],
-                acousticness=song_feat[4],
-                feature_distances=feature_distances,
-                match_reason=reason
-            ))
-        
-        return {
-            "status": "success",
-            "target_song": {
-                "productId": target_song['ProductID'],
-                "albumTitle": target_song['AlbumTitle'],
-                "tempo": target_tempo,
-                "energy": target_energy,
-                "valence": target_valence,
-                "danceability": target_danceability,
-                "acousticness": target_acousticness
-            },
-            "algorithm": "K-Nearest Neighbors with Cosine Similarity",
-            "features_used": feature_names,
-            "normalization": "MinMaxScaler",
-            "similar_songs": similar_songs,
-            "total_songs_analyzed": len(valid_songs)
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        print(f"❌ ML similarity error: {e}")
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"ML similarity computation failed: {str(e)}")
-
-
-@app.get("/api/ml/similar-songs/{product_id}")
-async def get_ml_similar_songs_by_id(product_id: int, limit: int = 10):
-    """
-    GET endpoint for ML-based similar songs - convenience wrapper.
-    Finds songs similar to the given product ID using ML cosine similarity.
-    """
-    request = MLSimilarSongsRequest(song_id=product_id, limit=limit)
-    return await get_ml_similar_songs(request)
 
 
 # ============================================
@@ -1368,6 +725,12 @@ class ArtistSimilarSong(BaseModel):
     match_reason: str
     ml_algorithm: str
 
+
+# This function uses the Machine Learning technique called Content-Based Filtering for 
+# mathematically comparing the actual audio characteristics of the songs. Machine Learning logic
+# used here because the audio qualities vary wildly compared to the curated database. 
+# ML techniques like MinMaxScaler (Normalization) and cosine similarity are essential here to prevent 
+# one loud song from breaking the calculations.
 @app.post("/api/ml/artist-similarity")
 async def compute_artist_similarity(request: ArtistSimilarityRequest):
     """
@@ -1428,9 +791,13 @@ async def compute_artist_similarity(request: ArtistSimilarityRequest):
                     detail=f"Target song '{request.target_song.trackName}' has no preview URL for audio analysis"
                 )
             
+
             # Perform real audio analysis
             loop = asyncio.get_event_loop()
             try:
+                # To prevent librosa synchronous extraction freezing API,
+                # Use run_in_executor to get recommendations while 
+                # one song is finished processing
                 target_features = await loop.run_in_executor(
                     executor,
                     extract_audio_features_from_preview,
@@ -1453,6 +820,7 @@ async def compute_artist_similarity(request: ArtistSimilarityRequest):
                 )
             
             itunes_features_cache[request.target_song.trackId] = target_features
+
         
         # Step 2: Extract features for all artist songs (excluding target)
         song_data = []
@@ -1648,7 +1016,8 @@ async def compute_artist_similarity(request: ArtistSimilarityRequest):
         song_matrix = np.array(song_features)
         
         # Step 4: Normalize features using MinMaxScaler
-        # Combine target and all songs for consistent scaling
+        # Squashes all audio features (tempo, energy) numbers into a range between 0.0 and 1.0
+        # using MinMaxScaler for normalization.
         all_features = np.vstack([target_vec, song_matrix])
         scaler = MinMaxScaler()
         normalized_features = scaler.fit_transform(all_features)
@@ -1656,12 +1025,25 @@ async def compute_artist_similarity(request: ArtistSimilarityRequest):
         normalized_target = normalized_features[0:1]  # First row is target
         normalized_songs = normalized_features[1:]    # Rest are candidates
         
+
         # Step 5: Compute cosine similarity
+
+        # It draws a line (vector) from zero to the Target Song.
+        # It draws lines to every Candidate Song.
+        # Cosine Similarity calculates the angle between the lines.
+        # If the lines point in the same direction (Angle = 0), the songs are 100% similar.
+        # If they point in different directions, they are less similar.
         similarities = cosine_similarity(normalized_target, normalized_songs)[0]
         
+
         # Step 6: Sort by similarity and get top K
+
+        # Sorts the songs by their similarity score (e.g., 95% match, 80% match...).
+        # Explains why it matched. It looks at the raw numbers to see which feature was the closest.
+        # Example: "Matching energy (High Energy)" vs "Similar tempo (128 BPM)".
         sorted_indices = np.argsort(similarities)[::-1][:request.limit]
-        
+              
+
         # Step 7: Build response with detailed feature matching
         similar_songs = []
         feature_names = ['tempo', 'energy', 'valence', 'danceability', 'acousticness']
