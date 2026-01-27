@@ -302,7 +302,7 @@ const SongDetails = () => {
             primaryGenreName: song.primaryGenreName || 'Electronic',
             trackTimeMillis: song.trackTimeMillis
           })),
-          limit: 10  // Reduced from 20 to 10 for faster results
+          limit: 5 // Reduced from 20 to 5 for faster results
         }),
         // Reduce timeout to 30 seconds - should be instant with database cache
         signal: AbortSignal.timeout(30000)

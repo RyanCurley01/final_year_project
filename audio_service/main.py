@@ -1,3 +1,5 @@
+from ast import Not
+from pyexpat import features
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -10,7 +12,9 @@ import boto3
 from urllib.parse import urlparse, unquote
 import httpx
 import numpy as np
-from sklearn.preprocessing import MinMaxScaler
+from sklearn.preprocessing import MinMaxScaler, StandardScaler
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import silhouette_score
 from sklearn.metrics.pairwise import cosine_similarity
 import tempfile
 import asyncio
@@ -215,6 +219,103 @@ async def startup_cache():
                         
                         cache_loaded = True
                         print(f"✅ Cached {len(audio_features_cache)} audio features for fast recommendations")
+                        
+                        # Initialize ML datasets and scale features
+                        # Splits database data into Training, Validation, and Test sets
+                        # to generalize the model scaler across the entire catalog
+                        try:
+                            global feature_scaler
+                            
+                            # 1. Feature Extraction & Labeling
+                            feature_vectors = []
+                            feature_labels = [] # Genres used as "Ground Truth" for model validation
+                            
+                            for pid, data in audio_features_cache.items():
+                                if all(k in data for k in ['tempo', 'energy', 'valence', 'danceability', 'acousticness']):
+                                    feature_vectors.append([
+                                        float(data['tempo'] or 0),
+                                        float(data['energy'] or 0),
+                                        float(data['valence'] or 0),
+                                        float(data['danceability'] or 0),
+                                        float(data['acousticness'] or 0)
+                                    ])
+                                    feature_labels.append(data.get('genre', 'Unknown'))
+                            
+                            if len(feature_vectors) > 10: # Ensure enough data for splitting
+                                X = np.array(feature_vectors)
+                                y = np.array(feature_labels)
+                                
+                                # 2. Data Splitting (Train / Validation / Test)
+                                # Training (70%): Used to learn the scaling parameters
+                                # Validation (15%): Used to select the best scaler (Model Selection)
+                                # Test (15%): Used to evaluate the final performance
+                                X_train, X_temp, y_train, y_temp = train_test_split(X, y, test_size=0.3, random_state=42)
+                                X_val, X_test, y_val, y_test = train_test_split(X_temp, y_temp, test_size=0.5, random_state=42)
+                                
+                                print(f"📊 ML Pipeline Initialized with {len(X)} tracks")
+                                print(f"   Splits: Train={len(X_train)}, Val={len(X_val)}, Test={len(X_test)}")
+                                
+                                # 3. Model Selection (Hyperparameter Tuning)
+                                # We compare two Normalization Models to see which one preserves Genre clusters best.
+                                # Metric: Silhouette Score (Higher is better, meaning Genres are distinct in feature space)
+                                
+                                # Candidate Model A: MinMaxScaler
+                                model_a = MinMaxScaler()
+                                model_a.fit(X_train)
+                                val_embed_a = model_a.transform(X_val)
+                                
+                                # Candidate Model B: StandardScaler (Z-Score)
+                                model_b = StandardScaler()
+                                model_b.fit(X_train)
+                                val_embed_b = model_b.transform(X_val)
+                                
+                                # Evaluate both on Validation Set
+                                # Only calculate if we have multiple genres to cluster
+                                if len(set(y_val)) > 1:
+                                    # Handle silhouette score errors if cluster size < 2
+                                    try:
+                                        score_a = silhouette_score(val_embed_a, y_val)
+                                    except: score_a = -1
+                                    
+                                    try:
+                                        score_b = silhouette_score(val_embed_b, y_val)
+                                    except: score_b = -1
+                                    
+                                    print(f"   🧪 Model Selection (Validation Set Silhouette Score):")
+                                    print(f"      - MinMaxScaler:   {score_a:.4f}")
+                                    print(f"      - StandardScaler: {score_b:.4f}")
+                                    
+                                    # Select Best Model
+                                    if score_b > score_a:
+                                        print("   🏆 Selected Model: StandardScaler")
+                                        feature_scaler = model_b
+                                        best_model = "StandardScaler"
+                                    else:
+                                        print("   🏆 Selected Model: MinMaxScaler")
+                                        feature_scaler = model_a
+                                        best_model = "MinMaxScaler"
+                                else:
+                                    # Fallback if validation set lacks genre diversity
+                                    print("   ⚠️ Validation set lacks genre diversity, defaulting to MinMaxScaler")
+                                    feature_scaler = model_a
+                                    best_model = "MinMaxScaler"
+                                
+                                # 4. Final Evaluation (Test Set)
+                                # Measures how well the selected model creates separable clusters on completely unseen data
+                                if len(set(y_test)) > 1:
+                                    try:
+                                        test_embed = feature_scaler.transform(X_test)
+                                        final_acc = silhouette_score(test_embed, y_test)
+                                        print(f"   ✅ Final Test Set Performance: {final_acc:.4f} (Silhouette Score)")
+                                    except:
+                                        print("   ⚠️ Could not calculate final test score due to label distribution")
+                                
+                            else:
+                                print(f"⚠️ Not enough data to train ML model (Found {len(feature_vectors)} tracks)")
+                            
+                        except Exception as e:
+                            print(f"⚠️ ML Initialization warning: {e}")
+
                         return  # Success - exit retry loop
         except Exception as e:
             print(f"⚠️ Attempt {attempt + 1}/{max_retries} - Failed to load audio features cache: {e}")
@@ -435,7 +536,7 @@ async def get_realtime_recommendations(request: RealtimeRecommendationRequest):
                         
         
         # Sets whatever audio features are available from the 
-        # request as the current audio features of the currently playing song
+        # frontend request as the current audio features of the currently playing song
         if request.audio_features.effective_tempo is not None:
             current_tempo = request.audio_features.effective_tempo
         elif request.audio_features.tempo is not None:
@@ -469,9 +570,17 @@ async def get_realtime_recommendations(request: RealtimeRecommendationRequest):
             # to be minused from 1 to get a similarity score of (1 = identical or 0 = completely different)
 
             # Energy similarity
+            # e.g If Song A has energy 0.8 and Song B has 0.8, the difference is 0.0.
+            # e.g If Song A has 0.9 and Song B has 0.2, the difference is 0.7.
             energy_diff = abs(product["energy"] - current_energy)
+
+            # 1 - energy_diff: This inverts the difference to create a "match" score.
+            # Large difference (e.g., 0.7) becomes a Low score (0.3 - Poor Match).
+            # max(0, ...): This is a safety guard. It ensures the score never goes 
+            # below zero (becomes negative), keeping the result strictly between 0 and 1.
             energy_match = max(0, 1 - energy_diff)
             
+
             # Valence (mood) similarity
             valence_diff = abs(product["valence"] - current_valence)
             mood_match = max(0, 1 - valence_diff)
@@ -487,6 +596,13 @@ async def get_realtime_recommendations(request: RealtimeRecommendationRequest):
 
             # Weights applied to each similarity score
             # Energy and tempo weights are hightest for perceived similarity
+
+            # Weights are applied to prioritize certain audio features over others based on how 
+            # human listeners actually perceive musical similarity.
+            # Not all features are equally important when deciding if two songs "feel" the same
+
+            # Energy (35%) & Tempo (25%) combined make up 60% of the score.
+            # This is because the "intensity" and "speed" of a track are the first things a listener notices
             similarity = (
                 tempo_match * 0.25 +      # Tempo match weight
                 energy_match * 0.35 +     # Energy match weight (highest)
@@ -739,7 +855,7 @@ async def compute_artist_similarity(request: ArtistSimilarityRequest):
     
     This is a real industry-standard ML algorithm:
     1. Extract/estimate audio features for all artist songs
-    2. Normalize features using MinMaxScaler for fair comparison
+    2. Normalize features using pre-trained Scaler (from DB Training Set) for generalized comparison
     3. Compute cosine similarity between target song and all other songs
     4. Return top K most similar songs ranked by similarity score
     
@@ -1015,13 +1131,16 @@ async def compute_artist_similarity(request: ArtistSimilarityRequest):
         
         song_matrix = np.array(song_features)
         
-        # Step 4: Normalize features using MinMaxScaler
+        # Step 4: Normalize features using Scaler
         # Squashes all audio features (tempo, energy) numbers into a range between 0.0 and 1.0
         # using MinMaxScaler for normalization.
         all_features = np.vstack([target_vec, song_matrix])
-        scaler = MinMaxScaler()
-        normalized_features = scaler.fit_transform(all_features)
         
+        # Use the global scaler fitted on the Training Set (Generalization)
+        # This applies the population's distribution knowledge to this specific artist
+        if feature_scaler is not None:
+             normalized_features = feature_scaler.transform(all_features)
+   
         normalized_target = normalized_features[0:1]  # First row is target
         normalized_songs = normalized_features[1:]    # Rest are candidates
         
@@ -1029,8 +1148,8 @@ async def compute_artist_similarity(request: ArtistSimilarityRequest):
         # Step 5: Compute cosine similarity
 
         # It draws a line (vector) from zero to the Target Song.
-        # It draws lines to every Candidate Song.
-        # Cosine Similarity calculates the angle between the lines.
+        # It draws vectors from zero to every Candidate Song.
+        # Cosine Similarity calculates the angle between those two lines where they meet at the origin.
         # If the lines point in the same direction (Angle = 0), the songs are 100% similar.
         # If they point in different directions, they are less similar.
         similarities = cosine_similarity(normalized_target, normalized_songs)[0]
