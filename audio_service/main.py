@@ -241,7 +241,7 @@ async def startup_cache():
                                     ])
                                     feature_labels.append(data.get('genre', 'Unknown'))
                             
-                            if len(feature_vectors) > 10: # Ensure enough data for splitting
+                            if len(feature_vectors) > 100: # Ensure enough data for splitting
                                 X = np.array(feature_vectors)
                                 y = np.array(feature_labels)
                                 
@@ -610,6 +610,10 @@ async def get_realtime_recommendations(request: RealtimeRecommendationRequest):
                 dance_match * 0.15 +      # Danceability weight
                 acoustic_match * 0.05     # Acousticness weight
             )
+
+            # Debug: Log high similarity matches to verify computation
+            if similarity > 0.8:
+                print(f"✨ Strong Match: Song {product['id']} | Sim: {similarity:.3f} | Tempo: {tempo_match:.2f} | Energy: {energy_match:.2f}", flush=True)
 
             
             # Genre bonus (same genre gets small boost)
@@ -1138,8 +1142,18 @@ async def compute_artist_similarity(request: ArtistSimilarityRequest):
         
         # Use the global scaler fitted on the Training Set (Generalization)
         # This applies the population's distribution knowledge to this specific artist
-        if feature_scaler is not None:
-             normalized_features = feature_scaler.transform(all_features)
+        try:
+            if feature_scaler is not None:
+                print("📊 Scaling features using global feature scaler...", flush=True)
+                normalized_features = feature_scaler.transform(all_features)
+                print(f"   Target Normalized: {normalized_features[0]}", flush=True)
+            else:
+                print("⚠️ No feature scaler available (insufficient training data). Using raw features.", flush=True)
+                normalized_features = all_features
+        except Exception as e:
+            print(f"❌ Error during feature scaling: {e}", flush=True)
+            # Fallback to raw features if scaling fails
+            normalized_features = all_features
    
         normalized_target = normalized_features[0:1]  # First row is target
         normalized_songs = normalized_features[1:]    # Rest are candidates
@@ -1153,6 +1167,11 @@ async def compute_artist_similarity(request: ArtistSimilarityRequest):
         # If the lines point in the same direction (Angle = 0), the songs are 100% similar.
         # If they point in different directions, they are less similar.
         similarities = cosine_similarity(normalized_target, normalized_songs)[0]
+        
+        print(f"✅ Computed {len(similarities)} similarity scores.", flush=True)
+        if len(similarities) > 0:
+            print(f"   Top Similarity: {max(similarities):.4f}", flush=True)
+            print(f"   Avg Similarity: {np.mean(similarities):.4f}", flush=True)
         
 
         # Step 6: Sort by similarity and get top K
