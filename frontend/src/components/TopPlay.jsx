@@ -88,6 +88,7 @@ const TopPlay = () => {
   const handlePlayClick = (song, i) => {
     // Only play if the song has a fileUrl (matched with database)
     if (song.fileUrl) {
+      console.log("▶️ Playing top song:", song.albumTitle);
       dispatch(setActiveSong({ song, data: topSongs, i }));
       dispatch(playPause(true));
     }

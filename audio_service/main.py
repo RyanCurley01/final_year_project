@@ -20,6 +20,13 @@ import tempfile
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 
+# Helper class to support console.log syntax
+class Console:
+    def log(self, *args, **kwargs):
+        print(*args, **kwargs)
+
+console = Console()
+
 # Load environment variables
 load_dotenv()
 
@@ -73,6 +80,7 @@ app.add_middleware(
 # Cache for audio features - loaded once at startup to avoid repeated DB queries
 audio_features_cache: Dict[int, Dict] = {}
 cache_loaded: bool = False
+model_performance_metrics: Dict[str, float] = {"MinMaxScaler": 0.0, "StandardScaler": 0.0} # Store model validation scores
 
 # Database configuration
 DB_CONFIG = {
@@ -116,11 +124,11 @@ try:
             aws_secret_access_key=S3_CONFIG['secret_key'],
             config=s3_config
         )
-        print(f"✅ S3 client initialized for presigned URLs (region: {S3_CONFIG['region']}, signature: v4)")
+        console.log(f"✅ S3 client initialized for presigned URLs (region: {S3_CONFIG['region']}, signature: v4)")
     else:
-        print("⚠️  AWS credentials not found. Presigned URLs will not be generated.")
+        console.log("⚠️  AWS credentials not found. Presigned URLs will not be generated.")
 except Exception as e:
-    print(f"⚠️  Failed to initialize S3 client: {e}")
+    console.log(f"⚠️  Failed to initialize S3 client: {e}")
     s3_client = None
 
 def generate_presigned_url(s3_url: str) -> str:
@@ -157,7 +165,7 @@ def generate_presigned_url(s3_url: str) -> str:
         
         return presigned_url
     except Exception as e:
-        print(f"Error generating presigned URL for {s3_url}: {e}")
+        console.log(f"Error generating presigned URL for {s3_url}: {e}")
         return s3_url  # Return original URL as fallback
 
 @contextmanager
@@ -168,7 +176,7 @@ def get_db_connection():
         connection = pymysql.connect(**DB_CONFIG)
         yield connection
     except pymysql.Error as e:
-        print(f"Database connection error: {e}")
+        console.log(f"Database connection error: {e}")
         yield None
     finally:
         if connection:
@@ -218,13 +226,13 @@ async def startup_cache():
                             }
                         
                         cache_loaded = True
-                        print(f"✅ Cached {len(audio_features_cache)} audio features for fast recommendations")
+                        console.log(f"✅ Cached {len(audio_features_cache)} audio features for fast recommendations")
                         
                         # Initialize ML datasets and scale features
                         # Splits database data into Training, Validation, and Test sets
                         # to generalize the model scaler across the entire catalog
                         try:
-                            global feature_scaler
+                            global feature_scaler, model_performance_metrics
                             
                             # 1. Feature Extraction & Labeling
                             feature_vectors = []
@@ -241,7 +249,7 @@ async def startup_cache():
                                     ])
                                     feature_labels.append(data.get('genre', 'Unknown'))
                             
-                            if len(feature_vectors) > 100: # Ensure enough data for splitting
+                            if len(feature_vectors) > 10: # Ensure enough data for splitting (lowered from 100 to 10)
                                 X = np.array(feature_vectors)
                                 y = np.array(feature_labels)
                                 
@@ -252,8 +260,8 @@ async def startup_cache():
                                 X_train, X_temp, y_train, y_temp = train_test_split(X, y, test_size=0.3, random_state=42)
                                 X_val, X_test, y_val, y_test = train_test_split(X_temp, y_temp, test_size=0.5, random_state=42)
                                 
-                                print(f"📊 ML Pipeline Initialized with {len(X)} tracks")
-                                print(f"   Splits: Train={len(X_train)}, Val={len(X_val)}, Test={len(X_test)}")
+                                console.log(f"📊 ML Pipeline Initialized with {len(X)} tracks")
+                                console.log(f"   Splits: Train={len(X_train)}, Val={len(X_val)}, Test={len(X_test)}")
                                 
                                 # 3. Model Selection (Hyperparameter Tuning)
                                 # We compare two Normalization Models to see which one preserves Genre clusters best.
@@ -281,22 +289,26 @@ async def startup_cache():
                                         score_b = silhouette_score(val_embed_b, y_val)
                                     except: score_b = -1
                                     
-                                    print(f"   🧪 Model Selection (Validation Set Silhouette Score):")
-                                    print(f"      - MinMaxScaler:   {score_a:.4f}")
-                                    print(f"      - StandardScaler: {score_b:.4f}")
+                                    console.log(f"   🧪 Model Selection (Validation Set Silhouette Score):")
+                                    console.log(f"      - MinMaxScaler:   {score_a:.4f}")
+                                    console.log(f"      - StandardScaler: {score_b:.4f}")
+
+                                    model_performance_metrics["MinMaxScaler"] = round(score_a, 4)
+                                    model_performance_metrics["StandardScaler"] = round(score_b, 4)
+                                    console.log(f"✅ Model metrics stored: {model_performance_metrics}", flush=True)
                                     
                                     # Select Best Model
                                     if score_b > score_a:
-                                        print("   🏆 Selected Model: StandardScaler")
+                                        console.log("   🏆 Selected Model: StandardScaler")
                                         feature_scaler = model_b
                                         best_model = "StandardScaler"
                                     else:
-                                        print("   🏆 Selected Model: MinMaxScaler")
+                                        console.log("   🏆 Selected Model: MinMaxScaler")
                                         feature_scaler = model_a
                                         best_model = "MinMaxScaler"
                                 else:
                                     # Fallback if validation set lacks genre diversity
-                                    print("   ⚠️ Validation set lacks genre diversity, defaulting to MinMaxScaler")
+                                    console.log("   ⚠️ Validation set lacks genre diversity, defaulting to MinMaxScaler")
                                     feature_scaler = model_a
                                     best_model = "MinMaxScaler"
                                 
@@ -306,26 +318,28 @@ async def startup_cache():
                                     try:
                                         test_embed = feature_scaler.transform(X_test)
                                         final_acc = silhouette_score(test_embed, y_test)
-                                        print(f"   ✅ Final Test Set Performance: {final_acc:.4f} (Silhouette Score)")
+                                        console.log(f"   ✅ Final Test Set Performance: {final_acc:.4f} (Silhouette Score)")
                                     except:
-                                        print("   ⚠️ Could not calculate final test score due to label distribution")
+                                        console.log("   ⚠️ Could not calculate final test score due to label distribution")
                                 
                             else:
-                                print(f"⚠️ Not enough data to train ML model (Found {len(feature_vectors)} tracks)")
+                                console.log(f"⚠️ Not enough data to train ML model (Found {len(feature_vectors)} tracks - need >10)")
                             
                         except Exception as e:
-                            print(f"⚠️ ML Initialization warning: {e}")
+                            console.log(f"⚠️ ML Initialization warning: {e}")
+                        
+                        console.log(f"📊 Final model_performance_metrics: {model_performance_metrics}", flush=True)
 
                         return  # Success - exit retry loop
         except Exception as e:
-            print(f"⚠️ Attempt {attempt + 1}/{max_retries} - Failed to load audio features cache: {e}")
+            console.log(f"⚠️ Attempt {attempt + 1}/{max_retries} - Failed to load audio features cache: {e}")
             if attempt < max_retries - 1:
-                print(f"   Retrying in {retry_delay} seconds...")
+                console.log(f"   Retrying in {retry_delay} seconds...")
                 await asyncio.sleep(retry_delay)
             else:
                 # Last attempt failed - log warning but don't crash
-                print(f"❌ Could not load audio features cache after {max_retries} attempts")
-                print(f"   Service will start but similarity will be slower (real-time analysis)")
+                console.log(f"❌ Could not load audio features cache after {max_retries} attempts")
+                console.log(f"   Service will start but similarity will be slower (real-time analysis)")
                 cache_loaded = False
 
 @app.get("/")
@@ -424,7 +438,7 @@ async def get_top_played_songs(limit: int = 5):
             else:
                 raise HTTPException(status_code=503, detail="Database connection unavailable")
     except Exception as e:
-        print(f"Error fetching top played songs: {e}")
+        console.log(f"Error fetching top played songs: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # ============================================
@@ -473,7 +487,7 @@ async def record_interaction(interaction: UserInteractionRequest):
             else:
                 raise HTTPException(status_code=503, detail="Database connection unavailable")
     except Exception as e:
-        print(f"Error recording interaction: {e}")
+        console.log(f"Error recording interaction: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -532,7 +546,7 @@ async def get_realtime_recommendations(request: RealtimeRecommendationRequest):
             product for pid, product in audio_features_cache.items() 
             if pid != request.current_product_id
         ]
-        print(f"✅ Using cached features for {len(products)} products")
+        console.log(f"✅ Using cached features for {len(products)} products")
                         
         
         # Sets whatever audio features are available from the 
@@ -549,7 +563,7 @@ async def get_realtime_recommendations(request: RealtimeRecommendationRequest):
         current_acousticness = request.audio_features.acousticness if request.audio_features.acousticness is not None else 0.1
         
         playback_rate = request.audio_features.playback_rate if request.audio_features.playback_rate is not None else 1.0
-        print(f"🎵 Calculating similarity with tempo: {current_tempo} BPM (effective_tempo: {request.audio_features.effective_tempo}, base_tempo: {request.audio_features.tempo}, playback rate: {playback_rate}x)")
+        console.log(f"🎵 Calculating similarity with tempo: {current_tempo} BPM (effective_tempo: {request.audio_features.effective_tempo}, base_tempo: {request.audio_features.tempo}, playback rate: {playback_rate}x)")
         
         
         for product in products:
@@ -613,7 +627,7 @@ async def get_realtime_recommendations(request: RealtimeRecommendationRequest):
 
             # Debug: Log high similarity matches to verify computation
             if similarity > 0.8:
-                print(f"✨ Strong Match: Song {product['id']} | Sim: {similarity:.3f} | Tempo: {tempo_match:.2f} | Energy: {energy_match:.2f}", flush=True)
+                console.log(f"✨ Strong Match: Song {product['id']} | Sim: {similarity:.3f} | Tempo: {tempo_match:.2f} | Energy: {energy_match:.2f}", flush=True)
 
             
             # Genre bonus (same genre gets small boost)
@@ -662,7 +676,8 @@ async def get_realtime_recommendations(request: RealtimeRecommendationRequest):
             "session_id": request.session_id,
             "current_product_id": request.current_product_id,
             "algorithm": "multi-dimensional-audio-similarity",
-            "features_analyzed": ["tempo", "energy", "valence", "danceability", "acousticness"]
+            "features_analyzed": ["tempo", "energy", "valence", "danceability", "acousticness"],
+            "model_metrics": model_performance_metrics
         }
         
     except Exception as e:
@@ -696,7 +711,7 @@ def extract_audio_features_from_preview(audio_url: str, track_id: int) -> Option
         
         # Skip non-audio files (ZIP, etc.)
         if path.endswith('.zip') or path.endswith('.rar') or path.endswith('.7z'):
-            print(f"⚠️ Skipping audio analysis for archive file: {audio_url}")
+            console.log(f"⚠️ Skipping audio analysis for archive file: {audio_url}")
             return None
 
         import librosa
@@ -706,13 +721,13 @@ def extract_audio_features_from_preview(audio_url: str, track_id: int) -> Option
         try:
             response = httpx.get(audio_url, timeout=15.0, follow_redirects=True)
             if response.status_code != 200:
-                print(f"⚠️ Failed to download preview for track {track_id}: {response.status_code}")
+                console.log(f"⚠️ Failed to download preview for track {track_id}: {response.status_code}")
                 return None
         except httpx.TimeoutException:
-            print(f"⚠️ Timeout downloading preview for track {track_id}")
+            console.log(f"⚠️ Timeout downloading preview for track {track_id}")
             return None
         except Exception as e:
-            print(f"⚠️ Network error downloading preview for track {track_id}: {e}")
+            console.log(f"⚠️ Network error downloading preview for track {track_id}: {e}")
             return None
         
         # Save to temp file and load with librosa
@@ -763,17 +778,17 @@ def extract_audio_features_from_preview(audio_url: str, track_id: int) -> Option
                 'acousticness': round(acousticness, 3),
             }
             
-            print(f"✅ Extracted features for track {track_id}: tempo={tempo:.1f}, energy={energy:.2f}")
+            console.log(f"✅ Extracted features for track {track_id}: tempo={tempo:.1f}, energy={energy:.2f}")
             return features
             
         finally:
             os.unlink(tmp_path)
             
     except ImportError as e:
-        print(f"❌ librosa required but not available: {e}")
+        console.log(f"❌ librosa required but not available: {e}")
         raise HTTPException(status_code=503, detail="Audio analysis library (librosa) not available")
     except Exception as e:
-        print(f"❌ Error extracting audio features for track {track_id}: {e}")
+        console.log(f"❌ Error extracting audio features for track {track_id}: {e}")
         raise HTTPException(status_code=500, detail=f"Audio feature extraction failed: {e}")
 
 
@@ -807,7 +822,7 @@ async def search_itunes(term: str, limit: int = 200, media: str = "music", entit
     except httpx.TimeoutException:
         raise HTTPException(status_code=504, detail="iTunes API timeout")
     except Exception as e:
-        print(f"❌ iTunes search error: {e}")
+        console.log(f"❌ iTunes search error: {e}")
         raise HTTPException(status_code=500, detail=f"Error searching iTunes: {str(e)}")
 
 
@@ -887,8 +902,8 @@ async def compute_artist_similarity(request: ArtistSimilarityRequest):
         target_features = None
         target_id = int(request.target_song.trackId)  # Ensure integer for cache lookup
         
-        print(f"🔍 Looking up target song {target_id} in cache ({len(audio_features_cache)} items)")
-        print(f"🔍 Cache keys sample: {list(audio_features_cache.keys())[:5]}")
+        console.log(f"🔍 Looking up target song {target_id} in cache ({len(audio_features_cache)} items)")
+        console.log(f"🔍 Cache keys sample: {list(audio_features_cache.keys())[:5]}")
         
         if target_id in audio_features_cache:
             # Use pre-computed features from database
@@ -900,7 +915,7 @@ async def compute_artist_similarity(request: ArtistSimilarityRequest):
                 'danceability': cached['danceability'],
                 'acousticness': cached['acousticness']
             }
-            print(f"✅ Using cached DB features for target song {target_id}")
+            console.log(f"✅ Using cached DB features for target song {target_id}")
         elif target_id in itunes_features_cache:
             target_features = itunes_features_cache[target_id]
         else:
@@ -925,7 +940,7 @@ async def compute_artist_similarity(request: ArtistSimilarityRequest):
                     request.target_song.trackId
                 )
             except Exception as e:
-                print(f"❌ Audio analysis execution error: {e}")
+                console.log(f"❌ Audio analysis execution error: {e}")
                 target_features = None
             
             if target_features is None:
@@ -968,11 +983,11 @@ async def compute_artist_similarity(request: ArtistSimilarityRequest):
         cached_count = sum(1 for sid in cachable_ids if sid in audio_features_cache or sid in itunes_features_cache)
         all_in_cache = cached_count == len(songs_to_process)
         
-        print(f"🔍 Checking {len(songs_to_process)} songs against cache. In cache: {cached_count}/{len(songs_to_process)}")
+        console.log(f"🔍 Checking {len(songs_to_process)} songs against cache. In cache: {cached_count}/{len(songs_to_process)}")
         
         if all_in_cache:
             # Fast path - all songs are pre-analyzed in database
-            print(f"✅ Fast path: All {len(songs_to_process)} songs found in (DB/iTunes) cache")
+            console.log(f"✅ Fast path: All {len(songs_to_process)} songs found in (DB/iTunes) cache")
             for song in songs_to_process:
                 try:
                     tid = int(song.trackId)
@@ -1009,7 +1024,7 @@ async def compute_artist_similarity(request: ArtistSimilarityRequest):
                 })
         else:
             # Slow path - need to analyze some songs
-            print(f"⚠️ Slow path: Some songs need analysis")
+            console.log(f"⚠️ Slow path: Some songs need analysis")
             # Parallelize audio analysis for songs not in cache
             tasks = []
             for song in songs_to_process:
@@ -1081,7 +1096,7 @@ async def compute_artist_similarity(request: ArtistSimilarityRequest):
                     
                     # Check if result is an exception or valid data
                     if isinstance(res, Exception):
-                        print(f"Error processing song {song.trackId}: {res}")
+                        console.log(f"Error processing song {song.trackId}: {res}")
                         features = None
                     else:
                         features = res
@@ -1137,21 +1152,21 @@ async def compute_artist_similarity(request: ArtistSimilarityRequest):
         
         # Step 4: Normalize features using Scaler
         # Squashes all audio features (tempo, energy) numbers into a range between 0.0 and 1.0
-        # using MinMaxScaler for normalization.
+        # using trained scaler for normalization.
         all_features = np.vstack([target_vec, song_matrix])
         
         # Use the global scaler fitted on the Training Set (Generalization)
         # This applies the population's distribution knowledge to this specific artist
         try:
             if feature_scaler is not None:
-                print("📊 Scaling features using global feature scaler...", flush=True)
+                console.log("📊 Scaling features using global feature scaler...", flush=True)
                 normalized_features = feature_scaler.transform(all_features)
-                print(f"   Target Normalized: {normalized_features[0]}", flush=True)
+                console.log(f"   Target Normalized: {normalized_features[0]}", flush=True)
             else:
-                print("⚠️ No feature scaler available (insufficient training data). Using raw features.", flush=True)
+                console.log("⚠️ No feature scaler available (insufficient training data). Using raw features.", flush=True)
                 normalized_features = all_features
         except Exception as e:
-            print(f"❌ Error during feature scaling: {e}", flush=True)
+            console.log(f"❌ Error during feature scaling: {e}", flush=True)
             # Fallback to raw features if scaling fails
             normalized_features = all_features
    
@@ -1168,10 +1183,10 @@ async def compute_artist_similarity(request: ArtistSimilarityRequest):
         # If they point in different directions, they are less similar.
         similarities = cosine_similarity(normalized_target, normalized_songs)[0]
         
-        print(f"✅ Computed {len(similarities)} similarity scores.", flush=True)
+        console.log(f"✅ Computed {len(similarities)} similarity scores.", flush=True)
         if len(similarities) > 0:
-            print(f"   Top Similarity: {max(similarities):.4f}", flush=True)
-            print(f"   Avg Similarity: {np.mean(similarities):.4f}", flush=True)
+            console.log(f"   Top Similarity: {max(similarities):.4f}", flush=True)
+            console.log(f"   Avg Similarity: {np.mean(similarities):.4f}", flush=True)
         
 
         # Step 6: Sort by similarity and get top K
@@ -1229,10 +1244,12 @@ async def compute_artist_similarity(request: ArtistSimilarityRequest):
                 ml_algorithm="KNN-Cosine-Similarity"
             ))
         
+        console.log(f"📊 Returning model_metrics in API response: {model_performance_metrics}", flush=True)
+        
         return {
             "status": "success",
             "algorithm": "K-Nearest Neighbors with Cosine Similarity",
-            "normalization": "MinMaxScaler",
+            "model_metrics": model_performance_metrics,
             "features_used": feature_names,
             "target_song": {
                 "trackId": request.target_song.trackId,
@@ -1252,7 +1269,7 @@ async def compute_artist_similarity(request: ArtistSimilarityRequest):
     except HTTPException:
         raise
     except Exception as e:
-        print(f"❌ Artist similarity error: {e}")
+        console.log(f"❌ Artist similarity error: {e}")
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Artist similarity computation failed: {str(e)}")

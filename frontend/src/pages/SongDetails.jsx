@@ -318,6 +318,11 @@ const SongDetails = () => {
       }
 
       const data = await response.json();
+      console.log("🎵 ML Similarity Response:", data);
+
+      if (data.model_metrics) {
+        console.log("🧪 Model Selection Scores (Artist Similarity):", data.model_metrics);
+      }
       
       // Set target features from the response
       if (data.target_song) {

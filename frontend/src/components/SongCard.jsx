@@ -50,6 +50,7 @@ const SongCard = ({ product, payment, i, data }) => {
   };
 
   const handlePlayClick = () => {
+    console.log("▶️ Playing song:", product.albumTitle);
     dispatch(setActiveSong({ song: product, data, i }));
     dispatch(playPause(true));
     setIsHovered(false); // Hide overlay after clicking

@@ -92,6 +92,12 @@ const SmartRecommendationVisualizer = ({
         playback_rate: rate
       });
 
+      console.log("🎵 Backend Response (Recommendations):", response.data);
+      
+      if (response.data.model_metrics) {
+        console.log("🧪 Model Selection Scores:", response.data.model_metrics);
+      }
+
       const recs = response.data.recommendations || [];
       
       setRecommendations(recs);
