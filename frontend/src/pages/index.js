@@ -6,6 +6,7 @@ import TopCharts from './TopCharts';
 import Cart from './Cart';
 import PurchaseHistory from './PurchaseHistory';
 import SimilarSongs from './SimilarSongs';
+import MLVisualization from './MLVisualization';
 
 export {
   CustomerScreen,
@@ -16,4 +17,5 @@ export {
   Cart,
   PurchaseHistory,
   SimilarSongs,
+  MLVisualization,
 };

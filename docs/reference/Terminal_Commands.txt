@@ -208,3 +208,6 @@ docker-compose -f docker-compose.services.yml up -d
 To rebuild docker images 
 docker compose -f docker-compose.services.yml -p gamestore_services build
 
+To rebuild just audio service container
+docker compose -f docker-compose.services.yml -p gamestore_services build audio-service && docker compose -f docker-compose.services.yml -p gamestore_services up -d audio-service
+

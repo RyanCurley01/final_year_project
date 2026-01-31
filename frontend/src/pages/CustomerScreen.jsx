@@ -66,7 +66,9 @@ const CustomerScreen = () => {
 
   const music = products.filter(p => {
     const isAudio = p.fileUrl && !p.fileUrl.toLowerCase().includes('.zip');
-    return p.albumTitle && isAudio;
+    // Only show original store products (positive IDs), filter out imported iTunes songs (negative IDs)
+    const isOriginalProduct = p.id > 0;
+    return p.albumTitle && isAudio && isOriginalProduct;
   });
 
   // Generate a session ID for recommendations

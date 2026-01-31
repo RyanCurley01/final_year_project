@@ -15,7 +15,10 @@ import numpy as np
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import silhouette_score
-from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.decomposition import PCA
+from sklearn.cluster import KMeans
+from fastapi.responses import HTMLResponse
+import json
 import tempfile
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
@@ -29,6 +32,9 @@ console = Console()
 
 # Load environment variables
 load_dotenv()
+
+# Global storage for visualization
+visualization_data = None
 
 # Thread pool for audio analysis
 # Increased workers to 15 to handle parallel downloads and analysis faster
@@ -80,7 +86,12 @@ app.add_middleware(
 # Cache for audio features - loaded once at startup to avoid repeated DB queries
 audio_features_cache: Dict[int, Dict] = {}
 cache_loaded: bool = False
-model_performance_metrics: Dict[str, float] = {"MinMaxScaler": 0.0, "StandardScaler": 0.0} # Store model validation scores
+model_performance_metrics: Dict[str, float] = {
+    "MinMaxScaler_train": 0.0, 
+    "StandardScaler_train": 0.0,
+    "MinMaxScaler_val": 0.0, 
+    "StandardScaler_val": 0.0
+} # Store model training and validation scores
 
 # Database configuration
 DB_CONFIG = {
@@ -205,7 +216,13 @@ async def startup_cache():
                                 Valence,
                                 Danceability,
                                 Acousticness,
-                                Genre
+                                Genre,
+                                SpectralCentroid,
+                                SpectralRolloff,
+                                ZeroCrossingRate,
+                                Instrumentalness,
+                                Loudness,
+                                Speechiness
                             FROM AudioFeatures
                             WHERE Tempo IS NOT NULL
                             AND Energy IS NOT NULL
@@ -222,7 +239,13 @@ async def startup_cache():
                                 'valence': row['Valence'],
                                 'danceability': row['Danceability'],
                                 'acousticness': row['Acousticness'],
-                                'genre': row['Genre']
+                                'genre': row['Genre'],
+                                'spectral_centroid': row.get('SpectralCentroid', 1500.0),
+                                'spectral_rolloff': row.get('SpectralRolloff', 3000.0),
+                                'zero_crossing_rate': row.get('ZeroCrossingRate', 0.05),
+                                'instrumentalness': row.get('Instrumentalness', 0.5),
+                                'loudness': row.get('Loudness', -60.0),
+                                'speechiness': row.get('Speechiness', 0.1)
                             }
                         
                         cache_loaded = True
@@ -245,11 +268,17 @@ async def startup_cache():
                                         float(data['energy'] or 0),
                                         float(data['valence'] or 0),
                                         float(data['danceability'] or 0),
-                                        float(data['acousticness'] or 0)
+                                        float(data['acousticness'] or 0),
+                                        float(data.get('spectral_centroid', 1500.0) / 5000.0),  # Normalize to 0-1
+                                        float(data.get('spectral_rolloff', 3000.0) / 10000.0),  # Normalize to 0-1
+                                        float(data.get('zero_crossing_rate', 0.05) * 10.0),     # Scale to 0-1
+                                        float(data.get('instrumentalness', 0.5)),
+                                        float((data.get('loudness', -60.0) + 60.0) / 60.0),     # Normalize -60 to 0 dB -> 0-1
+                                        float(data.get('speechiness', 0.1))
                                     ])
                                     feature_labels.append(data.get('genre', 'Unknown'))
                             
-                            if len(feature_vectors) > 10: # Ensure enough data for splitting (lowered from 100 to 10)
+                            if len(feature_vectors) > 50: # Ensure enough data for splitting (lowered from 100 to 50)
                                 X = np.array(feature_vectors)
                                 y = np.array(feature_labels)
                                 
@@ -280,6 +309,24 @@ async def startup_cache():
                                 # Evaluate both on Validation Set
                                 # Only calculate if we have multiple genres to cluster
                                 if len(set(y_val)) > 1:
+                                    # Calculate Training Scores (Check for Overfitting)
+                                    # Ideally, Training Score and validation score should be close.
+                                    # If Training >> Validation, the model is overfitting.
+                                    try:
+                                        train_embed_a = model_a.transform(X_train)
+                                        train_score_a = silhouette_score(train_embed_a, y_train)
+                                    except: train_score_a = -1
+                                    
+                                    try:
+                                        train_embed_b = model_b.transform(X_train)
+                                        train_score_b = silhouette_score(train_embed_b, y_train)
+                                    except: train_score_b = -1
+
+                                    console.log(f"   📈 Training Set Performance (Silhouette Score):")
+                                    console.log(f"      - MinMaxScaler:   {train_score_a:.4f}")
+                                    console.log(f"      - StandardScaler: {train_score_b:.4f}")
+
+
                                     # Handle silhouette score errors if cluster size < 2
                                     try:
                                         score_a = silhouette_score(val_embed_a, y_val)
@@ -293,8 +340,10 @@ async def startup_cache():
                                     console.log(f"      - MinMaxScaler:   {score_a:.4f}")
                                     console.log(f"      - StandardScaler: {score_b:.4f}")
 
-                                    model_performance_metrics["MinMaxScaler"] = round(score_a, 4)
-                                    model_performance_metrics["StandardScaler"] = round(score_b, 4)
+                                    model_performance_metrics["MinMaxScaler_train"] = round(train_score_a, 4)
+                                    model_performance_metrics["StandardScaler_train"] = round(train_score_b, 4)
+                                    model_performance_metrics["MinMaxScaler_val"] = round(score_a, 4)
+                                    model_performance_metrics["StandardScaler_val"] = round(score_b, 4)
                                     console.log(f"✅ Model metrics stored: {model_performance_metrics}", flush=True)
                                     
                                     # Select Best Model
@@ -312,6 +361,26 @@ async def startup_cache():
                                     feature_scaler = model_a
                                     best_model = "MinMaxScaler"
                                 
+                                # Generate Visualization Data (PCA 2D Projection)
+                                try:
+                                    console.log("   🎨 Generating Visualization Data...")
+                                    pca = PCA(n_components=2)
+                                    # Transform all data with the chosen scaler
+                                    X_scaled_vis = feature_scaler.transform(X)
+                                    X_2d = pca.fit_transform(X_scaled_vis)
+                                    
+                                    global visualization_data
+                                    visualization_data = {
+                                        "x": X_2d[:, 0].tolist(),
+                                        "y": X_2d[:, 1].tolist(),
+                                        "genres": y.tolist(),
+                                        "scaler": best_model,
+                                        "metrics": model_performance_metrics
+                                    }
+                                    console.log("   ✅ Visualization data ready")
+                                except Exception as ve:
+                                    console.log(f"   ⚠️ Visualization generation failed: {ve}")
+
                                 # 4. Final Evaluation (Test Set)
                                 # Measures how well the selected model creates separable clusters on completely unseen data
                                 if len(set(y_test)) > 1:
@@ -349,6 +418,139 @@ async def root():
         "status": "running",
         "cache_loaded": cache_loaded,
         "cached_products": len(audio_features_cache)
+    }
+
+@app.get("/visualize", response_class=HTMLResponse)
+async def visualize_clusters():
+    if not visualization_data:
+         return "<html><body><h1>No Model visualization available (Model has not trained yet or cache is empty)</h1></body></html>"
+    
+    html_content = f"""
+    <html>
+        <head>
+            <title>Audio Features Visualization</title>
+            <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+            <style>
+                body {{ font-family: sans-serif; padding: 20px; }}
+            </style>
+        </head>
+        <body>
+            <h2>Audio Feature Clusters (PCA Projection)</h2>
+            <div id="myDiv" style="width:100%;height:600px"></div>
+            <script>
+                var x = {json.dumps(visualization_data['x'])};
+                var y = {json.dumps(visualization_data['y'])};
+                var genres = {json.dumps(visualization_data['genres'])};
+                var metrics = {json.dumps(visualization_data['metrics'])};
+                
+                // Group data by genre for better legend
+                var traces = [];
+                var genreGroups = {{}};
+                
+                for(var i=0; i<x.length; i++) {{
+                    var g = genres[i];
+                    if(!genreGroups[g]) genreGroups[g] = {{x:[], y:[], text:[]}};
+                    genreGroups[g].x.push(x[i]);
+                    genreGroups[g].y.push(y[i]);
+                    genreGroups[g].text.push(g);
+                }}
+                
+                for(var g in genreGroups) {{
+                    traces.push({{
+                        x: genreGroups[g].x,
+                        y: genreGroups[g].y,
+                        mode: 'markers',
+                        type: 'scatter',
+                        name: g,
+                        text: genreGroups[g].text,
+                        marker: {{ size: 10 }}
+                    }});
+                }}
+
+                var layout = {{
+                    title: 'Audio Feature Space (2D PCA) - Best Scaler: {visualization_data['scaler']}',
+                    xaxis: {{ 
+                        title: 'PCA Component 1',
+                        showgrid: true,
+                        zeroline: true,
+                        showline: true,
+                        showticklabels: true,
+                        ticks: 'outside',
+                        tickmode: 'auto',
+                        nticks: 10,
+                        tickfont: {{
+                            size: 12,
+                            color: '#ffffff'
+                        }},
+                        linecolor: '#ffffff',
+                        gridcolor: 'rgba(255,255,255,0.2)'
+                    }},
+                    yaxis: {{ 
+                        title: 'PCA Component 2',
+                        showgrid: true,
+                        zeroline: true,
+                        showline: true,
+                        showticklabels: true,
+                        ticks: 'outside',
+                        tickmode: 'auto',
+                        nticks: 10,
+                        tickfont: {{
+                            size: 12,
+                            color: '#ffffff'
+                        }},
+                        linecolor: '#ffffff',
+                        gridcolor: 'rgba(255,255,255,0.2)'
+                    }},
+                    hovermode: 'closest',
+                    plot_bgcolor: '#1e293b',
+                    paper_bgcolor: '#0f172a',
+                    font: {{
+                        color: '#ffffff'
+                    }}
+                }};
+
+                Plotly.newPlot('myDiv', traces, layout);
+            </script>
+            <div style="background: #f0f0f0; padding: 15px; border-radius: 8px; margin-top: 20px;">
+                <h3>Model Metrics</h3>
+                <table style="width: 100%; border-collapse: collapse;">
+                    <tr style="background: #ddd;">
+                        <th style="padding: 8px; text-align: left;">Scaler</th>
+                        <th style="padding: 8px; text-align: left;">Training Score</th>
+                        <th style="padding: 8px; text-align: left;">Validation Score</th>
+                    </tr>
+                    <tr>
+                        <td style="padding: 8px;"><strong>MinMaxScaler</strong></td>
+                        <td style="padding: 8px;">{visualization_data['metrics'].get('MinMaxScaler_train', 'N/A')}</td>
+                        <td style="padding: 8px;">{visualization_data['metrics'].get('MinMaxScaler_val', 'N/A')}</td>
+                    </tr>
+                    <tr style="background: #f8f8f8;">
+                        <td style="padding: 8px;"><strong>StandardScaler</strong></td>
+                        <td style="padding: 8px;">{visualization_data['metrics'].get('StandardScaler_train', 'N/A')}</td>
+                        <td style="padding: 8px;">{visualization_data['metrics'].get('StandardScaler_val', 'N/A')}</td>
+                    </tr>
+                </table>
+                <p style="margin-top: 10px;"><em>Higher silhouette score indicates better separation between genres. Training vs Validation scores help detect overfitting.</em></p>
+            </div>
+        </body>
+    </html>
+    """
+    return html_content
+
+@app.get("/api/visualization/data")
+async def get_visualization_data():
+    """
+    Returns visualization data as JSON for frontend consumption
+    """
+    if not visualization_data:
+        raise HTTPException(status_code=404, detail="No visualization data available. Model has not been trained yet or cache is empty.")
+    
+    return {
+        "x": visualization_data['x'],
+        "y": visualization_data['y'],
+        "genres": visualization_data['genres'],
+        "scaler": visualization_data['scaler'],
+        "metrics": visualization_data['metrics']
     }
 
 @app.get("/health")
@@ -525,6 +727,293 @@ class AudioSimilarityResult(BaseModel):
     genre_match: bool
     reason: str
 
+
+@app.post("/api/audio/extract-features/{product_id}")
+async def extract_product_features(product_id: int):
+    """
+    Extract audio features for a single product using librosa (industry-standard).
+    This endpoint can be used to:
+    1. Extract features for a new product
+    2. Re-extract features with improved accuracy (no hardcoded genre logic)
+    
+    Returns the extracted features and optionally updates the cache.
+    """
+    try:
+        # Get file_url from database
+        with get_db_connection() as conn:
+            if not conn:
+                raise HTTPException(status_code=503, detail="Database connection unavailable")
+            
+            with conn.cursor() as cursor:
+                cursor.execute("""
+                    SELECT ProductID, AlbumTitle, file_url 
+                    FROM Products 
+                    WHERE ProductID = %s AND file_url IS NOT NULL
+                """, (product_id,))
+                product = cursor.fetchone()
+                
+                if not product:
+                    raise HTTPException(status_code=404, detail=f"Product {product_id} not found or has no audio file")
+        
+        # Extract features using librosa
+        features = await extract_features_for_product_async(product_id, product['file_url'])
+        
+        if not features:
+            raise HTTPException(status_code=500, detail=f"Failed to extract features for product {product_id}")
+        
+        # Classify genre using K-Means clustering
+        genre = classify_genre_from_features(
+            features['tempo'],
+            features['energy'],
+            features['valence'],
+            features['danceability'],
+            features['acousticness']
+        )
+        
+        # Update cache with new features
+        audio_features_cache[product_id] = {
+            'id': product_id,
+            'tempo': features['tempo'],
+            'energy': features['energy'],
+            'valence': features['valence'],
+            'danceability': features['danceability'],
+            'acousticness': features['acousticness'],
+            'genre': genre,
+            'spectral_centroid': features.get('spectral_centroid', 1500.0),
+            'spectral_rolloff': features.get('spectral_rolloff', 3000.0),
+            'zero_crossing_rate': features.get('zero_crossing_rate', 0.05),
+            'instrumentalness': features.get('instrumentalness', 0.5),
+            'loudness': features.get('loudness', -60.0),
+            'speechiness': features.get('speechiness', 0.1)
+        }
+        
+        # Insert into database with classified genre
+        with get_db_connection() as conn:
+            if conn:
+                with conn.cursor() as cursor:
+                    sql = """
+                        INSERT INTO AudioFeatures (
+                            ProductID, Tempo, Energy, Danceability, Valence,
+                            Acousticness, Instrumentalness, Loudness, Speechiness,
+                            SpectralCentroid, SpectralRolloff, ZeroCrossingRate, Genre
+                        ) VALUES (
+                            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                        )
+                        ON DUPLICATE KEY UPDATE
+                            Tempo = VALUES(Tempo),
+                            Energy = VALUES(Energy),
+                            Danceability = VALUES(Danceability),
+                            Valence = VALUES(Valence),
+                            Acousticness = VALUES(Acousticness),
+                            Instrumentalness = VALUES(Instrumentalness),
+                            Loudness = VALUES(Loudness),
+                            Speechiness = VALUES(Speechiness),
+                            SpectralCentroid = VALUES(SpectralCentroid),
+                            SpectralRolloff = VALUES(SpectralRolloff),
+                            ZeroCrossingRate = VALUES(ZeroCrossingRate),
+                            Genre = VALUES(Genre)
+                    """
+                    cursor.execute(sql, (
+                        product_id,
+                        features['tempo'],
+                        features['energy'],
+                        features['danceability'],
+                        features['valence'],
+                        features['acousticness'],
+                        features.get('instrumentalness', 0.5),
+                        features.get('loudness', -60.0),
+                        features.get('speechiness', 0.1),
+                        features.get('spectral_centroid', 1500.0),
+                        features.get('spectral_rolloff', 3000.0),
+                        features.get('zero_crossing_rate', 0.05),
+                        genre
+                    ))
+                    conn.commit()
+                    console.log(f"✅ Features saved to database for product {product_id} with genre: {genre}")
+        
+        return {
+            "status": "success",
+            "product_id": product_id,
+            "album_title": product['AlbumTitle'],
+            "features": features,
+            "genre": genre,
+            "saved_to_database": True,
+            "extraction_method": "librosa_industry_standard"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        console.log(f"❌ Error extracting features for product {product_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/audio/extract-all-features")
+async def extract_all_product_features(limit: int = 197, save_to_db: bool = True):
+    """
+    Extract audio features for all music products using librosa.
+    This replaces the hardcoded genre/mood classification with industry-standard audio analysis.
+    
+    Args:
+        limit: Maximum number of products to process (default 50 for safety)
+        save_to_db: Whether to save extracted features to AudioFeatures table (default True)
+    
+    Returns:
+        Summary of extraction results
+    """
+    try:
+        # Get all music products from database
+        with get_db_connection() as conn:
+            if not conn:
+                raise HTTPException(status_code=503, detail="Database connection unavailable")
+            
+            with conn.cursor() as cursor:
+                cursor.execute("""
+                    SELECT ProductID, AlbumTitle, file_url 
+                    FROM Products 
+                    WHERE AlbumTitle IS NOT NULL 
+                    AND AlbumTitle != 'Selected Electronic Works'
+                    AND file_url IS NOT NULL
+                    LIMIT %s
+                """, (limit,))
+                products = cursor.fetchall()
+        
+        console.log(f"🎵 Starting librosa feature extraction for {len(products)} products...")
+        console.log(f"   Save to database: {save_to_db}")
+        
+        success_count = 0
+        error_count = 0
+        db_insert_count = 0
+        results = []
+        
+        for product in products:
+            product_id = product['ProductID']
+            console.log(f"   Processing: {product['AlbumTitle']} (ID: {product_id})")
+            
+            try:
+                features = await extract_features_for_product_async(product_id, product['file_url'])
+                
+                if features:
+                    # Classify genre using K-Means clustering
+                    genre = classify_genre_from_features(
+                        features['tempo'],
+                        features['energy'],
+                        features['valence'],
+                        features['danceability'],
+                        features['acousticness']
+                    )
+                    
+                    # Update cache
+                    audio_features_cache[product_id] = {
+                        'id': product_id,
+                        'tempo': features['tempo'],
+                        'energy': features['energy'],
+                        'valence': features['valence'],
+                        'danceability': features['danceability'],
+                        'acousticness': features['acousticness'],
+                        'genre': genre,
+                        'spectral_centroid': features.get('spectral_centroid', 1500.0),
+                        'spectral_rolloff': features.get('spectral_rolloff', 3000.0),
+                        'zero_crossing_rate': features.get('zero_crossing_rate', 0.05),
+                        'instrumentalness': features.get('instrumentalness', 0.5),
+                        'loudness': features.get('loudness', -60.0),
+                        'speechiness': features.get('speechiness', 0.1)
+                    }
+                    
+                    # Insert into database if requested
+                    if save_to_db:
+                        with get_db_connection() as conn:
+                            if conn:
+                                with conn.cursor() as cursor:
+                                    sql = """
+                                        INSERT INTO AudioFeatures (
+                                            ProductID, Tempo, Energy, Danceability, Valence,
+                                            Acousticness, Instrumentalness, Loudness, Speechiness,
+                                            SpectralCentroid, SpectralRolloff, ZeroCrossingRate, Genre
+                                        ) VALUES (
+                                            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                                        )
+                                        ON DUPLICATE KEY UPDATE
+                                            Tempo = VALUES(Tempo),
+                                            Energy = VALUES(Energy),
+                                            Danceability = VALUES(Danceability),
+                                            Valence = VALUES(Valence),
+                                            Acousticness = VALUES(Acousticness),
+                                            Instrumentalness = VALUES(Instrumentalness),
+                                            Loudness = VALUES(Loudness),
+                                            Speechiness = VALUES(Speechiness),
+                                            SpectralCentroid = VALUES(SpectralCentroid),
+                                            SpectralRolloff = VALUES(SpectralRolloff),
+                                            ZeroCrossingRate = VALUES(ZeroCrossingRate),
+                                            Genre = VALUES(Genre)
+                                    """
+                                    cursor.execute(sql, (
+                                        product_id,
+                                        features['tempo'],
+                                        features['energy'],
+                                        features['danceability'],
+                                        features['valence'],
+                                        features['acousticness'],
+                                        features.get('instrumentalness', 0.5),
+                                        features.get('loudness', -60.0),
+                                        features.get('speechiness', 0.1),
+                                        features.get('spectral_centroid', 1500.0),
+                                        features.get('spectral_rolloff', 3000.0),
+                                        features.get('zero_crossing_rate', 0.05),
+                                        genre
+                                    ))
+                                    conn.commit()
+                                    db_insert_count += 1
+                                    console.log(f"   ✅ Saved to database with genre: {genre}")
+                    
+                    success_count += 1
+                    results.append({
+                        "product_id": product_id,
+                        "album_title": product['AlbumTitle'],
+                        "status": "success",
+                        "saved_to_db": save_to_db,
+                        "tempo": features['tempo'],
+                        "energy": features['energy']
+                    })
+                else:
+                    error_count += 1
+                    results.append({
+                        "product_id": product_id,
+                        "album_title": product['AlbumTitle'],
+                        "status": "failed"
+                    })
+            except Exception as e:
+                error_count += 1
+                console.log(f"   ❌ Error: {e}")
+                results.append({
+                    "product_id": product_id,
+                    "album_title": product['AlbumTitle'],
+                    "status": "error",
+                    "error": str(e)
+                })
+        
+        console.log(f"✅ Extraction complete: {success_count} success, {error_count} errors")
+        if save_to_db:
+            console.log(f"💾 Database inserts: {db_insert_count}")
+        
+        return {
+            "status": "complete",
+            "total_processed": len(products),
+            "success_count": success_count,
+            "error_count": error_count,
+            "db_insert_count": db_insert_count if save_to_db else 0,
+            "saved_to_database": save_to_db,
+            "extraction_method": "librosa_industry_standard",
+            "results": results
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        console.log(f"❌ Batch extraction error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # Manual "Heuristic" Logic for discover pages songs for speed as all database songs are always cached
 # so building numpy matrices and running scikit-learn models is unnsecessary overhead here.
 @app.post("/api/audio/realtime-recommendations")
@@ -631,7 +1120,8 @@ async def get_realtime_recommendations(request: RealtimeRecommendationRequest):
 
             
             # Genre bonus (same genre gets small boost)
-            if product["genre"] == "Electronic":
+            current_genre = audio_features_cache.get(request.current_product_id, {}).get('genre', 'Unknown')
+            if product["genre"] == current_genre and current_genre != 'Unknown':
                 similarity = min(1.0, similarity + 0.05)
             
             # Max functions chooses ONE tuple based on it's highest similarity score
@@ -685,6 +1175,244 @@ async def get_realtime_recommendations(request: RealtimeRecommendationRequest):
 
 
 # ============================================
+# INDUSTRY-STANDARD AUDIO FEATURE EXTRACTION (LIBROSA)
+# ============================================
+
+def classify_genre_from_features(tempo: float, energy: float, valence: float, danceability: float, acousticness: float) -> str:
+    """
+    Classify genre using K-Means clustering on audio features.
+    Automatically detects 3 genre clusters: Energetic, Calm, Balanced.
+    
+    Args:
+        tempo: BPM
+        energy: 0-1
+        valence: 0-1 (mood/brightness)
+        danceability: 0-1
+        acousticness: 0-1
+    
+    Returns:
+        Genre label ("Energetic", "Calm", or "Balanced")
+    """
+    global genre_classifier
+    
+    # Train classifier if not already trained
+    if genre_classifier is None and len(audio_features_cache) >= 10:
+        # Extract features from cache
+        X_train = []
+        for pid, data in audio_features_cache.items():
+            if all(k in data for k in ['tempo', 'energy', 'valence', 'danceability', 'acousticness']):
+                X_train.append([
+                    float(data['tempo'] or 0),
+                    float(data['energy'] or 0),
+                    float(data['valence'] or 0),
+                    float(data['danceability'] or 0),
+                    float(data['acousticness'] or 0)
+                ])
+        
+        if len(X_train) >= 10:
+            # Normalize features
+            scaler = StandardScaler()
+            X_scaled = scaler.fit_transform(X_train)
+            
+            # Fit K-Means with 3 clusters
+            genre_classifier = {
+                'model': KMeans(n_clusters=3, random_state=42, n_init=10),
+                'scaler': scaler
+            }
+            genre_classifier['model'].fit(X_scaled)
+            
+            # Determine which cluster represents which genre based on centroids
+            centroids = genre_classifier['model'].cluster_centers_
+            # Energy is index 1 in scaled features
+            energy_values = centroids[:, 1]
+            
+            # Sort clusters by energy: Low energy = Calm, High energy = Energetic, Middle = Balanced
+            sorted_indices = np.argsort(energy_values)
+            genre_classifier['mapping'] = {
+                sorted_indices[0]: "Calm",       # Lowest energy cluster
+                sorted_indices[1]: "Balanced",   # Middle energy cluster  
+                sorted_indices[2]: "Energetic"   # Highest energy cluster
+            }
+            
+            console.log(f"✅ Genre classifier trained with 3 clusters (Energetic, Calm, Balanced)")
+    
+    # Classify the new features
+    if genre_classifier:
+        features = np.array([[tempo, energy, valence, danceability, acousticness]])
+        features_scaled = genre_classifier['scaler'].transform(features)
+        cluster = genre_classifier['model'].predict(features_scaled)[0]
+        return genre_classifier['mapping'][cluster]
+    else:
+        # Fallback: Simple heuristic classification
+        if energy > 0.7:
+            return "Energetic"
+        elif energy < 0.3:
+            return "Calm"
+        else:
+            return "Balanced"
+
+def extract_audio_features_librosa(audio_url: str, product_id: int) -> Optional[Dict]:
+    """
+    Extract audio features from any audio URL using librosa.
+    Uses industry-standard audio analysis for tempo, energy, valence, danceability, acousticness.
+    NO hardcoded genre/mood classification - purely data-driven.
+    
+    This is the same approach used for iTunes but works for S3/database songs.
+    
+    Args:
+        audio_url: URL to audio file (S3 presigned URL or direct link)
+        product_id: Product ID for logging
+        
+    Returns:
+        Dict with extracted features or None if extraction fails
+    """
+    try:
+        import librosa
+        
+        # Validate URL format
+        parsed_url = urlparse(audio_url)
+        path = parsed_url.path.lower()
+        
+        # Skip non-audio files (ZIP, etc.)
+        if path.endswith('.zip') or path.endswith('.rar') or path.endswith('.7z'):
+            console.log(f"⚠️ Skipping audio analysis for archive file (product {product_id})")
+            return None
+        
+        # Download the audio file with longer timeout for S3 presigned URLs
+        try:
+            response = httpx.get(audio_url, timeout=30.0, follow_redirects=True)
+            if response.status_code != 200:
+                console.log(f"⚠️ Failed to download audio for product {product_id}: {response.status_code}")
+                return None
+        except httpx.TimeoutException:
+            console.log(f"⚠️ Timeout downloading audio for product {product_id}")
+            return None
+        except Exception as e:
+            console.log(f"⚠️ Network error downloading audio for product {product_id}: {e}")
+            return None
+        
+        # Determine file extension from URL or default to wav
+        if '.mp3' in path:
+            suffix = '.mp3'
+        elif '.m4a' in path:
+            suffix = '.m4a'
+        elif '.wav' in path:
+            suffix = '.wav'
+        else:
+            suffix = '.wav'  # Default
+        
+        # Save to temp file and load with librosa
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp_file:
+            tmp_file.write(response.content)
+            tmp_path = tmp_file.name
+        
+        try:
+            # Load audio file (first 30 seconds for consistency)
+            y, sr = librosa.load(tmp_path, sr=22050, mono=True, duration=30)
+            
+            # ===== TEMPO (BPM) =====
+            # Extract tempo using beat tracking
+            tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
+            tempo = float(tempo) if hasattr(tempo, '__float__') else float(tempo[0]) if len(tempo) > 0 else 120.0
+            
+            # ===== ENERGY =====
+            # RMS energy normalized to 0-1 range
+            rms = librosa.feature.rms(y=y)[0]
+            energy = float(np.mean(rms) / np.max(rms)) if np.max(rms) > 0 else 0.5
+            energy = min(1.0, max(0.0, energy * 2))  # Scale to 0-1 range
+            
+            # ===== SPECTRAL FEATURES =====
+            spectral_centroid = librosa.feature.spectral_centroid(y=y, sr=sr)[0]
+            spectral_rolloff = librosa.feature.spectral_rolloff(y=y, sr=sr)[0]
+            
+            # ===== VALENCE (Brightness/Positivity) =====
+            # Estimated from spectral centroid - brighter sounds tend to feel more positive
+            valence = float(np.mean(spectral_centroid) / sr)
+            valence = min(1.0, max(0.0, valence * 4))
+            
+            # ===== DANCEABILITY =====
+            # Combination of tempo stability and beat strength
+            onset_env = librosa.onset.onset_strength(y=y, sr=sr)
+            pulse = librosa.beat.plp(onset_envelope=onset_env, sr=sr)
+            danceability = float(np.mean(pulse))
+            danceability = min(1.0, max(0.0, danceability))
+            
+            # ===== ACOUSTICNESS =====
+            # Ratio of low frequency to total energy
+            spec = np.abs(librosa.stft(y))
+            low_freq_energy = np.mean(spec[:int(spec.shape[0] * 0.1), :])
+            total_energy = np.mean(spec)
+            acousticness = float(low_freq_energy / total_energy) if total_energy > 0 else 0.3
+            acousticness = min(1.0, max(0.0, acousticness * 2))
+            
+            # ===== LOUDNESS (dB) =====
+            S = librosa.stft(y)
+            loudness = float(librosa.amplitude_to_db(np.abs(S), ref=np.max).mean())
+            
+            # ===== INSTRUMENTALNESS =====
+            # Lack of vocal frequencies (using zero crossing rate as proxy)
+            zcr = librosa.feature.zero_crossing_rate(y)[0]
+            zero_crossing_rate = float(np.mean(zcr))
+            instrumentalness = float(np.clip(1 - zero_crossing_rate * 2, 0, 1))
+            
+            # ===== SPEECHINESS =====
+            speechiness = float(1 - instrumentalness)
+            
+            features = {
+                'product_id': product_id,
+                'tempo': round(tempo, 2),
+                'energy': round(energy, 3),
+                'valence': round(valence, 3),
+                'danceability': round(danceability, 3),
+                'acousticness': round(acousticness, 3),
+                'loudness': round(loudness, 2),
+                'instrumentalness': round(instrumentalness, 3),
+                'speechiness': round(speechiness, 3),
+                'spectral_centroid': round(float(np.mean(spectral_centroid)), 2),
+                'spectral_rolloff': round(float(np.mean(spectral_rolloff)), 2),
+                'zero_crossing_rate': round(zero_crossing_rate, 4),
+            }
+            
+            console.log(f"✅ Librosa extracted features for product {product_id}: tempo={tempo:.1f}, energy={energy:.2f}, valence={valence:.2f}")
+            return features
+            
+        finally:
+            # Clean up temp file
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+            
+    except ImportError as e:
+        console.log(f"❌ librosa required but not available: {e}")
+        return None
+    except Exception as e:
+        console.log(f"❌ Error extracting audio features for product {product_id}: {e}")
+        return None
+
+
+async def extract_features_for_product_async(product_id: int, file_url: str) -> Optional[Dict]:
+    """
+    Async wrapper to extract audio features from S3 in a thread pool.
+    Used for real-time feature extraction when cache is empty.
+    """
+    loop = asyncio.get_event_loop()
+    
+    # Generate presigned URL if needed
+    presigned_url = generate_presigned_url(file_url) if file_url else None
+    if not presigned_url:
+        return None
+    
+    # Run librosa extraction in thread pool (CPU-bound operation)
+    features = await loop.run_in_executor(
+        executor,
+        extract_audio_features_librosa,
+        presigned_url,
+        product_id
+    )
+    
+    return features
+
+
+# ============================================
 # ML-BASED ITUNES SIMILARITY SERVICE
 # ============================================
 
@@ -696,6 +1424,10 @@ itunes_features_cache: Dict[int, Dict] = {}
 
 # Trained feature scaler for normalization (will be fit on first use)
 feature_scaler = None
+
+# K-Means model for automatic genre clustering (3 clusters: Energetic, Calm, Balanced)
+genre_classifier = None
+genre_labels = ["Energetic", "Calm", "Balanced"]
 
 # To extract audio features from iTunes preview URLs using librosa
 def extract_audio_features_from_preview(audio_url: str, track_id: int) -> Optional[Dict]:
@@ -824,6 +1556,251 @@ async def search_itunes(term: str, limit: int = 200, media: str = "music", entit
     except Exception as e:
         console.log(f"❌ iTunes search error: {e}")
         raise HTTPException(status_code=500, detail=f"Error searching iTunes: {str(e)}")
+
+
+@app.delete("/api/itunes/clear-imported-songs")
+async def clear_imported_songs():
+    """
+    Delete all imported iTunes songs (negative ProductIDs) from the database.
+    This removes both Products and AudioFeatures entries.
+    """
+    try:
+        console.log("🗑️  Starting cleanup of imported songs...")
+        deleted_count = 0
+        
+        with get_db_connection() as conn:
+            if conn:
+                with conn.cursor() as cursor:
+                    # Delete from AudioFeatures first (foreign key constraint)
+                    cursor.execute("DELETE FROM AudioFeatures WHERE ProductID < 0")
+                    audio_deleted = cursor.rowcount
+                    
+                    # Delete from Products
+                    cursor.execute("DELETE FROM Products WHERE ProductID < 0")
+                    products_deleted = cursor.rowcount
+                    
+                    conn.commit()
+                    deleted_count = products_deleted
+                    
+                    console.log(f"   ✅ Deleted {products_deleted} products and {audio_deleted} audio features")
+        
+        # Reload cache after cleanup
+        global cache_loaded
+        cache_loaded = False
+        
+        console.log(f"🎉 Cleanup complete: {deleted_count} imported songs removed")
+        
+        return {
+            "status": "success",
+            "deleted_count": deleted_count,
+            "message": f"Successfully removed {deleted_count} imported songs from database"
+        }
+        
+    except Exception as e:
+        console.log(f"❌ Cleanup error: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Cleanup failed: {str(e)}")
+
+
+@app.post("/api/itunes/import-to-database")
+async def import_itunes_songs_to_database(limit: int = 100, genre: str = "electronic"):
+    """
+    Import iTunes songs into the database to increase dataset size for better similarity scores.
+    
+    Steps:
+    1. Search iTunes for songs (default: electronic genre)
+    2. Extract audio features from preview URLs
+    3. Insert into Products table (with negative ProductIDs to avoid conflicts)
+    4. Insert features into AudioFeatures table
+    5. Reload cache
+    
+    Args:
+        limit: Number of songs to import (default 100)
+        genre: Genre to search for (default "electronic")
+    
+    Returns:
+        Summary of imported songs
+    """
+    try:
+        console.log(f"🎵 Starting iTunes import: {limit} {genre} songs...")
+        
+        # 1. Search iTunes API
+        itunes_url = f"{ITUNES_API_BASE_URL}/search"
+        params = {"term": genre, "limit": limit, "media": "music", "entity": "song"}
+        
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.get(itunes_url, params=params)
+            if response.status_code != 200:
+                raise HTTPException(status_code=response.status_code, detail="iTunes API error")
+            
+            data = response.json()
+            results = data.get('results', [])
+        
+        console.log(f"   Found {len(results)} iTunes songs")
+        
+        # 2. Extract features and insert into database
+        imported_count = 0
+        skipped_count = 0
+        error_count = 0
+        imported_songs = []
+        
+        for track in results:
+            track_id = track.get('trackId')
+            preview_url = track.get('previewUrl')
+            
+            if not preview_url:
+                skipped_count += 1
+                continue
+            
+            try:
+                # Use negative IDs to avoid conflicts with existing products
+                product_id = -track_id
+                
+                # Check if already exists
+                with get_db_connection() as conn:
+                    if conn:
+                        with conn.cursor() as cursor:
+                            cursor.execute("SELECT ProductID FROM Products WHERE ProductID = %s", (product_id,))
+                            if cursor.fetchone():
+                                skipped_count += 1
+                                continue
+                
+                # Extract features from preview URL
+                features = await asyncio.get_event_loop().run_in_executor(
+                    executor,
+                    extract_audio_features_from_preview,
+                    preview_url,
+                    track_id
+                )
+                
+                if not features:
+                    error_count += 1
+                    continue
+                
+                # Classify genre using K-Means
+                genre_label = classify_genre_from_features(
+                    features['tempo'],
+                    features['energy'],
+                    features['valence'],
+                    features['danceability'],
+                    features['acousticness']
+                )
+                
+                # Insert into Products table
+                with get_db_connection() as conn:
+                    if conn:
+                        with conn.cursor() as cursor:
+                            # Insert into Products
+                            cursor.execute("""
+                                INSERT INTO Products (
+                                    ProductID, AlbumTitle, AlbumPrice,
+                                    albumCoverImageUrl, file_url, preview_url
+                                ) VALUES (%s, %s, %s, %s, %s, %s)
+                            """, (
+                                product_id,
+                                track.get('trackName', 'Unknown'),
+                                track.get('trackPrice', 0.99),
+                                track.get('artworkUrl100', ''),
+                                preview_url,  # Use preview as full file for iTunes
+                                preview_url
+                            ))
+                            
+                            # Insert into AudioFeatures
+                            cursor.execute("""
+                                INSERT INTO AudioFeatures (
+                                    ProductID, Tempo, Energy, Danceability, Valence,
+                                    Acousticness, Instrumentalness, Loudness, Speechiness,
+                                    SpectralCentroid, SpectralRolloff, ZeroCrossingRate, Genre
+                                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            """, (
+                                product_id,
+                                features['tempo'],
+                                features['energy'],
+                                features['danceability'],
+                                features['valence'],
+                                features['acousticness'],
+                                features.get('instrumentalness', 0.5),
+                                features.get('loudness', -60.0),
+                                features.get('speechiness', 0.1),
+                                features.get('spectral_centroid', 1500.0),
+                                features.get('spectral_rolloff', 3000.0),
+                                features.get('zero_crossing_rate', 0.05),
+                                genre_label
+                            ))
+                            
+                            conn.commit()
+                
+                imported_count += 1
+                imported_songs.append({
+                    "product_id": product_id,
+                    "track_name": track.get('trackName'),
+                    "artist": track.get('artistName'),
+                    "genre": genre_label,
+                    "tempo": features['tempo'],
+                    "energy": features['energy']
+                })
+                
+                console.log(f"   ✅ Imported: {track.get('trackName')} by {track.get('artistName')} (Genre: {genre_label})")
+                
+            except Exception as e:
+                error_count += 1
+                console.log(f"   ❌ Error importing track {track_id}: {e}")
+        
+        # 3. Reload cache to include new songs
+        console.log("   🔄 Reloading cache with new songs...")
+        global audio_features_cache, cache_loaded
+        
+        with get_db_connection() as conn:
+            if conn:
+                with conn.cursor() as cursor:
+                    sql = """
+                        SELECT 
+                            ProductID, Tempo, Energy, Valence, Danceability,
+                            Acousticness, Genre, SpectralCentroid, SpectralRolloff,
+                            ZeroCrossingRate, Instrumentalness, Loudness, Speechiness
+                        FROM AudioFeatures
+                        WHERE Tempo IS NOT NULL AND Energy IS NOT NULL
+                    """
+                    cursor.execute(sql)
+                    results = cursor.fetchall()
+                    
+                    audio_features_cache.clear()
+                    for row in results:
+                        audio_features_cache[row['ProductID']] = {
+                            'id': row['ProductID'],
+                            'tempo': row['Tempo'],
+                            'energy': row['Energy'],
+                            'valence': row['Valence'],
+                            'danceability': row['Danceability'],
+                            'acousticness': row['Acousticness'],
+                            'genre': row['Genre'],
+                            'spectral_centroid': row.get('SpectralCentroid', 1500.0),
+                            'spectral_rolloff': row.get('SpectralRolloff', 3000.0),
+                            'zero_crossing_rate': row.get('ZeroCrossingRate', 0.05),
+                            'instrumentalness': row.get('Instrumentalness', 0.5),
+                            'loudness': row.get('Loudness', -60.0),
+                            'speechiness': row.get('Speechiness', 0.1)
+                        }
+                    
+                    cache_loaded = True
+                    console.log(f"   ✅ Cache reloaded: {len(audio_features_cache)} total songs")
+        
+        console.log(f"🎉 Import complete: {imported_count} imported, {skipped_count} skipped, {error_count} errors")
+        
+        return {
+            "status": "success",
+            "imported_count": imported_count,
+            "skipped_count": skipped_count,
+            "error_count": error_count,
+            "total_in_cache": len(audio_features_cache),
+            "imported_songs": imported_songs[:10],  # Return first 10 for preview
+            "message": f"Successfully imported {imported_count} iTunes songs. Cache now contains {len(audio_features_cache)} songs total."
+        }
+        
+    except Exception as e:
+        console.log(f"❌ iTunes import error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ============================================

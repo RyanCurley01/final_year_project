@@ -3,7 +3,7 @@ import { NavLink } from 'react-router-dom';
 import { useDispatch } from 'react-redux';
 import { HiOutlineMenu } from 'react-icons/hi';
 import { RiCloseLine } from 'react-icons/ri';
-import { FaReceipt } from 'react-icons/fa';
+import { FaReceipt, FaChartLine } from 'react-icons/fa';
 
 import { logo } from '../assets';
 import { links } from '../assets/constants';
@@ -54,6 +54,19 @@ const NavLinks = ({ handleClick, onResetPlayer }) => (
     >
       <FaReceipt className="w-6 h-6 mr-2" />
       Purchase History
+    </NavLink>
+    
+    {/* ML Visualization Link */}
+    <NavLink
+      to="/ml-visualization"
+      className="flex flex-row justify-start items-center my-8 text-sm font-medium text-gray-300 hover:text-primary-light"
+      onClick={() => {
+        onResetPlayer && onResetPlayer();
+        handleClick && handleClick();
+      }}
+    >
+      <FaChartLine className="w-6 h-6 mr-2" />
+      ML Visualization
     </NavLink>
   </div>
 );
