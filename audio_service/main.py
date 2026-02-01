@@ -232,6 +232,10 @@ async def startup_cache():
                         
                         # Sets the database rows data to the dictionary keys
                         for row in results:
+                            # Sanitize Tempo: If 0, set to default 120 (prevents visualizer issues)
+                            if row['Tempo'] == 0:
+                                row['Tempo'] = 120.0
+                                
                             audio_features_cache[row['ProductID']] = {
                                 'id': row['ProductID'],
                                 'tempo': row['Tempo'],
@@ -576,6 +580,84 @@ async def health_check():
         "cache_loaded": cache_loaded,
         "cached_products": len(audio_features_cache)
     }
+
+# ============================================
+# CACHED AUDIO FEATURES ENDPOINT (for artist songs)
+# ============================================
+
+@app.get("/api/audio/cached-features")
+async def get_cached_audio_features(artist_only: bool = True):
+    """
+    Get cached audio features from the AudioFeatures table.
+    This allows the frontend to use REAL extracted features instead of pseudo-features.
+    
+    Args:
+        artist_only: If True, only return artist songs (negative ProductIDs from iTunes).
+                     If False, return all cached features including discover page songs.
+    
+    Returns:
+        Dictionary mapping ProductID to audio features (tempo, energy, valence, danceability, etc.)
+    """
+    try:
+        if not cache_loaded or not audio_features_cache:
+            return {
+                "status": "error",
+                "message": "Audio features cache not loaded",
+                "features": {}
+            }
+        
+        # Filter based on artist_only parameter
+        if artist_only:
+            # Artist songs have negative ProductIDs (from iTunes import)
+            features = {
+                str(pid): {
+                    "productId": pid,
+                    "tempo": data.get('tempo', 120),
+                    "energy": data.get('energy', 0.5),
+                    "valence": data.get('valence', 0.5),
+                    "danceability": data.get('danceability', 0.5),
+                    "acousticness": data.get('acousticness', 0.5),
+                    "instrumentalness": data.get('instrumentalness', 0.5),
+                    "speechiness": data.get('speechiness', 0.1),
+                    "loudness": data.get('loudness', -60),
+                    "genre": data.get('genre', 'Unknown'),
+                    "spectralCentroid": data.get('spectral_centroid', 1500),
+                    "spectralRolloff": data.get('spectral_rolloff', 3000),
+                    "zeroCrossingRate": data.get('zero_crossing_rate', 0.05)
+                }
+                for pid, data in audio_features_cache.items()
+                if pid < 0  # Negative IDs are iTunes artist songs
+            }
+        else:
+            # Return all cached features
+            features = {
+                str(pid): {
+                    "productId": pid,
+                    "tempo": data.get('tempo', 120),
+                    "energy": data.get('energy', 0.5),
+                    "valence": data.get('valence', 0.5),
+                    "danceability": data.get('danceability', 0.5),
+                    "acousticness": data.get('acousticness', 0.5),
+                    "instrumentalness": data.get('instrumentalness', 0.5),
+                    "speechiness": data.get('speechiness', 0.1),
+                    "loudness": data.get('loudness', -60),
+                    "genre": data.get('genre', 'Unknown'),
+                    "spectralCentroid": data.get('spectral_centroid', 1500),
+                    "spectralRolloff": data.get('spectral_rolloff', 3000),
+                    "zeroCrossingRate": data.get('zero_crossing_rate', 0.05)
+                }
+                for pid, data in audio_features_cache.items()
+            }
+        
+        return {
+            "status": "success",
+            "count": len(features),
+            "features": features
+        }
+    except Exception as e:
+        console.log(f"Error fetching cached features: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 # ============================================
 # TOP PLAYED SONGS ENDPOINT (from UserInteractions)
@@ -1045,30 +1127,224 @@ async def get_realtime_recommendations(request: RealtimeRecommendationRequest):
         if not cache_loaded or not audio_features_cache:
             raise HTTPException(status_code=503, detail="Audio features cache not loaded. Database connection required.")
         
+        # Filter for discover page songs (positive IDs only)
+        # Artist songs have negative IDs (from iTunes import)
         products = [
             product for pid, product in audio_features_cache.items() 
-            if pid != request.current_product_id
+            if str(pid) != str(request.current_product_id) and int(product['id']) > 0
         ]
-        console.log(f"✅ Using cached features for {len(products)} products")
+        console.log(f"✅ Using cached features for {len(products)} products (Discover Page Songs only)")
                         
         
         # Sets whatever audio features are available from the 
         # frontend request as the current audio features of the currently playing song
-        if request.audio_features.effective_tempo is not None:
+        # REALTIME UPDATE LOGIC:
+        # If the frontend provided valid audio features (Live Analysis), use them!
+        # This ensures the visualizer updates dynamically every 3 seconds.
+        # Use cache ONLY for metadata or if request features are missing/invalid.
+        
+        current_id_int = 0
+        try:
+             current_id_int = int(request.current_product_id)
+        except:
+             pass
+
+        cached_current_song = None
+        if request.current_product_id in audio_features_cache:
+            cached_current_song = audio_features_cache[request.current_product_id]
+        elif current_id_int != 0:
+            # Check negative ID (artist songs stored as negative in DB)
+            neg_id = -abs(current_id_int)
+            if neg_id in audio_features_cache:
+                 cached_current_song = audio_features_cache[neg_id]
+            # Check positive ID
+            elif abs(current_id_int) in audio_features_cache:
+                 cached_current_song = audio_features_cache[abs(current_id_int)]
+
+        if cached_current_song:
+            console.log(f"✅ Found cached features for current song {request.current_product_id} for metadata")
+            
+            # Use cached values ONLY if request didn't provide them (or they are invalid/zero)
+            # Prioritize Request (Live) -> Cache (Static)
+            
+            req_f = request.audio_features
+            rate = req_f.playback_rate if req_f.playback_rate else 1.0
+            
+            # Tempo: Use effective_tempo (calculated live) or request tempo, else cache
+            if req_f.effective_tempo and req_f.effective_tempo > 0:
+                current_tempo = req_f.effective_tempo
+            elif req_f.tempo and req_f.tempo > 0:
+                current_tempo = req_f.tempo * rate
+            else:
+                 current_tempo = cached_current_song['tempo'] * rate
+
+            # Energy: Use request energy if valid
+            if req_f.energy is not None:
+                current_energy = req_f.energy
+            else:
+                current_energy = cached_current_song['energy']
+
+            # Valence: Use request valence if valid
+            if req_f.valence is not None:
+                current_valence = req_f.valence
+            else:
+                current_valence = cached_current_song['valence']
+                
+            # Danceability & Acousticness (Live analysis might not provide these accurately, 
+            # so we can stick to cache if available, but respect request if present)
+            if req_f.danceability is not None:
+                current_danceability = req_f.danceability
+            else:
+                current_danceability = cached_current_song.get('danceability', 0.5)
+
+            if req_f.acousticness is not None:
+                current_acousticness = req_f.acousticness
+            else:
+                current_acousticness = cached_current_song.get('acousticness', 0.1)
+            
+        elif request.audio_features.effective_tempo is not None:
             current_tempo = request.audio_features.effective_tempo
         elif request.audio_features.tempo is not None:
             rate = request.audio_features.playback_rate if request.audio_features.playback_rate else 1.0
             current_tempo = request.audio_features.tempo * rate
-            
-        current_energy = request.audio_features.energy if request.audio_features.energy is not None else 0.5
-        current_valence = request.audio_features.valence if request.audio_features.valence is not None else 0.5
-        current_danceability = request.audio_features.danceability if request.audio_features.danceability is not None else 0.5
-        current_acousticness = request.audio_features.acousticness if request.audio_features.acousticness is not None else 0.1
+        else:
+            # Default fallbacks if absolutely nothing available
+            current_tempo = 120
+        
+        if not cached_current_song:
+            current_energy = request.audio_features.energy if request.audio_features.energy is not None else 0.5
+            current_valence = request.audio_features.valence if request.audio_features.valence is not None else 0.5
+            current_danceability = request.audio_features.danceability if request.audio_features.danceability is not None else 0.5
+            current_acousticness = request.audio_features.acousticness if request.audio_features.acousticness is not None else 0.1
         
         playback_rate = request.audio_features.playback_rate if request.audio_features.playback_rate is not None else 1.0
         console.log(f"🎵 Calculating similarity with tempo: {current_tempo} BPM (effective_tempo: {request.audio_features.effective_tempo}, base_tempo: {request.audio_features.tempo}, playback rate: {playback_rate}x)")
         
+        # -------------------------------------------------------------------------
+        # ML PATH: Use Scikit-Learn trained Scaler and Cosine Similarity
+        # This aligns the Visualizer logic with the "Clicked Song" logic (deep analysis)
+        # Only possible if we have the scaler and full feature set for the current song
+        # -------------------------------------------------------------------------
+        global feature_scaler
         
+        # Check if we can use the ML pipeline
+        # Needs: 1. Trained Scaler, 2. Current song in cache (to have all 11 features)
+        use_ml_pipeline = feature_scaler is not None and cached_current_song is not None
+        
+        if use_ml_pipeline:
+            # Import metrics specifically for this scope
+            from sklearn.metrics.pairwise import cosine_similarity
+            
+            console.log("✨ Using Trained ML Pipeline (Scaler + Cosine Similarity) for recommendations")
+            
+            # 1. Build Target Vector (Current Song) - MATCHES training format EXACTLY
+            target_vector = [
+                float(cached_current_song['tempo'] or 0) / 200.0,
+                float(cached_current_song['energy'] or 0),
+                float(cached_current_song['valence'] or 0),
+                float(cached_current_song.get('danceability', 0) or 0),
+                float(cached_current_song.get('acousticness', 0) or 0),
+                float(cached_current_song.get('spectral_centroid', 1500.0) / 5000.0),
+                float(cached_current_song.get('spectral_rolloff', 3000.0) / 10000.0),
+                float(cached_current_song.get('zero_crossing_rate', 0.05) * 10.0),
+                float(cached_current_song.get('instrumentalness', 0.5)),
+                float((cached_current_song.get('loudness', -60.0) + 60.0) / 60.0),
+                float(cached_current_song.get('speechiness', 0.1))
+            ]
+            
+            # 2. Build Candidate Vectors (All other songs)
+            candidate_ids = []
+            candidate_vectors = []
+            candidate_products = []
+            
+            for product in products:
+                # Skip current song
+                if product["id"] == request.current_product_id:
+                    continue
+                
+                # Check for required basic fields
+                if not all(k in product for k in ['tempo', 'energy', 'valence']):
+                    continue
+                    
+                vec = [
+                    float(product['tempo'] or 0) / 200.0,
+                    float(product['energy'] or 0),
+                    float(product['valence'] or 0),
+                    float(product.get('danceability', 0) or 0),
+                    float(product.get('acousticness', 0) or 0),
+                    float(product.get('spectral_centroid', 1500.0) / 5000.0),
+                    float(product.get('spectral_rolloff', 3000.0) / 10000.0),
+                    float(product.get('zero_crossing_rate', 0.05) * 10.0),
+                    float(product.get('instrumentalness', 0.5)),
+                    float((product.get('loudness', -60.0) + 60.0) / 60.0),
+                    float(product.get('speechiness', 0.1))
+                ]
+                
+                candidate_ids.append(product["id"])
+                candidate_vectors.append(vec)
+                candidate_products.append(product)
+            
+            if len(candidate_vectors) > 0:
+                # 3. Normalize everything using the TRAINED scaler
+                # Combine target and candidates for batch transformation (efficient)
+                all_vectors = [target_vector] + candidate_vectors
+                X = np.array(all_vectors)
+                
+                # Apply the pre-trained normalization (MinMaxScaler or StandardScaler selected at startup)
+                X_scaled = feature_scaler.transform(X)
+                
+                target_scaled = X_scaled[0].reshape(1, -1)
+                candidates_scaled = X_scaled[1:]
+                
+                # 4. Compute Cosine Similarity
+                # Result is array of shape [1, n_candidates]
+                similarities = cosine_similarity(target_scaled, candidates_scaled)[0]
+                
+                # 5. Format results
+                for idx, sim_score in enumerate(similarities):
+                    product = candidate_products[idx]
+                    
+                    # Generate human-readable reason (heuristic fallback for explanation)
+                    # We still calculate individual matches for the UI
+                    tempo_match = 1.0 - min(abs(current_tempo - product['tempo']), 100) / 100
+                    energy_match = 1.0 - abs(current_energy - product['energy'])
+                    mood_match = 1.0 - abs(current_valence - product['valence'])
+                    
+                    dominant_feature = max(
+                        [("tempo", tempo_match), ("energy", energy_match), ("mood", mood_match)],
+                        key=lambda x: x[1]
+                    )
+                    
+                    if dominant_feature[0] == "tempo":
+                        reason = f"Matching rhythm ({product['tempo']} BPM)"
+                    elif dominant_feature[0] == "energy":
+                        reason = f"Similar intensity ({product['energy']:.2f}) and vibe"
+                    else:
+                        reason = f"Comparable mood"
+                        
+                    # Use the ML similarity score
+                    final_sim = float(sim_score)
+                    
+                    # Genre bonus still applies
+                    current_genre = cached_current_song.get('genre', 'Unknown')
+                    if product["genre"] == current_genre and current_genre != 'Unknown':
+                        final_sim = min(1.0, final_sim + 0.05)
+
+                    recommendations.append(AudioSimilarityResult(
+                        product_id=product["id"],
+                        similarity_score=round(final_sim, 3),
+                        tempo_match=round(tempo_match, 3),
+                        energy_match=round(energy_match, 3),
+                        mood_match=round(mood_match, 3),
+                        danceability_match=round(product.get('danceability', 0.5), 3), # Just return value for UI
+                        genre_match=product["genre"] == current_genre,
+                        reason=reason
+                    ))
+                
+                # Skip manual loop
+                products = [] 
+        
+        # Fallback Manual Loop (if ML not possible or no products processed)
         for product in products:
             if product["id"] == request.current_product_id:
                 continue
@@ -1181,7 +1457,16 @@ async def get_realtime_recommendations(request: RealtimeRecommendationRequest):
             "current_product_id": request.current_product_id,
             "algorithm": "multi-dimensional-audio-similarity",
             "features_analyzed": ["tempo", "energy", "valence", "danceability", "acousticness"],
-            "model_metrics": model_performance_metrics
+            "model_metrics": model_performance_metrics,
+            "source_features": {
+                "tempo": float(current_tempo),
+                "effective_tempo": float(current_tempo),
+                "energy": float(current_energy),
+                "valence": float(current_valence),
+                "danceability": float(current_danceability),
+                "acousticness": float(current_acousticness),
+                "using_cached_features": cached_current_song is not None
+            }
         }
         
     except Exception as e:

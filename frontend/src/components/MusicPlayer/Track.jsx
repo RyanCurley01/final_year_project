@@ -8,13 +8,10 @@ const Track = ({ isPlaying, isActive, activeSong }) => {
   const { songEnded } = useSelector((state) => state.player);
   
   // Support both database songs (albumCoverImageUrl) and iTunes songs (artworkUrl100)
-  // Also check matchedDbSong for songs from Search page that have matched database songs
   const getCoverMedia = () => {
-    // First check if there's a matched database song (from Search page iTunes songs)
-    if (activeSong?.matchedDbSong?.albumCoverImageUrl) return activeSong.matchedDbSong.albumCoverImageUrl;
-    // Then check direct album cover (from Discover page database songs)
+    // First check direct album cover (from Discover page database songs)
     if (activeSong?.albumCoverImageUrl) return activeSong.albumCoverImageUrl;
-    // Finally fall back to iTunes artwork
+    // Then fall back to iTunes artwork
     if (activeSong?.artworkUrl100) return activeSong.artworkUrl100.replace('100x100', '400x400');
     return null;
   };
@@ -52,7 +49,7 @@ const Track = ({ isPlaying, isActive, activeSong }) => {
 
   return (
   <div className="flex items-center justify-start flex-shrink-0">
-    <div className={`${isPlaying && isActive ? 'animate-[spin_3s_linear_infinite]' : ''} block h-12 w-12 sm:h-16 sm:w-16 mr-2 sm:mr-4 flex-shrink-0`}>
+    <div className={`${isPlaying && isActive ? 'animate-spin' : ''} block h-12 w-12 sm:h-16 sm:w-16 mr-2 sm:mr-4 flex-shrink-0`} style={{ animationDuration: '3s' }}>
       {isVideo && !videoError ? (
         <video
           ref={videoRef}
@@ -71,6 +68,7 @@ const Track = ({ isPlaying, isActive, activeSong }) => {
       ) : null}
       {!isVideo || videoError ? (
         <img 
+          key={coverMedia}
           src={coverMedia || placeholders.small} 
           alt="cover art" 
           className={`rounded-full object-cover w-full h-full`}
@@ -87,7 +85,7 @@ const Track = ({ isPlaying, isActive, activeSong }) => {
         {activeSong?.trackName || activeSong?.albumTitle || 'No active Song'}
       </p>
       <p className="text-gray-300 text-xs sm:text-sm truncate">
-        {activeSong?.artistName || (activeSong?.albumPrice ? `$${activeSong.albumPrice.toFixed(2)}` : 'Select a song')}
+        {activeSong?.artistName === 'Unknown Artist' || (activeSong?.source === 'database') ? ' ' : (activeSong?.artistName || 'Select a song')}
       </p>
     </div>
   </div>

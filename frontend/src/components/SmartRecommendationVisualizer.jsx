@@ -25,6 +25,7 @@ const SmartRecommendationVisualizer = ({
   const [displayedFeatures, setDisplayedFeatures] = useState(null);
   const [displayedPlaybackRate, setDisplayedPlaybackRate] = useState(1);
   const [hoveredRec, setHoveredRec] = useState(null);
+  const [cachedAudioFeatures, setCachedAudioFeatures] = useState({});
   const isInitialLoad = useRef(true);
   const intervalRef = useRef(null);
   const lastSongIdRef = useRef(null);
@@ -45,6 +46,10 @@ const SmartRecommendationVisualizer = ({
   // Store audioFeatures in ref so interval always has latest value without triggering re-renders
   const audioFeaturesRef = useRef(audioFeatures);
   audioFeaturesRef.current = audioFeatures;
+
+  // Store cachedAudioFeatures in ref so interval always has latest value
+  const cachedAudioFeaturesRef = useRef(cachedAudioFeatures);
+  cachedAudioFeaturesRef.current = cachedAudioFeatures;
 
   // Get current song ID for comparison
   const currentSongId = activeSong?.id || activeSong?.productId || activeSong?.trackId;
@@ -100,6 +105,15 @@ const SmartRecommendationVisualizer = ({
 
       const recs = response.data.recommendations || [];
       
+      // Update displayed features to match exactly what the backend used (Source of Truth)
+      if (response.data.source_features) {
+         setDisplayedFeatures(prev => ({
+             ...response.data.source_features,
+             // Map backend names to frontend expected names
+             using_cached: response.data.source_features.using_cached_features
+         }));
+      }
+
       setRecommendations(recs);
       setNoMatchFound(recs.length === 0);
       
@@ -110,6 +124,30 @@ const SmartRecommendationVisualizer = ({
       setLoading(false);
     }
   };
+
+  // Fetch cached audio features from the backend (REAL extracted features from AudioFeatures table)
+  useEffect(() => {
+    const fetchCachedFeatures = async () => {
+      try {
+        const audioServiceUrl = envConfig.getApiBaseUrl();
+        // Fetch ALL features (both artist and discover songs) so visualizer works for everything
+        const response = await fetch(`${audioServiceUrl}/api/audio/cached-features?artist_only=false`);
+        
+        if (response.ok) {
+          const data = await response.json();
+          if (data.status === 'success' && data.features) {
+            // Backend returns a dictionary/object mapped by ID, use it directly
+            setCachedAudioFeatures(data.features);
+            console.log(`[Visualizer] Loaded ${data.count} cached audio features`);
+          }
+        }
+      } catch (err) {
+        console.warn('Could not fetch cached audio features:', err.message);
+      }
+    };
+
+    fetchCachedFeatures();
+  }, []); // Fetch once on mount
 
   // Single useEffect to handle all recommendation updates
   useEffect(() => {
@@ -131,18 +169,52 @@ const SmartRecommendationVisualizer = ({
 
     // Helper function to fetch recommendations
     const doFetch = (forceRefresh = false) => {
-      const features = audioFeaturesRef.current;
+      const liveFeatures = audioFeaturesRef.current;
       const rate = playbackRateRef.current;
+      const cachedFeatures = cachedAudioFeaturesRef.current;
       
-      if (!features) return;
+      const songId = currentProduct?.id || currentProduct?.productId || currentProduct?.ProductID;
+      console.log(`[Visualizer] doing fetch for song ${songId}.`);
+
+      // ALWAYS prefer live features for the "Source" of the recommendation
+      // This ensures the visualizer updates dynamically every 3 seconds based on the
+      // real-time audio analysis of what is actually playing.
+      // We only use cached features if live features are completely unavailable (e.g. before playback starts)
       
-      setDisplayedFeatures(features);
+      let featuresToUse = liveFeatures;
+      
+      // If no live features yet, try cache as fallback
+      if (!featuresToUse && songId) {
+          const songIdStr = String(songId);
+          const cached = cachedFeatures[songIdStr] || cachedFeatures[String(-Math.abs(songId))];
+          if (cached) {
+            console.log(`[Visualizer] No live features yet, using cache for ${songIdStr}`);
+            featuresToUse = {
+                ...cached,
+                tempo: Number(cached.tempo),
+                energy: Number(cached.energy),
+                valence: Number(cached.valence),
+                using_cached: true
+            };
+          }
+      }
+
+      // If we have no features at all (no live, no cache), we can't do anything
+      if (!featuresToUse) {
+         console.log('[Visualizer] No features available to send');
+         return;
+      }
+      
+      // Update display immediately with what we are about to send
+      setDisplayedFeatures(featuresToUse);
       setDisplayedPlaybackRate(rate);
-      fetchRecommendations(currentProduct, features, rate, sessionId, forceRefresh);
+      
+      fetchRecommendations(currentProduct, featuresToUse, rate, sessionId, forceRefresh);
     };
 
     // Immediate fetch if features available
-    if (audioFeaturesRef.current) {
+    // OR if we just loaded cached features (even if live features aren't ready)
+    if (audioFeaturesRef.current || Object.keys(cachedAudioFeaturesRef.current).length > 0) {
       doFetch(true);
     }
 
@@ -156,7 +228,7 @@ const SmartRecommendationVisualizer = ({
         intervalRef.current = null;
       }
     };
-  }, [currentProduct, sessionId, currentSongId, location.pathname]); // Don't include audioFeatures - use ref instead
+  }, [currentProduct, sessionId, currentSongId, location.pathname, cachedAudioFeatures]); // Add cachedAudioFeatures to deps
 
   // Calculate real-time match values based on current audio features
   const calculateLiveMatch = (recProductId) => {
@@ -230,6 +302,7 @@ const SmartRecommendationVisualizer = ({
               <div className="relative w-12 h-16 flex-shrink-0">
                 {isVideo ? (
                   <img 
+                    key={coverMedia || 'video-placeholder'}
                     src={blissImage}
                     alt="Album cover"
                     className={`w-12 h-12 rounded-full object-cover border-2 border-cyan-500/50 ${isPlaying ? 'animate-spin' : ''}`}
@@ -237,6 +310,7 @@ const SmartRecommendationVisualizer = ({
                   />
                 ) : (
                   <img 
+                    key={coverMedia || 'no-cover'}
                     src={coverMedia || placeholders.music}
                     alt={currentProduct.trackName || currentProduct.albumTitle}
                     className={`w-12 h-12 rounded-full object-cover border-2 border-cyan-500/50 ${isPlaying ? 'animate-spin' : ''}`}
@@ -327,9 +401,17 @@ const SmartRecommendationVisualizer = ({
             animate={{ opacity: 1, y: 0 }}
             className="space-y-2 overflow-x-hidden"
           >
-            {/* Matches count */}
-            <p className="text-[12px] text-gray-500 mb-2">
-              {recommendations.length} {recommendations.length === 1 ? 'match' : 'matches'} • Updates 3s
+            {/* Matches count - Show "Verified" if cached features used */}
+            <p className="text-[12px] text-gray-500 mb-2 flex items-center gap-2">
+              <span>{recommendations.length} {recommendations.length === 1 ? 'match' : 'matches'} • Updates 3s</span>
+              {displayedFeatures?.using_cached && (
+                 <span className="text-cyan-500 flex items-center gap-1 bg-cyan-900/20 px-1.5 rounded" title="Using verified audio features from database">
+                   ✓ Verified
+                 </span>
+              )}
+              {!displayedFeatures?.using_cached && (
+                 <span className="text-gray-500 animate-pulse">• Live Analysis</span>
+              )}
             </p>
             
             {recommendations.map((rec, index) => {

@@ -9,6 +9,8 @@ import { productService } from '../redux/services';
 import { FaPauseCircle, FaPlayCircle } from 'react-icons/fa';
 import envConfig from '../config/environment';
 
+import { calculateSimilarity } from '../utils/audioSimilarity';
+
 const ARTISTS = ['Aphex Twin', 'Boards of Canada', 'Squarepusher'];
 
 const getArtistBadgeColor = (artist) => {
@@ -20,17 +22,6 @@ const getArtistBadgeColor = (artist) => {
 
 const fallbackImage = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="250" height="250" viewBox="0 0 250 250"><rect width="250" height="250" fill="#374151"/><circle cx="125" cy="125" r="80" fill="#4B5563"/><circle cx="125" cy="125" r="30" fill="#374151"/><circle cx="125" cy="125" r="10" fill="#6B7280"/></svg>');
 
-// Hash function for consistent but distributed matching
-const hashCode = (str) => {
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    const char = str.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
-    hash = hash & hash;
-  }
-  return Math.abs(hash);
-};
-
 // Shuffle array helper
 const shuffleArray = (array) => {
   const shuffled = [...array];
@@ -39,42 +30,6 @@ const shuffleArray = (array) => {
     [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
   }
   return shuffled;
-};
-
-// Match artist songs to db songs with randomization and hash-based similarity
-const matchArtistSongsToDbSongs = (artistSongs, dbSongs) => {
-  if (!dbSongs.length) return artistSongs.map(s => ({ ...s, matchedDbSong: null, similarity: 0.75 }));
-  
-  const shuffledDbSongs = shuffleArray(dbSongs);
-  const usedDbIndices = new Set();
-  const matched = [];
-  
-  artistSongs.forEach((artistSong) => {
-    let dbIndex = Math.floor(Math.random() * shuffledDbSongs.length);
-    let attempts = 0;
-    
-    while (usedDbIndices.has(dbIndex) && attempts < shuffledDbSongs.length) {
-      dbIndex = (dbIndex + 1) % shuffledDbSongs.length;
-      attempts++;
-    }
-    
-    if (attempts >= shuffledDbSongs.length) {
-      usedDbIndices.clear();
-      dbIndex = Math.floor(Math.random() * shuffledDbSongs.length);
-    }
-    
-    usedDbIndices.add(dbIndex);
-    const hash = hashCode(artistSong.trackName + artistSong.artistName);
-    const similarity = 0.55 + ((hash % 40) / 100);
-    
-    matched.push({
-      ...artistSong,
-      matchedDbSong: shuffledDbSongs[dbIndex],
-      similarity
-    });
-  });
-  
-  return matched;
 };
 
 // Helper function for mood-based colors - same as SmartRecommendationVisualizer
@@ -97,8 +52,8 @@ const FeatureBadge = ({ label, value }) => {
   const colors = getFeatureColor(label, value);
   return (
     <div className={`rounded-md px-1 py-1 text-center border ${colors.bg} ${colors.border}`}>
-      <div className="text-[12px] text-gray-400 leading-tight">{label}</div>
-      <div className={`text-[12px] font-bold leading-tight ${colors.text}`}>{value}</div>
+      <div className="text-xs text-gray-400 leading-tight">{label}</div>
+      <div className={`text-xs font-bold leading-tight ${colors.text}`}>{value}</div>
     </div>
   );
 };
@@ -181,7 +136,8 @@ const SongCard = ({ song, isPlaying, activeSong, onPlay, onPause, index, allSong
           {song.artistName}
         </div>
 
-        {song.similarity && (
+        {/* Always show similarity badge if property exists (even if 0) */}
+        {song.similarity !== undefined && song.similarity !== null && (
           <div className="absolute top-2 right-2 px-2 py-1 bg-cyan-500/90 rounded-full text-[12px] font-bold text-white shadow-lg">
             {(song.similarity * 100).toFixed(0)}%
           </div>
@@ -242,6 +198,7 @@ const SimilarSongs = () => {
   const [recLoading, setRecLoading] = useState(false);
   const [displayedFeatures, setDisplayedFeatures] = useState(null);
   const [displayedPlaybackRate, setDisplayedPlaybackRate] = useState(1);
+  const [cachedAudioFeatures, setCachedAudioFeatures] = useState({});
   
   const intervalRef = useRef(null);
   const dispatch = useDispatch();
@@ -261,50 +218,70 @@ const SimilarSongs = () => {
   const password = 'password';
 
   // Find similar artist songs based on audio features (local matching)
-  // Now uses ML-computed features when available from the backend
+  // Uses REAL cached audio features from database when available, NO pseudo-features
   const findSimilarArtistSongs = (currentSong, features, allSongs, rate = 1) => {
     if (!currentSong || !features || !allSongs.length) return [];
     
-    // Use real-time audio features with playback rate adjustment
-    const effectiveTempo = features.tempo * rate;
-    const currentEnergy = features.energy || 0.5;
-    const currentValence = features.valence || 0.5;
-    const currentDanceability = features.danceability || 0.5;
-    
-    // Filter out current song and calculate similarity
+    // Filter out current song
     const otherSongs = allSongs.filter(s => s.id !== currentSong.id);
     
     const scoredSongs = otherSongs.map(song => {
-      // Generate pseudo audio features based on song characteristics
-      const songHash = hashCode(song.trackName + song.artistName);
-      const songTempo = 80 + (songHash % 100); // 80-180 BPM range
-      const songEnergy = (songHash % 100) / 100;
-      const songValence = ((songHash >> 8) % 100) / 100;
-      const songDanceability = ((songHash >> 16) % 100) / 100;
+      // Try to get REAL cached audio features from database
+      const songIdStr = String(song.id);
+      const negativeIdStr = String(-Math.abs(song.id)); // Artist songs use negative IDs in database
+      const cached = cachedAudioFeatures[songIdStr] || cachedAudioFeatures[negativeIdStr];
       
-      // Calculate match scores using audio features from analyzer
-      const tempoMatch = 1 - Math.min(Math.abs(effectiveTempo - songTempo) / 100, 1);
-      const energyMatch = 1 - Math.abs(currentEnergy - songEnergy);
-      const moodMatch = 1 - Math.abs(currentValence - songValence);
-      const danceMatch = 1 - Math.abs(currentDanceability - songDanceability);
+      let similarityScore = null;
+      let usingRealFeatures = false;
+      let songTempo = null;
+      let songEnergy = null;
+      let songValence = null;
+      let songDanceability = null;
+
+      let tempoMatch = null;
+      let energyMatch = null;
+      let moodMatch = null;
+      let danceMatch = null;
       
-      // Weighted similarity score
-      const similarityScore = (tempoMatch * 0.25) + (energyMatch * 0.35) + (moodMatch * 0.20) + (danceMatch * 0.20);
+      if (cached) {
+        // Use REAL extracted audio features from AudioFeatures table
+        usingRealFeatures = true;
+        songTempo = cached.tempo || 120;
+        songEnergy = cached.energy || 0.5;
+        songValence = cached.valence || 0.5;
+        songDanceability = cached.danceability || 0.5;
+        
+        // Calculate similarity using consistent utility
+        similarityScore = calculateSimilarity(features, cached, rate);
+        
+        // Calculate match details for display
+        const effectiveTempo = features.effective_tempo || (features.tempo * rate);
+        const currentEnergy = features.energy || 0.5;
+        const currentValence = features.valence || 0.5;
+        const currentDanceability = features.danceability || 0.5;
+
+        tempoMatch = Math.min(effectiveTempo, songTempo) / Math.max(effectiveTempo, songTempo);
+        energyMatch = Math.max(0, 1 - Math.abs(currentEnergy - songEnergy));
+        moodMatch = Math.max(0, 1 - Math.abs(currentValence - songValence));
+        danceMatch = Math.max(0, 1 - Math.abs(currentDanceability - songDanceability));
+      }
       
-      // Generate contextual reason based on dominant feature
-      const dominantFeature = [
-        ['tempo', tempoMatch],
-        ['energy', energyMatch],
-        ['mood', moodMatch]
-      ].reduce((max, curr) => curr[1] > max[1] ? curr : max);
-      
-      let matchReason;
-      if (dominantFeature[0] === 'tempo') {
-        matchReason = `Matching rhythm (${Math.round(songTempo)} BPM)`;
-      } else if (dominantFeature[0] === 'energy') {
-        matchReason = `Similar intensity (${(songEnergy * 100).toFixed(0)}%)`;
-      } else {
-        matchReason = 'Comparable mood';
+      // Generate contextual reason based on dominant feature - only if we have a match
+      let matchReason = null;
+      if (similarityScore !== null) {
+          const dominantFeature = [
+            ['tempo', tempoMatch],
+            ['energy', energyMatch],
+            ['mood', moodMatch]
+          ].reduce((max, curr) => curr[1] > max[1] ? curr : max);
+          
+          if (dominantFeature[0] === 'tempo') {
+            matchReason = `Matching rhythm (${Math.round(songTempo)} BPM)`;
+          } else if (dominantFeature[0] === 'energy') {
+            matchReason = `Similar intensity (${(songEnergy * 100).toFixed(0)}%)`;
+          } else {
+            matchReason = 'Comparable mood';
+          }
       }
       
       return {
@@ -313,17 +290,39 @@ const SimilarSongs = () => {
         energy_match: energyMatch,
         mood_match: moodMatch,
         dance_match: danceMatch,
+        similarity: similarityScore, // Use standard property name
         similarity_score: similarityScore,
         match_reason: matchReason,
-        pseudo_features: { tempo: songTempo, energy: songEnergy, valence: songValence, danceability: songDanceability }
+        using_real_features: usingRealFeatures,
+        audio_features: usingRealFeatures ? { tempo: songTempo, energy: songEnergy, valence: songValence, danceability: songDanceability } : null
       };
     });
     
     // Sort by similarity and return top 5
     return scoredSongs
-      .sort((a, b) => b.similarity_score - a.similarity_score)
+      .filter(s => s.similarity !== null)
+      .sort((a, b) => b.similarity - a.similarity)
       .slice(0, 5);
   };
+
+  // Fetch cached audio features from backend (real extracted features from AudioFeatures table)
+  useEffect(() => {
+    const fetchCachedFeatures = async () => {
+      try {
+        const audioApiUrl = envConfig.getApiBaseUrl();
+        const response = await fetch(`${audioApiUrl}/api/audio/cached-features?artist_only=false`);
+        if (response.ok) {
+          const data = await response.json();
+          // Backend returns a dictionary/object mapped by ID, use it directly
+          setCachedAudioFeatures(data.features);
+          console.log(`[SimilarSongs] Loaded ${data.count} cached audio features for artist songs`);
+        }
+      } catch (err) {
+        console.warn('[SimilarSongs] Could not fetch cached audio features:', err.message);
+      }
+    };
+    fetchCachedFeatures();
+  }, []);
 
   // Initial data fetch
   useEffect(() => {   
@@ -336,7 +335,25 @@ const SimilarSongs = () => {
       
       try {
         const products = await productService.getAllProducts(email, password);
-        const musicProducts = products.filter(p => p.albumTitle && p.fileUrl);
+        // Only include actual store products (positive IDs), exclude cached iTunes songs
+        // Normalize properties to match iTunes format (trackName, artworkUrl100) for consistent rendering
+        const musicProducts = products
+          .filter(p => p.albumTitle && p.fileUrl && p.id > 0)
+          // Ensure we only have unique entries (remove potential duplicates)
+          .filter((p, index, self) => 
+            index === self.findIndex((t) => (
+              t.albumTitle === p.albumTitle && t.artistName === p.artistName
+            ))
+          )
+          // Limit to 47 songs if we have more (as requested for specific library set)
+          .slice(0, 47)
+          .map(p => ({
+            ...p,
+            trackName: p.albumTitle || p.productName, // Database songs often use albumTitle as track name
+            artworkUrl100: p.albumCoverImageUrl || p.imageUrl || p.image, // Map DB cover image to iTunes format (support var props)
+            previewUrl: p.fileUrl,                    // Map DB file URL
+            artistName: p.artistName || 'Unknown Artist'
+          }));
         setDbSongs(musicProducts);
         
         const allArtistSongs = [];
@@ -382,10 +399,18 @@ const SimilarSongs = () => {
           }
         }
         
-        // Match songs to library with hash-based similarity
-        const matchedSongs = matchArtistSongsToDbSongs(allArtistSongs, musicProducts);
-        matchedSongs.sort((a, b) => b.similarity - a.similarity);
-        setSongs(matchedSongs);
+        // Calculate real similarity using cached features logic (same as findSimilarArtistSongs)
+        // Note: For iTunes songs without cached features, this will result in NO similarity badge.
+        // This is "Real" behavior as requested.
+        const calculatedSongs = allArtistSongs.map(song => {
+             // We can't calculate real similarity here on mount effectively without active song context easily,
+             // but mainly we just want to remove the FAKE matching.
+             // We return the song as is. Similarity will be added by the useEffect interval if active song + features exist.
+             return song;
+        });
+        
+        // No more fake matching
+        setSongs(calculatedSongs);
       } catch (err) {
         console.error('Error in fetchAllSongs:', err);
         setError(err.message);
@@ -417,6 +442,7 @@ const SimilarSongs = () => {
       
       if (!features) return; // Don't update if no features available yet
       
+      // Use artist songs for recommendations (not library dbSongs)
       const recs = findSimilarArtistSongs(activeSong, features, songs, rate);
       setRecommendations(recs);
       setDisplayedFeatures(features);
@@ -439,6 +465,63 @@ const SimilarSongs = () => {
       }
     };
   }, [activeSong?.id, songs]);
+
+  // Match iTunes songs to Library songs once features are loaded
+  useEffect(() => {
+    // Need songs, dbSongs and cached features to proceed
+    if (songs.length === 0 || dbSongs.length === 0 || Object.keys(cachedAudioFeatures).length === 0) return;
+    
+    // Check if we already did matching to avoid infinite loop (check first song)
+    if (songs[0].matchedDbSong !== undefined) return;
+
+    console.log('[SimilarSongs] Matching iTunes songs to Library using REAL ML features...');
+    
+    const matchedSongs = songs.map(song => {
+      // Get features for this iTunes song (try various ID formats)
+      // iTunes songs often use negative IDs in our features DB or just the trackId
+      const songIdStr = String(song.id);
+      const negativeIdStr = String(-Math.abs(song.id));
+      const features = cachedAudioFeatures[songIdStr] || cachedAudioFeatures[negativeIdStr];
+      
+      let bestMatch = null;
+      let bestScore = 0;
+
+      // If we have features, try to find a real match
+      if (features) {
+        // Find closest match in dbSongs
+        dbSongs.forEach(dbSong => {
+          const dbIdStr = String(dbSong.id);
+          const dbFeatures = cachedAudioFeatures[dbIdStr] || cachedAudioFeatures[String(-Math.abs(dbSong.id))];
+          
+          if (dbFeatures) {
+            const score = calculateSimilarity(features, dbFeatures);
+            if (score > bestScore) {
+              bestScore = score;
+              bestMatch = dbSong;
+            }
+          }
+        });
+      }
+
+      // Only show score if we have real features and a real match
+      if (bestMatch && bestScore > 0) {
+        return {
+          ...song,
+          matchedDbSong: bestMatch,
+          similarity: bestScore
+        };
+      } else {
+        // No features available - don't show score or match
+        return {
+          ...song,
+          matchedDbSong: null,
+          similarity: null
+        };
+      }
+    });
+
+    setSongs(matchedSongs);
+  }, [dbSongs, cachedAudioFeatures, songs]);
 
   // Filter songs and shuffle selection for variety, then sort by similarity
   const filteredSongs = useMemo(() => {
@@ -590,7 +673,8 @@ const SimilarSongs = () => {
                 {/* Spinning Album Cover */}
                 <div className="relative w-12 h-16 flex-shrink-0">
                   <img 
-                    src={activeSong.artworkUrl100?.replace('100x100', '200x200') || activeSong.albumCoverImageUrl || fallbackImage}
+                    key={activeSong?.albumCoverImageUrl || activeSong?.artworkUrl100 || 'no-cover'}
+                    src={activeSong?.albumCoverImageUrl || activeSong?.artworkUrl100?.replace('100x100', '200x200') || activeSong?.imageUrl || activeSong?.image || fallbackImage}
                     alt={activeSong.trackName || activeSong.albumTitle}
                     className={`w-12 h-12 rounded-full object-cover border-2 border-cyan-500/50 ${isPlaying ? 'animate-spin' : ''}`}
                     style={{ animationDuration: '3s' }}
@@ -640,10 +724,10 @@ const SimilarSongs = () => {
                     className="relative p-2 bg-gray-800/70 hover:bg-gray-700/70 rounded-lg border border-gray-700 hover:border-cyan-500 transition-all cursor-pointer group"
                   >
                     <div className="flex items-center gap-2">
-                      {/* Album Cover */}
+                      {/* Album Cover - Support both URL formats */}
                       <div className="w-12 h-12 rounded-md overflow-hidden flex-shrink-0 border border-gray-600 group-hover:border-cyan-500 transition-colors">
                         <img 
-                          src={rec.artworkUrl100?.replace('100x100', '200x200') || fallbackImage}
+                          src={rec.albumCoverImageUrl || rec.artworkUrl100?.replace('100x100', '200x200') || rec.imageUrl || rec.image || fallbackImage}
                           alt={rec.trackName}
                           className="w-full h-full object-cover"
                           onError={(e) => { e.target.src = fallbackImage; }}
@@ -653,10 +737,10 @@ const SimilarSongs = () => {
                       {/* Product Info */}
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center justify-between gap-1">
-                          <h4 className="text-white font-semibold truncate group-hover:text-cyan-400 transition-colors text-[12px]">
+                          <h4 className="text-white font-semibold truncate group-hover:text-cyan-400 transition-colors text-sm leading-tight flex-1">
                             {rec.trackName}
                           </h4>
-                          <span className={`px-1.5 py-0.5 rounded-full text-[12px] font-bold text-white flex-shrink-0 ${
+                          <span className={`px-1.5 py-0.5 rounded-full text-xs font-bold text-white flex-shrink-0 ${
                             rec.similarity_score >= 0.7 ? 'bg-green-500' : 
                             rec.similarity_score >= 0.5 ? 'bg-yellow-500' : 
                             'bg-red-500'
@@ -664,32 +748,33 @@ const SimilarSongs = () => {
                             {Math.round(rec.similarity_score * 100)}%
                           </span>
                         </div>
-                        <p className="text-[12px] text-gray-400 truncate">{rec.match_reason}</p>
+                        <p className="text-xs text-gray-300 truncate font-medium">{rec.artistName}</p>
+                        <p className="text-xs text-gray-400 truncate">{rec.match_reason}</p>
                         
                         {/* Feature Matches */}
                         <div className="flex gap-1 mt-1 flex-wrap">
-                          <span className={`px-1 py-0.5 rounded text-[12px] ${
+                          <span className={`px-1 py-0.5 rounded text-xs ${
                             rec.tempo_match >= 0.7 ? 'bg-green-500/30 text-green-300' : 
                             rec.tempo_match >= 0.5 ? 'bg-yellow-500/30 text-yellow-300' : 
                             'bg-red-500/30 text-red-300'
                           }`}>
                             Tempo:{Math.round(rec.tempo_match * 100)}%
                           </span>
-                          <span className={`px-1 py-0.5 rounded text-[12px] ${
+                          <span className={`px-1 py-0.5 rounded text-xs ${
                             rec.energy_match >= 0.7 ? 'bg-green-500/30 text-green-300' : 
                             rec.energy_match >= 0.5 ? 'bg-yellow-500/30 text-yellow-300' : 
                             'bg-red-500/30 text-red-300'
                           }`}>
                             Energy:{Math.round(rec.energy_match * 100)}%
                           </span>
-                          <span className={`px-1 py-0.5 rounded text-[12px] ${
+                          <span className={`px-1 py-0.5 rounded text-xs ${
                             rec.mood_match >= 0.7 ? 'bg-green-500/30 text-green-300' : 
                             rec.mood_match >= 0.5 ? 'bg-yellow-500/30 text-yellow-300' : 
                             'bg-red-500/30 text-red-300'
                           }`}>
                             Mood:{Math.round(rec.mood_match * 100)}%
                           </span>
-                          <span className={`px-1 py-0.5 rounded text-[12px] ${
+                          <span className={`px-1 py-0.5 rounded text-xs ${
                             rec.dance_match >= 0.7 ? 'bg-green-500/30 text-green-300' : 
                             rec.dance_match >= 0.5 ? 'bg-yellow-500/30 text-yellow-300' : 
                             'bg-red-500/30 text-red-300'
