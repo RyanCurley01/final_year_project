@@ -264,7 +264,7 @@ async def startup_cache():
                             for pid, data in audio_features_cache.items():
                                 if all(k in data for k in ['tempo', 'energy', 'valence', 'danceability', 'acousticness']):
                                     feature_vectors.append([
-                                        float(data['tempo'] or 0),
+                                        float(data['tempo'] or 0) / 200.0,  # Normalize tempo (0-200 BPM -> 0-1)
                                         float(data['energy'] or 0),
                                         float(data['valence'] or 0),
                                         float(data['danceability'] or 0),
@@ -611,6 +611,7 @@ async def get_top_played_songs(limit: int = 5):
                         WHERE p.AlbumTitle IS NOT NULL 
                             AND p.AlbumTitle != 'Selected Electronic Works'
                             AND p.file_url IS NOT NULL
+                            AND p.ProductID > 0
                         GROUP BY p.ProductID, p.AlbumTitle, p.albumCoverImageUrl, 
                                  p.file_url, p.preview_url, p.AlbumPrice
                         ORDER BY playCount DESC, p.AlbumTitle ASC
@@ -891,7 +892,20 @@ async def extract_all_product_features(limit: int = 197, save_to_db: bool = True
             console.log(f"   Processing: {product['AlbumTitle']} (ID: {product_id})")
             
             try:
-                features = await extract_features_for_product_async(product_id, product['file_url'])
+                # Detect URL type and use appropriate extraction function
+                file_url = product['file_url']
+                if 'itunes.apple.com' in file_url or 'audio-ssl.itunes.apple.com' in file_url:
+                    # iTunes preview URL - use sync function in thread pool
+                    loop = asyncio.get_event_loop()
+                    features = await loop.run_in_executor(
+                        executor,
+                        extract_audio_features_from_preview,
+                        file_url,
+                        product_id
+                    )
+                else:
+                    # S3 URL - use async function
+                    features = await extract_features_for_product_async(product_id, file_url)
                 
                 if features:
                     # Classify genre using K-Means clustering
@@ -1202,7 +1216,7 @@ def classify_genre_from_features(tempo: float, energy: float, valence: float, da
         for pid, data in audio_features_cache.items():
             if all(k in data for k in ['tempo', 'energy', 'valence', 'danceability', 'acousticness']):
                 X_train.append([
-                    float(data['tempo'] or 0),
+                    float(data['tempo'] or 0) / 200.0,  # Normalize tempo (0-200 BPM -> 0-1)
                     float(data['energy'] or 0),
                     float(data['valence'] or 0),
                     float(data['danceability'] or 0),
@@ -2166,12 +2180,35 @@ async def compute_artist_similarity(request: ArtistSimilarityRequest):
             console.log(f"   Avg Similarity: {np.mean(similarities):.4f}", flush=True)
         
 
-        # Step 6: Sort by similarity and get top K
+        # Step 6: Calculate weighted similarity for all songs and sort
 
         # Sorts the songs by their similarity score (e.g., 95% match, 80% match...).
         # Explains why it matched. It looks at the raw numbers to see which feature was the closest.
         # Example: "Matching energy (High Energy)" vs "Similar tempo (128 BPM)".
-        sorted_indices = np.argsort(similarities)[::-1][:request.limit]
+        
+        # First, calculate weighted similarity for all songs
+        weighted_similarities = []
+        for idx in range(len(song_data)):
+            data = song_data[idx]
+            features = data['features']
+            
+            # Calculate individual feature matches
+            tempo_match = 1 - min(abs(target_features['tempo'] - features['tempo']) / 100, 1)
+            energy_match = 1 - abs(target_features['energy'] - features['energy'])
+            mood_match = 1 - abs(target_features['valence'] - features['valence'])
+            dance_match = 1 - abs(target_features['danceability'] - features['danceability'])
+            
+            # Calculate overall similarity as weighted average
+            overall_similarity = (
+                tempo_match * 0.25 +      # 25% weight on tempo
+                energy_match * 0.30 +     # 30% weight on energy
+                mood_match * 0.20 +       # 20% weight on mood
+                dance_match * 0.25        # 25% weight on danceability
+            )
+            weighted_similarities.append(overall_similarity)
+        
+        # Sort by weighted similarity
+        sorted_indices = np.argsort(weighted_similarities)[::-1][:request.limit]
               
 
         # Step 7: Build response with detailed feature matching
@@ -2182,13 +2219,15 @@ async def compute_artist_similarity(request: ArtistSimilarityRequest):
             data = song_data[idx]
             song = data['song']
             features = data['features']
-            similarity = float(similarities[idx])
             
-            # Calculate individual feature matches
+            # Calculate individual feature matches (recalculate for display)
             tempo_match = 1 - min(abs(target_features['tempo'] - features['tempo']) / 100, 1)
             energy_match = 1 - abs(target_features['energy'] - features['energy'])
             mood_match = 1 - abs(target_features['valence'] - features['valence'])
             dance_match = 1 - abs(target_features['danceability'] - features['danceability'])
+            
+            # Use the pre-calculated weighted similarity
+            overall_similarity = weighted_similarities[idx]
             
             # Determine match reason based on closest features
             matches = [
@@ -2207,7 +2246,7 @@ async def compute_artist_similarity(request: ArtistSimilarityRequest):
                 artworkUrl100=song.artworkUrl100,
                 previewUrl=song.previewUrl,
                 trackPrice=song.trackPrice,
-                similarity_score=round(similarity, 4),
+                similarity_score=round(overall_similarity, 4),
                 tempo=features['tempo'],
                 energy=features['energy'],
                 valence=features['valence'],

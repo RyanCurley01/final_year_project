@@ -14,7 +14,7 @@ echo ""
 # Step 1: Rebuild audio-service container
 echo "📦 Step 1: Rebuilding audio-service container..."
 cd "$(dirname "$0")"
-docker compose -f docker-compose.services.yml up -d --build audio-service
+docker compose -f docker-compose.services.yml -p gamestore_services up -d --build audio-service
 echo "✅ Container rebuilt successfully"
 echo ""
 
