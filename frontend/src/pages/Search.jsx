@@ -660,18 +660,67 @@ const Search = () => {
     }
 
     // Helper function to update recommendations
-    const updateRecs = () => {
-      const features = audioFeaturesRef.current;
-      const rate = playbackRateRef.current;
-      
-      if (!features) return; // Don't update if no features available yet
-      
-      // Use the full recommendationPool (artist songs) instead of filtered search results
-      // This matches SimilarSongs/TopCharts behavior
-      const recs = findSimilarArtistSongs(activeSong, features, recommendationPool.length > 0 ? recommendationPool : songs, rate);
-      setRecommendations(recs);
-      setDisplayedFeatures(features);
-      setDisplayedPlaybackRate(rate);
+    const updateRecs = async () => {
+      try {
+        const apiBaseUrl = envConfig.getApiBaseUrl();
+        // Unified endpoint handles pool selection based on source
+        
+        const payload = {
+            source: 'search_component',
+            current_product_id: String(activeSong.trackId || activeSong.id),
+            preview_url: String(activeSong.previewUrl || activeSong.fileUrl || ''),
+            audio_features: audioFeaturesRef.current ? {
+                 tempo: Number(audioFeaturesRef.current.tempo),
+                 energy: Number(audioFeaturesRef.current.energy),
+                 valence: Number(audioFeaturesRef.current.valence),
+                 danceability: Number(audioFeaturesRef.current.danceability),
+                 acousticness: Number(audioFeaturesRef.current.acousticness),
+                 effective_tempo: audioFeaturesRef.current.tempo ? (Number(audioFeaturesRef.current.tempo) * Number(playbackRateRef.current || 1)) : null,
+                 playback_rate: Number(playbackRateRef.current || 1)
+            } : null,
+            limit: 5,
+            // Compare against top 15 results to prevent backend timeout from feature extraction
+            // Strict casting to prevent 422 errors
+            candidates: displayedSongs.slice(0, 15).map(s => ({
+                trackId: String(s.trackId || s.id || 0),
+                trackName: String(s.trackName || s.albumTitle || 'Unknown Track'),
+                artistName: String(s.artistName || 'Unknown Artist'),
+                collectionName: s.collectionName || s.albumTitle ? String(s.collectionName || s.albumTitle) : null,
+                artworkUrl100: s.artworkUrl100 || s.coverImage ? String(s.artworkUrl100 || s.coverImage) : null,
+                previewUrl: s.previewUrl || s.fileUrl ? String(s.previewUrl || s.fileUrl) : null
+                // Removed extra fields (price, genre, duration) to avoid validation errors if backend is stale
+            })),
+            limit: 5
+        };
+
+        console.log('[Search] Sending Unified Payload:', JSON.stringify(payload, null, 2));
+
+        const response = await fetch(`${apiBaseUrl}/api/audio/unified-recommendations`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(payload),
+          signal: AbortSignal.timeout(5000)
+        });
+
+        if (response.ok) {
+           const data = await response.json();
+           if (data.recommendations) {
+               setRecommendations(data.recommendations);
+           }
+           if (data.target_features) {
+               setDisplayedFeatures({
+                   tempo: data.target_features.tempo,
+                   energy: data.target_features.energy,
+                   valence: data.target_features.valence,
+                   danceability: data.target_features.danceability
+               });
+           }
+        }
+      } catch (err) {
+         // console.warn("ML Similarity update failed", err);
+      }
     };
 
     // Immediate update

@@ -420,17 +420,54 @@ const TopCharts = () => {
     }
 
     // Helper function to update recommendations
-    const updateRecs = () => {
-      const features = audioFeaturesRef.current;
-      const rate = playbackRateRef.current;
-      
-      if (!features) return; // Don't update if no features available yet
-      
-      // Use artist songs for recommendations (not library dbSongs)
-      const recs = findSimilarArtistSongs(activeSong, features, songs, rate);
-      setRecommendations(recs);
-      setDisplayedFeatures(features);
-      setDisplayedPlaybackRate(rate);
+    const updateRecs = async () => {
+      try {
+        const apiBaseUrl = envConfig.getApiBaseUrl();
+
+        const payload = {
+            source: 'top_charts',
+            current_product_id: String(activeSong.trackId || activeSong.id),
+            preview_url: String(activeSong.previewUrl || activeSong.fileUrl || ''),
+            audio_features: audioFeaturesRef.current ? {
+                 tempo: audioFeaturesRef.current.tempo ? parseFloat(audioFeaturesRef.current.tempo) : null,
+                 energy: audioFeaturesRef.current.energy ? parseFloat(audioFeaturesRef.current.energy) : null,
+                 valence: audioFeaturesRef.current.valence ? parseFloat(audioFeaturesRef.current.valence) : null,
+                 danceability: audioFeaturesRef.current.danceability ? parseFloat(audioFeaturesRef.current.danceability) : null,
+                 acousticness: audioFeaturesRef.current.acousticness ? parseFloat(audioFeaturesRef.current.acousticness) : null,
+                 effective_tempo: audioFeaturesRef.current.tempo ? (parseFloat(audioFeaturesRef.current.tempo) * parseFloat(playbackRateRef.current || 1)) : null,
+                 playback_rate: parseFloat(playbackRateRef.current || 1)
+            } : null,
+            limit: 5
+        };
+
+        console.log('[TopCharts] Sending Unified Payload:', JSON.stringify(payload, null, 2));
+
+        const response = await fetch(`${apiBaseUrl}/api/audio/unified-recommendations`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(payload),
+          signal: AbortSignal.timeout(5000)
+        });
+
+        if (response.ok) {
+           const data = await response.json();
+           if (data.recommendations) {
+               setRecommendations(data.recommendations);
+           }
+           if (data.target_features) {
+               setDisplayedFeatures({
+                   tempo: data.target_features.tempo,
+                   energy: data.target_features.energy,
+                   valence: data.target_features.valence,
+                   danceability: data.target_features.danceability
+               });
+           }
+        }
+      } catch (err) {
+         // console.warn("ML Similarity update failed", err);
+      }
     };
 
     // Immediate update
@@ -448,7 +485,7 @@ const TopCharts = () => {
         intervalRef.current = null;
       }
     };
-  }, [activeSong?.id, songs]);
+  }, [activeSong?.id, songs]); // Only restart loop if song effectively changes
 
   const filteredSongs = useMemo(() => {
     if (filter === 'all') return songs;

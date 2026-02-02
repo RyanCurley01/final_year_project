@@ -7,7 +7,7 @@ from typing import List, Optional
 class UserInteractionRequest(BaseModel):
     """Request to record a user interaction"""
     account_id: int
-    product_id: int
+    product_id: int | str
     interaction_type: str  # 'play', 'preview', 'pause', 'purchase', 'wishlist', 'view', 'click'
     duration_seconds: Optional[int] = None
     session_id: Optional[str] = None
@@ -22,6 +22,9 @@ class AudioFeatures(BaseModel):
     valence: Optional[float] = None
     acousticness: Optional[float] = None
 
+    class Config:
+        extra = 'ignore'
+
 class RealtimeRecommendationRequest(BaseModel):
     """Request for real-time audio similarity recommendations"""
     current_product_id: int
@@ -32,14 +35,32 @@ class RealtimeRecommendationRequest(BaseModel):
 
 class AudioSimilarityResult(BaseModel):
     """Single audio similarity result"""
-    product_id: int
+    product_id: int | str
     similarity_score: float
     tempo_match: float
     energy_match: float
     mood_match: float
     danceability_match: float
+    dance_match: Optional[float] = None # Alias for frontend compatibility
     genre_match: bool
     reason: str
+    
+    # Raw features (for frontend visualization)
+    tempo: Optional[float] = None
+    energy: Optional[float] = None
+    valence: Optional[float] = None
+    danceability: Optional[float] = None
+    acousticness: Optional[float] = None
+    instrumentalness: Optional[float] = None
+    speechiness: Optional[float] = None
+    
+    # Metadata fields
+    trackName: Optional[str] = None
+    artistName: Optional[str] = None
+    albumTitle: Optional[str] = None
+    collectionName: Optional[str] = None
+    artworkUrl100: Optional[str] = None
+    previewUrl: Optional[str] = None
 
 class ITunesSong(BaseModel):
     """iTunes song with extracted features"""
@@ -52,6 +73,27 @@ class ITunesSong(BaseModel):
     trackPrice: Optional[float] = None
     primaryGenreName: Optional[str] = None
     trackTimeMillis: Optional[int] = None
+
+class SearchSong(BaseModel):
+    """Generic song model for Search/Discover (handles Database IDs and iTunes IDs)"""
+    trackId: str | int  # Allow both string (e.g., 'db-1') and int IDs
+    trackName: str
+    artistName: str
+    collectionName: Optional[str] = None
+    artworkUrl100: Optional[str] = None
+    previewUrl: Optional[str] = None
+    trackPrice: Optional[float] = None
+    primaryGenreName: Optional[str] = None
+    trackTimeMillis: Optional[int] = None
+
+    class Config:
+        extra = 'ignore'
+
+class SearchSimilarityRequest(BaseModel):
+    """Request for finding similar songs in Search context"""
+    target_song: SearchSong
+    comparison_songs: List[SearchSong]
+    limit: int = 10
 
 class ArtistSimilarityRequest(BaseModel):
     """Request for finding similar songs from the same artist"""
@@ -81,3 +123,58 @@ class ArtistSimilarSong(BaseModel):
     dance_match: float
     match_reason: str
     ml_algorithm: str
+
+class SearchSimilarSong(BaseModel):
+    """Similar song for Search context with ML-computed similarity"""
+    trackId: str | int
+    trackName: str
+    artistName: str
+    collectionName: Optional[str] = None
+    artworkUrl100: Optional[str] = None
+    previewUrl: Optional[str] = None
+    trackPrice: Optional[float] = None
+    similarity_score: float
+    tempo: float
+    energy: float
+    valence: float
+    danceability: float
+    acousticness: float
+    tempo_match: float
+    energy_match: float
+    mood_match: float
+    dance_match: float
+    match_reason: str
+    ml_algorithm: str
+
+class UnifiedRecommendationRequest(BaseModel):
+    """
+    Unified request for recommendations from various parts of the application.
+    Handles logic for different sources (TopCharts, Discover, Search, etc.)
+    """
+    source: str  # 'top_charts', 'similar_songs', 'discover_page', 'search_component'
+    current_product_id: int | str
+    preview_url: Optional[str] = None
+    limit: int = 5
+    audio_features: Optional[AudioFeatures] = None
+    candidates: Optional[List[SearchSong]] = None
+
+class LibraryMatchRequest(BaseModel):
+    """Request to match external songs against the internal library (cached products)"""
+    candidates: List[SearchSong]
+    target_ids: Optional[List[int]] = None # Optional list of specific library IDs to compare against
+    limit: int = 50 # Max songs to process at once
+
+class LibraryMatchResult(BaseModel):
+    """Result of matching an external song to the library"""
+    input_track_id: str | int
+    matched_product_id: Optional[str | int] = None
+    similarity_score: float = 0.0
+    match_reason: Optional[str] = None
+    tempo_match: float = 0.0
+    energy_match: float = 0.0
+    mood_match: float = 0.0
+    dance_match: float = 0.0
+    matched_product_name: Optional[str] = None # Optional valid if cache supports it
+
+    class Config:
+        extra = 'ignore'

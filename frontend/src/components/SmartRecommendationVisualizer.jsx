@@ -84,18 +84,32 @@ const SmartRecommendationVisualizer = ({
       
       // Include playback rate for tempo-adjusted recommendations
       const adjustedFeatures = {
-        ...features,
-        effective_tempo: features.tempo ? features.tempo * rate : null,
-        playback_rate: rate
+         tempo: Number(features.tempo),
+         energy: Number(features.energy),
+         valence: Number(features.valence),
+         danceability: Number(features.danceability),
+         acousticness: Number(features.acousticness),
+         effective_tempo: features.tempo ? (Number(features.tempo) * rate) : null,
+         playback_rate: rate
       };
       
-      const response = await axios.post(`${envConfig.getApiBaseUrl()}/api/audio/realtime-recommendations`, {
-        current_product_id: productId,
-        audio_features: adjustedFeatures,
-        session_id: session,
-        limit: 5,
-        playback_rate: rate
-      });
+      // Determine source based on location
+      let source = 'discover_page'; // Default for Home/CustomerScreen
+      if (location.pathname.includes('/top-charts')) source = 'top_charts';
+      else if (location.pathname.includes('/similar-songs')) source = 'similar_songs';
+      else if (location.pathname.includes('/search')) source = 'search_component';
+      
+      const payload = {
+        source: source,
+        current_product_id: String(productId),
+        preview_url: String(product.previewUrl || product.fileUrl || product.hub?.actions?.[1]?.uri || ''),
+        audio_features: adjustedFeatures, // Already sanitized with Number() above
+        limit: 5
+      };
+
+      console.log('[Visualizer] Sending Unified Payload:', JSON.stringify(payload, null, 2));
+
+      const response = await axios.post(`${envConfig.getApiBaseUrl()}/api/audio/unified-recommendations`, payload);
 
       console.log("🎵 Backend Response (Recommendations):", response.data);
       

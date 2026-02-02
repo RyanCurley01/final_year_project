@@ -337,3 +337,12 @@ def classify_genre_from_features(tempo: float, energy: float, valence: float, da
             return "Calm"
         else:
             return "Balanced"
+
+async def extract_audio_features_from_preview_async(audio_url: str, track_id: int) -> Optional[Dict]:
+    """Async wrapper for extract_audio_features_from_preview"""
+    loop = asyncio.get_event_loop()
+    try:
+        return await loop.run_in_executor(executor, extract_audio_features_from_preview, audio_url, track_id)
+    except Exception as e:
+        console.log(f"Async extraction failed: {e}")
+        return None

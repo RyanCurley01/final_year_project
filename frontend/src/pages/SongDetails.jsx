@@ -2,11 +2,14 @@ import { useState, useEffect } from 'react';
 import { useParams, useLocation, useNavigate } from 'react-router-dom';
 import { useSelector, useDispatch } from 'react-redux';
 import { FaPauseCircle, FaPlayCircle, FaArrowLeft, FaMusic } from 'react-icons/fa';
+import { useRef } from 'react';
 
 import { setActiveSong, playPause } from '../redux/features/playerSlice';
 import Loader from '../components/Loader';
 import AudioReactiveVideo from '../components/AudioReactiveVideo';
 import envConfig from '../config/environment';
+import { productService } from '../redux/services';
+import { useAudioFeatures } from '../context/AudioFeaturesContext';
 
 // Fallback image for missing album art
 const fallbackImage = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="250" height="250" viewBox="0 0 250 250"><rect width="250" height="250" fill="#374151"/><circle cx="125" cy="125" r="80" fill="#4B5563"/><circle cx="125" cy="125" r="30" fill="#374151"/><circle cx="125" cy="125" r="10" fill="#6B7280"/></svg>');
@@ -175,7 +178,9 @@ const SongDetails = () => {
   const { songid } = useParams();
   const location = useLocation();
   const { activeSong, isPlaying, playbackRate } = useSelector((state) => state.player);
-  
+  const { audioFeatures } = useAudioFeatures();
+  const audioFeaturesRef = useRef(audioFeatures);
+  audioFeaturesRef.current = audioFeatures;
   // State
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -194,19 +199,44 @@ const SongDetails = () => {
       
       try {
         // Get song data from location state (passed from SimilarSongs/TopCharts/Discover)
-        const songData = location.state?.song;
+        let songData = location.state?.song;
+        
+        // If no state (direct navigation), fetch from API
+        if (!songData && songid) {
+           try {
+              // Use hardcoded auth for demo
+              const fetchedSong = await productService.getProductById(songid, 'john.smith@store.com', 'password');
+              if (fetchedSong) {
+                  // Normalize DB product to Song format
+                  songData = {
+                      id: fetchedSong.productId,
+                      trackId: fetchedSong.productId,
+                      trackName: fetchedSong.albumTitle,
+                      artistName: fetchedSong.artistName,
+                      collectionName: fetchedSong.albumTitle,
+                      artworkUrl100: fetchedSong.albumCoverImageUrl,
+                      previewUrl: fetchedSong.fileUrl,
+                      fileUrl: fetchedSong.fileUrl,
+                      price: fetchedSong.albumPrice,
+                      source: 'database'
+                  };
+              }
+           } catch (e) {
+               console.warn("Failed to fetch song by ID:", e);
+           }
+        }
+        
         const allArtistSongsData = location.state?.artistSongs || [];
         const fromDiscover = location.state?.fromDiscover || false;
         
         if (!songData) {
-          setError('Song data not found. Please navigate from the Similar Songs, Top Charts, or Discover page.');
+          setError('Song not found.');
           setLoading(false);
           return;
         }
         
         setTargetSong(songData);
         
-        // If coming from Discover page, use provided songs for similarity
         if (fromDiscover) {
           // Filter out zip files and non-audio content
           const validSongs = allArtistSongsData.filter(s => {
@@ -223,7 +253,7 @@ const SongDetails = () => {
           } else {
             console.log("Skipping ML similarity: Target is not audio or no valid comparison songs");
             setLoading(false);
-            if (!isTargetAudio) {
+             if (!isTargetAudio) {
                  setError('ML Similarity not available for non-audio (ZIP) content.');
             } else {
                  setError('No other songs available for comparison.');
@@ -249,13 +279,18 @@ const SongDetails = () => {
           if (filteredArtistSongs.length > 0 && isTargetAudio) {
             await computeMLSimilarity(songData, filteredArtistSongs);
           } else {
-            console.log("Skipping ML similarity: Target is not audio or no valid comparison songs");
-            setLoading(false);
-            if (!isTargetAudio) {
-                setError('ML Similarity not available for non-audio (ZIP) content.');
-            } else {
-                setError('No other songs from this artist available for comparison.');
-            }
+             // If no context, just try to get features for the target song
+             if (isTargetAudio) {
+                 await computeMLSimilarity(songData, []);
+             } else {
+                 console.log("Skipping ML similarity: Target is not audio");
+                 setLoading(false);
+                 if (!isTargetAudio) {
+                     setError('ML Similarity not available for non-audio (ZIP) content.');
+                 } else {
+                     setError('No other songs from this artist available for comparison.');
+                 }
+             }
           }
         }
       } catch (err) {
@@ -268,87 +303,101 @@ const SongDetails = () => {
     initializePage();
   }, [songid, location.state]);
 
+  // Real-time update loop
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const liveFeatures = audioFeaturesRef.current;
+      
+      // Only update if we are playing the song that is being displayed
+      const isCurrentSongActive = activeSong && targetSong && (
+          String(activeSong.trackId || activeSong.id) === String(targetSong.trackId || targetSong.id)
+      );
+      
+      if (isPlaying && isCurrentSongActive && liveFeatures && targetSong && artistSongs.length > 0) {
+        // Prepare adjusted features
+        const featuresToSend = {
+             tempo: Number(liveFeatures.tempo),
+             energy: Number(liveFeatures.energy),
+             valence: Number(liveFeatures.valence),
+             danceability: Number(liveFeatures.danceability),
+             acousticness: Number(liveFeatures.acousticness),
+        };
+
+        computeMLSimilarity(targetSong, artistSongs, featuresToSend).catch(err => {
+            console.warn("[SongDetails] Real-time update failed:", err);
+        });
+      }
+    }, 3000);
+
+    return () => clearInterval(interval);
+  }, [isPlaying, activeSong, targetSong, artistSongs]);
+
   // Compute ML similarity using the backend
-  const computeMLSimilarity = async (targetSong, artistSongs) => {
+  const computeMLSimilarity = async (targetSong, comparisonSongs, overrideFeatures = null) => {
     const apiBaseUrl = envConfig.getApiBaseUrl();
     
     try {
-      const response = await fetch(`${apiBaseUrl}/api/ml/artist-similarity`, {
+      // Use Unified Endpoint instead of legacy search-similarity
+      
+      const payload = {
+          source: 'search_component', // Use search mode to enable candidates comparison
+          current_product_id: String(targetSong.trackId || targetSong.id),
+          preview_url: String(targetSong.previewUrl || targetSong.fileUrl || ''),
+          limit: 50,
+          audio_features: overrideFeatures, // Pass live features if available
+          // Map comparison songs to 'candidates'
+          candidates: comparisonSongs.map(song => ({
+            trackId: String(song.trackId || song.id || 0),
+            trackName: String(song.trackName || song.albumTitle || 'Unknown Track'),
+            artistName: String(song.artistName || 'Unknown Artist'),
+            collectionName: song.collectionName || song.albumTitle ? String(song.collectionName || song.albumTitle) : null,
+            artworkUrl100: song.artworkUrl100 || song.albumCoverImageUrl ? String(song.artworkUrl100 || song.albumCoverImageUrl) : null,
+            previewUrl: song.previewUrl || song.fileUrl ? String(song.previewUrl || song.fileUrl) : null
+          }))
+      };
+
+      // Only log if not an update loop to avoid spam
+      if (!overrideFeatures) {
+         console.log('[SongDetails] Sending Unified Payload:', JSON.stringify(payload, null, 2));
+      }
+
+      const response = await fetch(`${apiBaseUrl}/api/audio/unified-recommendations`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          artist_name: targetSong.artistName,
-          target_song: {
-            trackId: targetSong.trackId || targetSong.id,
-            trackName: targetSong.trackName || targetSong.albumTitle,
-            artistName: targetSong.artistName,
-            collectionName: targetSong.collectionName,
-            artworkUrl100: targetSong.artworkUrl100,
-            previewUrl: targetSong.previewUrl || targetSong.fileUrl,
-            trackPrice: targetSong.price || targetSong.trackPrice,
-            primaryGenreName: targetSong.primaryGenreName || 'Electronic',
-            trackTimeMillis: targetSong.trackTimeMillis
-          },
-          artist_songs: artistSongs.slice(0, 5).map(song => ({
-            trackId: song.trackId || song.id,
-            trackName: song.trackName || song.albumTitle,
-            artistName: song.artistName,
-            collectionName: song.collectionName,
-            artworkUrl100: song.artworkUrl100,
-            previewUrl: song.previewUrl || song.fileUrl,
-            trackPrice: song.price || song.trackPrice,
-            primaryGenreName: song.primaryGenreName || 'Electronic',
-            trackTimeMillis: song.trackTimeMillis
-          })),
-          limit: 5 // Reduced from 20 to 5 for faster results
-        }),
-        // Reduce timeout to 30 seconds - should be instant with database cache
-        signal: AbortSignal.timeout(30000)
+        body: JSON.stringify(payload)
       });
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.detail || `ML service returned ${response.status}`);
-      }
-
-      if (!response.ok) {
-        throw new Error(`ML service returned ${response.status}`);
+        throw new Error(`ML Service Error: ${response.status}`);
       }
 
       const data = await response.json();
-      console.log("🎵 ML Similarity Response:", data);
-
-      if (data.model_metrics) {
-        console.log("🧪 Model Selection Scores (Artist Similarity):", data.model_metrics);
+      
+      if (data.status === 'success') {
+        // Backend returns "recommendations" which are the scored candidates
+        setSimilarSongs(data.recommendations || []);
+        
+        // It also returns "target_features" (or source_features)
+        if (data.source_features) {
+            setTargetFeatures(data.source_features);
+            
+            // Construct ML info for display
+            setMlInfo({
+                algorithm: "Hybrid Audio Analysis",
+                features: data.source_features
+            });
+        }
+      } else {
+        throw new Error(data.message || 'Failed to analyze songs');
       }
-      
-      // Set target features from the response
-      if (data.target_song) {
-        setTargetFeatures({
-          tempo: data.target_song.tempo,
-          energy: data.target_song.energy,
-          valence: data.target_song.valence,
-          danceability: data.target_song.danceability,
-          acousticness: data.target_song.acousticness
-        });
-      }
-      
-      // Set ML info
-      setMlInfo({
-        algorithm: data.algorithm,
-        normalization: data.normalization,
-        features_used: data.features_used,
-        songs_analyzed: data.artist_songs_analyzed
-      });
-      
-      // Set similar songs
-      setSimilarSongs(data.similar_songs || []);
-      
     } catch (err) {
-      console.error('ML similarity computation failed:', err);
-      setError(err.message);
+      console.error('ML Similarity error:', err);
+      // Don't set global error if just ML fails, allow basic display
+      if (!targetFeatures) {
+         // Fallback if we completely failed
+      }
     } finally {
       setLoading(false);
     }

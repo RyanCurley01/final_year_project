@@ -9,8 +9,6 @@ import { productService } from '../redux/services';
 import { FaPauseCircle, FaPlayCircle } from 'react-icons/fa';
 import envConfig from '../config/environment';
 
-import { calculateSimilarity } from '../utils/audioSimilarity';
-
 const ARTISTS = ['Aphex Twin', 'Boards of Canada', 'Squarepusher'];
 
 const getArtistBadgeColor = (artist) => {
@@ -190,6 +188,7 @@ const SongCard = ({ song, isPlaying, activeSong, onPlay, onPause, index, allSong
 
 const SimilarSongs = () => {
   const [loading, setLoading] = useState(true);
+  const [analyzing, setAnalyzing] = useState(false);
   const [songs, setSongs] = useState([]);
   const [dbSongs, setDbSongs] = useState([]);
   const [filter, setFilter] = useState('all');
@@ -198,9 +197,9 @@ const SimilarSongs = () => {
   const [recLoading, setRecLoading] = useState(false);
   const [displayedFeatures, setDisplayedFeatures] = useState(null);
   const [displayedPlaybackRate, setDisplayedPlaybackRate] = useState(1);
-  const [cachedAudioFeatures, setCachedAudioFeatures] = useState({});
   
   const intervalRef = useRef(null);
+  const matchStartedRef = useRef(false);
   const dispatch = useDispatch();
   const navigate = useNavigate();
   const { activeSong, isPlaying, playbackRate } = useSelector((state) => state.player);
@@ -216,113 +215,6 @@ const SimilarSongs = () => {
 
   const email = 'john.smith@store.com';
   const password = 'password';
-
-  // Find similar artist songs based on audio features (local matching)
-  // Uses REAL cached audio features from database when available, NO pseudo-features
-  const findSimilarArtistSongs = (currentSong, features, allSongs, rate = 1) => {
-    if (!currentSong || !features || !allSongs.length) return [];
-    
-    // Filter out current song
-    const otherSongs = allSongs.filter(s => s.id !== currentSong.id);
-    
-    const scoredSongs = otherSongs.map(song => {
-      // Try to get REAL cached audio features from database
-      const songIdStr = String(song.id);
-      const negativeIdStr = String(-Math.abs(song.id)); // Artist songs use negative IDs in database
-      const cached = cachedAudioFeatures[songIdStr] || cachedAudioFeatures[negativeIdStr];
-      
-      let similarityScore = null;
-      let usingRealFeatures = false;
-      let songTempo = null;
-      let songEnergy = null;
-      let songValence = null;
-      let songDanceability = null;
-
-      let tempoMatch = null;
-      let energyMatch = null;
-      let moodMatch = null;
-      let danceMatch = null;
-      
-      if (cached) {
-        // Use REAL extracted audio features from AudioFeatures table
-        usingRealFeatures = true;
-        songTempo = cached.tempo || 120;
-        songEnergy = cached.energy || 0.5;
-        songValence = cached.valence || 0.5;
-        songDanceability = cached.danceability || 0.5;
-        
-        // Calculate similarity using consistent utility
-        similarityScore = calculateSimilarity(features, cached, rate);
-        
-        // Calculate match details for display
-        const effectiveTempo = features.effective_tempo || (features.tempo * rate);
-        const currentEnergy = features.energy || 0.5;
-        const currentValence = features.valence || 0.5;
-        const currentDanceability = features.danceability || 0.5;
-
-        tempoMatch = Math.min(effectiveTempo, songTempo) / Math.max(effectiveTempo, songTempo);
-        energyMatch = Math.max(0, 1 - Math.abs(currentEnergy - songEnergy));
-        moodMatch = Math.max(0, 1 - Math.abs(currentValence - songValence));
-        danceMatch = Math.max(0, 1 - Math.abs(currentDanceability - songDanceability));
-      }
-      
-      // Generate contextual reason based on dominant feature - only if we have a match
-      let matchReason = null;
-      if (similarityScore !== null) {
-          const dominantFeature = [
-            ['tempo', tempoMatch],
-            ['energy', energyMatch],
-            ['mood', moodMatch]
-          ].reduce((max, curr) => curr[1] > max[1] ? curr : max);
-          
-          if (dominantFeature[0] === 'tempo') {
-            matchReason = `Matching rhythm (${Math.round(songTempo)} BPM)`;
-          } else if (dominantFeature[0] === 'energy') {
-            matchReason = `Similar intensity (${(songEnergy * 100).toFixed(0)}%)`;
-          } else {
-            matchReason = 'Comparable mood';
-          }
-      }
-      
-      return {
-        ...song,
-        tempo_match: tempoMatch,
-        energy_match: energyMatch,
-        mood_match: moodMatch,
-        dance_match: danceMatch,
-        similarity: similarityScore, // Use standard property name
-        similarity_score: similarityScore,
-        match_reason: matchReason,
-        using_real_features: usingRealFeatures,
-        audio_features: usingRealFeatures ? { tempo: songTempo, energy: songEnergy, valence: songValence, danceability: songDanceability } : null
-      };
-    });
-    
-    // Sort by similarity and return top 5
-    return scoredSongs
-      .filter(s => s.similarity !== null)
-      .sort((a, b) => b.similarity - a.similarity)
-      .slice(0, 5);
-  };
-
-  // Fetch cached audio features from backend (real extracted features from AudioFeatures table)
-  useEffect(() => {
-    const fetchCachedFeatures = async () => {
-      try {
-        const audioApiUrl = envConfig.getApiBaseUrl();
-        const response = await fetch(`${audioApiUrl}/api/audio/cached-features?artist_only=false`);
-        if (response.ok) {
-          const data = await response.json();
-          // Backend returns a dictionary/object mapped by ID, use it directly
-          setCachedAudioFeatures(data.features);
-          console.log(`[SimilarSongs] Loaded ${data.count} cached audio features for artist songs`);
-        }
-      } catch (err) {
-        console.warn('[SimilarSongs] Could not fetch cached audio features:', err.message);
-      }
-    };
-    fetchCachedFeatures();
-  }, []);
 
   // Initial data fetch
   useEffect(() => {   
@@ -436,17 +328,54 @@ const SimilarSongs = () => {
     }
 
     // Helper function to update recommendations
-    const updateRecs = () => {
-      const features = audioFeaturesRef.current;
-      const rate = playbackRateRef.current;
-      
-      if (!features) return; // Don't update if no features available yet
-      
-      // Use artist songs for recommendations (not library dbSongs)
-      const recs = findSimilarArtistSongs(activeSong, features, songs, rate);
-      setRecommendations(recs);
-      setDisplayedFeatures(features);
-      setDisplayedPlaybackRate(rate);
+    const updateRecs = async () => {
+      try {
+        const apiBaseUrl = envConfig.getApiBaseUrl();
+
+        const payload = {
+            source: 'similar_songs',
+            current_product_id: String(activeSong.trackId || activeSong.id),
+            preview_url: String(activeSong.previewUrl || activeSong.fileUrl || ''),
+            audio_features: audioFeaturesRef.current ? {
+                 tempo: audioFeaturesRef.current.tempo ? parseFloat(audioFeaturesRef.current.tempo) : null,
+                 energy: audioFeaturesRef.current.energy ? parseFloat(audioFeaturesRef.current.energy) : null,
+                 valence: audioFeaturesRef.current.valence ? parseFloat(audioFeaturesRef.current.valence) : null,
+                 danceability: audioFeaturesRef.current.danceability ? parseFloat(audioFeaturesRef.current.danceability) : null,
+                 acousticness: audioFeaturesRef.current.acousticness ? parseFloat(audioFeaturesRef.current.acousticness) : null,
+                 effective_tempo: audioFeaturesRef.current.tempo ? (parseFloat(audioFeaturesRef.current.tempo) * parseFloat(playbackRateRef.current || 1)) : null,
+                 playback_rate: parseFloat(playbackRateRef.current || 1)
+            } : null,
+            limit: 5
+        };
+
+        console.log('[SimilarSongs] Sending Unified Payload:', JSON.stringify(payload, null, 2));
+
+        const response = await fetch(`${apiBaseUrl}/api/audio/unified-recommendations`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(payload),
+          signal: AbortSignal.timeout(5000)
+        });
+
+        if (response.ok) {
+           const data = await response.json();
+           if (data.recommendations) {
+               setRecommendations(data.recommendations);
+           }
+           if (data.target_features) {
+               setDisplayedFeatures({
+                   tempo: data.target_features.tempo,
+                   energy: data.target_features.energy,
+                   valence: data.target_features.valence,
+                   danceability: data.target_features.danceability
+               });
+           }
+        }
+      } catch (err) {
+         // console.warn("ML Similarity update failed", err);
+      }
     };
 
     // Immediate update
@@ -466,62 +395,97 @@ const SimilarSongs = () => {
     };
   }, [activeSong?.id, songs]);
 
-  // Match iTunes songs to Library songs once features are loaded
+  // Match iTunes songs to Library songs using New Bulk Endpoint
   useEffect(() => {
-    // Need songs, dbSongs and cached features to proceed
-    if (songs.length === 0 || dbSongs.length === 0 || Object.keys(cachedAudioFeatures).length === 0) return;
+    // Need songs and dbSongs to proceed
+    if (loading || songs.length === 0 || dbSongs.length === 0) return;
     
-    // Check if we already did matching to avoid infinite loop (check first song)
-    if (songs[0].matchedDbSong !== undefined) return;
+    // Check if we already started matching to avoid infinite loop
+    if (matchStartedRef.current) return;
 
-    console.log('[SimilarSongs] Matching iTunes songs to Library using REAL ML features...');
-    
-    const matchedSongs = songs.map(song => {
-      // Get features for this iTunes song (try various ID formats)
-      // iTunes songs often use negative IDs in our features DB or just the trackId
-      const songIdStr = String(song.id);
-      const negativeIdStr = String(-Math.abs(song.id));
-      const features = cachedAudioFeatures[songIdStr] || cachedAudioFeatures[negativeIdStr];
-      
-      let bestMatch = null;
-      let bestScore = 0;
+    matchStartedRef.current = true;
+    setAnalyzing(true);
 
-      // If we have features, try to find a real match
-      if (features) {
-        // Find closest match in dbSongs
-        dbSongs.forEach(dbSong => {
-          const dbIdStr = String(dbSong.id);
-          const dbFeatures = cachedAudioFeatures[dbIdStr] || cachedAudioFeatures[String(-Math.abs(dbSong.id))];
-          
-          if (dbFeatures) {
-            const score = calculateSimilarity(features, dbFeatures);
-            if (score > bestScore) {
-              bestScore = score;
-              bestMatch = dbSong;
-            }
-          }
-        });
-      }
+    const matchSongsUsingBulkEndpoint = async () => {
+        const apiBaseUrl = envConfig.getApiBaseUrl();
+        console.log(`[SimilarSongs] Matching ${songs.length} iTunes songs to Library using Bulk Match...`);
+        
+        // Split songs into smaller batches to allow for on-the-fly feature extraction
+        const BATCH_SIZE = 10; 
+        const batches = [];
+        for (let i = 0; i < songs.length; i += BATCH_SIZE) {
+            batches.push(songs.slice(i, i + BATCH_SIZE));
+        }
 
-      // Only show score if we have real features and a real match
-      if (bestMatch && bestScore > 0) {
-        return {
-          ...song,
-          matchedDbSong: bestMatch,
-          similarity: bestScore
-        };
-      } else {
-        // No features available - don't show score or match
-        return {
-          ...song,
-          matchedDbSong: null,
-          similarity: null
-        };
-      }
-    });
+        // Limit DB songs IDs to send to backend (ensure we compare against exactly these 47)
+        const targetIds = dbSongs.map(s => s.id);
 
-    setSongs(matchedSongs);
-  }, [dbSongs, cachedAudioFeatures, songs]);
+        for (const batch of batches) {
+             const payload = {
+                candidates: batch.map(s => ({
+                    trackId: String(s.trackId || s.id),
+                    trackName: String(s.trackName || s.albumTitle || 'Unknown'),
+                    artistName: String(s.artistName),
+                    previewUrl: String(s.previewUrl || s.fileUrl || '')
+                })),
+                target_ids: targetIds,
+                limit: BATCH_SIZE
+             };
+             
+             try {
+                const response = await fetch(`${apiBaseUrl}/api/audio/match-library`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(payload)
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    const matches = data.matches || [];
+                    
+                    if (matches.length > 0) {
+                        setSongs(currentSongs => {
+                            const newSongs = [...currentSongs];
+                            let updated = false;
+                            
+                            matches.forEach(match => {
+                                const index = newSongs.findIndex(s => String(s.trackId || s.id) === String(match.input_track_id));
+                                if (index !== -1) {
+                                    newSongs[index] = {
+                                        ...newSongs[index],
+                                        similarity: match.similarity_score,
+                                        similarity_score: match.similarity_score,
+                                        match_reason: match.match_reason,
+                                        tempo_match: match.tempo_match,
+                                        energy_match: match.energy_match,
+                                        mood_match: match.mood_match,
+                                        dance_match: match.dance_match,
+                                        matchedDbSong: {
+                                            id: match.matched_product_id,
+                                            albumTitle: match.matched_product_name || `Track ${match.matched_product_id}`
+                                        }
+                                    };
+                                    updated = true;
+                                }
+                            });
+                            
+                            return updated ? newSongs : currentSongs;
+                        });
+                    }
+                }
+             } catch (e) {
+                 console.warn("Bulk match failed", e);
+             }
+             
+             // Tiny delay
+             await new Promise(r => setTimeout(r, 50));
+        }
+        
+        setAnalyzing(false);
+    };
+
+    matchSongsUsingBulkEndpoint();
+  }, [loading, dbSongs.length, songs.length]);
 
   // Filter songs and shuffle selection for variety, then sort by similarity
   const filteredSongs = useMemo(() => {
@@ -580,14 +544,40 @@ const SimilarSongs = () => {
 
   // Handle clicking on a recommended artist song
   const handleRecommendationClick = (song) => {
-    if (song?.fileUrl) {
-      const index = songs.findIndex(s => s.id === song.id);
-      dispatch(setActiveSong({ song, data: songs, i: index }));
+    // Backend result uses 'product_id' and 'previewUrl', map to player format
+    const songToPlay = {
+        ...song,
+        id: song.product_id || song.id,
+        trackId: song.product_id || song.id,
+        fileUrl: song.previewUrl || song.fileUrl,
+        artworkUrl100: song.artworkUrl100 || song.albumCoverImageUrl,
+        trackName: song.trackName || 'Unknown Track',
+        // Ensure albumTitle is present for MusicPlayer visibility check
+        albumTitle: song.albumTitle || song.collectionName || song.trackName || 'Single',
+        artistName: song.artistName || 'Unknown Artist'
+    };
+
+    if (songToPlay.fileUrl) {
+      // Find index in current list if possible, otherwise use new list
+      let index = songs.findIndex(s => String(s.id) === String(songToPlay.id));
+      
+      // If the song is not in the current 'songs' list (e.g. it's a library recommendation)
+      // we play it as a single song or append to list logic. 
+      // For now, simpler to just play it.
+      
+      dispatch(setActiveSong({ 
+          song: songToPlay, 
+          data: index !== -1 ? songs : [songToPlay], 
+          i: index !== -1 ? index : 0 
+      }));
       dispatch(playPause(true));
+    } else {
+        console.warn("Cannot play recommendation: No preview URL", song);
     }
   };
 
   if (loading) return <Loader title="Finding similar songs from iTunes..." />;
+  // if (analyzing) return <Loader title="Analyzing audio features & matching to library..." />;
   
   if (error) {
     return (
@@ -607,7 +597,15 @@ const SimilarSongs = () => {
         <div className="mb-4 sm:mb-6">
           <h1 className="font-bold text-xl sm:text-2xl md:text-3xl text-white mb-2">Similar Track Information</h1>
           <p className="text-gray-400">Aphex Twin, Squarepusher and Boards of Canada songs matched to the {dbSongs.length} library tracks using ML-based cosine similarity on audio features (tempo, energy, valence, danceability)</p>
-          <p className="text-xs text-cyan-400 mt-1">Powered by ML Audio Similarity • {songs.length} artist tracks with 30s previews • Industry-standard feature extraction</p>
+          <div className="flex flex-col sm:flex-row gap-2 mt-1">
+            <p className="text-xs text-cyan-400">Powered by ML Audio Similarity • {songs.length} artist tracks with 30s previews • Industry-standard feature extraction</p>
+            {analyzing && (
+                <div className="flex items-center gap-2">
+                    <div className="w-3 h-3 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin"></div>
+                    <span className="text-xs text-yellow-500 font-semibold animate-pulse">Analyzing audio & matching... scores update live</span>
+                </div>
+            )}
+          </div>
         </div>
 
         <div className="mb-6 flex flex-wrap gap-3">

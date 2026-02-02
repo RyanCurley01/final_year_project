@@ -99,20 +99,38 @@ async def record_interaction(interaction: UserInteractionRequest):
                         (AccountID, ProductID, InteractionType, DurationSeconds, SessionID)
                         VALUES (%s, %s, %s, %s, %s)
                     """
-                    cursor.execute(sql, (
-                        interaction.account_id,
-                        interaction.product_id,
-                        interaction.interaction_type,
-                        interaction.duration_seconds,
-                        interaction.session_id
-                    ))
-                    conn.commit()
+                    real_product_id = interaction.product_id
                     
-                    return {
-                        "status": "success",
-                        "message": f"Recorded {interaction.interaction_type} interaction for product {interaction.product_id}",
-                        "interaction_id": cursor.lastrowid
-                    }
+                    # If product_id is a string or looks like an iTunes ID, try to convert to int if possible.
+                    # If it's strictly a string (like 'db-1'), we need to extract the ID.
+                    try:
+                        real_product_id = int(str(interaction.product_id).replace('db-', ''))
+                    except ValueError:
+                        # If we can't convert to an int (e.g. some complex string), we can't record it in our SQL table
+                        # Return success to not crash the frontend
+                        return {"status": "ignored", "message": "Skipped recording interaction for non-integer ProductID"}
+
+                    # Execute the insertion
+                    # We wrap in try-except specifically for foreign key constraints in case the product doesn't exist
+                    try:
+                        cursor.execute(sql, (
+                            interaction.account_id,
+                            real_product_id,
+                            interaction.interaction_type,
+                            interaction.duration_seconds,
+                            interaction.session_id
+                        ))
+                        conn.commit()
+                        return {
+                            "status": "success",
+                            "message": f"Recorded {interaction.interaction_type} interaction for product {real_product_id}",
+                            "interaction_id": cursor.lastrowid
+                        }
+                    except Exception as db_err:
+                         # Foreign key constraint fails or other DB error
+                        console.log(f"Skipping interaction insert (likely FK violation): {db_err}")
+                        return {"status": "ignored", "message": "Product not found in database"}
+
             else:
                 raise HTTPException(status_code=503, detail="Database connection unavailable")
     except Exception as e:
