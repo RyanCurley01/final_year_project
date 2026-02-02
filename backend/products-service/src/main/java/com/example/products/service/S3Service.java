@@ -66,6 +66,12 @@ public class S3Service {
                 return s3Url; // Return original URL if presigner failed to initialize
             }
 
+            // Check if this is an S3 URL before trying to process it
+            // This prevents error logs for external URLs (like iTunes previews)
+            if (!s3Url.contains(".amazonaws.com/")) {
+                return s3Url;
+            }
+
             // Extract the key from the S3 URL
             String key = extractKeyFromUrl(s3Url);
             
