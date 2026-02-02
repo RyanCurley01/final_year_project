@@ -747,7 +747,7 @@ const SimilarSongs = () => {
                           </span>
                         </div>
                         <p className="text-xs text-gray-300 truncate font-medium">{rec.artistName}</p>
-                        <p className="text-xs text-gray-400 truncate">{rec.match_reason}</p>
+                        <p className="text-xs text-gray-400 truncate">{rec.reason || rec.match_reason}</p>
                         
                         {/* Feature Matches */}
                         <div className="flex gap-1 mt-1 flex-wrap">

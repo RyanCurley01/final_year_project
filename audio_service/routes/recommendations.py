@@ -2,11 +2,12 @@
 from fastapi import APIRouter, HTTPException
 from typing import List, Optional, Dict
 import asyncio
+import httpx
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
 
 from utils import console
-from config import executor
+from config import executor, ITUNES_API_BASE_URL
 from database import get_db_connection
 from models import (
     RealtimeRecommendationRequest, 
@@ -455,28 +456,32 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
         
         top_recommendations = recommendations[:request.limit]
         
-        # 5. Hydrate Data from Database for Cached Items
+        # 5. Hydrate Data from Database and iTunes for Cached Items
         missing_meta_ids = [r for r in top_recommendations if not r.trackName]
         
         if missing_meta_ids:
              try:
-                 safe_ids = []
+                 # Split IDs into DB (positive) and iTunes (negative)
+                 db_ids = []
+                 itunes_ids = []
+                 
                  for r in missing_meta_ids:
                       try:
-                           safe_ids.append(int(r.product_id))
+                           pid_int = int(r.product_id)
+                           if pid_int > 0:
+                               db_ids.append(pid_int)
+                           elif pid_int < 0:
+                               itunes_ids.append(abs(pid_int))
                       except:
                            pass
                            
-                 if safe_ids:
-                     id_string = ",".join(str(i) for i in safe_ids)
-                     
+                 # A. Hydrate DB Songs
+                 if db_ids:
+                     id_string = ",".join(str(i) for i in db_ids)
                      with get_db_connection() as conn:
                          if conn:
                              with conn.cursor() as cursor:
-                                 # Fetch both AlbumTitle (for name) and GameTitle/Title if available
-                                 # We assume 'AlbumTitle' holds the display name for iTunes imports
-                                 # For products, we might need to check if AlbumTitle is used or something else
-                                 # Let's try to fetch multiple fields
+                                 # Fetch standard columns (ArtistName not in DB)
                                  sql = f"""
                                     SELECT ProductID, AlbumTitle, albumCoverImageUrl, preview_url
                                     FROM Products 
@@ -493,14 +498,45 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
                                      try: pid_int = int(r.product_id)
                                      except: pass
                                      
-                                     if pid_int in meta_map:
+                                     if pid_int > 0 and pid_int in meta_map:
                                          data = meta_map[pid_int]
                                          # Prefer AlbumTitle, fallback to ID if completely missing
                                          r.trackName = data.get('AlbumTitle') or f"Track {r.product_id}"
                                          r.artworkUrl100 = data.get('albumCoverImageUrl')
                                          r.previewUrl = data.get('preview_url')
-                                         if not r.artistName:
-                                             r.artistName = "Library Song" if pid_int > 0 else "Artist"
+                                         if not r.artistName or r.artistName == "Artist":
+                                             r.artistName = "Library Artist"
+
+                 # B. Hydrate iTunes Songs via Lookup API
+                 if itunes_ids:
+                     # Limit lookup batch size
+                     lookup_ids = ",".join(str(i) for i in itunes_ids[:50])
+                     itunes_map = {}
+                     
+                     try:
+                         async with httpx.AsyncClient(timeout=5.0) as client:
+                             # Lookup original metadata including Artist
+                             resp = await client.get(f"{ITUNES_API_BASE_URL}/lookup", params={"id": lookup_ids})
+                             if resp.status_code == 200:
+                                 results = resp.json().get('results', [])
+                                 for item in results:
+                                     # Map by negative ID (our internal ID)
+                                     itunes_map[-item['trackId']] = item
+                     except Exception as ex:
+                         console.log(f"iTunes hydration failed: {ex}")
+
+                     for r in top_recommendations:
+                         try: pid_int = int(r.product_id)
+                         except: continue
+                         
+                         if pid_int < 0 and pid_int in itunes_map:
+                             data = itunes_map[pid_int]
+                             r.trackName = data.get('trackName')
+                             r.artistName = data.get('artistName') # Correct artist name from iTunes
+                             r.albumTitle = data.get('collectionName')
+                             r.artworkUrl100 = data.get('artworkUrl100')
+                             r.previewUrl = data.get('previewUrl')
+
              except Exception as rx:
                  console.log(f"Error hydrating metadata: {rx}")
         

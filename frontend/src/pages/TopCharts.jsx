@@ -532,10 +532,32 @@ const TopCharts = () => {
 
   // Handle clicking on a recommended artist song
   const handleRecommendationClick = (song) => {
-    if (song?.fileUrl) {
-      const index = songs.findIndex(s => s.id === song.id);
-      dispatch(setActiveSong({ song, data: songs, i: index }));
+    // Flatten backend result which might use 'product_id' or different naming
+    const songToPlay = {
+        ...song,
+        id: song.product_id || song.id,
+        trackId: song.product_id || song.id,
+        fileUrl: song.previewUrl || song.fileUrl,
+        artworkUrl100: song.artworkUrl100 || song.albumCoverImageUrl,
+        trackName: song.trackName || 'Unknown Track',
+        // Ensure albumTitle is present for MusicPlayer visibility check
+        albumTitle: song.albumTitle || song.collectionName || song.trackName || 'Single',
+        artistName: song.artistName || 'Unknown Artist'
+    };
+
+    if (songToPlay.fileUrl) {
+      // Try to find in current list
+      let index = songs.findIndex(s => String(s.id) === String(songToPlay.id));
+      
+      // If not in current list, play as single song context
+      dispatch(setActiveSong({ 
+          song: songToPlay, 
+          data: index !== -1 ? songs : [songToPlay], 
+          i: index !== -1 ? index : 0 
+      }));
       dispatch(playPause(true));
+    } else {
+        console.warn("Cannot play recommendation: No preview URL", song);
     }
   };
 
@@ -701,7 +723,7 @@ const TopCharts = () => {
                           </span>
                         </div>
                         <p className="text-xs text-gray-300 truncate font-medium">{rec.artistName}</p>
-                        <p className="text-xs text-gray-400 truncate">{rec.match_reason}</p>
+                        <p className="text-xs text-gray-400 truncate">{rec.reason || rec.match_reason}</p>
                         
                         {/* Feature Matches */}
                         <div className="flex gap-1 mt-1 flex-wrap">

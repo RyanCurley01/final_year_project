@@ -50,7 +50,8 @@ const FeatureBadge = ({ label, value }) => {
 
 // Similar Song Card Component
 const SimilarSongCard = ({ song, isPlaying, activeSong, onPlay, onPause, rank, playbackRate }) => {
-  const isThisSongActive = activeSong?.trackId === song.trackId || activeSong?.id === song.trackId;
+  const isThisSongActive = (activeSong?.trackId && String(activeSong.trackId) === String(song.trackId)) || 
+                           (activeSong?.id && String(activeSong.id) === String(song.trackId));
   const albumArt = song.artworkUrl100?.replace('100x100', '600x600') || song.albumCoverImageUrl || fallbackImage;
   const [isHovered, setIsHovered] = useState(false);
   
@@ -377,7 +378,15 @@ const SongDetails = () => {
       
       if (data.status === 'success') {
         // Backend returns "recommendations" which are the scored candidates
-        setSimilarSongs(data.recommendations || []);
+        // Filter out songs with 0 or negative similarity scores and map product_id to trackId
+        const validRecommendations = (data.recommendations || [])
+            .filter(song => song.similarity_score > 0)
+            .map(song => ({
+                ...song,
+                trackId: song.product_id,
+                id: song.product_id
+            }));
+        setSimilarSongs(validRecommendations);
         
         // It also returns "target_features" (or source_features)
         if (data.source_features) {

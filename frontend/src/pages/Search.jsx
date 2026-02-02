@@ -177,6 +177,7 @@ const SongCard = ({ song, isPlaying, activeSong, onPlay, onPause, index, onSongN
       </div>
 
       {/* Tempo Slider - shown only for videos when this song is active */}
+      {/* Playback bar commented out as per request
       {isVideo && isThisSongActive && (
         <div className="mt-2 px-2">
           <div className="flex items-center justify-between mb-1">
@@ -202,6 +203,7 @@ const SongCard = ({ song, isPlaying, activeSong, onPlay, onPause, index, onSongN
           </div>
         </div>
       )}
+      */}
 
       {/* Song Info - Different layout for database songs vs artist songs */}
       {song.source === 'database' ? (
@@ -646,7 +648,8 @@ const Search = () => {
     setSongs(matchedSongs);
   }, [dbSongs, cachedAudioFeatures, songs]);
 
-  // Single useEffect to handle all recommendation updates
+  // Single useEffect to handle all recommendation updates (Visualizer logic commented out)
+  /*
   useEffect(() => {
     // Clear any existing interval
     if (intervalRef.current) {
@@ -665,6 +668,9 @@ const Search = () => {
         const apiBaseUrl = envConfig.getApiBaseUrl();
         // Unified endpoint handles pool selection based on source
         
+        // Note: displayedSongs was likely intended to be filteredSongs or songs, check variable scope if restoring
+        const candidateSource = songs; // Fallback if displayedSongs was unavailable
+
         const payload = {
             source: 'search_component',
             current_product_id: String(activeSong.trackId || activeSong.id),
@@ -681,7 +687,7 @@ const Search = () => {
             limit: 5,
             // Compare against top 15 results to prevent backend timeout from feature extraction
             // Strict casting to prevent 422 errors
-            candidates: displayedSongs.slice(0, 15).map(s => ({
+            candidates: candidateSource.slice(0, 15).map(s => ({
                 trackId: String(s.trackId || s.id || 0),
                 trackName: String(s.trackName || s.albumTitle || 'Unknown Track'),
                 artistName: String(s.artistName || 'Unknown Artist'),
@@ -739,6 +745,7 @@ const Search = () => {
       }
     };
   }, [activeSong?.id, recommendationPool, songs]);
+  */
 
   const filteredSongs = useMemo(() => {
     if (filter === 'all') return songs;
@@ -881,7 +888,7 @@ const Search = () => {
   return (
     <div className="flex flex-col lg:flex-row gap-6 scrollbar-hide overflow-x-hidden">
       {/* Main Content */}
-      <div className={`flex-1 min-w-0 ${filter === 'visualizer' ? 'hidden' : ''}`}>
+      <div className={`flex-1 min-w-0`}>
         <div className="mb-4 sm:mb-6">
           <h1 className="font-bold text-xl sm:text-2xl md:text-3xl text-white mb-2">
             Search Results for "{searchTerm}"
@@ -894,23 +901,25 @@ const Search = () => {
           <button onClick={() => setFilter('all')} className={`px-4 py-2 rounded-full text-sm font-medium transition-all ${filter === 'all' ? 'bg-white text-black' : 'bg-white/10 text-white hover:bg-white/20'}`}>
             All Results ({songs.length})
           </button>
+          
+          {/* Visualiser button commented out
           <button onClick={() => setFilter('visualizer')} className={`px-4 py-2 rounded-full text-sm font-medium transition-all flex items-center gap-2 ${filter === 'visualizer' ? 'bg-gradient-to-r from-cyan-500 to-blue-500 text-white' : 'bg-white/10 text-white hover:bg-gradient-to-r hover:from-cyan-500/30 hover:to-blue-500/30'}`}>
             <span className="w-2 h-2 rounded-full bg-gradient-to-r from-cyan-400 to-blue-400 animate-pulse"></span>
             Visualiser
           </button>
+          */}
         </div>
 
-        {/* Song Grid - Hidden in visualizer mode */}
-        {filter !== 'visualizer' && (
+        {/* Song Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6">
           {filteredSongs.map((song, i) => (
             <SongCard key={song.id} song={song} isPlaying={isPlaying} activeSong={activeSong} onPlay={handlePlay} onPause={handlePause} index={i} onSongNameClick={handleSongNameClick} onArtistClick={handleArtistClick} onAlbumClick={handleAlbumClick} playbackRate={playbackRate} />
           ))}
         </div>
-        )}
       </div>
 
       {/* Right Sidebar - Real-time Recommendations with Audio Feature Badges */}
+      {false && (
       <div className={`w-full ${filter === 'visualizer' ? 'lg:w-full lg:max-w-full' : 'lg:w-[330px] lg:min-w-[330px]'}`}>
         {/* Back button when in visualizer mode */}
         {filter === 'visualizer' && (
@@ -1162,6 +1171,7 @@ const Search = () => {
         </div>
         )}
       </div>
+      )}
     </div>
   );
 };
