@@ -304,34 +304,34 @@ const SongDetails = () => {
     initializePage();
   }, [songid, location.state]);
 
-  // Real-time update loop
-  useEffect(() => {
-    const interval = setInterval(() => {
-      const liveFeatures = audioFeaturesRef.current;
+  // Real-time update loop DISABLED (Static loading only)
+  // useEffect(() => {
+  //   const interval = setInterval(() => {
+  //     const liveFeatures = audioFeaturesRef.current;
       
-      // Only update if we are playing the song that is being displayed
-      const isCurrentSongActive = activeSong && targetSong && (
-          String(activeSong.trackId || activeSong.id) === String(targetSong.trackId || targetSong.id)
-      );
+  //     // Only update if we are playing the song that is being displayed
+  //     const isCurrentSongActive = activeSong && targetSong && (
+  //         String(activeSong.trackId || activeSong.id) === String(targetSong.trackId || targetSong.id)
+  //     );
       
-      if (isPlaying && isCurrentSongActive && liveFeatures && targetSong && artistSongs.length > 0) {
-        // Prepare adjusted features
-        const featuresToSend = {
-             tempo: Number(liveFeatures.tempo),
-             energy: Number(liveFeatures.energy),
-             valence: Number(liveFeatures.valence),
-             danceability: Number(liveFeatures.danceability),
-             acousticness: Number(liveFeatures.acousticness),
-        };
+  //     if (isPlaying && isCurrentSongActive && liveFeatures && targetSong && artistSongs.length > 0) {
+  //       // Prepare adjusted features
+  //       const featuresToSend = {
+  //            tempo: Number(liveFeatures.tempo),
+  //            energy: Number(liveFeatures.energy),
+  //            valence: Number(liveFeatures.valence),
+  //            danceability: Number(liveFeatures.danceability),
+  //            acousticness: Number(liveFeatures.acousticness),
+  //       };
 
-        computeMLSimilarity(targetSong, artistSongs, featuresToSend).catch(err => {
-            console.warn("[SongDetails] Real-time update failed:", err);
-        });
-      }
-    }, 3000);
+  //       computeMLSimilarity(targetSong, artistSongs, featuresToSend).catch(err => {
+  //           console.warn("[SongDetails] Real-time update failed:", err);
+  //       });
+  //     }
+  //   }, 3000);
 
-    return () => clearInterval(interval);
-  }, [isPlaying, activeSong, targetSong, artistSongs]);
+  //   return () => clearInterval(interval);
+  // }, [isPlaying, activeSong, targetSong, artistSongs]);
 
   // Compute ML similarity using the backend
   const computeMLSimilarity = async (targetSong, comparisonSongs, overrideFeatures = null) => {

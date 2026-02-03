@@ -416,7 +416,7 @@ const SmartRecommendationVisualizer = ({
             className="space-y-2 overflow-x-hidden"
           >
             {/* Matches count - Show "Verified" if cached features used */}
-            <p className="text-[12px] text-gray-500 mb-2 flex items-center gap-2">
+            {/* <p className="text-[12px] text-gray-500 mb-2 flex items-center gap-2">
               <span>{recommendations.length} {recommendations.length === 1 ? 'match' : 'matches'} • Updates 3s</span>
               {displayedFeatures?.using_cached && (
                  <span className="text-cyan-500 flex items-center gap-1 bg-cyan-900/20 px-1.5 rounded" title="Using verified audio features from database">
@@ -426,7 +426,7 @@ const SmartRecommendationVisualizer = ({
               {!displayedFeatures?.using_cached && (
                  <span className="text-gray-500 animate-pulse">• Live Analysis</span>
               )}
-            </p>
+            </p> */}
             
             {recommendations.map((rec, index) => {
               const product = getRecommendedProduct(rec.product_id);

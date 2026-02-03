@@ -19,7 +19,8 @@ def get_db_connection():
         yield connection
     except pymysql.Error as e:
         console.log(f"Database connection error: {e}")
-        yield None
+        # Explicitly re-raise to avoid 'generator didn't stop' error
+        raise
     finally:
         if connection:
             connection.close()

@@ -387,6 +387,10 @@ const TopCharts = () => {
           }
         }
         
+        // Interleave songs by popularity rank (Index 1s together, Index 2s together)
+        // This prevents grouping all Aphex Twin songs first, then Boards of Canada, etc.
+        allArtistSongs.sort((a, b) => a.artistRank - b.artistRank);
+
         // Use DB songs for recommendations to ensure we have real audio features
         setSongs(allArtistSongs);
         setDbSongs(musicProducts);
@@ -689,7 +693,7 @@ const TopCharts = () => {
           {/* Recommendations List */}
           {activeSong && recommendations.length > 0 && (
             <>
-              <p className="text-[12px] text-gray-500 mb-2">{recommendations.length} matches • Updates 3s</p>
+              {/* <p className="text-[12px] text-gray-500 mb-2">{recommendations.length} matches • Updates 3s</p> */}
               <div className="space-y-2">
                 {recommendations.map((rec) => (
                   <div 

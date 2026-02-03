@@ -6,6 +6,7 @@ from sklearn.preprocessing import MinMaxScaler, StandardScaler
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import silhouette_score
 from sklearn.decomposition import PCA
+from sklearn.cluster import KMeans
 
 from utils import console
 from database import get_db_connection
@@ -144,58 +145,112 @@ async def startup_cache():
                                 model_b.fit(X_train)
                                 val_embed_b = model_b.transform(X_val)
                                 
-                                # Evaluate both on Validation Set
-                                # Only calculate if we have multiple genres to cluster
-                                if len(set(y_val)) > 1:
-                                    # Calculate Training Scores (Check for Overfitting)
-                                    # Ideally, Training Score and validation score should be close.
-                                    # If Training >> Validation, the model is overfitting.
-                                    try:
-                                        train_embed_a = model_a.transform(X_train)
-                                        train_score_a = silhouette_score(train_embed_a, y_train)
-                                    except: train_score_a = -1
-                                    
-                                    try:
-                                        train_embed_b = model_b.transform(X_train)
-                                        train_score_b = silhouette_score(train_embed_b, y_train)
-                                    except: train_score_b = -1
+                                # ALWAYS calculate Training Scores (Check for Overfitting)
+                                try:
+                                    train_embed_a = model_a.transform(X_train)
+                                    train_score_a = silhouette_score(train_embed_a, y_train) if len(set(y_train)) > 1 else -1.0
+                                except: train_score_a = -1.0
+                                
+                                try:
+                                    train_embed_b = model_b.transform(X_train)
+                                    train_score_b = silhouette_score(train_embed_b, y_train) if len(set(y_train)) > 1 else -1.0
+                                except: train_score_b = -1.0
 
-                                    console.log(f"   📈 Training Set Performance (Silhouette Score):")
-                                    console.log(f"      - MinMaxScaler:   {train_score_a:.4f}")
-                                    console.log(f"      - StandardScaler: {train_score_b:.4f}")
-
-
-                                    # Handle silhouette score errors if cluster size < 2
-                                    try:
-                                        score_a = silhouette_score(val_embed_a, y_val)
-                                    except: score_a = -1
-                                    
-                                    try:
-                                        score_b = silhouette_score(val_embed_b, y_val)
-                                    except: score_b = -1
-                                    
-                                    console.log(f"   🧪 Model Selection (Validation Set Silhouette Score):")
-                                    console.log(f"      - MinMaxScaler:   {score_a:.4f}")
-                                    console.log(f"      - StandardScaler: {score_b:.4f}")
-
-                                    model_performance_metrics["MinMaxScaler_train"] = round(train_score_a, 4)
-                                    model_performance_metrics["StandardScaler_train"] = round(train_score_b, 4)
-                                    model_performance_metrics["MinMaxScaler_val"] = round(score_a, 4)
-                                    model_performance_metrics["StandardScaler_val"] = round(score_b, 4)
-                                    console.log(f"✅ Model metrics stored: {model_performance_metrics}", flush=True)
-                                    
-                                    # Select Best Model
-                                    if score_b > score_a:
-                                        console.log("   🏆 Selected Model: StandardScaler")
-                                        feature_scaler = model_b
-                                        best_model = "StandardScaler"
+                                model_performance_metrics["MinMaxScaler_train"] = round(train_score_a, 4)
+                                model_performance_metrics["StandardScaler_train"] = round(train_score_b, 4)
+                                
+                                # Improved Validation: Check Intrinsic Clustering Structure using K-Means
+                                # This works even if we only have 1 Genre in the validation set.
+                                # k=3 for Calm/Balanced/Energetic logic.
+                                try:
+                                    kmeans_a = KMeans(n_clusters=3, random_state=42, n_init=10).fit(val_embed_a)
+                                    # Silhouette requires > 1 label. If KMeans finds only 1 cluster (rare), this fails.
+                                    if len(set(kmeans_a.labels_)) > 1:
+                                        kmeans_score_a = silhouette_score(val_embed_a, kmeans_a.labels_)
                                     else:
-                                        console.log("   🏆 Selected Model: MinMaxScaler")
-                                        feature_scaler = model_a
-                                        best_model = "MinMaxScaler"
+                                        kmeans_score_a = 0.0
+                                except: kmeans_score_a = 0.0
+                                
+                                try:
+                                    kmeans_b = KMeans(n_clusters=3, random_state=42, n_init=10).fit(val_embed_b)
+                                    if len(set(kmeans_b.labels_)) > 1:
+                                        kmeans_score_b = silhouette_score(val_embed_b, kmeans_b.labels_)
+                                    else:
+                                        kmeans_score_b = 0.0
+                                except: kmeans_score_b = 0.0
+
+                                # Check if we have valid ground truth labels (Genres)
+                                has_enough_genres = len(set(y_val)) > 1
+                                
+                                target_labels = y_val
+                                label_source = "Ground Truth Genres"
+
+                                if not has_enough_genres:
+                                    # Fallback: Create Synthetic Labels based on Audio Features (Energy)
+                                    # This allows us to score the scaler even without diverse genres.
+                                    # We simulate 3 categories: Low Energy, Medium Energy, High Energy.
+                                    console.log("   ⚠️ Validation genres are providing low quality data. Using 'Energy Levels' as Synthetic Ground Truth.")
+                                    y_synthetic = []
+                                    # X_val is numpy array. Index 1 corresponds to 'energy' (see feature_vectors creation)
+                                    for row in X_val:
+                                        energy = row[1] 
+                                        if energy > 0.7:
+                                            y_synthetic.append("High Energy")
+                                        elif energy < 0.4:
+                                            y_synthetic.append("Low Energy")
+                                        else:
+                                            y_synthetic.append("Medium Energy")
+                                    
+                                    if len(set(y_synthetic)) > 1:
+                                        target_labels = y_synthetic
+                                        label_source = "Synthetic Energy Levels"
+                                        has_enough_genres = True
+                                    else:
+                                        console.log("   ⚠️ Synthetic labeling failed (data lacks energy variance).")
+
+                                # Evaluate Classification Quality (Silhouette vs Target Labels)
+                                if has_enough_genres:
+                                    try:
+                                        score_a = silhouette_score(val_embed_a, target_labels)
+                                    except: score_a = 0.0
+                                    
+                                    try:
+                                        score_b = silhouette_score(val_embed_b, target_labels)
+                                    except: score_b = 0.0
+                                    
+                                    console.log(f"   🧪 Model Selection (Validation vs {label_source}):")
+                                    console.log(f"      - MinMaxScaler:   Recall={score_a:.4f}, Intrinsic={kmeans_score_a:.4f}")
+                                    console.log(f"      - StandardScaler: Recall={score_b:.4f}, Intrinsic={kmeans_score_b:.4f}")
+
+                                    # Use a blended score (50% Label Match, 50% Cluster Quality)
+                                    final_score_a = (score_a + kmeans_score_a) / 2
+                                    final_score_b = (score_b + kmeans_score_b) / 2
                                 else:
-                                    # Fallback if validation set lacks genre diversity
-                                    console.log("   ⚠️ Validation set lacks genre diversity, defaulting to MinMaxScaler")
+                                    # Ultimate Fallback: Rely 100% on Intrinsic Clustering
+                                    console.log("   ⚠️ Using Intrinsic Score only")
+                                    # Set scores to 0 for logging clarity
+                                    score_a = 0.0
+                                    score_b = 0.0
+                                    
+                                    final_score_a = kmeans_score_a
+                                    final_score_b = kmeans_score_b
+                                    
+                                    console.log(f"   🧪 Model Selection (Intrinsic Only):")
+                                    console.log(f"      - MinMaxScaler:   {final_score_a:.4f}")
+                                    console.log(f"      - StandardScaler: {final_score_b:.4f}")
+
+                                # Update Metrics
+                                model_performance_metrics["MinMaxScaler_val"] = round(final_score_a, 4)
+                                model_performance_metrics["StandardScaler_val"] = round(final_score_b, 4)
+                                console.log(f"✅ Model metrics stored: {model_performance_metrics}", flush=True)
+                                
+                                # Select Best Model based on Blended Score
+                                if final_score_b > final_score_a:
+                                    console.log(f"   🏆 Selected Model: StandardScaler (Score: {final_score_b:.4f})")
+                                    feature_scaler = model_b
+                                    best_model = "StandardScaler"
+                                else:
+                                    console.log(f"   🏆 Selected Model: MinMaxScaler (Score: {final_score_a:.4f})")
                                     feature_scaler = model_a
                                     best_model = "MinMaxScaler"
                                 

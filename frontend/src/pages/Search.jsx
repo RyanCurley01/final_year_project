@@ -1078,7 +1078,7 @@ const Search = () => {
           {/* Recommendations List */}
           {activeSong && recommendations.length > 0 && (
             <>
-              <p className="text-[12px] text-gray-500 mb-2">{recommendations.length} matches • Updates 3s</p>
+              {/* <p className="text-[12px] text-gray-500 mb-2">{recommendations.length} matches • Updates 3s</p> */}
               <div className="space-y-2">
                 {recommendations.map((rec) => {
                   return (

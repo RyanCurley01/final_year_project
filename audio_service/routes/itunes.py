@@ -55,18 +55,27 @@ async def clear_imported_songs():
         with get_db_connection() as conn:
             if conn:
                 with conn.cursor() as cursor:
-                    # Delete from AudioFeatures first (foreign key constraint)
+                    # 1. Delete from UserInteractions (references Products)
+                    # We might need to delete by ProductID where ProductID < 0
+                    cursor.execute("DELETE FROM UserInteractions WHERE ProductID < 0")
+                    interactions_deleted = cursor.rowcount
+                    
+                    # 2. Delete from UserRecommendations (references Products)
+                    cursor.execute("DELETE FROM UserRecommendations WHERE ProductID < 0")
+                    recommendations_deleted = cursor.rowcount
+                    
+                    # 3. Delete from AudioFeatures (references Products)
                     cursor.execute("DELETE FROM AudioFeatures WHERE ProductID < 0")
                     audio_deleted = cursor.rowcount
                     
-                    # Delete from Products
+                    # 4. Delete from Products
                     cursor.execute("DELETE FROM Products WHERE ProductID < 0")
                     products_deleted = cursor.rowcount
                     
                     conn.commit()
                     deleted_count = products_deleted
                     
-                    console.log(f"   ✅ Deleted {products_deleted} products and {audio_deleted} audio features")
+                    console.log(f"   ✅ Deleted {products_deleted} products, {audio_deleted} features, {interactions_deleted} interactions")
         
         # Reload cache after cleanup
         ml_service.cache_loaded = False

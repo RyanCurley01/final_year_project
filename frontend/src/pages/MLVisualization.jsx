@@ -288,13 +288,13 @@ const MLVisualization = () => {
               <tbody>
                 <tr className="border-b border-gray-700/50">
                   <td className="py-3 text-white font-semibold">MinMaxScaler</td>
-                  <td className="py-3 text-gray-300">{metrics.MinMaxScaler_train || 'N/A'}</td>
-                  <td className="py-3 text-gray-300">{metrics.MinMaxScaler_val || 'N/A'}</td>
+                  <td className="py-3 text-gray-300">{metrics.MinMaxScaler_train !== undefined && metrics.MinMaxScaler_train !== null ? metrics.MinMaxScaler_train : 'N/A'}</td>
+                  <td className="py-3 text-gray-300">{metrics.MinMaxScaler_val !== undefined && metrics.MinMaxScaler_val !== null ? metrics.MinMaxScaler_val : 'N/A'}</td>
                 </tr>
                 <tr>
                   <td className="py-3 text-white font-semibold">StandardScaler</td>
-                  <td className="py-3 text-gray-300">{metrics.StandardScaler_train || 'N/A'}</td>
-                  <td className="py-3 text-gray-300">{metrics.StandardScaler_val || 'N/A'}</td>
+                  <td className="py-3 text-gray-300">{metrics.StandardScaler_train !== undefined && metrics.StandardScaler_train !== null ? metrics.StandardScaler_train : 'N/A'}</td>
+                  <td className="py-3 text-gray-300">{metrics.StandardScaler_val !== undefined && metrics.StandardScaler_val !== null ? metrics.StandardScaler_val : 'N/A'}</td>
                 </tr>
               </tbody>
             </table>

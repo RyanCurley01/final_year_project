@@ -474,24 +474,39 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
         # Determine LIVE comparison features
         # For matching scores (UI), we want to compare against the ACTUAL LIVE MOMENT
         match_features = target_features.copy()
-        if request.audio_features:
-             live_features = request.audio_features.dict()
-             if live_features.get('energy') is not None: match_features['energy'] = live_features['energy']
-             if live_features.get('valence') is not None: match_features['valence'] = live_features['valence']
-             if live_features.get('danceability') is not None: match_features['danceability'] = live_features['danceability']
+        # LIVE UPDATE DISABLED: We force static comparison only
+        # if request.audio_features:
+        #      live_features = request.audio_features.dict()
              
-             # Tempo logic
-             req_f = request.audio_features
-             rate = req_f.playback_rate if req_f.playback_rate else 1.0
-             if req_f.effective_tempo:
-                  match_features['tempo'] = req_f.effective_tempo
-             elif req_f.tempo:
-                  match_features['tempo'] = req_f.tempo * rate
+        #      # Robust Update: Only use live features if they are non-zero/valid.
+        #      # This allows the Visualizer to fallback to Cached features during silence/loading.
+        #      if live_features.get('energy') and live_features.get('energy') > 0.01: 
+        #           match_features['energy'] = live_features['energy']
+        #      if live_features.get('valence') and live_features.get('valence') > 0.01: 
+        #           match_features['valence'] = live_features['valence']
+        #      if live_features.get('danceability') and live_features.get('danceability') > 0.01: 
+        #           match_features['danceability'] = live_features['danceability']
+             
+        #      # Tempo logic
+        #      req_f = request.audio_features
+        #      rate = req_f.playback_rate if req_f.playback_rate else 1.0
+             
+        #      new_tempo = None
+        #      if req_f.effective_tempo and req_f.effective_tempo > 10:
+        #           new_tempo = req_f.effective_tempo
+        #      elif req_f.tempo and req_f.tempo > 10:
+        #           new_tempo = req_f.tempo * rate
+                  
+        #      if new_tempo:
+        #           match_features['tempo'] = new_tempo
         
         # 4. Filter and Sort
         # Recalculate similarity with live features if they differ from target_features
-        use_live_similarity = (request.audio_features is not None and 
-                               match_features != target_features)
+        # use_live_similarity = (request.audio_features is not None and 
+        #                        match_features != target_features)
+        
+        # Force False since we disabled live updates
+        use_live_similarity = False
         
         if use_live_similarity:
             # Build live target vector with updated features (1D list)
