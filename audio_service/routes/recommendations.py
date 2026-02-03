@@ -403,7 +403,11 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
                     # Live Artist songs (iTunes) use large positive IDs (>1,000,000).
                     
                     if cid_int > 0 and cid_int < 1000000:
-                        continue # Skip Library Song
+                        # Only skip library songs if requesting song is NOT a discovery/library song
+                        # If current song (target) is from library (positive < 1M), we should show library matches
+                        is_current_library = current_id_int > 0 and current_id_int < 1000000
+                        if not is_current_library:
+                            continue # Skip Library Song
                 except:
                     pass # Keep if ID is weird (e.g. uuid string or something else)
 
@@ -576,9 +580,17 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
             )
             recommendations.append(result)
             
+        # Filter: Only > 0% similarity
+        recommendations = [r for r in recommendations if r.similarity_score > 0]
+            
         recommendations.sort(key=lambda x: x.similarity_score, reverse=True)
         
-        top_recommendations = recommendations[:request.limit]
+        # Limit to max 20, or lower if requester set a lower limit
+        limit_count = 20
+        if request.limit and request.limit < 20:
+             limit_count = request.limit
+        
+        top_recommendations = recommendations[:limit_count]
         
         # 5. Hydrate Data from Database and iTunes for Cached Items
         missing_meta_ids = [r for r in top_recommendations if not r.trackName]
