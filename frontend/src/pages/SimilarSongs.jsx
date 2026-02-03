@@ -197,6 +197,7 @@ const SimilarSongs = () => {
   const [recLoading, setRecLoading] = useState(false);
   const [displayedFeatures, setDisplayedFeatures] = useState(null);
   const [displayedPlaybackRate, setDisplayedPlaybackRate] = useState(1);
+  const [cachedAudioFeatures, setCachedAudioFeatures] = useState({});
   
   const intervalRef = useRef(null);
   const matchStartedRef = useRef(false);
@@ -215,6 +216,24 @@ const SimilarSongs = () => {
 
   const email = 'john.smith@store.com';
   const password = 'password';
+
+  // Fetch cached audio features from backend
+  useEffect(() => {
+    const fetchCachedFeatures = async () => {
+      try {
+        const audioApiUrl = envConfig.getApiBaseUrl();
+        const response = await fetch(`${audioApiUrl}/api/audio/cached-features?artist_only=false`);
+        if (response.ok) {
+          const data = await response.json();
+          setCachedAudioFeatures(data.features || {});
+          console.log(`[SimilarSongs] Loaded ${data.count} cached audio features`);
+        }
+      } catch (err) {
+        console.warn('Could not fetch cached audio features:', err.message);
+      }
+    };
+    fetchCachedFeatures();
+  }, []);
 
   // Initial data fetch
   useEffect(() => {   
@@ -332,11 +351,10 @@ const SimilarSongs = () => {
       try {
         const apiBaseUrl = envConfig.getApiBaseUrl();
 
-        const payload = {
-            source: 'similar_songs',
-            current_product_id: String(activeSong.trackId || activeSong.id),
-            preview_url: String(activeSong.previewUrl || activeSong.fileUrl || ''),
-            audio_features: audioFeaturesRef.current ? {
+        // Construct live features but merge with cache if available for stability
+        let featuresToSend = null;
+        if (audioFeaturesRef.current) {
+            featuresToSend = {
                  tempo: audioFeaturesRef.current.tempo ? parseFloat(audioFeaturesRef.current.tempo) : null,
                  energy: audioFeaturesRef.current.energy ? parseFloat(audioFeaturesRef.current.energy) : null,
                  valence: audioFeaturesRef.current.valence ? parseFloat(audioFeaturesRef.current.valence) : null,
@@ -344,7 +362,38 @@ const SimilarSongs = () => {
                  acousticness: audioFeaturesRef.current.acousticness ? parseFloat(audioFeaturesRef.current.acousticness) : null,
                  effective_tempo: audioFeaturesRef.current.tempo ? (parseFloat(audioFeaturesRef.current.tempo) * parseFloat(playbackRateRef.current || 1)) : null,
                  playback_rate: parseFloat(playbackRateRef.current || 1)
-            } : null,
+            };
+            
+            // Merge with cache if available for current song
+            const songIdStr = String(activeSong.trackId || activeSong.id);
+            const cached = cachedAudioFeatures[songIdStr] || cachedAudioFeatures[String(-Math.abs(Number(songIdStr)))];
+            
+            if (cached) {
+                // Lock stable features to cache
+                featuresToSend.tempo = Number(cached.tempo) || featuresToSend.tempo;
+                featuresToSend.acousticness = Number(cached.acousticness);
+                // Keep energy/valence live for pulse
+            }
+        } else {
+             // Try to use cache if no live features
+             const songIdStr = String(activeSong.trackId || activeSong.id);
+             const cached = cachedAudioFeatures[songIdStr] || cachedAudioFeatures[String(-Math.abs(Number(songIdStr)))];
+             if (cached) {
+                 featuresToSend = {
+                    ...cached,
+                    tempo: Number(cached.tempo),
+                    energy: Number(cached.energy),
+                    valence: Number(cached.valence),
+                    playback_rate: parseFloat(playbackRateRef.current || 1)
+                 };
+             }
+        }
+
+        const payload = {
+            source: 'similar_songs',
+            current_product_id: String(activeSong.trackId || activeSong.id),
+            preview_url: String(activeSong.previewUrl || activeSong.fileUrl || ''),
+            audio_features: featuresToSend,
             limit: 5
         };
 

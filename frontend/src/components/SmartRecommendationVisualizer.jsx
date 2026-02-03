@@ -197,6 +197,41 @@ const SmartRecommendationVisualizer = ({
       
       let featuresToUse = liveFeatures;
       
+      // FIX: If we have high-quality cached features for the current song, use them to stabilize the values
+      // (especially Tempo which shouldn't fluctuate).
+      // We merge Cached (Stable) + Live (Dynamic Energy for Visuals)
+      if (songId) {
+          const songIdStr = String(songId);
+          const cached = cachedFeatures[songIdStr] || cachedFeatures[String(-Math.abs(Number(songIdStr)))];
+          
+          if (cached) {
+             if (featuresToUse) {
+                 // Hybrid: Keep live energy/valence for pulse, but fix Tempo/Acousticness from Cache
+                 featuresToUse = {
+                     ...featuresToUse,
+                     tempo: Number(cached.tempo) || featuresToUse.tempo, // Lock Tempo to Cache
+                     acousticness: Number(cached.acousticness),
+                     instrumentalness: Number(cached.instrumentalness),
+                     speechiness: Number(cached.speechiness),
+                     loudness: Number(cached.loudness),
+                     // Allow live Energy/Valence/Danceability to drive the visualizer pulse
+                     // Unless user wants zero fluctuation, but typically pulse is good. 
+                     // The complaint was about "defaults back to 100bpm". This fixes that.
+                 };
+             } else {
+                 // No live features yet, fully use cache
+                 console.log(`[Visualizer] No live features yet, using cache for ${songIdStr}`);
+                 featuresToUse = {
+                    ...cached,
+                    tempo: Number(cached.tempo),
+                    energy: Number(cached.energy),
+                    valence: Number(cached.valence),
+                    using_cached: true
+                 };
+             }
+          }
+      }
+      
       // If no live features yet, try cache as fallback
       if (!featuresToUse && songId) {
           const songIdStr = String(songId);
