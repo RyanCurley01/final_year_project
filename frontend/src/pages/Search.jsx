@@ -337,6 +337,7 @@ const Search = () => {
         // Also fetch iTunes songs for the 3 artists (same as TopCharts)
         const allArtistSongs = [];
         
+        // Loop through the 3 specific artists (Not the user's search term)
         for (let i = 0; i < ARTISTS.length; i++) {
           const artist = ARTISTS[i];
           try {
@@ -344,10 +345,13 @@ const Search = () => {
               await new Promise(resolve => setTimeout(resolve, 300));
             }
             
+            // Search iTunes for THE ARTIST, not the user's typed word
             const response = await fetch(
               `https://itunes.apple.com/search?term=${encodeURIComponent(artist)}&media=music&entity=song&limit=200`,
               { signal: abortController.signal }
             );
+
+            // process results into allArtistSongs
             const data = await response.json();
             
             const artistLower = artist.toLowerCase();
@@ -409,7 +413,9 @@ const Search = () => {
           source: 'database'
         }));
         
-        // Filter iTunes artist songs based on search term
+        // NOW filter that pool by the user's search word
+        // fetches all products from the database and filters them locally to see if 
+        // the typed word is in the song name, Album Title, Artist Name, or Genre.
         const filteredArtistSongs = allArtistSongs.filter(song => {
           // If song is already in matchedArtistSongs (which contains DB matches), exclude it
           // Actually we haven't matched yet.
