@@ -9,8 +9,6 @@ import { productService } from '../redux/services';
 import { FaPauseCircle, FaPlayCircle } from 'react-icons/fa';
 import envConfig from '../config/environment';
 
-import { calculateSimilarity } from '../utils/audioSimilarity';
-
 const ARTISTS = ['Aphex Twin', 'Boards of Canada', 'Squarepusher'];
 
 const getArtistBadgeColor = (artist) => {
@@ -207,94 +205,6 @@ const TopCharts = () => {
 
   const email = 'john.smith@store.com';
   const password = 'password';
-
-  // Find similar artist songs based on audio features (local matching)
-  // Uses REAL cached audio features from database when available, NO pseudo-features
-  const findSimilarArtistSongs = (currentSong, features, allSongs, rate = 1) => {
-    if (!currentSong || !features || !allSongs.length) return [];
-    
-    // Filter out current song
-    const otherSongs = allSongs.filter(s => s.id !== currentSong.id);
-    
-    const scoredSongs = otherSongs.map(song => {
-      // Try to get REAL cached audio features from database
-      const songIdStr = String(song.id);
-      const negativeIdStr = String(-Math.abs(song.id)); // Artist songs use negative IDs in database
-      const cached = cachedAudioFeatures[songIdStr] || cachedAudioFeatures[negativeIdStr];
-      
-      let similarityScore = null;
-      let usingRealFeatures = false;
-      let songTempo = null;
-      let songEnergy = null;
-      let songValence = null;
-      let songDanceability = null;
-
-      let tempoMatch = null;
-      let energyMatch = null;
-      let moodMatch = null;
-      let danceMatch = null;
-      
-      if (cached) {
-        // Use REAL extracted audio features from AudioFeatures table
-        usingRealFeatures = true;
-        songTempo = cached.tempo || 120;
-        songEnergy = cached.energy || 0.5;
-        songValence = cached.valence || 0.5;
-        songDanceability = cached.danceability || 0.5;
-        
-        // Calculate similarity using consistent utility
-        similarityScore = calculateSimilarity(features, cached, rate);
-        
-        // Calculate match details for display
-        const effectiveTempo = features.effective_tempo || (features.tempo * rate);
-        const currentEnergy = features.energy || 0.5;
-        const currentValence = features.valence || 0.5;
-        const currentDanceability = features.danceability || 0.5;
-
-        tempoMatch = Math.min(effectiveTempo, songTempo) / Math.max(effectiveTempo, songTempo);
-        energyMatch = Math.max(0, 1 - Math.abs(currentEnergy - songEnergy));
-        moodMatch = Math.max(0, 1 - Math.abs(currentValence - songValence));
-        danceMatch = Math.max(0, 1 - Math.abs(currentDanceability - songDanceability));
-      }
-      
-      // Generate contextual reason based on dominant feature - only if we have a match
-      let matchReason = null;
-      if (similarityScore !== null) {
-          const dominantFeature = [
-            ['tempo', tempoMatch],
-            ['energy', energyMatch],
-            ['mood', moodMatch]
-          ].reduce((max, curr) => curr[1] > max[1] ? curr : max);
-          
-          if (dominantFeature[0] === 'tempo') {
-            matchReason = `Matching rhythm (${Math.round(songTempo)} BPM)`;
-          } else if (dominantFeature[0] === 'energy') {
-            matchReason = `Similar intensity (${(songEnergy * 100).toFixed(0)}%)`;
-          } else {
-            matchReason = 'Comparable mood';
-          }
-      }
-      
-      return {
-        ...song,
-        tempo_match: tempoMatch,
-        energy_match: energyMatch,
-        mood_match: moodMatch,
-        dance_match: danceMatch,
-        similarity: similarityScore,
-        similarity_score: similarityScore,
-        match_reason: matchReason,
-        using_real_features: usingRealFeatures,
-        audio_features: usingRealFeatures ? { tempo: songTempo, energy: songEnergy, valence: songValence, danceability: songDanceability } : null
-      };
-    });
-    
-    // Sort by similarity and return top 5
-    return scoredSongs
-      .filter(s => s.similarity !== null)
-      .sort((a, b) => b.similarity - a.similarity)
-      .slice(0, 5);
-  };
 
   // Fetch cached audio features from backend (real extracted features from AudioFeatures table)
   useEffect(() => {
