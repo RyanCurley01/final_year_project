@@ -85,6 +85,7 @@ class SearchSong(BaseModel):
     trackPrice: Optional[float] = None
     primaryGenreName: Optional[str] = None
     trackTimeMillis: Optional[int] = None
+    audio_features: Optional[AudioFeatures] = None  # Live audio features for this song
 
     class Config:
         extra = 'ignore'

@@ -224,6 +224,19 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
             tasks = []
             
             for song in songs_to_process:
+                 # Check if live audio features provided for this song
+                 if song.audio_features:
+                      # Use live features directly from the song
+                      live_song_features = song.audio_features.dict()
+                      safe_features = {
+                          'tempo': live_song_features.get('tempo', 120),
+                          'energy': live_song_features.get('energy', 0.5),
+                          'valence': live_song_features.get('valence', 0.5),
+                          'danceability': live_song_features.get('danceability', 0.5),
+                      }
+                      tasks.append(asyncio.sleep(0, result=safe_features))
+                      continue
+                 
                  # Check if features are already cached
                  tid_raw = song.trackId
                  tid_res = None
@@ -242,7 +255,8 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
                            found_features = ml_service.audio_features_cache[abs(tid_res)]
                            
                  if found_features:
-                      safe_features = {k: found_features.get(k, 0.5) for k in ['tempo', 'energy', 'valence', 'danceability', 'acousticness']}
+                      # Use ALL cached features to ensure similarity calculation is accurate
+                      safe_features = found_features.copy()
                       tasks.append(asyncio.sleep(0, result=safe_features))
                  elif song.previewUrl:
                       loop = asyncio.get_event_loop()
@@ -293,6 +307,10 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
                 # Recommend from ALL cached content (Artist Songs AND Library Songs)
                 candidates = []
                 for pid, p in all_cached:
+                     # For TopCharts and SimilarSongs, ONLY include Artist Songs (Negative IDs)
+                     if request.source in ['top_charts', 'similar_songs'] and pid >= 0:
+                         continue
+
                      # Strict filtering of current song
                      if str(pid) == clean_current_id or pid == current_id_int:
                           continue
@@ -334,18 +352,81 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
         if not candidates:
              return {"status": "success", "recommendations": []}
 
+        # ENFORCE CANDIDATE FILTERING (Self & Source Type)
+        # This creates a 'clean' candidate list before we do any math.
+        filtered_candidates = []
+        for c in candidates:
+            # A. Robust Self-Filtering
+            cid_raw = c.get('id')
+            is_self = False
+            
+            # String comparison (strip whitespace)
+            clean_cid = str(cid_raw).strip() if cid_raw is not None else ""
+            if clean_cid and clean_cid == clean_current_id:
+                is_self = True
+            
+            # Integer comparison (handle mismatch types & negative/positive variants)
+            if not is_self and cid_raw is not None:
+                try:
+                    cid_int = int(cid_raw)
+                    # Direct match
+                    if cid_int == current_id_int:
+                        is_self = True
+                    # Abs match (handles negative IDs representing same song in different contexts)
+                    elif current_id_int != 0 and abs(cid_int) == abs(current_id_int):
+                         is_self = True
+                except:
+                    pass
+            
+            if is_self:
+                continue
+
+            # B. Source Filtering (Artist Only)
+            # We strictly enforce that "Artist" contexts should NEVER show "Library" songs.
+            # Sources: 'top_charts', 'similar_songs', 'visualiser', 'visualizer', 'sidebar', 'search_component'
+            # We treat any request that isn't explicitly 'discover_page' or 'library' as potentially needing filtering if it behaves like an artist view
+            
+            # Robust source checking (substring match)
+            source_lower = request.source.lower()
+            artist_context_keywords = ['chart', 'similar', 'visual', 'side', 'search']
+            is_artist_context = any(kw in source_lower for kw in artist_context_keywords)
+            
+            # Explicitly allow discover/library matches
+            if 'discover' in source_lower or 'library' in source_lower:
+                is_artist_context = False
+
+            if is_artist_context:
+                try:
+                    cid_int = int(cid_raw)
+                    # Library songs in our DB are small positive IDs (1-1000). 
+                    # Cached Artist songs use Negative IDs.
+                    # Live Artist songs (iTunes) use large positive IDs (>1,000,000).
+                    
+                    if cid_int > 0 and cid_int < 1000000:
+                        continue # Skip Library Song
+                except:
+                    pass # Keep if ID is weird (e.g. uuid string or something else)
+
+            filtered_candidates.append(c)
+        
+        candidates = filtered_candidates
+        console.log(f"🔎 Final Filtered Candidates: {len(candidates)} (Artist Only Filter: {is_artist_context})")
+        
+        if not candidates:
+             return {"status": "success", "recommendations": []}
+
         target_vector = [
-            float(target_features.get('tempo', 120) or 120) / 200.0,
-            float(target_features.get('energy', 0.5) or 0.5),
-            float(target_features.get('valence', 0.5) or 0.5),
-            float(target_features.get('danceability', 0.5) or 0.5),
-            float(target_features.get('acousticness', 0.5) or 0.5),
-            float(target_features.get('spectral_centroid', 1500.0) / 5000.0),
-            float(target_features.get('spectral_rolloff', 3000.0) / 10000.0),
-            float(target_features.get('zero_crossing_rate', 0.05) * 10.0),
-            float(target_features.get('instrumentalness', 0.5)),
-            float((target_features.get('loudness', -60.0) + 60.0) / 60.0),
-            float(target_features.get('speechiness', 0.1))
+            float(target_features.get('tempo') if target_features.get('tempo') is not None else 120) / 200.0,
+            float(target_features.get('energy') if target_features.get('energy') is not None else 0.5),
+            float(target_features.get('valence') if target_features.get('valence') is not None else 0.5),
+            float(target_features.get('danceability') if target_features.get('danceability') is not None else 0.5),
+            float(target_features.get('acousticness') if target_features.get('acousticness') is not None else 0.5),
+            float(target_features.get('spectral_centroid') if target_features.get('spectral_centroid') is not None else 1500.0) / 5000.0,
+            float(target_features.get('spectral_rolloff') if target_features.get('spectral_rolloff') is not None else 3000.0) / 10000.0,
+            float(target_features.get('zero_crossing_rate') if target_features.get('zero_crossing_rate') is not None else 0.05) * 10.0,
+            float(target_features.get('instrumentalness') if target_features.get('instrumentalness') is not None else 0.5),
+            float((target_features.get('loudness') if target_features.get('loudness') is not None else -60.0) + 60.0) / 60.0,
+            float(target_features.get('speechiness') if target_features.get('speechiness') is not None else 0.1)
         ]
         
         candidate_vectors = []
@@ -353,17 +434,17 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
         
         for p in candidates:
              vec = [
-                float(p.get('tempo', 120) or 120) / 200.0,
-                float(p.get('energy', 0.5) or 0.5),
-                float(p.get('valence', 0.5) or 0.5),
-                float(p.get('danceability', 0.5) or 0.5),
-                float(p.get('acousticness', 0.5) or 0.5),
-                float(p.get('spectral_centroid', 1500.0) / 5000.0),
-                float(p.get('spectral_rolloff', 3000.0) / 10000.0),
-                float(p.get('zero_crossing_rate', 0.05) * 10.0),
-                float(p.get('instrumentalness', 0.5)),
-                float((p.get('loudness', -60.0) + 60.0) / 60.0),
-                float(p.get('speechiness', 0.1))
+                float(p.get('tempo') if p.get('tempo') is not None else 120) / 200.0,
+                float(p.get('energy') if p.get('energy') is not None else 0.5),
+                float(p.get('valence') if p.get('valence') is not None else 0.5),
+                float(p.get('danceability') if p.get('danceability') is not None else 0.5),
+                float(p.get('acousticness') if p.get('acousticness') is not None else 0.5),
+                float(p.get('spectral_centroid') if p.get('spectral_centroid') is not None else 1500.0) / 5000.0,
+                float(p.get('spectral_rolloff') if p.get('spectral_rolloff') is not None else 3000.0) / 10000.0,
+                float(p.get('zero_crossing_rate') if p.get('zero_crossing_rate') is not None else 0.05) * 10.0,
+                float(p.get('instrumentalness') if p.get('instrumentalness') is not None else 0.5),
+                float((p.get('loudness') if p.get('loudness') is not None else -60.0) + 60.0) / 60.0,
+                float(p.get('speechiness') if p.get('speechiness') is not None else 0.1)
             ]
              candidate_vectors.append(vec)
              candidate_objs.append(p)
@@ -404,8 +485,51 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
                   match_features['tempo'] = req_f.tempo * rate
         
         # 4. Filter and Sort
+        # Recalculate similarity with live features if they differ from target_features
+        use_live_similarity = (request.audio_features is not None and 
+                               match_features != target_features)
+        
+        if use_live_similarity:
+            # Build live target vector with updated features (1D list)
+            # Use explicit None checks to avoid defaulting 0.0 values to 0.5 (which happens with 'or')
+            live_target_list = [
+                float(match_features.get('tempo') if match_features.get('tempo') is not None else 120) / 200.0,
+                float(match_features.get('energy') if match_features.get('energy') is not None else 0.5),
+                float(match_features.get('valence') if match_features.get('valence') is not None else 0.5),
+                float(match_features.get('danceability') if match_features.get('danceability') is not None else 0.5),
+                float(match_features.get('acousticness') if match_features.get('acousticness') is not None else 0.5),
+                float(match_features.get('spectral_centroid') if match_features.get('spectral_centroid') is not None else 1500.0) / 5000.0,
+                float(match_features.get('spectral_rolloff') if match_features.get('spectral_rolloff') is not None else 3000.0) / 10000.0,
+                float(match_features.get('zero_crossing_rate') if match_features.get('zero_crossing_rate') is not None else 0.05) * 10.0,
+                float(match_features.get('instrumentalness') if match_features.get('instrumentalness') is not None else 0.5),
+                float((match_features.get('loudness') if match_features.get('loudness') is not None else -60.0) + 60.0) / 60.0,
+                float(match_features.get('speechiness') if match_features.get('speechiness') is not None else 0.1)
+            ]
+            
+            # Recalculate similarity with live target
+            # We need to compute similarity between live_target and EACH candidate
+            # But candidates_scaled is already processed for the whole batch.
+            # Ideally we would just scale live_target and compare to candidates_scaled
+            
+            live_target_vector = np.array([live_target_list]) # Shape (1, 11)
+            
+            if ml_service.feature_scaler:
+                try:
+                    live_target_scaled = ml_service.feature_scaler.transform(live_target_vector) # Expects (n_samples, n_features)
+                except:
+                    live_target_scaled = live_target_vector
+            else:
+                live_target_scaled = live_target_vector
+            
+            # Recalculate similarity against efficiently against ALL candidates at once
+            # candidates_scaled is (N, 11)
+            live_sims = cosine_similarity(live_target_scaled, candidates_scaled)[0] # Result (N,)
+            
+        else:
+            live_sims = sims
+        
         recommendations = []
-        for i, score in enumerate(sims):
+        for i, score in enumerate(live_sims):
             p = candidate_objs[i]
             
             tempo_match=1.0 - min(abs(match_features.get('tempo',120) - p.get('tempo',120)), 100)/100
@@ -425,7 +549,7 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
             
             result = AudioSimilarityResult(
                 product_id=p['id'],
-                similarity_score=float(score),
+                similarity_score=round(float(score), 3),
                 tempo_match=round(tempo_match, 3),
                 energy_match=round(energy_match, 3),
                 mood_match=round(mood_match, 3),

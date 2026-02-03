@@ -152,6 +152,28 @@ def extract_audio_features_librosa(audio_url: str, product_id: int) -> Optional[
             # ===== SPEECHINESS =====
             speechiness = float(1 - instrumentalness)
             
+            # ===== MFCC (Mel-Frequency Cepstral Coefficients) =====
+            # Extract timbre/texture features - critical for similarity matching
+            mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13)
+            mfcc_mean = [float(np.mean(mfcc[i])) for i in range(13)]
+            
+            # ===== CHROMA (Pitch Class Profile) =====
+            # Extract harmonic/melodic features - critical for musical similarity
+            chroma = librosa.feature.chroma_stft(y=y, sr=sr)
+            chroma_mean = [float(np.mean(chroma[i])) for i in range(12)]
+            
+            # ===== KEY SIGNATURE & TIME SIGNATURE =====
+            # Estimate key from chroma features
+            key_names = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
+            key_index = int(np.argmax(chroma_mean))
+            key_signature = key_names[key_index]
+            
+            # Estimate time signature (4/4 is most common, but can be detected from beat analysis)
+            time_signature = "4/4"  # Default for most electronic music
+            
+            # ===== DURATION =====
+            duration = int(len(y) / sr)  # Duration in seconds
+            
             features = {
                 'product_id': product_id,
                 'tempo': round(tempo, 2),
@@ -165,9 +187,14 @@ def extract_audio_features_librosa(audio_url: str, product_id: int) -> Optional[
                 'spectral_centroid': round(float(np.mean(spectral_centroid)), 2),
                 'spectral_rolloff': round(float(np.mean(spectral_rolloff)), 2),
                 'zero_crossing_rate': round(zero_crossing_rate, 4),
+                'mfcc_mean': mfcc_mean,
+                'chroma_mean': chroma_mean,
+                'key_signature': key_signature,
+                'time_signature': time_signature,
+                'duration': duration
             }
             
-            console.log(f"✅ Librosa extracted features for product {product_id}: tempo={tempo:.1f}, energy={energy:.2f}, valence={valence:.2f}")
+            console.log(f"✅ Librosa extracted FULL features for product {product_id}: tempo={tempo:.1f}, energy={energy:.2f}, key={key_signature}")
             return features
             
         finally:
@@ -252,6 +279,41 @@ def extract_audio_features_from_preview(audio_url: str, track_id: int) -> Option
             acousticness = float(low_freq_energy / total_energy) if total_energy > 0 else 0.3
             acousticness = min(1.0, max(0.0, acousticness * 2))
             
+            # ===== LOUDNESS (dB) =====
+            S = librosa.stft(y)
+            loudness = float(librosa.amplitude_to_db(np.abs(S), ref=np.max).mean())
+            
+            # ===== INSTRUMENTALNESS =====
+            # Lack of vocal frequencies (using zero crossing rate as proxy)
+            zcr = librosa.feature.zero_crossing_rate(y)[0]
+            zero_crossing_rate = float(np.mean(zcr))
+            instrumentalness = float(np.clip(1 - zero_crossing_rate * 2, 0, 1))
+            
+            # ===== SPEECHINESS =====
+            speechiness = float(1 - instrumentalness)
+            
+            # ===== MFCC (Mel-Frequency Cepstral Coefficients) =====
+            # Extract timbre/texture features - critical for similarity matching
+            mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13)
+            mfcc_mean = [float(np.mean(mfcc[i])) for i in range(13)]
+            
+            # ===== CHROMA (Pitch Class Profile) =====
+            # Extract harmonic/melodic features - critical for musical similarity
+            chroma = librosa.feature.chroma_stft(y=y, sr=sr)
+            chroma_mean = [float(np.mean(chroma[i])) for i in range(12)]
+            
+            # ===== KEY SIGNATURE & TIME SIGNATURE =====
+            # Estimate key from chroma features
+            key_names = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
+            key_index = int(np.argmax(chroma_mean))
+            key_signature = key_names[key_index]
+            
+            # Estimate time signature (4/4 is most common, but can be detected from beat analysis)
+            time_signature = "4/4"  # Default for most electronic music
+            
+            # ===== DURATION =====
+            duration = int(len(y) / sr)  # Duration in seconds
+            
             features = {
                 'track_id': track_id,
                 'tempo': round(tempo, 1),
@@ -259,9 +321,20 @@ def extract_audio_features_from_preview(audio_url: str, track_id: int) -> Option
                 'valence': round(valence, 3),
                 'danceability': round(danceability, 3),
                 'acousticness': round(acousticness, 3),
+                'loudness': round(loudness, 2),
+                'instrumentalness': round(instrumentalness, 3),
+                'speechiness': round(speechiness, 3),
+                'spectral_centroid': round(float(np.mean(spectral_centroid)), 2),
+                'spectral_rolloff': round(float(np.mean(spectral_rolloff)), 2),
+                'zero_crossing_rate': round(zero_crossing_rate, 4),
+                'mfcc_mean': mfcc_mean,
+                'chroma_mean': chroma_mean,
+                'key_signature': key_signature,
+                'time_signature': time_signature,
+                'duration': duration
             }
             
-            console.log(f"✅ Extracted features for track {track_id}: tempo={tempo:.1f}, energy={energy:.2f}")
+            console.log(f"✅ Extracted FULL features for track {track_id}: tempo={tempo:.1f}, energy={energy:.2f}, key={key_signature}")
             return features
             
         finally:

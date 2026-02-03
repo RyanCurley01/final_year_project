@@ -197,13 +197,19 @@ async def import_itunes_songs_to_database(limit: int = 100, genre: str = "electr
                                 preview_url
                             ))
                             
-                            # Insert into AudioFeatures
+                            # Insert into AudioFeatures with FULL feature set
+                            # Convert MFCC and Chroma arrays to JSON strings for storage
+                            import json
+                            mfcc_json = json.dumps(features.get('mfcc_mean', [])) if features.get('mfcc_mean') else None
+                            chroma_json = json.dumps(features.get('chroma_mean', [])) if features.get('chroma_mean') else None
+                            
                             cursor.execute("""
                                 INSERT INTO AudioFeatures (
                                     ProductID, Tempo, Energy, Danceability, Valence,
                                     Acousticness, Instrumentalness, Loudness, Speechiness,
-                                    SpectralCentroid, SpectralRolloff, ZeroCrossingRate, Genre
-                                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                    SpectralCentroid, SpectralRolloff, ZeroCrossingRate, Genre,
+                                    MfccMean, ChromaMean, Key_Signature, TimeSignature, Duration
+                                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                             """, (
                                 product_id,
                                 features['tempo'],
@@ -217,7 +223,12 @@ async def import_itunes_songs_to_database(limit: int = 100, genre: str = "electr
                                 features.get('spectral_centroid', 1500.0),
                                 features.get('spectral_rolloff', 3000.0),
                                 features.get('zero_crossing_rate', 0.05),
-                                genre_label
+                                genre_label,
+                                mfcc_json,
+                                chroma_json,
+                                features.get('key_signature', None),
+                                features.get('time_signature', None),
+                                features.get('duration', None)
                             ))
                             
                             conn.commit()

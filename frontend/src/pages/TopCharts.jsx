@@ -485,7 +485,7 @@ const TopCharts = () => {
         intervalRef.current = null;
       }
     };
-  }, [activeSong?.id, songs]); // Only restart loop if song effectively changes
+  }, [activeSong?.trackId || activeSong?.id, songs]); // Only restart loop if song effectively changes
 
   const filteredSongs = useMemo(() => {
     if (filter === 'all') return songs;

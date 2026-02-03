@@ -393,7 +393,7 @@ const SimilarSongs = () => {
         intervalRef.current = null;
       }
     };
-  }, [activeSong?.id, songs]);
+  }, [activeSong?.trackId || activeSong?.id, songs]);
 
   // Match iTunes songs to Library songs using New Bulk Endpoint
   useEffect(() => {
