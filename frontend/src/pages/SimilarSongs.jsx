@@ -625,6 +625,61 @@ const SimilarSongs = () => {
     }
   };
 
+  // Helper to calculate live match scores for visualizer mode
+  const calculateLiveMatch = (rec) => {
+    const featuresToUse = displayedFeatures || audioFeatures;
+
+    if (!featuresToUse) {
+       return {
+         tempo_match: rec.tempo_match,
+         energy_match: rec.energy_match,
+         mood_match: rec.mood_match,
+         danceability_match: rec.danceability_match || rec.dance_match,
+         similarity_score: rec.similarity_score
+       };
+    }
+
+    const rateToUse = displayedPlaybackRate || 1;
+    
+    // 1. Get Current Features
+    let currentTempo = 120;
+    if (featuresToUse.effective_tempo) {
+        currentTempo = featuresToUse.effective_tempo;
+    } else if (featuresToUse.tempo) {
+        currentTempo = Number(featuresToUse.tempo) * rateToUse;
+    }
+    
+    // 2. Get Target Features (from rec)
+    const targetTempo = Number(rec.tempo) || 120;
+    
+    // 3. Compute Matches
+    const tempoDiff = Math.abs(targetTempo - currentTempo);
+    const tempoMatch = Math.max(0, 1 - Math.min(tempoDiff / 100.0, 1.0));
+    
+    const energyMatch = Math.max(0, 1 - Math.abs((Number(featuresToUse.energy) || 0.5) - (Number(rec.energy) || 0.5)));
+    const moodMatch = Math.max(0, 1 - Math.abs((Number(featuresToUse.valence) || 0.5) - (Number(rec.valence) || 0.5)));
+    const danceabilityMatch = Math.max(0, 1 - Math.abs((Number(featuresToUse.danceability) || 0.5) - (Number(rec.danceability) || 0.5)));
+
+    // 4. Weighted Score
+    let score = (
+      tempoMatch * 0.25 +
+      energyMatch * 0.30 +
+      moodMatch * 0.20 +
+      danceabilityMatch * 0.25
+    );
+    
+    if (score > 0.99) score = 0.99;
+    if (isNaN(score)) score = 0;
+    
+    return {
+      tempo_match: tempoMatch,
+      energy_match: energyMatch,
+      mood_match: moodMatch,
+      danceability_match: danceabilityMatch,
+      similarity_score: score
+    };
+  };
+
   if (loading) return <Loader title="Finding similar songs from iTunes..." />;
   // if (analyzing) return <Loader title="Analyzing audio features & matching to library..." />;
   
@@ -764,7 +819,21 @@ const SimilarSongs = () => {
             <>
               {/* <p className="text-[12px] text-gray-500 mb-2">{recommendations.length} matches • Updates 3s</p> */}
               <div className="space-y-2">
-                {recommendations.map((rec) => (
+                {recommendations
+                  .map(rec => {
+                      const liveMatch = calculateLiveMatch(rec);
+                      return {
+                          ...rec,
+                          similarity_score: liveMatch ? liveMatch.similarity_score : rec.similarity_score,
+                          tempo_match: liveMatch ? liveMatch.tempo_match : rec.tempo_match,
+                          energy_match: liveMatch ? liveMatch.energy_match : rec.energy_match,
+                          mood_match: liveMatch ? liveMatch.mood_match : rec.mood_match,
+                          danceability_match: liveMatch ? liveMatch.danceability_match : (rec.danceability_match || rec.dance_match)
+                      };
+                  })
+                  .sort((a, b) => b.similarity_score - a.similarity_score)
+                  .map((rec) => {
+                  return (
                   <div 
                     key={rec.id}
                     onClick={() => handleRecommendationClick(rec)}
@@ -822,17 +891,18 @@ const SimilarSongs = () => {
                             Mood:{Math.round(rec.mood_match * 100)}%
                           </span>
                           <span className={`px-1 py-0.5 rounded text-xs ${
-                            rec.dance_match >= 0.7 ? 'bg-green-500/30 text-green-300' : 
-                            rec.dance_match >= 0.5 ? 'bg-yellow-500/30 text-yellow-300' : 
+                            rec.danceability_match >= 0.7 ? 'bg-green-500/30 text-green-300' : 
+                            rec.danceability_match >= 0.5 ? 'bg-yellow-500/30 text-yellow-300' : 
                             'bg-red-500/30 text-red-300'
                           }`}>
-                            Dance:{Math.round(rec.dance_match * 100)}%
+                            Dance:{Math.round(rec.danceability_match * 100)}%
                           </span>
                         </div>
                       </div>
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             </>
           )}

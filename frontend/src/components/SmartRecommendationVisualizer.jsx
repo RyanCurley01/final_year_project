@@ -280,19 +280,59 @@ const SmartRecommendationVisualizer = ({
   }, [currentProduct, sessionId, currentSongId, location.pathname, cachedAudioFeatures]); // Add cachedAudioFeatures to deps
 
   // Calculate real-time match values based on current audio features
-  const calculateLiveMatch = (recProductId) => {
-    if (!audioFeatures) return null;
-    
-    // Find product's stored features from recommendations or estimate
-    const rec = recommendations.find(r => r.product_id === recProductId);
-    if (!rec) return null;
+  const calculateLiveMatch = (rec) => {
+    // If no features available, return existing match data
+    const featuresToUse = displayedFeatures || audioFeatures;
 
-    // The rec already has match scores from the API, but we can show live features
+    if (!featuresToUse) {
+       return {
+         tempo_match: rec.tempo_match,
+         energy_match: rec.energy_match,
+         mood_match: rec.mood_match,
+         danceability_match: rec.danceability_match || rec.dance_match,
+         similarity_score: rec.similarity_score
+       };
+    }
+
+    const rateToUse = displayedPlaybackRate || 1;
+    
+    // 1. Get Current Features
+    let currentTempo = 120;
+    if (featuresToUse.effective_tempo) {
+        currentTempo = featuresToUse.effective_tempo;
+    } else if (featuresToUse.tempo) {
+        currentTempo = Number(featuresToUse.tempo) * rateToUse;
+    }
+    
+    // 2. Get Target Features (from rec)
+    const targetTempo = Number(rec.tempo) || 120;
+    
+    // 3. Compute Matches (Replicate audioSimilarity.js logic)
+    const tempoDiff = Math.abs(targetTempo - currentTempo);
+    const tempoMatch = Math.max(0, 1 - Math.min(tempoDiff / 100.0, 1.0));
+    
+    const energyMatch = Math.max(0, 1 - Math.abs((Number(featuresToUse.energy) || 0.5) - (Number(rec.energy) || 0.5)));
+    const moodMatch = Math.max(0, 1 - Math.abs((Number(featuresToUse.valence) || 0.5) - (Number(rec.valence) || 0.5)));
+    const danceabilityMatch = Math.max(0, 1 - Math.abs((Number(featuresToUse.danceability) || 0.5) - (Number(rec.danceability) || 0.5)));
+
+    // 4. Weighted Score
+    // Tempo (25%) + Energy (30%) + Mood (20%) + Danceability (25%)
+    let score = (
+      tempoMatch * 0.25 +
+      energyMatch * 0.30 +
+      moodMatch * 0.20 +
+      danceabilityMatch * 0.25
+    );
+    
+    // Cap at 99%
+    if (score > 0.99) score = 0.99;
+    
     return {
-      tempo_match: rec.tempo_match,
-      energy_match: rec.energy_match,
-      mood_match: rec.mood_match,
-      similarity_score: rec.similarity_score
+      tempo_match: tempoMatch,
+      energy_match: energyMatch,
+      mood_match: moodMatch,
+      danceability_match: danceabilityMatch,
+      similarity_score: score
     };
   };
 
@@ -463,7 +503,23 @@ const SmartRecommendationVisualizer = ({
               )}
             </p> */}
             
-            {recommendations.map((rec, index) => {
+            {recommendations
+            .map(rec => {
+              // Calculate live match scores
+              const liveMatch = calculateLiveMatch(rec);
+              
+              // Use live scores if available, otherwise static
+              return {
+                ...rec,
+                similarity_score: liveMatch ? liveMatch.similarity_score : rec.similarity_score,
+                tempo_match: liveMatch ? liveMatch.tempo_match : rec.tempo_match,
+                energy_match: liveMatch ? liveMatch.energy_match : rec.energy_match,
+                mood_match: liveMatch ? liveMatch.mood_match : rec.mood_match,
+                danceability_match: liveMatch ? liveMatch.danceability_match : (rec.danceability_match || rec.dance_match)
+              };
+            })
+            .sort((a, b) => b.similarity_score - a.similarity_score)
+            .map((rec, index) => {
               const product = getRecommendedProduct(rec.product_id);
               // Show recommendation even if product not found locally - use rec data as fallback
               const displayTitle = product?.albumTitle || `Track ID: ${rec.product_id}`;
