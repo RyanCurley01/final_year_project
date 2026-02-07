@@ -97,7 +97,7 @@ python3 extract_audio_features.py --sql-only --output audio_features_insert.sql
 # 📊 Better formatted MySQL queries for readability
 
 # Option 1: Use --table flag with column for perfect alignment
-docker exec gamestore_services-db-1 mysql -u root -pYOUR_PASSWORD Game_Store_System --table -e "SELECT * FROM Accounts;" | column -t -s $'\t'
+docker exec gamestore_services-db-1 mysql -u root -prootpassword Game_Store_System --table -e "SELECT * FROM Accounts;" | column -t -s $'\t'
 
 # Option 2: Use less -S for horizontal scrolling on wide tables (recommended for many columns)
 docker exec gamestore_services-db-1 mysql -u root -pYOUR_PASSWORD Game_Store_System --table -e "SELECT * FROM Accounts;" | less -S

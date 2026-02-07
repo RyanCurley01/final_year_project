@@ -13,6 +13,10 @@ public interface AccountRepository extends JpaRepository<Account, Long> {
     List<Account> findByAccountType(String accountType);
     
     Optional<Account> findByAccountEmailAddress(String email);
+
+    Optional<Account> findByFirebaseUid(String firebaseUid);
     
     boolean existsByAccountEmailAddress(String email);
+
+    boolean existsByFirebaseUid(String firebaseUid);
 }

@@ -136,3 +136,4 @@ scripts/add_individual_songs*.sql
 *.mov
 *.avi
 .env.docker
+**/firebase-service-account.json

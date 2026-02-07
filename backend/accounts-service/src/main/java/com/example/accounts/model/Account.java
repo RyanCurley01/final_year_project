@@ -23,6 +23,9 @@ public class Account {
     @Column(name = "AccountID")
     private Long id;
 
+    @Column(name = "FirebaseUID", unique = true, length = 128)
+    private String firebaseUid;
+
     @NotBlank(message = "Account name is required")
     @Column(name = "AccountName", nullable = false, length = 100)
     private String accountName;

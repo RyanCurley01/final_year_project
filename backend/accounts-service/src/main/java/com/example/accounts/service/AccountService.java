@@ -101,6 +101,37 @@ public class AccountService {
     }
 
     @Transactional
+    public Account registerFirebaseUser(String firebaseUid, String email, String name) {
+        Optional<Account> existingByUid = accountRepository.findByFirebaseUid(firebaseUid);
+        if (existingByUid.isPresent()) {
+            return existingByUid.get();
+        }
+
+        Optional<Account> existingByEmail = accountRepository.findByAccountEmailAddress(email);
+        if (existingByEmail.isPresent()) {
+            // Link existing account
+            Account existing = existingByEmail.get();
+            existing.setFirebaseUid(firebaseUid);
+            return accountRepository.save(existing);
+        }
+
+        return createFirebaseAccount(firebaseUid, email, name);
+    }
+
+    private Account createFirebaseAccount(String firebaseUid, String email, String name) {
+        Account newAccount = new Account();
+        newAccount.setFirebaseUid(firebaseUid);
+        newAccount.setAccountEmailAddress(email);
+        newAccount.setAccountName(name != null ? name : "User");
+        // Set a random strong password for database constraints
+        newAccount.setAccountPassword(passwordEncoder.encode("FIREBASE-" + java.util.UUID.randomUUID().toString()));
+        newAccount.setAccountType("Customer"); // Default type
+        newAccount.setAccountPhoneNumber(""); 
+        
+        return accountRepository.save(newAccount);
+    }
+
+    @Transactional
     public void deleteAccount(Long id) {
         if (!accountRepository.existsById(id)) {
             throw new IllegalArgumentException("Account not found with id: " + id);

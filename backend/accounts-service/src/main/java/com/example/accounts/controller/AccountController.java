@@ -5,6 +5,9 @@ import com.example.accounts.dto.LoginRequest;
 import com.example.accounts.dto.LoginResponse;
 import com.example.accounts.model.Account;
 import com.example.accounts.service.AccountService;
+import com.google.firebase.auth.FirebaseAuth;
+import com.google.firebase.auth.FirebaseToken;
+import com.google.firebase.auth.FirebaseAuthException;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -44,6 +47,16 @@ public class AccountController {
         } else {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(response);
         }
+    }
+
+    @PostMapping("/firebase-login")
+    public ResponseEntity<AccountResponse> firebaseLogin(@RequestBody java.util.Map<String, String> payload) throws FirebaseAuthException {
+        String idToken = payload.get("token");
+        FirebaseToken decodedToken = FirebaseAuth.getInstance().verifyIdToken(idToken);
+        String uid = decodedToken.getUid();
+        
+        Account account = accountService.registerFirebaseUser(uid, decodedToken.getEmail(), decodedToken.getName());
+        return ResponseEntity.ok(AccountResponse.fromAccount(account));
     }
 
     @GetMapping("/{id}")

@@ -7,6 +7,8 @@ import Cart from './Cart';
 import PurchaseHistory from './PurchaseHistory';
 import SimilarSongs from './SimilarSongs';
 import MLVisualization from './MLVisualization';
+import Login from './Login';
+import Register from './Register';
 
 export {
   CustomerScreen,
@@ -18,4 +20,6 @@ export {
   PurchaseHistory,
   SimilarSongs,
   MLVisualization,
+  Login,
+  Register,
 };
