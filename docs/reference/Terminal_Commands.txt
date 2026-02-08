@@ -216,3 +216,6 @@ docker compose -f docker-compose.services.yml -p gamestore_services build audio-
 
 To remove database volume
 docker volume rm gamestore_services_mysql-data
+
+Checks logs of entire container for services
+docker logs gamestore_services-db-1 2>&1 | tail -n 50
