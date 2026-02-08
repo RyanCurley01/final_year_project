@@ -24,8 +24,10 @@ export default function Login() {
       const userCredential = await login(email, password);
       const user = userCredential.user;
       const token = await user.getIdToken();
+      console.log("DEBUG (Login): Obtained Firebase Token:", token ? `${token.substring(0, 20)}...[truncated]` : "null");
 
       // 2. Sync/Login with backend
+      console.log("DEBUG (Login): Calling accountService.firebaseLogin");
       const backendUser = await accountService.firebaseLogin(token, user.email, user.uid);
       
       // 3. Store user details

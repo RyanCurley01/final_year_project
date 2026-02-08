@@ -13,14 +13,22 @@ export const accountService = {
 
   // Firebase Login/Sync
   firebaseLogin: async (token, email, uid, name = null, phoneNumber = null) => {
+    console.log("DEBUG (accountService): Preparing firebase-login payload");
+    console.log("DEBUG (accountService): Token valid?", !!token, "Length:", token ? token.length : 0);
+
     const payload = { token, email, uid };
     if (name) payload.name = name;
     if (phoneNumber) payload.phoneNumber = phoneNumber;
     
-    return apiCall(`${BASE_URL}/firebase-login`, {
+    console.log("DEBUG (accountService): Sending request to:", `${BASE_URL}/firebase-login`);
+    console.log("DEBUG (accountService): Payload keys:", Object.keys(payload));
+
+    const result = await apiCall(`${BASE_URL}/firebase-login`, {
       method: 'POST',
       body: JSON.stringify(payload),
     });
+    console.log("DEBUG (accountService): Response received:", result);
+    return result;
   },
 
   // Register new account

@@ -49,14 +49,40 @@ public class AccountController {
     }
 
     @PostMapping("/firebase-login")
-    public ResponseEntity<AccountResponse> firebaseLogin(@RequestBody java.util.Map<String, String> payload) throws FirebaseAuthException {
-        String idToken = payload.get("token");
-        FirebaseToken decodedToken = FirebaseAuth.getInstance().verifyIdToken(idToken);
-        String uid = decodedToken.getUid();
-        String phoneNumber = payload.get("phoneNumber");
-        
-        Account account = accountService.registerFirebaseUser(uid, decodedToken.getEmail(), decodedToken.getName(), phoneNumber);
-        return ResponseEntity.ok(AccountResponse.fromAccount(account));
+    public ResponseEntity<AccountResponse> firebaseLogin(@RequestBody java.util.Map<String, String> payload) {
+        System.out.println("DEBUG: Received firebase-login request");
+        try {
+            System.out.println("DEBUG: Payload keys: " + payload.keySet());
+            
+            String idToken = payload.get("token");
+            if (idToken == null || idToken.isEmpty()) {
+                System.err.println("ERROR: 'token' is missing or empty in the payload.");
+                // Print values (truncated) to debug
+                payload.forEach((k, v) -> System.out.println("Key: " + k + ", Value Length: " + (v == null ? "null" : v.length())));
+                return ResponseEntity.badRequest().build();
+            }
+
+            String phoneNumber = payload.get("phoneNumber");
+            
+            System.out.println("DEBUG: Verifying token (length: " + idToken.length() + ")...");
+            FirebaseToken decodedToken = FirebaseAuth.getInstance().verifyIdToken(idToken);
+            String uid = decodedToken.getUid();
+            String email = decodedToken.getEmail();
+            
+            // Use name from payload if available, else from token
+            String payloadName = payload.get("name");
+            String name = (payloadName != null && !payloadName.isEmpty()) ? payloadName : decodedToken.getName();
+
+            System.out.println("DEBUG: Token verified. UID: " + uid + ", Email: " + email + ", Name: " + name);
+            
+            Account account = accountService.registerFirebaseUser(uid, email, name, phoneNumber);
+            System.out.println("DEBUG: Account processed: " + account.getId());
+            return ResponseEntity.ok(AccountResponse.fromAccount(account));
+        } catch (Exception e) {
+            System.err.println("DEBUG ERROR: Exception in firebaseLogin: " + e.getMessage());
+            e.printStackTrace();
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
     }
 
     @GetMapping("/{id}")

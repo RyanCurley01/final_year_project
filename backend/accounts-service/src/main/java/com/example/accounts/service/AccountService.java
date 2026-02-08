@@ -102,19 +102,23 @@ public class AccountService {
 
     @Transactional
     public Account registerFirebaseUser(String firebaseUid, String email, String name, String phoneNumber) {
+        System.out.println("DEBUG: registerFirebaseUser called for Email: " + email + ", UID: " + firebaseUid);
         Optional<Account> existingByUid = accountRepository.findByFirebaseUid(firebaseUid);
         if (existingByUid.isPresent()) {
+            System.out.println("DEBUG: Found existing account by UID: " + existingByUid.get().getId());
             return existingByUid.get();
         }
 
         Optional<Account> existingByEmail = accountRepository.findByAccountEmailAddress(email);
         if (existingByEmail.isPresent()) {
             // Link existing account
+            System.out.println("DEBUG: Found existing account by Email: " + existingByEmail.get().getId() + ". Linking UID.");
             Account existing = existingByEmail.get();
             existing.setFirebaseUid(firebaseUid);
             return accountRepository.save(existing);
         }
 
+        System.out.println("DEBUG: Creating new Firebase account.");
         return createFirebaseAccount(firebaseUid, email, name, phoneNumber);
     }
 

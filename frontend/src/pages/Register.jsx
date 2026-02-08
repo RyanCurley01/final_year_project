@@ -9,7 +9,7 @@ export default function Register() {
   const passwordConfirmRef = useRef();
   const nameRef = useRef();
   const phoneRef = useRef();
-  const { signup, setUser } = useAuth();
+  const { signup, login, setUser } = useAuth();
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
@@ -24,13 +24,30 @@ export default function Register() {
     try {
       setError('');
       setLoading(true);
-      // 1. Create user in Firebase
-      const userCredential = await signup(emailRef.current.value, passwordRef.current.value);
-      const user = userCredential.user;
+      // 1. Create user in Firebase or identify existing
+      let user;
+      try {
+        const userCredential = await signup(emailRef.current.value, passwordRef.current.value);
+        user = userCredential.user;
+      } catch (signupErr) {
+        if (signupErr.code === 'auth/email-already-in-use') {
+          // If already in Firebase, try to sign in to verify and sync
+          console.log("Email already in use, attempting to login and sync...");
+          const userCredential = await login(emailRef.current.value, passwordRef.current.value);
+          user = userCredential.user;
+        } else {
+          throw signupErr;
+        }
+      }
+
       const token = await user.getIdToken();
+      console.log("DEBUG (Register): Obtained Firebase Token:", token ? `${token.substring(0, 20)}...[truncated]` : "null");
+      console.log("DEBUG (Register): User:", user.uid, user.email);
       
       // 2. Sync with backend
       const phoneNumber = phoneRef.current.value || "";
+      console.log("DEBUG (Register): Syncing with backend...", { name: nameRef.current.value, phoneNumber });
+      
       const backendUser = await accountService.firebaseLogin(token, user.email, user.uid, nameRef.current.value, phoneNumber);
       
       // 3. Store user details

@@ -202,9 +202,6 @@ INSERT INTO AudioFeatures (ProductID, Tempo, Energy, Danceability, Valence, Acou
 (51, 152.0, 0.173, 1.0, 0.641, 0.999, 0.886, -66.67, 0.114, 'Pop', 'Uplifting', 'G', '4/4', 30, 1906.83, 4123.88, 0.0571);
 EOF
 
-# To start services in their docker images
-docker-compose -f docker-compose.services.yml up -d
-
 To rebuild docker images 
 docker compose -f docker-compose.services.yml -p gamestore_services build
 
