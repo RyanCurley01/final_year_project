@@ -245,8 +245,6 @@ const SimilarSongs = () => {
         : envConfig.getApiBaseUrl() + '/api';
       
       try {
-        // Use the new useGetAllProductsQuery hook would be better, but keeping existing logic for now
-        // to minimize changes. The fix handles the iTunes service URL.
         const products = await productService.getAllProducts();
         // Only include actual store products (positive IDs), exclude cached iTunes songs
         // Normalize properties to match iTunes format (trackName, artworkUrl100) for consistent rendering
@@ -279,10 +277,19 @@ const SimilarSongs = () => {
               await new Promise(resolve => setTimeout(resolve, 300));
             }
             
+            // Use our own proxy to avoid CORS issues from client-side calls to iTunes
+            // The audio service has an endpoint for this: /api/itunes/search
             const response = await fetch(
-              `${apiBaseUrl}/api/itunes/search?term=${encodeURIComponent(artist)}&media=music&entity=song&limit=200`);
+              `${apiBaseUrl}/itunes/search?term=${encodeURIComponent(artist)}&media=music&entity=song&limit=200`
+            );
             const data = await response.json();
             
+            // Check if results exist before filtering
+            if (!data.results) {
+               console.warn(`No results format for ${artist}`, data);
+               continue;
+            }
+
             // Filter to only include tracks that have a preview AND match the artist name
             const artistLower = artist.toLowerCase();
             const artistSongs = data.results

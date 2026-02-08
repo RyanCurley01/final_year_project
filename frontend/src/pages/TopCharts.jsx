@@ -266,6 +266,12 @@ const TopCharts = () => {
               `${apiBaseUrl}/itunes/search?term=${encodeURIComponent(artist)}&media=music&entity=song&limit=200`
             );
             const data = await response.json();
+
+             // Check if results exist before filtering
+            if (!data.results) {
+               console.warn(`No results format for ${artist}`, data);
+               continue;
+            }
             
             // Filter to only include tracks that have a preview AND match the artist name
             const artistLower = artist.toLowerCase();
