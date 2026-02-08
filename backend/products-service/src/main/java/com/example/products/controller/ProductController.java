@@ -15,16 +15,28 @@ import java.util.List;
 @RequestMapping("/api/products")
 @CrossOrigin(origins = "*")
 @RequiredArgsConstructor
+@lombok.extern.slf4j.Slf4j
 public class ProductController {
 
     private final ProductService productService;
 
-    @GetMapping("/getAllProducts")
+    @GetMapping("/health")
+    public ResponseEntity<String> healthCheck() {
+        log.info("Health check endpoint called");
+        return ResponseEntity.ok("Products Service is Healthy");
+    }
+
+    @GetMapping(value = {"", "/", "/getAllProducts"})
     public ResponseEntity<List<ProductResponse>> getAllProducts(
             @RequestParam(required = false) String albumCoverImageUrl) {
-
+        log.info("Received request to get all products");
+        long startTime = System.currentTimeMillis();
+        
         // Always return all products with signed URLs (filtering handled in the service layer if needed)
-        return ResponseEntity.ok(productService.getAllProductsWithSignedUrls());
+        List<ProductResponse> products = productService.getAllProductsWithSignedUrls();
+        
+        log.info("Responding with {} products. Duration: {}ms", products.size(), System.currentTimeMillis() - startTime);
+        return ResponseEntity.ok(products);
     }
 
     @PostMapping

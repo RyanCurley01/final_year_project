@@ -17,6 +17,9 @@ public class Account {
     @Column(name = "AccountID")
     private Long id;
 
+    @Column(name = "FirebaseUID", unique = true, length = 128)
+    private String firebaseUid;
+
     @Column(name = "AccountName", nullable = false)
     private String accountName;
 
