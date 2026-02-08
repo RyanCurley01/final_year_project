@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 
-import { productService, accountService } from '../redux/services';
+import { accountService } from '../redux/services';
+import { useGetAllProductsQuery } from '../redux/services/productsApi';
 import SongCard from '../components/SongCard';
 import Loader from '../components/Loader';
 import Error from '../components/Error';
@@ -12,11 +13,34 @@ import { setActiveSong, playPause } from '../redux/features/playerSlice';
 
 
 const CustomerScreen = () => {
-  const [products, setProducts] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
   const [user, setUser] = useState(null);
   const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    // Check for logged in user
+    const storedUser = localStorage.getItem('currentUser');
+    if (storedUser) {
+      const parsedUser = JSON.parse(storedUser);
+      setUser(parsedUser);
+
+      // Check user role
+      if (!['Customer', 'Employee', 'Manager'].includes(parsedUser.accountType)) {
+          console.warn('Unknown account type:', parsedUser.accountType);
+      }
+    }
+  }, [navigate]);
+
+  // Construct auth object if user exists (Note: password usually not in localStorage, but if it is, we use it)
+  // If not, we pass undefined, and the API calls public endpoint
+  const auth = user?.email && user?.password ? { email: user.email, password: user.password } : undefined;
+
+  const { data: productsData, isLoading: loading, error } = useGetAllProductsQuery(auth, {
+    refetchOnMountOrArgChange: true,
+  });
+  
+  const products = productsData || [];
+  
   const viewMode = searchParams.get('mode') || 'discover'; // 'discover' or 'visualizer'
 
   const setViewMode = (mode) => {
@@ -29,38 +53,6 @@ const CustomerScreen = () => {
 
   const dispatch = useDispatch();
   const { activeSong, isPlaying } = useSelector((state) => state.player);
-  const navigate = useNavigate();
-
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        setLoading(true);
-        
-        // Check for logged in user
-        const storedUser = localStorage.getItem('currentUser');
-        if (storedUser) {
-          const parsedUser = JSON.parse(storedUser);
-          setUser(parsedUser);
-
-          // Check user role
-          if (!['Customer', 'Employee', 'Manager'].includes(parsedUser.accountType)) {
-              console.warn('Unknown account type:', parsedUser.accountType);
-          }
-        }
-        
-        // Fetch products
-        const productData = await productService.getAllProducts();
-        setProducts(productData);
-        setError(null);
-      } catch (err) {
-        setError(err.message);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchData();
-  }, [navigate]);
 
   if (loading) return <Loader title="Loading products..." />;
   if (error) return <Error />;
