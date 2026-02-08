@@ -1,29 +1,41 @@
 import { getServiceUrl, apiCall, getBasicAuthHeaders } from './api';
 
-const BASE_URL = `${getServiceUrl('PRODUCTS')}/api/products`;
+// Helper to determine base URL
+const getBaseUrl = () => {
+  const hostname = window.location.hostname;
+  const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1';
+  
+  if (isLocalhost) {
+    return 'http://localhost:8081/api/products';
+  }
+  return `${getServiceUrl('PRODUCTS')}/api/products`;
+};
 
 export const productService = {
   // Get all products
   getAllProducts: async (email, password) => {
+    const baseUrl = getBaseUrl();
     const options = {};
     if (email && password) {
       options.headers = getBasicAuthHeaders(email, password);
     }
-    return apiCall(`${BASE_URL}/getAllProducts`, options);
+    return apiCall(`${baseUrl}/getAllProducts`, options);
   },
 
   // Get product by ID
   getProductById: async (id, email, password) => {
+    const baseUrl = getBaseUrl();
     const options = {};
     if (email && password) {
       options.headers = getBasicAuthHeaders(email, password);
     }
-    return apiCall(`${BASE_URL}/${id}`, options);
+    return apiCall(`${baseUrl}/${id}`, options);
   },
 
   // Create product (Manager only)
   createProduct: async (productData, email, password) => {
-    return apiCall(BASE_URL, {
+    const baseUrl = getBaseUrl();
+    return apiCall(baseUrl, {
       method: 'POST',
       headers: getBasicAuthHeaders(email, password),
       body: JSON.stringify(productData),

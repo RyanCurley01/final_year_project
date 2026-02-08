@@ -239,9 +239,14 @@ const SimilarSongs = () => {
       setError(null);
       
       // Get API URL from environment config (no hardcoding)
-      const apiBaseUrl = envConfig.getApiBaseUrl();
+      // Use direct localhost URL if running locally to avoid proxy issues
+      const apiBaseUrl = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+        ? 'http://localhost:5000/api'
+        : envConfig.getApiBaseUrl() + '/api';
       
       try {
+        // Use the new useGetAllProductsQuery hook would be better, but keeping existing logic for now
+        // to minimize changes. The fix handles the iTunes service URL.
         const products = await productService.getAllProducts();
         // Only include actual store products (positive IDs), exclude cached iTunes songs
         // Normalize properties to match iTunes format (trackName, artworkUrl100) for consistent rendering
