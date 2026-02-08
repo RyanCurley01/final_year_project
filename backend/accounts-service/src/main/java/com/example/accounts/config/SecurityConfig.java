@@ -20,7 +20,7 @@ import org.springframework.security.config.annotation.authentication.configurati
 import lombok.RequiredArgsConstructor;
 
 @Configuration
-@EnableWebSecurity
+@EnableWebSecurity(debug = true) // Enable debug logs
 @RequiredArgsConstructor
 public class SecurityConfig
 {
@@ -38,19 +38,19 @@ public class SecurityConfig
         return authConfig.getAuthenticationManager();
     }
 
-    // @Bean
-    // public CorsConfigurationSource corsConfigurationSource() {
-    //     CorsConfiguration configuration = new CorsConfiguration();
-    //     configuration.setAllowedOrigins(Arrays.asList("*"));
-    //     configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"));
-    //     configuration.setAllowedHeaders(Arrays.asList("*"));
-    //     configuration.setAllowCredentials(false);
-    //     configuration.setMaxAge(3600L);
+    @Bean
+    public org.springframework.web.cors.CorsConfigurationSource corsConfigurationSource() {
+        org.springframework.web.cors.CorsConfiguration configuration = new org.springframework.web.cors.CorsConfiguration();
+        configuration.setAllowedOrigins(java.util.Arrays.asList("*"));
+        configuration.setAllowedMethods(java.util.Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"));
+        configuration.setAllowedHeaders(java.util.Arrays.asList("*"));
+        configuration.setAllowCredentials(false);
+        configuration.setMaxAge(3600L);
         
-    //     UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
-    //     source.registerCorsConfiguration("/**", configuration);
-    //     return source;
-    // }
+        org.springframework.web.cors.UrlBasedCorsConfigurationSource source = new org.springframework.web.cors.UrlBasedCorsConfigurationSource();
+        source.registerCorsConfiguration("/**", configuration);
+        return source;
+    }
 
     // Defines security rules as to what endpoints a manager, employee or customer have access to
     @Bean
@@ -58,15 +58,18 @@ public class SecurityConfig
     {
         http
             .csrf(csrf -> csrf.disable())
-            .cors(Customizer.withDefaults())
+            .cors(Customizer.withDefaults()) // Uses corsConfigurationSource bean if available
             .authorizeHttpRequests(auth -> auth
-                // Public endpoints
-                .requestMatchers(HttpMethod.POST, "/api/accounts/login").permitAll()
-                .requestMatchers(HttpMethod.POST, "/api/accounts").permitAll() // Register new account
+                // Explicitly allow login endpoints
+                .requestMatchers("/api/accounts/login").permitAll()
+                .requestMatchers("/api/accounts/firebase-login").permitAll()
+                .requestMatchers(HttpMethod.POST, "/api/accounts").permitAll()
+                .requestMatchers("/error").permitAll()
+                .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                 
                 // Manager-only endpoints 
                 .requestMatchers(HttpMethod.GET, "/api/accounts/getAllAccounts").hasRole("MANAGER")
-                .requestMatchers(HttpMethod.DELETE, "/api/accounts/**").hasRole("MANAGER")
+                .requestMatchers(HttpMethod.DELETE, "/api/accounts /**").hasRole("MANAGER")
 
                 // Manager and Employee only endpoints 
                 .requestMatchers(HttpMethod.GET, "/api/accounts/{id}").hasAnyRole("MANAGER", "EMPLOYEE")
@@ -75,7 +78,7 @@ public class SecurityConfig
                 // All other requests must be authenticated
                 .anyRequest().authenticated()
             )
-            .httpBasic(Customizer.withDefaults()) // Enable HTTP Basic Authentication
+            .httpBasic(basic -> basic.disable()) // Disable HTTP Basic Authentication
             .sessionManagement(session -> session
                 .sessionCreationPolicy(SessionCreationPolicy.STATELESS)
             )

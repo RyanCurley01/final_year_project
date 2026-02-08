@@ -1,14 +1,15 @@
 import React, { useRef, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { Link, useNavigate } from 'react-router-dom';
-import axios from 'axios';
+import { accountService } from '../redux/services';
 
 export default function Register() {
   const emailRef = useRef();
   const passwordRef = useRef();
   const passwordConfirmRef = useRef();
   const nameRef = useRef();
-  const { signup } = useAuth();
+  const phoneRef = useRef();
+  const { signup, setUser } = useAuth();
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
@@ -29,17 +30,16 @@ export default function Register() {
       const token = await user.getIdToken();
       
       // 2. Sync with backend
-      await axios.post('http://localhost:8080/api/accounts/firebase-login', {
-        token,
-        email: user.email,
-        uid: user.uid,
-        name: nameRef.current.value
-      });
+      const phoneNumber = phoneRef.current.value || "";
+      const backendUser = await accountService.firebaseLogin(token, user.email, user.uid, nameRef.current.value, phoneNumber);
+      
+      // 3. Store user details
+      setUser(backendUser);
 
       navigate('/');
     } catch (err) {
       console.error(err);
-      setError('Failed to create an account');
+      setError('Failed to create an account: ' + (err.message || 'Unknown error'));
     }
 
     setLoading(false);
@@ -66,6 +66,14 @@ export default function Register() {
               type="email"
               ref={emailRef}
               required
+              className="w-full px-4 py-2 mt-1 bg-gray-800 border border-gray-700 rounded focus:outline-none focus:ring-2 focus:ring-cyan-500"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium">Phone Number (Optional)</label>
+            <input
+              type="tel"
+              ref={phoneRef}
               className="w-full px-4 py-2 mt-1 bg-gray-800 border border-gray-700 rounded focus:outline-none focus:ring-2 focus:ring-cyan-500"
             />
           </div>

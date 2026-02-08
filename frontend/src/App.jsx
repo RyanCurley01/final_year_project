@@ -24,25 +24,18 @@ const AuthenticatedApp = () => {
   const [products, setProducts] = useState([]);
   const { currentUser } = useAuth();
   
-  // NOTE: For full integration, update productService to use Firebase Token instead of password
-  // For now, we use the authenticated user's email
-  const email = currentUser?.email || 'john.smith@store.com';
-  const password = 'password'; // Placeholder until backend works with Tokens
-  
   // Fetch products for recommendations
   useEffect(() => {
     const fetchProducts = async () => {
       try {
-        const productData = await productService.getAllProducts(email, password);
+        const productData = await productService.getAllProducts();
         setProducts(productData);
       } catch (error) {
         // Error fetching products
       }
     };
 
-    if (currentUser) {
-        fetchProducts();
-    }
+    fetchProducts();
   }, [currentUser]);
 
   // Handle recommendation click

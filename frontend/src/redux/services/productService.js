@@ -5,16 +5,20 @@ const BASE_URL = `${getServiceUrl('PRODUCTS')}/api/products`;
 export const productService = {
   // Get all products
   getAllProducts: async (email, password) => {
-    return apiCall(`${BASE_URL}/getAllProducts`, {
-      headers: getBasicAuthHeaders(email, password),
-    });
+    const options = {};
+    if (email && password) {
+      options.headers = getBasicAuthHeaders(email, password);
+    }
+    return apiCall(`${BASE_URL}/getAllProducts`, options);
   },
 
   // Get product by ID
   getProductById: async (id, email, password) => {
-    return apiCall(`${BASE_URL}/${id}`, {
-      headers: getBasicAuthHeaders(email, password),
-    });
+    const options = {};
+    if (email && password) {
+      options.headers = getBasicAuthHeaders(email, password);
+    }
+    return apiCall(`${BASE_URL}/${id}`, options);
   },
 
   // Create product (Manager only)

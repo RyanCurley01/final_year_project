@@ -226,17 +226,10 @@ USE Game_Store_System;
     -- Insert Accounts (Managers, Employees, Customers)
     -- All passwords are BCrypt hashed version of 'password'
     -- Using BCrypt hash: $2a$10$dXJ3SW6G7P50lGmMkkmwe.20cQQubK3.HZWzG3YB1tlRy.fqvM/BG
-    INSERT INTO Accounts (AccountName, AccountPhoneNumber, AccountEmailAddress, AccountPassword, AccountType) VALUES
-    ('John Smith', '5551234567', 'john.smith@store.com', '$2a$10$dXJ3SW6G7P50lGmMkkmwe.20cQQubK3.HZWzG3YB1tlRy.fqvM/BG', 'Manager'),
-    ('Sarah Johnson', '5552345678', 'sarah.j@store.com', '$2a$10$dXJ3SW6G7P50lGmMkkmwe.20cQQubK3.HZWzG3YB1tlRy.fqvM/BG', 'Employee'),
-    ('Mike Wilson', '5553456789', 'mike.w@store.com', '$2a$10$dXJ3SW6G7P50lGmMkkmwe.20cQQubK3.HZWzG3YB1tlRy.fqvM/BG', 'Employee'),
-    ('Alice Brown', '5554567890', 'alice.b@gmail.com', '$2a$10$dXJ3SW6G7P50lGmMkkmwe.20cQQubK3.HZWzG3YB1tlRy.fqvM/BG', 'Customer'),
-    ('Bob Davis', '5555678901', 'bob.d@gmail.com', '$2a$10$dXJ3SW6G7P50lGmMkkmwe.20cQQubK3.HZWzG3YB1tlRy.fqvM/BG', 'Customer'),
-    ('Carol White', '5556789012', 'carol.w@gmail.com', '$2a$10$dXJ3SW6G7P50lGmMkkmwe.20cQQubK3.HZWzG3YB1tlRy.fqvM/BG', 'Customer'),
-    ('David Lee', '5557890123', 'david.l@gmail.com', '$2a$10$dXJ3SW6G7P50lGmMkkmwe.20cQQubK3.HZWzG3YB1tlRy.fqvM/BG', 'Customer'),
-    ('Emma Garcia', '5558901234', 'emma.g@gmail.com', '$2a$10$dXJ3SW6G7P50lGmMkkmwe.20cQQubK3.HZWzG3YB1tlRy.fqvM/BG', 'Customer'),
-    ('Frank Martinez', '5559012345', 'frank.m@gmail.com', '$2a$10$dXJ3SW6G7P50lGmMkkmwe.20cQQubK3.HZWzG3YB1tlRy.fqvM/BG', 'Customer'),
-    ('Grace Taylor', '5550123456', 'grace.t@gmail.com', '$2a$10$dXJ3SW6G7P50lGmMkkmwe.20cQQubK3.HZWzG3YB1tlRy.fqvM/BG', 'Customer');
+    INSERT INTO Accounts (FirebaseUID, AccountName, AccountPhoneNumber, AccountEmailAddress, AccountPassword, AccountType) VALUES
+    ('uid_john', 'John Smith', '5551234567', 'john.smith@store.com', '$2a$12$o1bIeFKxF1n9qHMZ7jmfuePFvy151/ELJxASYZTvg8sJiiyLqqBvi', 'Manager'),
+    ('uid_sarah', 'Sarah Johnson', '5552345678', 'sarah.j@store.com', '$2a$12$o1bIeFKxF1n9qHMZ7jmfuePFvy151/ELJxASYZTvg8sJiiyLqqBvi', 'Employee'),
+    ('uid_alice', 'Alice Brown', '5554567890', 'alice.b@gmail.com', '$2a$12$o1bIeFKxF1n9qHMZ7jmfuePFvy151/ELJxASYZTvg8sJiiyLqqBvi', 'Customer');
 
     -- Insert Products (Games and Music Albums)
     -- Note: albumCoverImageUrl for music uses the cloud animation video from S3

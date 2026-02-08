@@ -101,7 +101,7 @@ public class AccountService {
     }
 
     @Transactional
-    public Account registerFirebaseUser(String firebaseUid, String email, String name) {
+    public Account registerFirebaseUser(String firebaseUid, String email, String name, String phoneNumber) {
         Optional<Account> existingByUid = accountRepository.findByFirebaseUid(firebaseUid);
         if (existingByUid.isPresent()) {
             return existingByUid.get();
@@ -115,10 +115,10 @@ public class AccountService {
             return accountRepository.save(existing);
         }
 
-        return createFirebaseAccount(firebaseUid, email, name);
+        return createFirebaseAccount(firebaseUid, email, name, phoneNumber);
     }
 
-    private Account createFirebaseAccount(String firebaseUid, String email, String name) {
+    private Account createFirebaseAccount(String firebaseUid, String email, String name, String phoneNumber) {
         Account newAccount = new Account();
         newAccount.setFirebaseUid(firebaseUid);
         newAccount.setAccountEmailAddress(email);
@@ -126,7 +126,7 @@ public class AccountService {
         // Set a random strong password for database constraints
         newAccount.setAccountPassword(passwordEncoder.encode("FIREBASE-" + java.util.UUID.randomUUID().toString()));
         newAccount.setAccountType("Customer"); // Default type
-        newAccount.setAccountPhoneNumber(""); 
+        newAccount.setAccountPhoneNumber(phoneNumber != null ? phoneNumber : ""); 
         
         return accountRepository.save(newAccount);
     }
@@ -143,13 +143,17 @@ public class AccountService {
         Optional<Account> accountOptional = accountRepository.findByAccountEmailAddress(email);
         
         if (accountOptional.isEmpty()) {
+            System.out.println("User not found: " + email);
             return new LoginResponse(false, "User not found", null, null, null, null);
         }
         
         Account account = accountOptional.get();
         
         // Check if password matches
-        if (passwordEncoder.matches(password, account.getAccountPassword())) {
+        boolean matches = passwordEncoder.matches(password, account.getAccountPassword());
+        System.out.println("Password match for " + email + ": " + matches);
+        
+        if (matches) {
             return new LoginResponse(
                 true, 
                 "Login successful", 

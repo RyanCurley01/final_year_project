@@ -203,9 +203,6 @@ const TopCharts = () => {
   const playbackRateRef = useRef(playbackRate);
   playbackRateRef.current = playbackRate;
 
-  const email = 'john.smith@store.com';
-  const password = 'password';
-
   // Fetch cached audio features from backend (real extracted features from AudioFeatures table)
   useEffect(() => {
     const fetchCachedFeatures = async () => {
@@ -237,7 +234,7 @@ const TopCharts = () => {
       const apiBaseUrl = envConfig.getApiBaseUrl();
       
       try {
-        const products = await productService.getAllProducts(email, password);
+        const products = await productService.getAllProducts();
         // Only include actual store products (positive IDs), exclude cached iTunes songs
         // Normalize properties to match iTunes format (trackName, artworkUrl100) for consistent rendering
         const musicProducts = products

@@ -302,9 +302,6 @@ const Search = () => {
   const playbackRateRef = useRef(playbackRate);
   playbackRateRef.current = playbackRate;
 
-  const email = 'john.smith@store.com';
-  const password = 'password';
-
   // Reset match flag when search term changes
   useEffect(() => {
     matchStartedRef.current = false;
@@ -329,7 +326,7 @@ const Search = () => {
       
       try {
         // Fetch database songs
-        const products = await productService.getAllProducts(email, password);
+        const products = await productService.getAllProducts();
         // Only include actual store products (positive IDs), exclude cached iTunes songs
         const musicProducts = products.filter(p => p.albumTitle && p.fileUrl && p.id > 0);
         setDbSongs(musicProducts);

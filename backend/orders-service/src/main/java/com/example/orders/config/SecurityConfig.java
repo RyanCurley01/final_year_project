@@ -50,8 +50,9 @@ public class SecurityConfig {
             .cors(Customizer.withDefaults())
             .authorizeHttpRequests(auth -> auth
                 // Customers can create and view their own orders
-                .requestMatchers(HttpMethod.POST, "/api/orders").authenticated()
-                .requestMatchers(HttpMethod.GET, "/api/orders/{id}").authenticated()
+                .requestMatchers(HttpMethod.POST, "/api/orders").permitAll()
+                .requestMatchers(HttpMethod.GET, "/api/orders/{id}").permitAll()
+                .requestMatchers(HttpMethod.GET, "/api/orders/account/**").permitAll()
                 
                 // Manager and Employee can view all orders
                 .requestMatchers(HttpMethod.GET, "/api/orders").hasAnyRole("MANAGER", "EMPLOYEE")

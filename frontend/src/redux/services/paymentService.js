@@ -52,19 +52,25 @@ export const paymentService = {
 
     // Create PayPal Order
   createPayPalOrder: async (orderData, email, password) => {
-    return apiCall(`${BASE_URL}/paypal/create-order`, {
+    const options = {
       method: 'POST',
-      headers: getBasicAuthHeaders(email, password),
       body: JSON.stringify(orderData),
-    });
+    };
+    if (email && password) {
+      options.headers = getBasicAuthHeaders(email, password);
+    }
+    return apiCall(`${BASE_URL}/paypal/create-order`, options);
   },
 
   // Capture PayPal Order
   capturePayPalOrder: async (paypalOrderId, email, password) => {
-    return apiCall(`${BASE_URL}/paypal/capture-order/${paypalOrderId}`, {
+    const options = {
       method: 'POST',
-      headers: getBasicAuthHeaders(email, password),
-    });
+    };
+    if (email && password) {
+      options.headers = getBasicAuthHeaders(email, password);
+    }
+    return apiCall(`${BASE_URL}/paypal/capture-order/${paypalOrderId}`, options);
   },
   
   // Process PayPal payment

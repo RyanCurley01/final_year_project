@@ -195,17 +195,10 @@ CREATE TABLE IF NOT EXISTS UserRecommendations (
 
 -- Insert Accounts (Managers, Employees, Customers)
 -- All passwords are BCrypt hashed version of 'password'
-INSERT INTO Accounts (AccountName, AccountPhoneNumber, AccountEmailAddress, AccountPassword, AccountType) VALUES
-('John Smith', '5551234567', 'john.smith@store.com', '$2a$10$dXJ3SW6G7P50lGmMkkmwe.20cQQubK3.HZWzG3YB1tlRy.fqvM/BG', 'Manager'),
-('Sarah Johnson', '5552345678', 'sarah.j@store.com', '$2a$10$dXJ3SW6G7P50lGmMkkmwe.20cQQubK3.HZWzG3YB1tlRy.fqvM/BG', 'Employee'),
-('Mike Wilson', '5553456789', 'mike.w@store.com', '$2a$10$dXJ3SW6G7P50lGmMkkmwe.20cQQubK3.HZWzG3YB1tlRy.fqvM/BG', 'Employee'),
-('Alice Brown', '5554567890', 'alice.b@gmail.com', '$2a$10$dXJ3SW6G7P50lGmMkkmwe.20cQQubK3.HZWzG3YB1tlRy.fqvM/BG', 'Customer'),
-('Bob Davis', '5555678901', 'bob.d@gmail.com', '$2a$10$dXJ3SW6G7P50lGmMkkmwe.20cQQubK3.HZWzG3YB1tlRy.fqvM/BG', 'Customer'),
-('Carol White', '5556789012', 'carol.w@gmail.com', '$2a$10$dXJ3SW6G7P50lGmMkkmwe.20cQQubK3.HZWzG3YB1tlRy.fqvM/BG', 'Customer'),
-('David Lee', '5557890123', 'david.l@gmail.com', '$2a$10$dXJ3SW6G7P50lGmMkkmwe.20cQQubK3.HZWzG3YB1tlRy.fqvM/BG', 'Customer'),
-('Emma Garcia', '5558901234', 'emma.g@gmail.com', '$2a$10$dXJ3SW6G7P50lGmMkkmwe.20cQQubK3.HZWzG3YB1tlRy.fqvM/BG', 'Customer'),
-('Frank Martinez', '5559012345', 'frank.m@gmail.com', '$2a$10$dXJ3SW6G7P50lGmMkkmwe.20cQQubK3.HZWzG3YB1tlRy.fqvM/BG', 'Customer'),
-('Grace Taylor', '5550123456', 'grace.t@gmail.com', '$2a$10$dXJ3SW6G7P50lGmMkkmwe.20cQQubK3.HZWzG3YB1tlRy.fqvM/BG', 'Customer');
+INSERT INTO Accounts (FirebaseUID, AccountName, AccountPhoneNumber, AccountEmailAddress, AccountPassword, AccountType) VALUES
+('uid_john', 'John Smith', '5551234567', 'john.smith@store.com', '$2a$12$o1bIeFKxF1n9qHMZ7jmfuePFvy151/ELJxASYZTvg8sJiiyLqqBvi', 'Manager'),
+('uid_sarah', 'Sarah Johnson', '5552345678', 'sarah.j@store.com', '$2a$12$o1bIeFKxF1n9qHMZ7jmfuePFvy151/ELJxASYZTvg8sJiiyLqqBvi', 'Employee'),
+('uid_alice', 'Alice Brown', '5554567890', 'alice.b@gmail.com', '$2a$12$o1bIeFKxF1n9qHMZ7jmfuePFvy151/ELJxASYZTvg8sJiiyLqqBvi', 'Customer');
 
 -- Insert Products (Games and Music Albums)
 INSERT INTO `Products` (`ProductID`, `AlbumTitle`, `AlbumPrice`, `albumCoverImageUrl`, `file_url`, `preview_url`, `StockQuantity`) VALUES (-1749388903,'#19',-1.00,'https://is1-ssl.mzstatic.com/image/thumb/Music221/v4/65/a8/9d/65a89da7-a637-0e68-901a-f737690e5115/5056614797763.png/100x100bb.jpg','https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview211/v4/27/9f/6f/279f6f83-65f9-2f2c-1c07-82cbd5f06a27/mzaf_9063744560744998868.plus.aac.p.m4a','https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview211/v4/27/9f/6f/279f6f83-65f9-2f2c-1c07-82cbd5f06a27/mzaf_9063744560744998868.plus.aac.p.m4a',0);

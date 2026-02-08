@@ -50,13 +50,13 @@ public class SecurityConfig {
             .cors(Customizer.withDefaults())
             .authorizeHttpRequests(auth -> auth
                 // PayPal endpoints - authenticated customers can create/capture orders
-                .requestMatchers(HttpMethod.POST, "/api/payments/paypal/create-order").authenticated()
-                .requestMatchers(HttpMethod.POST, "/api/payments/paypal/capture-order/**").authenticated()
-                .requestMatchers(HttpMethod.GET, "/api/payments/paypal/order/**").authenticated()
+                .requestMatchers(HttpMethod.POST, "/api/payments/paypal/create-order").permitAll()
+                .requestMatchers(HttpMethod.POST, "/api/payments/paypal/capture-order/**").permitAll()
+                .requestMatchers(HttpMethod.GET, "/api/payments/paypal/order/**").permitAll()
                 
                 // View individual payment or PayPal payment by ID
-                .requestMatchers(HttpMethod.GET, "/api/payments/{id}").authenticated()
-                .requestMatchers(HttpMethod.GET, "/api/payments/paypal/**").authenticated()
+                .requestMatchers(HttpMethod.GET, "/api/payments/{id}").permitAll()
+                .requestMatchers(HttpMethod.GET, "/api/payments/paypal/**").permitAll()
                 
                 // Manager and Employee can view all payments
                 .requestMatchers(HttpMethod.GET, "/api/payments").hasAnyRole("MANAGER", "EMPLOYEE")

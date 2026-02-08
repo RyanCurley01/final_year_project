@@ -30,7 +30,7 @@ public class Account {
     @Column(name = "AccountName", nullable = false, length = 100)
     private String accountName;
 
-    @NotBlank(message = "Phone number is required")
+    // Optional phone number
     @Column(name = "AccountPhoneNumber", length = 15)
     private String accountPhoneNumber;
 

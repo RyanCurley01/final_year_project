@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 
 import { productService, accountService } from '../redux/services';
 import SongCard from '../components/SongCard';
@@ -29,25 +29,27 @@ const CustomerScreen = () => {
 
   const dispatch = useDispatch();
   const { activeSong, isPlaying } = useSelector((state) => state.player);
-
-  /*
-  * Change this store these login detail in local storage 
-  * after the login screen is implemented
-  */ 
-  const email = 'john.smith@store.com';
-  const password = 'password';
+  const navigate = useNavigate();
 
   useEffect(() => {
     const fetchData = async () => {
       try {
         setLoading(true);
         
-        // Fetch user account details
-        const userData = await accountService.login(email, password);
-        setUser(userData);
+        // Check for logged in user
+        const storedUser = localStorage.getItem('currentUser');
+        if (storedUser) {
+          const parsedUser = JSON.parse(storedUser);
+          setUser(parsedUser);
+
+          // Check user role
+          if (!['Customer', 'Employee', 'Manager'].includes(parsedUser.accountType)) {
+              console.warn('Unknown account type:', parsedUser.accountType);
+          }
+        }
         
         // Fetch products
-        const productData = await productService.getAllProducts(email, password);
+        const productData = await productService.getAllProducts();
         setProducts(productData);
         setError(null);
       } catch (err) {
@@ -58,7 +60,7 @@ const CustomerScreen = () => {
     };
 
     fetchData();
-  }, []);
+  }, [navigate]);
 
   if (loading) return <Loader title="Loading products..." />;
   if (error) return <Error />;
@@ -142,9 +144,6 @@ const CustomerScreen = () => {
               product={product}
               data={music}
               i={i}
-              user={user}
-              email={email}
-              password={password}
             />
           ))}
         </div>

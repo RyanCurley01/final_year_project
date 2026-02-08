@@ -7,8 +7,19 @@ export const accountService = {
   login: async (email, password) => {
     return apiCall(`${BASE_URL}/login`, {
       method: 'POST',
-      headers: getBasicAuthHeaders(email, password),
       body: JSON.stringify({ email, password }),
+    });
+  },
+
+  // Firebase Login/Sync
+  firebaseLogin: async (token, email, uid, name = null, phoneNumber = null) => {
+    const payload = { token, email, uid };
+    if (name) payload.name = name;
+    if (phoneNumber) payload.phoneNumber = phoneNumber;
+    
+    return apiCall(`${BASE_URL}/firebase-login`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
     });
   },
 

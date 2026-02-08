@@ -37,16 +37,15 @@ public class AccountController {
     @PostMapping("/login")
     public ResponseEntity<LoginResponse> login(@Valid @RequestBody LoginRequest request)
     {   
+        System.out.println("Login endpoint hit for email: " + request.getEmail());
         LoginResponse response = accountService.authenticateUser(
             request.getEmail(), 
             request.getPassword()
         );
         
-        if (response.isSuccess()) {
-            return ResponseEntity.ok(response);
-        } else {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(response);
-        }
+        System.out.println("Login result: " + response.getMessage());
+        // DEBUG: Force 200 OK to bypass generic 401 errors
+        return ResponseEntity.ok(response);
     }
 
     @PostMapping("/firebase-login")
@@ -54,8 +53,9 @@ public class AccountController {
         String idToken = payload.get("token");
         FirebaseToken decodedToken = FirebaseAuth.getInstance().verifyIdToken(idToken);
         String uid = decodedToken.getUid();
+        String phoneNumber = payload.get("phoneNumber");
         
-        Account account = accountService.registerFirebaseUser(uid, decodedToken.getEmail(), decodedToken.getName());
+        Account account = accountService.registerFirebaseUser(uid, decodedToken.getEmail(), decodedToken.getName(), phoneNumber);
         return ResponseEntity.ok(AccountResponse.fromAccount(account));
     }
 

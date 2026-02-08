@@ -12,16 +12,20 @@ import { orderItemService } from '../redux/services/orderItemService';
 import placeholders from '../utils/placeholderImage';
 import { downloadMultipleFiles, generateFilename } from '../utils/downloadHelper';
 
+import { useAuth } from '../context/AuthContext';
+
 const Cart = () => {
   const dispatch = useDispatch();
   const { items, totalAmount, totalItems } = useSelector((state) => state.cart);
   const [showPayPal, setShowPayPal] = useState(false);
   const [processingPayment, setProcessingPayment] = useState(false);
+  const { currentUser } = useAuth();
   
-  // Authentication credentials (hardcoded for demo)
-  const email = 'john.smith@store.com';
-  const password = 'password';
-  const user = { accountId: 1, email };
+  // Use authenticated user
+  const user = currentUser ? { 
+    accountId: currentUser.id, 
+    email: currentUser.email || currentUser.accountEmailAddress 
+  } : null;
 
   const handleRemove = (productId) => {
     dispatch(removeFromCart(productId));
@@ -41,7 +45,7 @@ const Cart = () => {
         totalAmount: totalAmount,
       };
       
-      const order = await orderService.createOrder(orderData, email, password);
+      const order = await orderService.createOrder(orderData);
       
       // Step 2: Create Order_Items for each cart item
       for (const item of items) {
@@ -51,7 +55,7 @@ const Cart = () => {
           quantity: item.quantity,
           unitPrice: item.albumPrice
         };
-        await orderItemService.createOrderItem(orderItemData, email, password);
+        await orderItemService.createOrderItem(orderItemData);
       }
       
       // Step 3: Create PayPal order (use first product ID for backward compatibility)
@@ -68,7 +72,7 @@ const Cart = () => {
         }))
       };
       
-      const response = await paymentService.createPayPalOrder(paypalOrderData, email, password);
+      const response = await paymentService.createPayPalOrder(paypalOrderData);
       return response.id;
     } catch (error) {
       setProcessingPayment(false);
@@ -78,7 +82,7 @@ const Cart = () => {
 
   const handleApprove = async (data, actions) => {
     try {
-      const response = await paymentService.capturePayPalOrder(data.orderID, email, password);
+      const response = await paymentService.capturePayPalOrder(data.orderID);
       
       // Add to purchase history
       dispatch(addPurchase({

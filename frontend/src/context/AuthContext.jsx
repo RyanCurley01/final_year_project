@@ -26,12 +26,65 @@ export function AuthProvider({ children }) {
   }
 
   function logout() {
+    localStorage.removeItem('currentUser');
+    setCurrentUser(null);
     return signOut(auth);
   }
 
+  // Allow manual update of user (e.g. after backend sync or legacy login)
+  function setUser(user) {
+    setCurrentUser(user);
+    if (user) {
+      localStorage.setItem('currentUser', JSON.stringify(user));
+    } else {
+      localStorage.removeItem('currentUser');
+    }
+  }
+
   useEffect(() => {
+    // Check local storage first (for legacy login or persisted backend user)
+    const stored = localStorage.getItem('currentUser');
+    if (stored) {
+      setCurrentUser(JSON.parse(stored));
+    }
+
     const unsubscribe = onAuthStateChanged(auth, (user) => {
-      setCurrentUser(user);
+      // If Firebase detects a user, we generally want to respect it.
+      // However, if we already have a "richer" user object from localStorage (with DB ID),
+      // we might want to keep that, unless the UIDs don't match.
+      if (user) {
+         // If we don't have a current user, or the current user is just the firebase one (no ID),
+         // try to load from local storage to get the full profile.
+         const local = localStorage.getItem('currentUser');
+         if (local) {
+            const localUser = JSON.parse(local);
+            // Verify it matches the firebase user (email or uid)
+            if (localUser.email === user.email || localUser.firebaseUid === user.uid) {
+               setCurrentUser(localUser);
+            } else {
+               setCurrentUser(user);
+            }
+         } else {
+            setCurrentUser(user);
+         }
+      } else {
+         // Firebase says no user. 
+         // Check if we have a legacy user (Basic Auth) in local storage?
+         // If we do, we keep it. If not, we are logged out.
+         const local = localStorage.getItem('currentUser');
+         if (local) {
+            const localUser = JSON.parse(local);
+            // If it has a firebaseUid, and firebase says we are out, then we are out.
+            // If it has NO firebaseUid (Legacy/Seeded), then we act as logged in.
+            if (localUser.firebaseUid) {
+               setCurrentUser(null);
+            } else {
+               setCurrentUser(localUser);
+            }
+         } else {
+            setCurrentUser(null);
+         }
+      }
       setLoading(false);
     });
 
@@ -42,7 +95,8 @@ export function AuthProvider({ children }) {
     currentUser,
     login,
     signup,
-    logout
+    logout,
+    setUser
   };
 
   return (

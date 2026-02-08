@@ -26,11 +26,14 @@ export const orderService = {
 
   // Create order
   createOrder: async (orderData, email, password) => {
-    return apiCall(BASE_URL, {
+    const options = {
       method: 'POST',
-      headers: getBasicAuthHeaders(email, password),
       body: JSON.stringify(orderData),
-    });
+    };
+    if (email && password) {
+      options.headers = getBasicAuthHeaders(email, password);
+    }
+    return apiCall(BASE_URL, options);
   },
 
   // Update order

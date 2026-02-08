@@ -1,39 +1,71 @@
 import React, { useRef, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { Link, useNavigate } from 'react-router-dom';
-import axios from 'axios';
+import { accountService } from '../redux/services';
 
 export default function Login() {
   const emailRef = useRef();
   const passwordRef = useRef();
-  const { login } = useAuth();
+  const { login, setUser } = useAuth();
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
   async function handleSubmit(e) {
     e.preventDefault();
+    setLoading(true);
+    setError('');
+
+    const email = emailRef.current.value;
+    const password = passwordRef.current.value;
 
     try {
-      setError('');
-      setLoading(true);
-      const userCredential = await login(emailRef.current.value, passwordRef.current.value);
+      // 1. Try Firebase Login
+      const userCredential = await login(email, password);
       const user = userCredential.user;
       const token = await user.getIdToken();
 
-      // Sync/Login with backend
-      await axios.post('http://localhost:8080/api/accounts/firebase-login', {
-        token,
-        email: user.email,
-        uid: user.uid
-      });
+      // 2. Sync/Login with backend
+      const backendUser = await accountService.firebaseLogin(token, user.email, user.uid);
+      
+      // 3. Store user details
+      setUser(backendUser);
 
-      navigate('/'); // Redirect to home after login
-    } catch (err) {
-      console.error(err);
-      setError('Failed to log in');
+      navigate('/');
+    } catch (firebaseErr) {
+      console.warn("Firebase login failed, attempting legacy login...", firebaseErr);
+      
+      try {
+        // 4. Fallback to Legacy Backend Login
+        const response = await accountService.login(email, password);
+        
+        if (response.success) {
+          const legacyUser = {
+            id: response.accountId,
+            accountName: response.accountName,
+            accountType: response.accountType,
+            accountEmailAddress: response.email,
+            // Legacy users have no firebaseUid
+          };
+          setUser(legacyUser);
+          navigate('/');
+        } else {
+          setError(response.message || 'Failed to log in');
+        }
+      } catch (backendErr) {
+        console.error("Backend login failed:", backendErr);
+        
+        let errorMessage = 'Failed to log in';
+        if (backendErr.message && backendErr.message.includes('401')) {
+             errorMessage = 'Invalid email or password';
+        } else if (backendErr.message) {
+             errorMessage = backendErr.message;
+        }
+        
+        setError(errorMessage);
+      }
     }
-
+    
     setLoading(false);
   }
 

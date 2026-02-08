@@ -205,8 +205,8 @@ const SongDetails = () => {
         // If no state (direct navigation), fetch from API
         if (!songData && songid) {
            try {
-              // Use hardcoded auth for demo
-              const fetchedSong = await productService.getProductById(songid, 'john.smith@store.com', 'password');
+              // Public fetch
+              const fetchedSong = await productService.getProductById(songid);
               if (fetchedSong) {
                   // Normalize DB product to Song format
                   songData = {

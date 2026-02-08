@@ -1,16 +1,33 @@
 import { useState } from 'react';
-import { NavLink } from 'react-router-dom'; 
+import { Link, NavLink, useNavigate } from 'react-router-dom'; 
 import { useDispatch } from 'react-redux';
-import { HiOutlineMenu } from 'react-icons/hi';
+import { HiOutlineMenu, HiOutlineLogout } from 'react-icons/hi';
 import { RiCloseLine } from 'react-icons/ri';
 import { FaReceipt, FaChartLine } from 'react-icons/fa';
 
+import { useAuth } from '../context/AuthContext';
 import { logo } from '../assets';
 import { links } from '../assets/constants';
 import CartIcon from './CartIcon';
 import { resetPlayer } from '../redux/features/playerSlice';
 
-const NavLinks = ({ handleClick, onResetPlayer }) => (
+const NavLinks = ({ handleClick, onResetPlayer }) => {
+  const { logout } = useAuth();
+  const navigate = useNavigate();
+
+  const handleLogout = async () => {
+    try {
+      await logout();
+      localStorage.removeItem('currentUser');
+      navigate('/login');
+      if (onResetPlayer) onResetPlayer();
+      if (handleClick) handleClick();
+    } catch (error) {
+      console.error('Failed to log out', error);
+    }
+  };
+
+  return (
   <div className="mt-4">
     {links.map((item) => (
       <NavLink 
@@ -68,8 +85,19 @@ const NavLinks = ({ handleClick, onResetPlayer }) => (
       <FaChartLine className="w-6 h-6 mr-2" />
       ML Visualization
     </NavLink>
+
+    {/* Logout Button */}
+    <button
+      type="button"
+      className="flex flex-row justify-start items-center my-8 text-sm font-medium text-gray-300 hover:text-red-500 w-full"
+      onClick={handleLogout}
+    >
+      <HiOutlineLogout className="w-6 h-6 mr-2" />
+      Logout
+    </button>
   </div>
-);
+  );
+};
 
 const Sidebar = () => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
