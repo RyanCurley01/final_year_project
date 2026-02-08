@@ -36,6 +36,12 @@ const Cart = () => {
   };
 
   const handleCreateOrder = async (data, actions) => {
+    if (!user?.accountId) {
+      console.error("Cannot create order: User not logged in or Account ID missing");
+      setProcessingPayment(false);
+      return; 
+    }
+
     try {
       setProcessingPayment(true);
       
@@ -248,7 +254,14 @@ const Cart = () => {
             </div>
           </div>
 
-          {!showPayPal ? (
+          {!user ? (
+            <Link
+              to="/login"
+              className="w-full block text-center py-3 bg-cyan-600 hover:bg-cyan-700 text-white font-semibold rounded-lg transition"
+            >
+              Log in to Checkout
+            </Link>
+          ) : !showPayPal ? (
             <button
               onClick={() => setShowPayPal(true)}
               className="w-full py-3 bg-blue-700 hover:bg-blue-800 text-white font-semibold rounded-lg transition"

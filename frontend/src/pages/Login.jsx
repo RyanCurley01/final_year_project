@@ -31,7 +31,11 @@ export default function Login() {
       const backendUser = await accountService.firebaseLogin(token, user.email, user.uid);
       
       // 3. Store user details
-      setUser(backendUser);
+      // Combine backend data with Firebase UID for consistent identity checks
+      setUser({
+        ...backendUser,
+        firebaseUid: user.uid
+      });
 
       navigate('/');
     } catch (firebaseErr) {

@@ -19,9 +19,11 @@ export const orderService = {
 
   // Get orders by account ID
   getOrdersByAccountId: async (accountId, email, password) => {
-    return apiCall(`${BASE_URL}/account/${accountId}`, {
-      headers: getBasicAuthHeaders(email, password),
-    });
+    const options = {};
+    if (email && password && password !== 'undefined') {
+        options.headers = getBasicAuthHeaders(email, password);
+    }
+    return apiCall(`${BASE_URL}/account/${accountId}`, options);
   },
 
   // Create order

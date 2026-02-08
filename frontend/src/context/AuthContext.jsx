@@ -59,9 +59,13 @@ export function AuthProvider({ children }) {
          if (local) {
             const localUser = JSON.parse(local);
             // Verify it matches the firebase user (email or uid)
-            if (localUser.email === user.email || localUser.firebaseUid === user.uid) {
+            // Handle different email field names (legacy 'email' vs backend 'accountEmailAddress')
+            const localEmail = localUser.email || localUser.accountEmailAddress;
+            
+            if (localEmail === user.email || localUser.firebaseUid === user.uid) {
                setCurrentUser(localUser);
             } else {
+               console.warn("Local user mismatch with Firebase user, overwriting with Firebase user");
                setCurrentUser(user);
             }
          } else {

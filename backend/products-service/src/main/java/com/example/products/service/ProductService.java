@@ -28,6 +28,12 @@ public class ProductService {
                 .collect(Collectors.toList());
     }
 
+    public ProductResponse getProductById(Long id) {
+        Product product = productRepository.findById(id)
+                .orElseThrow(() -> new IllegalArgumentException("Product not found with id: " + id));
+        return toProductResponse(product);
+    }
+
     public List<Product> getProductsByAlbumCoverImageUrl(String albumImageUrlString) {
         return productRepository.findByAlbumCoverImageUrl(albumImageUrlString);
     }

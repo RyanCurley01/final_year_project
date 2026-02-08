@@ -1,11 +1,111 @@
-import { useSelector } from 'react-redux';
+import { useEffect } from 'react';
+import { useSelector, useDispatch } from 'react-redux';
 import { Link } from 'react-router-dom';
 import { FaReceipt, FaCalendar, FaDollarSign, FaDownload } from 'react-icons/fa';
 import placeholders from '../utils/placeholderImage';
 import { downloadFile, generateFilename } from '../utils/downloadHelper';
+import { useAuth } from '../context/AuthContext';
+import { orderService } from '../redux/services/orderService';
+import { orderItemService } from '../redux/services/orderItemService';
+import { productService } from '../redux/services/productService';
+import { setPurchases, setLoading } from '../redux/features/purchaseSlice';
 
 const PurchaseHistory = () => {
-  const { purchases } = useSelector((state) => state.purchase);
+  const { purchases, loading } = useSelector((state) => state.purchase);
+  const { currentUser } = useAuth();
+  const dispatch = useDispatch();
+
+  useEffect(() => {
+    const fetchHistory = async () => {
+      // Only fetch if we have a logged-in user with a valid Database ID
+      if (currentUser?.id) {
+        try {
+          dispatch(setLoading(true));
+          console.log("Fetching order history for Account ID:", currentUser.id);
+          
+          // 1. Fetch orders from backend
+          // Note: We do NOT pass email/password here because these services have their own auth
+          // and the endpoints are configured as permitAll() for customers.
+          // Passing credentials for a user that doesn't exist in the microservice DB triggers a 401.
+          const orders = await orderService.getOrdersByAccountId(currentUser.id);
+          
+          if (!orders || orders.length === 0) {
+            dispatch(setPurchases([]));
+            return;
+          }
+
+          // 2. Enrich orders with items and product details
+          // We need this because the raw Order object doesn't have items or product info
+          const enrichedPurchases = await Promise.all(orders.map(async (order) => {
+            try {
+              // Fetch items for this order
+              const orderItems = await orderItemService.getOrderItemsByOrderId(order.id);
+              
+              // Fetch product details for each item
+              const itemsWithDetails = await Promise.all(orderItems.map(async (item) => {
+                try {
+                  const product = await productService.getProductById(item.productId);
+                  return {
+                    ...item,
+                    albumTitle: product.albumTitle || 'Unknown Product',
+                    albumPrice: item.unitPrice, 
+                    albumCoverImageUrl: product.albumCoverImageUrl,
+                    fileUrl: product.fileUrl,
+                    quantity: item.quantity
+                  };
+                  return {
+                    ...item,
+                    albumTitle: product.albumTitle || 'Unknown Product',
+                    albumPrice: item.unitPrice, 
+                    albumCoverImageUrl: product.albumCoverImageUrl,
+                    fileUrl: product.fileUrl,
+                    quantity: item.quantity
+                  };
+                } catch (productErr) {
+                  console.error(`Failed to fetch product details for ${item.productId}:`, productErr);
+                  return {
+                    ...item,
+                    albumTitle: 'Product Unavailable',
+                    albumPrice: item.unitPrice,
+                    quantity: item.quantity
+                  };
+                }
+              }));
+
+              return {
+                id: order.id,
+                purchaseDate: order.orderDate,
+                totalAmount: order.totalAmount,
+                status: 'completed', // Default status if not provided by backend
+                items: itemsWithDetails
+              };
+            } catch (err) {
+              console.error(`Failed to fetch details for order ${order.id}:`, err);
+              // Return partial order info if items fail
+              return {
+                id: order.id,
+                purchaseDate: order.orderDate,
+                totalAmount: order.totalAmount,
+                status: 'Error loading details',
+                items: []
+              };
+            }
+          }));
+          
+          // Sort by date descending
+          enrichedPurchases.sort((a, b) => new Date(b.purchaseDate) - new Date(a.purchaseDate));
+          
+          dispatch(setPurchases(enrichedPurchases));
+        } catch (error) {
+          console.error("Failed to fetch purchase history:", error);
+        } finally {
+          dispatch(setLoading(false));
+        }
+      }
+    };
+
+    fetchHistory();
+  }, [currentUser, dispatch]);
 
   const handleDownload = (item) => {
     if (item.fileUrl) {
@@ -44,7 +144,7 @@ const PurchaseHistory = () => {
             <div className="flex flex-wrap justify-between items-start mb-4 pb-4 border-b border-gray-600">
               <div>
                 <h3 className="text-white font-semibold text-lg mb-2">
-                  Order ID: {purchase.id.replace('purchase-', '')}
+                  Order ID: {String(purchase.id).replace('purchase-', '')}
                 </h3>
                 <div className="flex flex-wrap gap-4 text-gray-400 text-sm">
                   <div className="flex items-center gap-2">

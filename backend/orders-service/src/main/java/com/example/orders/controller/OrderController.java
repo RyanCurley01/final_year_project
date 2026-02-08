@@ -36,6 +36,11 @@ public class OrderController {
                 .orElse(ResponseEntity.notFound().build());
     }
 
+    @GetMapping("/account/{accountId}")
+    public ResponseEntity<List<Order>> getOrdersByAccountId(@PathVariable Long accountId) {
+        return ResponseEntity.ok(orderService.getOrdersByCustomerId(accountId));
+    }
+
     @PostMapping
     public ResponseEntity<Order> createOrder(@Valid @RequestBody Order order) {
         Order createdOrder = orderService.createOrder(order);

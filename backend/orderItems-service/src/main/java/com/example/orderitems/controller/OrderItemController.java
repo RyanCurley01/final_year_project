@@ -33,6 +33,11 @@ public class OrderItemController {
         return ResponseEntity.ok(orderItemService.getAllOrderItems());
     }
 
+    @GetMapping("/order/{orderId}")
+    public ResponseEntity<List<OrderItem>> getOrderItemsByOrderId(@PathVariable Long orderId) {
+        return ResponseEntity.ok(orderItemService.getOrderItemsByOrderId(orderId));
+    }
+
     @GetMapping("/{id}")
     public ResponseEntity<OrderItem> getOrderItemById(@PathVariable Long id) {
         return orderItemService.getOrderItemById(id)
