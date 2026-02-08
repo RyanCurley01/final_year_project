@@ -108,7 +108,7 @@ const CustomerScreen = () => {
       </div>
 
       <div className="mb-4 sm:mb-6">
-        <h2 className="font-bold text-xl sm:text-2xl md:text-3xl text-white mb-4 sm:mb-6">Welcome, {user?.accountName || user?.firstName || 'Customer'}!</h2>
+        <h2 className="font-bold text-xl sm:text-2xl md:text-3xl text-white mb-4 sm:mb-6">Welcome, {(user?.accountName?.split(' ')[0]) || user?.firstName || 'Customer'}!</h2>
         <p className="text-gray-400 text-sm sm:text-base">Explore our collection of electronic music</p>
       </div>
 

@@ -76,8 +76,8 @@ export default function Login() {
   }
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen bg-black text-white">
-      <div className="w-full max-w-md p-8 space-y-6 bg-gray-900 rounded-lg shadow-md">
+    <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-br from-[#041529] to-[#2970c2] text-white">
+      <div className="w-full max-w-md p-8 space-y-6 bg-gradient-to-br bg-[#252246] rounded-lg shadow-md">
         <h2 className="text-3xl font-bold text-center">Log In</h2>
         {error && <div className="p-3 text-red-500 bg-red-100 rounded">{error}</div>}
         <form onSubmit={handleSubmit} className="space-y-4">
