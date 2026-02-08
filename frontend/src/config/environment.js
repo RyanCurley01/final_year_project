@@ -45,16 +45,8 @@ class EnvironmentConfig {
     const isLocalhostUrl = (url) => url && (url.includes('localhost') || url.includes('127.0.0.1'));
 
     // API Base URL (Audio Service - port 5000)
-    // Priority: current environment > runtime env > vite env
     if (isLocalhost) {
-      // When running on localhost, ALWAYS use localhost URLs (ignore build-time env vars)
-      // Only respect runtime config if it's explicitly set to a non-localhost URL
-      if (runtimeEnv.VITE_API_BASE_URL && !isLocalhostUrl(runtimeEnv.VITE_API_BASE_URL)) {
-        config.apiBaseUrl = runtimeEnv.VITE_API_BASE_URL;
-      } else {
-        // Force localhost when running locally, regardless of build-time env vars
-        config.apiBaseUrl = 'http://localhost:5000';
-      }
+      config.apiBaseUrl = runtimeEnv.VITE_API_BASE_URL || viteEnv.VITE_API_BASE_URL || 'http://localhost:5000';
     } else if (isCodespaces && codespaceName) {
       config.apiBaseUrl = `https://${codespaceName}-5000.${codespacesDomain}`;
     } else if (isNgrok) {
@@ -76,13 +68,7 @@ class EnvironmentConfig {
 
     // Backend API URL (Accounts Service - port 8080)
     if (isLocalhost) {
-      // When running on localhost, ALWAYS use localhost URLs (ignore build-time env vars)
-      if (runtimeEnv.VITE_BACKEND_API_URL && !isLocalhostUrl(runtimeEnv.VITE_BACKEND_API_URL)) {
-        config.backendApiUrl = runtimeEnv.VITE_BACKEND_API_URL;
-      } else {
-        // Force localhost when running locally, regardless of build-time env vars
-        config.backendApiUrl = 'http://localhost:8080';
-      }
+      config.backendApiUrl = runtimeEnv.VITE_BACKEND_API_URL || viteEnv.VITE_BACKEND_API_URL || 'http://localhost:8080';
     } else if (isCodespaces && codespaceName) {
       config.backendApiUrl = `https://${codespaceName}-8080.${codespacesDomain}`;
     } else if (isNgrok) {
@@ -108,13 +94,7 @@ class EnvironmentConfig {
 
     // Products API URL (Products Service - port 8081)
     if (isLocalhost) {
-      // When running on localhost, ALWAYS use localhost URLs (ignore build-time env vars)
-      if (runtimeEnv.VITE_PRODUCTS_API_URL && !isLocalhostUrl(runtimeEnv.VITE_PRODUCTS_API_URL)) {
-        config.productsApiUrl = runtimeEnv.VITE_PRODUCTS_API_URL;
-      } else {
-        // Force localhost when running locally, regardless of build-time env vars
-        config.productsApiUrl = 'http://localhost:8081';
-      }
+      config.productsApiUrl = runtimeEnv.VITE_PRODUCTS_API_URL || viteEnv.VITE_PRODUCTS_API_URL || 'http://localhost:8081';
     } else if (isCodespaces && codespaceName) {
       config.productsApiUrl = `https://${codespaceName}-8081.${codespacesDomain}`;
     } else if (isNgrok) {

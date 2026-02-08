@@ -239,10 +239,7 @@ const SimilarSongs = () => {
       setError(null);
       
       // Get API URL from environment config (no hardcoding)
-      // Use direct localhost URL if running locally to avoid proxy issues
-      const apiBaseUrl = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-        ? 'http://localhost:5000/api'
-        : envConfig.getApiBaseUrl() + '/api';
+      const apiBaseUrl = `${envConfig.getApiBaseUrl()}/api`;
       
       try {
         const products = await productService.getAllProducts();

@@ -9,15 +9,6 @@ const isNgrokHost = () => {
 };
 
 const getProductsServiceBaseUrl = () => {
-  const hostname = window.location.hostname;
-  const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1';
-  
-  // IMPORTANT: Check localhost FIRST - always use localhost URLs when running locally
-  // This mirrors the logic in apiService.js which works for TopPlay
-  if (isLocalhost) {
-    return 'http://localhost:8081/api/products';
-  }
-
   const serviceUrl = getServiceUrl('PRODUCTS');
   return `${serviceUrl}/api/products`;
 };
