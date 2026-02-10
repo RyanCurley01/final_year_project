@@ -275,8 +275,8 @@ const MLVisualization = () => {
 
         {/* Model Metrics */}
         <div className="bg-gray-800/50 backdrop-blur-sm rounded-xl p-6">
-          <h3 className="text-lg font-semibold text-white mb-4">Model Metrics</h3>
-          <div className="overflow-x-auto">
+          <h3 className="text-lg font-semibold text-white mb-4">Model Selection Metrics</h3>
+          <div className="overflow-x-auto mb-6">
             <table className="w-full text-left">
               <thead>
                 <tr className="border-b border-gray-700">
@@ -286,22 +286,53 @@ const MLVisualization = () => {
                 </tr>
               </thead>
               <tbody>
-                <tr className="border-b border-gray-700/50">
-                  <td className="py-3 text-white font-semibold">MinMaxScaler</td>
+                <tr className={`border-b border-gray-700/50 ${scaler === 'MinMaxScaler' ? 'bg-blue-500/10' : ''}`}>
+                  <td className="py-3 text-white font-semibold pl-2">
+                    MinMaxScaler {scaler === 'MinMaxScaler' && <span className="text-xs bg-blue-500 text-white px-2 py-0.5 rounded ml-2">Selected</span>}
+                  </td>
                   <td className="py-3 text-gray-300">{metrics.MinMaxScaler_train !== undefined && metrics.MinMaxScaler_train !== null ? metrics.MinMaxScaler_train : 'N/A'}</td>
                   <td className="py-3 text-gray-300">{metrics.MinMaxScaler_val !== undefined && metrics.MinMaxScaler_val !== null ? metrics.MinMaxScaler_val : 'N/A'}</td>
                 </tr>
-                <tr>
-                  <td className="py-3 text-white font-semibold">StandardScaler</td>
+                <tr className={`${scaler === 'StandardScaler' ? 'bg-blue-500/10' : ''}`}>
+                  <td className="py-3 text-white font-semibold pl-2">
+                    StandardScaler {scaler === 'StandardScaler' && <span className="text-xs bg-blue-500 text-white px-2 py-0.5 rounded ml-2">Selected</span>}
+                  </td>
                   <td className="py-3 text-gray-300">{metrics.StandardScaler_train !== undefined && metrics.StandardScaler_train !== null ? metrics.StandardScaler_train : 'N/A'}</td>
                   <td className="py-3 text-gray-300">{metrics.StandardScaler_val !== undefined && metrics.StandardScaler_val !== null ? metrics.StandardScaler_val : 'N/A'}</td>
                 </tr>
               </tbody>
             </table>
           </div>
-          <p className="text-sm text-gray-400 mt-4">
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+             <div className="bg-gray-700/50 p-4 rounded-lg">
+                <h4 className="text-gray-400 text-sm mb-1">Final Test Score</h4>
+                <p className="text-2xl font-bold text-white">{metrics.test_score !== undefined ? metrics.test_score : 'N/A'}</p>
+                <p className="text-xs text-gray-500">Silhouette Score on unseen data</p>
+             </div>
+             
+             {metrics.optimal_k !== undefined && (
+               <div className="bg-gray-700/50 p-4 rounded-lg">
+                  <h4 className="text-gray-400 text-sm mb-1">Optimal K (KNN)</h4>
+                  <p className="text-2xl font-bold text-blue-400">{metrics.optimal_k}</p>
+                  <p className="text-xs text-gray-500">Best neighbor count found via CV</p>
+               </div>
+             )}
+
+             {metrics.knn_cv_accuracy !== undefined && (
+               <div className="bg-gray-700/50 p-4 rounded-lg">
+                  <h4 className="text-gray-400 text-sm mb-1">KNN Accuracy</h4>
+                  <p className="text-2xl font-bold text-green-400">
+                    {typeof metrics.knn_cv_accuracy === 'number' ? (metrics.knn_cv_accuracy * 100).toFixed(1) + '%' : metrics.knn_cv_accuracy}
+                  </p>
+                  <p className="text-xs text-gray-500">Cross-Validation Accuracy</p>
+               </div>
+             )}
+          </div>
+
+          <p className="text-sm text-gray-400 mt-6">
             <strong>Note:</strong> Higher silhouette score indicates better separation between genres. 
-            Training vs Validation scores help detect overfitting.
+            Training vs Validation scores help detect overfitting. Test score confirms generalization.
           </p>
         </div>
       </div>

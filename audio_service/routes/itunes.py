@@ -7,10 +7,7 @@ import os
 from utils import console
 from config import executor, ITUNES_API_BASE_URL
 from database import get_db_connection
-from feature_extraction import (
-    extract_audio_features_from_preview,
-    classify_genre_from_features
-)
+from feature_extraction import extract_audio_features_from_preview
 import ml_service
 
 router = APIRouter()
@@ -179,7 +176,7 @@ async def import_itunes_songs_to_database(limit: int = 100, genre: str = "electr
                     continue
                 
                 # Classify genre using K-Means
-                genre_label = classify_genre_from_features(
+                genre_label = ml_service.classify_genre_from_features(
                     features['tempo'],
                     features['energy'],
                     features['valence'],

@@ -214,9 +214,6 @@ const SmartRecommendationVisualizer = ({
                      instrumentalness: Number(cached.instrumentalness),
                      speechiness: Number(cached.speechiness),
                      loudness: Number(cached.loudness),
-                     // Allow live Energy/Valence/Danceability to drive the visualizer pulse
-                     // Unless user wants zero fluctuation, but typically pulse is good. 
-                     // The complaint was about "defaults back to 100bpm". This fixes that.
                  };
              } else {
                  // No live features yet, fully use cache

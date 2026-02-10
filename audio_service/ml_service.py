@@ -1,12 +1,15 @@
 # audio_service/ml_service.py
 import asyncio
 import numpy as np
-from typing import Dict
+from typing import Dict, Optional
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import silhouette_score
 from sklearn.decomposition import PCA
 from sklearn.cluster import KMeans
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.model_selection import train_test_split, cross_val_score, StratifiedKFold
+
 
 from utils import console
 from database import get_db_connection
@@ -24,6 +27,7 @@ model_performance_metrics: Dict[str, float] = {
 
 visualization_data = None
 feature_scaler = None
+knn_classifier = None
 
 # Cache for extracted iTunes audio features
 itunes_features_cache: Dict[int, Dict] = {}
@@ -156,104 +160,76 @@ async def startup_cache():
                                     train_score_b = silhouette_score(train_embed_b, y_train) if len(set(y_train)) > 1 else -1.0
                                 except: train_score_b = -1.0
 
+
+                                # Calculate Validation Scores
+                                try:
+                                    score_a = silhouette_score(val_embed_a, y_val) if len(set(y_val)) > 1 else -1.0
+                                except: score_a = -1.0
+                                
+                                try:
+                                    score_b = silhouette_score(val_embed_b, y_val) if len(set(y_val)) > 1 else -1.0
+                                except: score_b = -1.0
+
                                 model_performance_metrics["MinMaxScaler_train"] = round(train_score_a, 4)
                                 model_performance_metrics["StandardScaler_train"] = round(train_score_b, 4)
-                                
-                                # Improved Validation: Check Intrinsic Clustering Structure using K-Means
-                                # This works even if we only have 1 Genre in the validation set.
-                                # k=3 for Calm/Balanced/Energetic logic.
-                                try:
-                                    kmeans_a = KMeans(n_clusters=3, random_state=42, n_init=10).fit(val_embed_a)
-                                    # Silhouette requires > 1 label. If KMeans finds only 1 cluster (rare), this fails.
-                                    if len(set(kmeans_a.labels_)) > 1:
-                                        kmeans_score_a = silhouette_score(val_embed_a, kmeans_a.labels_)
-                                    else:
-                                        kmeans_score_a = 0.0
-                                except: kmeans_score_a = 0.0
-                                
-                                try:
-                                    kmeans_b = KMeans(n_clusters=3, random_state=42, n_init=10).fit(val_embed_b)
-                                    if len(set(kmeans_b.labels_)) > 1:
-                                        kmeans_score_b = silhouette_score(val_embed_b, kmeans_b.labels_)
-                                    else:
-                                        kmeans_score_b = 0.0
-                                except: kmeans_score_b = 0.0
+                                model_performance_metrics["MinMaxScaler_val"] = round(score_a, 4)
+                                model_performance_metrics["StandardScaler_val"] = round(score_b, 4)
 
-                                # Check if we have valid ground truth labels (Genres)
-                                has_enough_genres = len(set(y_val)) > 1
-                                
-                                target_labels = y_val
-                                label_source = "Ground Truth Genres"
 
-                                if not has_enough_genres:
-                                    # Fallback: Create Synthetic Labels based on Audio Features (Energy)
-                                    # This allows us to score the scaler even without diverse genres.
-                                    # We simulate 3 categories: Low Energy, Medium Energy, High Energy.
-                                    console.log("   ⚠️ Validation genres are providing low quality data. Using 'Energy Levels' as Synthetic Ground Truth.")
-                                    y_synthetic = []
-                                    # X_val is numpy array. Index 1 corresponds to 'energy' (see feature_vectors creation)
-                                    for row in X_val:
-                                        energy = row[1] 
-                                        if energy > 0.7:
-                                            y_synthetic.append("High Energy")
-                                        elif energy < 0.4:
-                                            y_synthetic.append("Low Energy")
-                                        else:
-                                            y_synthetic.append("Medium Energy")
-                                    
-                                    if len(set(y_synthetic)) > 1:
-                                        target_labels = y_synthetic
-                                        label_source = "Synthetic Energy Levels"
-                                        has_enough_genres = True
-                                    else:
-                                        console.log("   ⚠️ Synthetic labeling failed (data lacks energy variance).")
-
-                                # Evaluate Classification Quality (Silhouette vs Target Labels)
-                                if has_enough_genres:
-                                    try:
-                                        score_a = silhouette_score(val_embed_a, target_labels)
-                                    except: score_a = 0.0
-                                    
-                                    try:
-                                        score_b = silhouette_score(val_embed_b, target_labels)
-                                    except: score_b = 0.0
-                                    
-                                    console.log(f"   🧪 Model Selection (Validation vs {label_source}):")
-                                    console.log(f"      - MinMaxScaler:   Recall={score_a:.4f}, Intrinsic={kmeans_score_a:.4f}")
-                                    console.log(f"      - StandardScaler: Recall={score_b:.4f}, Intrinsic={kmeans_score_b:.4f}")
-
-                                    # Use a blended score (50% Label Match, 50% Cluster Quality)
-                                    final_score_a = (score_a + kmeans_score_a) / 2
-                                    final_score_b = (score_b + kmeans_score_b) / 2
-                                else:
-                                    # Ultimate Fallback: Rely 100% on Intrinsic Clustering
-                                    console.log("   ⚠️ Using Intrinsic Score only")
-                                    # Set scores to 0 for logging clarity
-                                    score_a = 0.0
-                                    score_b = 0.0
-                                    
-                                    final_score_a = kmeans_score_a
-                                    final_score_b = kmeans_score_b
-                                    
-                                    console.log(f"   🧪 Model Selection (Intrinsic Only):")
-                                    console.log(f"      - MinMaxScaler:   {final_score_a:.4f}")
-                                    console.log(f"      - StandardScaler: {final_score_b:.4f}")
-
-                                # Update Metrics
-                                model_performance_metrics["MinMaxScaler_val"] = round(final_score_a, 4)
-                                model_performance_metrics["StandardScaler_val"] = round(final_score_b, 4)
-                                console.log(f"✅ Model metrics stored: {model_performance_metrics}", flush=True)
-                                
                                 # Select Best Model based on Blended Score
-                                if final_score_b > final_score_a:
-                                    console.log(f"   🏆 Selected Model: StandardScaler (Score: {final_score_b:.4f})")
+                                if score_b > score_a:
+                                    console.log(f"   🏆 Selected Model: StandardScaler (Score: {score_b:.4f})")
                                     feature_scaler = model_b
                                     best_model = "StandardScaler"
                                 else:
-                                    console.log(f"   🏆 Selected Model: MinMaxScaler (Score: {final_score_a:.4f})")
+                                    console.log(f"   🏆 Selected Model: MinMaxScaler (Score: {score_a:.4f})")
                                     feature_scaler = model_a
                                     best_model = "MinMaxScaler"
                                 
+                                
+                                # 4. Find Best K for KNN (Cross-Validation)
+                                # We search for the optimal 'k' that best predicts genre from audio features.
+                                # This validates that our feature space is meaningful.
+                                try:
+                                    console.log("   🔍 Tuning KNN Hyperparameters (Cross-Validation)...")
+                                    best_k = 5
+                                    best_cv_score = 0.0
+                                    
+                                    # Use the selected scaler's training data
+                                    X_train_scaled = feature_scaler.transform(X_train)
+                                    
+                                    # Test odd k values from 3 to 19
+                                    param_grid = range(3, 20, 2)
+                                    
+                                    for k in param_grid:
+                                        knn = KNeighborsClassifier(n_neighbors=k)
+                                        # Stratified K-Fold preserves class distribution
+                                        cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+                                        # Use accuracy as the metric (prediction of correct genre)
+                                        scores = cross_val_score(knn, X_train_scaled, y_train, cv=cv, scoring='accuracy')
+                                        avg_score = scores.mean()
+                                        
+                                        if avg_score > best_cv_score:
+                                            best_cv_score = avg_score
+                                            best_k = k
+                                    
+                                    console.log(f"   ✅ Optimal K-Neighbors found: {best_k} (CV Accuracy: {best_cv_score:.4f})")
+                                    model_performance_metrics["optimal_k"] = best_k
+                                    model_performance_metrics["knn_cv_accuracy"] = round(best_cv_score, 4)
+                                    
+                                    # Train the final Global KNN Classifier using the optimal K and ALL available data
+                                    # We use the full dataset (X) so the model has the maximum knowledge
+                                    global knn_classifier
+                                    
+                                    X_full_scaled = feature_scaler.transform(X)
+                                    knn_classifier = KNeighborsClassifier(n_neighbors=best_k)
+                                    knn_classifier.fit(X_full_scaled, y)
+                                    console.log(f"   🤖 Global KNN Classifier trained on {len(X)} tracks")
+                                    
+                                except Exception as ke:
+                                    console.log(f"   ⚠️ KNN Tuning failed: {ke}")
+
+
                                 # Generate Visualization Data (PCA 2D Projection)
                                 try:
                                     console.log("   🎨 Generating Visualization Data...")
@@ -273,14 +249,17 @@ async def startup_cache():
                                 except Exception as ve:
                                     console.log(f"   ⚠️ Visualization generation failed: {ve}")
 
+
                                 # 4. Final Evaluation (Test Set)
                                 # Measures how well the selected model creates separable clusters on completely unseen data
                                 if len(set(y_test)) > 1:
                                     try:
                                         test_embed = feature_scaler.transform(X_test)
                                         final_acc = silhouette_score(test_embed, y_test)
+                                        model_performance_metrics["test_score"] = round(final_acc, 4)
                                         console.log(f"   ✅ Final Test Set Performance: {final_acc:.4f} (Silhouette Score)")
                                     except:
+                                        model_performance_metrics["test_score"] = 0.0
                                         console.log("   ⚠️ Could not calculate final test score due to label distribution")
                                 
                             else:
@@ -302,3 +281,45 @@ async def startup_cache():
                 console.log(f"❌ Could not load audio features cache after {max_retries} attempts")
                 console.log(f"   Service will start but similarity will be slower (real-time analysis)")
                 cache_loaded = False
+
+# EXECUTION ORDER: Called by routes (iTunes, Feature Processing) to classify new tracks
+def classify_genre_from_features(tempo: float, energy: float, valence: float, danceability: float, acousticness: float, current_cache_size: int = 0, current_cache_items: Dict = {}) -> str:
+    """
+    Classify genre using the trained Global KNN Classifier.
+    Args:
+        tempo: Raw BPM
+        energy, valence, danceability, acousticness: 0-1 values
+        current_cache_size, current_cache_items: Legacy params, ignored
+    """
+    global feature_scaler, knn_classifier
+            
+    try:
+        # 1. Manual Pre-normalization (Must match startup_cache logic lines 107-117)
+        # Note: We use defaults for the spectral/advanced features not provided by the quick preview analysis
+        input_vector = [
+            float(tempo or 0) / 200.0,
+            float(energy or 0),
+            float(valence or 0),
+            float(danceability or 0),
+            float(acousticness or 0),
+            1500.0 / 5000.0,    # spectral_centroid default
+            3000.0 / 10000.0,   # spectral_rolloff default
+            0.05 * 10.0,        # zero_crossing_rate default scaled
+            0.5,                # instrumentalness default
+            0.0,                # loudness default ((-60+60)/60)
+            0.1                 # speechiness default
+        ]
+        
+        # 2. Reshape for Scikit-Learn (1 sample, 11 features)
+        features_array = np.array([input_vector])
+        
+        # 3. Apply the learned Scaler (MinMax or Standard)
+        features_scaled = feature_scaler.transform(features_array)
+        
+        # 4. Predict Genre
+        predicted_genre = knn_classifier.predict(features_scaled)[0]
+        return str(predicted_genre)
+        
+    except Exception as e:
+        console.log(f"⚠️ Genre classification failed: {e}")
+        return "Unknown"

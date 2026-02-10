@@ -5,8 +5,6 @@ import asyncio
 import httpx
 import numpy as np
 import librosa
-from sklearn.cluster import KMeans
-from sklearn.preprocessing import StandardScaler
 from urllib.parse import urlparse
 from typing import Dict, Optional, List
 from fastapi import HTTPException
@@ -15,10 +13,6 @@ from utils import console
 from config import executor
 from s3_service import generate_presigned_url
 
-# Global classifier state
-# EXECUTION ORDER: Initialized later by train_genre_classifier or implicitly.
-genre_classifier = None
-genre_labels = ["Energetic", "Calm", "Balanced"]
 
 # EXECUTION ORDER: Can be called any time to analyze a URL.
 # Uses 'executor' for CPU-bound tasks in background.
@@ -347,70 +341,6 @@ def extract_audio_features_from_preview(audio_url: str, track_id: int) -> Option
         console.log(f"❌ Error extracting audio features for track {track_id}: {e}")
         raise HTTPException(status_code=500, detail=f"Audio feature extraction failed: {e}")
 
-# EXECUTION ORDER: Called when a genre needs to be classified from features.
-def classify_genre_from_features(tempo: float, energy: float, valence: float, danceability: float, acousticness: float, current_cache_size: int = 0, current_cache_items: Dict = {}) -> str:
-    """
-    Classify genre using K-Means clustering on audio features.
-    Automatically detects 3 genre clusters: Energetic, Calm, Balanced.
-    """
-    global genre_classifier
-    
-    # Train classifier if not already trained
-    if genre_classifier is None and current_cache_size >= 10:
-        # Extract features from cache
-        X_train = []
-        for pid, data in current_cache_items.items():
-            if all(k in data for k in ['tempo', 'energy', 'valence', 'danceability', 'acousticness']):
-                X_train.append([
-                    float(data['tempo'] or 0) / 200.0,  # Normalize tempo (0-200 BPM -> 0-1)
-                    float(data['energy'] or 0),
-                    float(data['valence'] or 0),
-                    float(data['danceability'] or 0),
-                    float(data['acousticness'] or 0)
-                ])
-        
-        if len(X_train) >= 10:
-            # Normalize features
-            scaler = StandardScaler()
-            X_scaled = scaler.fit_transform(X_train)
-            
-            # Fit K-Means with 3 clusters
-            genre_classifier = {
-                'model': KMeans(n_clusters=3, random_state=42, n_init=10),
-                'scaler': scaler
-            }
-            genre_classifier['model'].fit(X_scaled)
-            
-            # Determine which cluster represents which genre based on centroids
-            centroids = genre_classifier['model'].cluster_centers_
-            # Energy is index 1 in scaled features
-            energy_values = centroids[:, 1]
-            
-            # Sort clusters by energy: Low energy = Calm, High energy = Energetic, Middle = Balanced
-            sorted_indices = np.argsort(energy_values)
-            genre_classifier['mapping'] = {
-                sorted_indices[0]: "Calm",       # Lowest energy cluster
-                sorted_indices[1]: "Balanced",   # Middle energy cluster  
-                sorted_indices[2]: "Energetic"   # Highest energy cluster
-            }
-            
-            console.log(f"✅ Genre classifier trained with 3 clusters (Energetic, Calm, Balanced)")
-    
-    # Classify the new features
-    if genre_classifier:
-        features = np.array([[tempo, energy, valence, danceability, acousticness]])
-        features_scaled = genre_classifier['scaler'].transform(features)
-        cluster = genre_classifier['model'].predict(features_scaled)[0]
-        return genre_classifier['mapping'][cluster]
-    else:
-        # Fallback: Simple heuristic classification
-        if energy > 0.7:
-            return "Energetic"
-        elif energy < 0.3:
-            return "Calm"
-        else:
-            return "Balanced"
-
 async def extract_audio_features_from_preview_async(audio_url: str, track_id: int) -> Optional[Dict]:
     """Async wrapper for extract_audio_features_from_preview"""
     loop = asyncio.get_event_loop()
@@ -419,3 +349,4 @@ async def extract_audio_features_from_preview_async(audio_url: str, track_id: in
     except Exception as e:
         console.log(f"Async extraction failed: {e}")
         return None
+

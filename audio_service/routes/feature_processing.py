@@ -8,8 +8,7 @@ from config import executor
 from database import get_db_connection
 from feature_extraction import (
     extract_audio_features_from_preview,
-    extract_features_for_product_async,
-    classify_genre_from_features
+    extract_features_for_product_async
 )
 import ml_service
 
@@ -83,7 +82,7 @@ async def extract_all_product_features(limit: int = 197, save_to_db: bool = True
                 
                 if features:
                     # Classify genre using K-Means clustering (needs cache context)
-                    genre = classify_genre_from_features(
+                    genre = ml_service.classify_genre_from_features(
                         features['tempo'],
                         features['energy'],
                         features['valence'],
