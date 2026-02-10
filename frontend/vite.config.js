@@ -8,6 +8,9 @@ export default defineConfig({
     host: '0.0.0.0',
     port: 5173,
     allowedHosts: ['.ngrok-free.app', '.ngrok-free.dev', '.ngrok.io'],
+    headers: {
+      'Cross-Origin-Opener-Policy': 'same-origin-allow-popups',
+    },
     watch: {
       usePolling: true,
     },

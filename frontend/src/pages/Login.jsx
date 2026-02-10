@@ -2,14 +2,48 @@ import React, { useRef, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { Link, useNavigate } from 'react-router-dom';
 import { accountService } from '../redux/services';
+import { FcGoogle } from "react-icons/fc";
 
 export default function Login() {
   const emailRef = useRef();
   const passwordRef = useRef();
-  const { login, setUser } = useAuth();
+  const { login, loginWithGoogle, syncWithBackend } = useAuth();
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
+
+  async function handleGoogleLogin() {
+    try {
+      setError("");
+      setLoading(true);
+      
+      console.log("DEBUG: Starting Google Popup Login...");
+      const result = await loginWithGoogle();
+      console.log("DEBUG: Popup finished, user:", result?.user?.email);
+      
+      if (result && result.user) {
+          await syncWithBackend(result.user);
+          console.log("DEBUG: Backend sync complete, navigating to home");
+          navigate("/");
+      }
+    } catch (err) {
+      console.error("Google login failed", err);
+      // Suppress the COOP error which is often benign in dev
+      if (err.code === 'auth/popup-closed-by-user') {
+          setError("Sign in cancelled");
+      } else if (err.message && err.message.includes("Cross-Origin-Opener-Policy")) {
+          // This is a browserpolicy header issue, but often the login actually SUCCEEDED in the background.
+          // However, if we are in the catch block, the promise rejected.
+          // We can try to recover if onAuthStateChanged picks it up, but usually we just show error.
+          setError("Browser security policy blocked the popup. Please try again or use a different browser.");
+      } else {
+          setError("Failed to sign in with Google: " + err.message);
+      }
+    } finally {
+      // If we navigated, this might run on unmounted component, which is fine/ignored
+      setLoading(false);
+    }
+  }
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -107,6 +141,22 @@ export default function Login() {
             Log In
           </button>
         </form>
+        
+        <div className="flex items-center justify-between my-4">
+          <span className="w-1/5 border-b border-gray-600 lg:w-1/4"></span>
+          <span className="text-xs text-center text-gray-400 uppercase">or</span>
+          <span className="w-1/5 border-b border-gray-600 lg:w-1/4"></span>
+        </div>
+
+        <button
+            disabled={loading}
+            onClick={handleGoogleLogin}
+            className="w-full flex items-center justify-center py-2 font-bold text-gray-900 bg-white rounded hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-cyan-500"
+          >
+            <FcGoogle className="mr-2 text-2xl" />
+            Sign in with Google
+        </button>
+
         <div className="text-center mt-4">
           Need an account? <Link to="/register" className="text-cyan-400 hover:text-cyan-300">Sign Up</Link>
         </div>

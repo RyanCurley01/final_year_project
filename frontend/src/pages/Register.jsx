@@ -2,6 +2,7 @@ import React, { useRef, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { Link, useNavigate } from 'react-router-dom';
 import { accountService } from '../redux/services';
+import { FcGoogle } from "react-icons/fc";
 
 export default function Register() {
   const emailRef = useRef();
@@ -9,10 +10,38 @@ export default function Register() {
   const passwordConfirmRef = useRef();
   const nameRef = useRef();
   const phoneRef = useRef();
-  const { signup, login, setUser } = useAuth();
+  const { signup, login, loginWithGoogle, syncWithBackend, setUser } = useAuth();
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
+
+  async function handleGoogleRegister() {
+    try {
+      setError("");
+      setLoading(true);
+
+      console.log("DEBUG: Starting Google Popup Register...");
+      const result = await loginWithGoogle();
+      
+      if (result && result.user) {
+          // Sync with backend (will create account if not exists)
+          await syncWithBackend(result.user);
+          console.log("DEBUG: Backend sync complete, navigating to home");
+          navigate("/");
+      }
+    } catch (err) {
+      console.error("Google register failed", err);
+      if (err.code === 'auth/popup-closed-by-user') {
+          setError("Sign in cancelled");
+      } else if (err.message && err.message.includes("Cross-Origin-Opener-Policy")) {
+          setError("Browser security policy blocked the popup. Please try again.");
+      } else {
+          setError("Failed to register with Google: " + err.message);
+      }
+    } finally {
+      setLoading(false);
+    }
+  }
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -120,6 +149,22 @@ export default function Register() {
             Sign Up
           </button>
         </form>
+
+        <div className="flex items-center justify-between my-4">
+          <span className="w-1/5 border-b border-gray-600 lg:w-1/4"></span>
+          <span className="text-xs text-center text-gray-400 uppercase">or</span>
+          <span className="w-1/5 border-b border-gray-600 lg:w-1/4"></span>
+        </div>
+
+        <button
+            disabled={loading}
+            onClick={handleGoogleRegister}
+            className="w-full flex items-center justify-center py-2 font-bold text-gray-900 bg-white rounded hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-cyan-500"
+          >
+            <FcGoogle className="mr-2 text-2xl" />
+            Sign up with Google
+        </button>
+
         <div className="text-center mt-4">
           Already have an account? <Link to="/login" className="text-cyan-400 hover:text-cyan-300">Log In</Link>
         </div>

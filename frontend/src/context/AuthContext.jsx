@@ -1,8 +1,12 @@
 import React, { useContext, useState, useEffect } from "react";
-import { auth } from "../firebase";
+import { auth, googleProvider } from "../firebase";
+import { accountService } from "../redux/services/accountService";
 import { 
   createUserWithEmailAndPassword, 
-  signInWithEmailAndPassword, 
+  signInWithEmailAndPassword,
+  signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
   signOut, 
   onAuthStateChanged 
 } from "firebase/auth";
@@ -24,6 +28,28 @@ export function AuthProvider({ children }) {
   function login(email, password) {
     return signInWithEmailAndPassword(auth, email, password);
   }
+
+  function loginWithGoogle() {
+    return signInWithPopup(auth, googleProvider);
+  }
+
+  function loginWithGoogleRedirect() {
+    return signInWithRedirect(auth, googleProvider);
+  }
+
+  async function syncWithBackend(user) {
+      if (!user) return null;
+      const token = await user.getIdToken();
+      // Pass displayName so backend can create account with name if it doesn't exist
+      const backendUser = await accountService.firebaseLogin(token, user.email, user.uid, user.displayName);
+      const fullUser = {
+        ...backendUser,
+        firebaseUid: user.uid
+      };
+      setUser(fullUser);
+      return fullUser;
+  }
+
 
   function logout() {
     localStorage.removeItem('currentUser');
@@ -98,6 +124,10 @@ export function AuthProvider({ children }) {
   const value = {
     currentUser,
     login,
+    loginWithGoogle,
+    loginWithGoogleRedirect,
+    auth, // Export auth for getRedirectResult usage
+    syncWithBackend,
     signup,
     logout,
     setUser
