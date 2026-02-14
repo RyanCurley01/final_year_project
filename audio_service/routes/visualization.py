@@ -132,6 +132,29 @@ async def visualize_clusters():
                         <td style="padding: 8px;">{vd['metrics'].get('StandardScaler_val', 'N/A')}</td>
                     </tr>
                 </table>
+
+                {f'''
+                <h3>Classification Report (Predicting Clusters)</h3>
+                <table style="width: 100%; border-collapse: collapse; margin-top: 10px;">
+                    <tr style="background: #ddd;">
+                        <th style="padding: 8px; text-align: left;">Metric</th>
+                        <th style="padding: 8px; text-align: left;">Score (Weighted Avg)</th>
+                    </tr>
+                    <tr>
+                        <td style="padding: 8px;"><strong>Precision</strong></td>
+                        <td style="padding: 8px;">{vd['metrics'].get('precision', 'N/A')}</td>
+                    </tr>
+                    <tr style="background: #f8f8f8;">
+                        <td style="padding: 8px;"><strong>Recall</strong></td>
+                        <td style="padding: 8px;">{vd['metrics'].get('recall', 'N/A')}</td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 8px;"><strong>F1 Score</strong></td>
+                        <td style="padding: 8px;">{vd['metrics'].get('f1_score', 'N/A')}</td>
+                    </tr>
+                </table>
+                ''' if 'precision' in vd['metrics'] else ''}
+
                 <p style="margin-top: 10px;"><em>Higher silhouette score indicates better separation between genres. Training vs Validation scores help detect overfitting.</em></p>
             </div>
         </body>

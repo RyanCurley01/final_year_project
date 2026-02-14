@@ -68,8 +68,7 @@ const AuthenticatedApp = () => {
             <Routes>
               <Route path="/" element={<CustomerScreen />} />
               <Route path="/top-charts" element={<TopCharts />} />
-              <Route path="/similar-songs" element={<ForYouPage />} />
-              <Route path="/for-you" element={<ForYouPage />} />
+              <Route path="/similar-songs" element={<SimilarSongs />} />
               <Route path="/ml-visualization" element={<MLVisualization />} />
               <Route path="/songs/:songid" element={<SongDetails />} />
               <Route path="/search/:searchTerm" element={<Search />} />

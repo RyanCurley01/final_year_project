@@ -4,7 +4,7 @@ import numpy as np
 from typing import Dict, Optional
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import silhouette_score
+from sklearn.metrics import silhouette_score, classification_report, precision_score, recall_score, f1_score
 from sklearn.decomposition import PCA
 from sklearn.cluster import KMeans
 from sklearn.neighbors import KNeighborsClassifier
@@ -187,61 +187,67 @@ async def startup_cache():
                                     best_model = "MinMaxScaler"
                                 
                                 
-                                # 4. Find Best K for KNN (Cross-Validation)
-                                # We search for the optimal 'k' that best predicts genre from audio features.
-                                # This validates that our feature space is meaningful.
+                                # 4. Use K-Means Clustering (3 Clusters) instead of Genres
                                 try:
-                                    console.log("   🔍 Tuning KNN Hyperparameters (Cross-Validation)...")
-                                    best_k = 5
-                                    best_cv_score = 0.0
+                                    console.log("   🔄 Applying K-Means (k=3) for new Ground Truth...")
                                     
-                                    # Use the selected scaler's training data
-                                    X_train_scaled = feature_scaler.transform(X_train)
-                                    
-                                    # Test odd k values from 3 to 19
-                                    param_grid = range(3, 20, 2)
-                                    
-                                    for k in param_grid:
-                                        knn = KNeighborsClassifier(n_neighbors=k)
-                                        # Stratified K-Fold preserves class distribution
-                                        cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
-                                        # Use accuracy as the metric (prediction of correct genre)
-                                        scores = cross_val_score(knn, X_train_scaled, y_train, cv=cv, scoring='accuracy')
-                                        avg_score = scores.mean()
-                                        
-                                        if avg_score > best_cv_score:
-                                            best_cv_score = avg_score
-                                            best_k = k
-                                    
-                                    console.log(f"   ✅ Optimal K-Neighbors found: {best_k} (CV Accuracy: {best_cv_score:.4f})")
-                                    model_performance_metrics["optimal_k"] = best_k
-                                    model_performance_metrics["knn_cv_accuracy"] = round(best_cv_score, 4)
-                                    
-                                    # Train the final Global KNN Classifier using the optimal K and ALL available data
-                                    # We use the full dataset (X) so the model has the maximum knowledge
-                                    global knn_classifier
-                                    
+                                    # Use full dataset for clustering to establish the "Ground Truth" structure
                                     X_full_scaled = feature_scaler.transform(X)
-                                    knn_classifier = KNeighborsClassifier(n_neighbors=best_k)
-                                    knn_classifier.fit(X_full_scaled, y)
-                                    console.log(f"   🤖 Global KNN Classifier trained on {len(X)} tracks")
+                                    
+                                    kmeans = KMeans(n_clusters=3, random_state=42, n_init=10)
+                                    cluster_labels = kmeans.fit_predict(X_full_scaled)
+                                    
+                                    # Convert to string labels for compatibility
+                                    y_clusters = np.array([f"Cluster {l}" for l in cluster_labels])
+                                    
+                                    console.log(f"   ✅ K-Means (k=3) applied. Distribution: {np.unique(y_clusters, return_counts=True)}")
+
+                                    # 5. Train KNN Classifier to predict these clusters
+                                    # We split the data to evaluate how well a supervised model can learn these unsupervised clusters
+                                    X_train_c, X_test_c, y_train_c, y_test_c = train_test_split(X_full_scaled, y_clusters, test_size=0.3, random_state=42)
+                                    
+                                    knn_k = 5
+                                    global knn_classifier
+                                    knn_classifier = KNeighborsClassifier(n_neighbors=knn_k)
+                                    knn_classifier.fit(X_train_c, y_train_c)
+                                    
+                                    # Evaluate on Test/Validation Set
+                                    y_pred = knn_classifier.predict(X_test_c)
+                                    
+                                    # Calculate Precision & Recall
+                                    precision = precision_score(y_test_c, y_pred, average='weighted', zero_division=0)
+                                    recall = recall_score(y_test_c, y_pred, average='weighted', zero_division=0)
+                                    f1 = f1_score(y_test_c, y_pred, average='weighted', zero_division=0)
+                                    
+                                    console.log(f"   📊 Classification Report (KNN predicting Clusters):")
+                                    console.log(f"      Precision: {precision:.4f}")
+                                    console.log(f"      Recall:    {recall:.4f}")
+                                    
+                                    model_performance_metrics["precision"] = round(precision, 4)
+                                    model_performance_metrics["recall"] = round(recall, 4)
+                                    model_performance_metrics["f1_score"] = round(f1, 4)
+                                    model_performance_metrics["optimal_k"] = knn_k
+                                    
+                                    # Retrain robust global classifier on ALL data
+                                    knn_classifier.fit(X_full_scaled, y_clusters)
+                                    console.log(f"   🤖 Global KNN Classifier trained on {len(X)} tracks (Target: 3 Clusters)")
                                     
                                 except Exception as ke:
-                                    console.log(f"   ⚠️ KNN Tuning failed: {ke}")
+                                    console.log(f"   ⚠️ Clustering/Classification failed: {ke}")
+                                    y_clusters = y # Fallback to original genres if K-Means fails
 
 
                                 # Generate Visualization Data (PCA 2D Projection)
                                 try:
                                     console.log("   🎨 Generating Visualization Data...")
                                     pca = PCA(n_components=2)
-                                    # Transform all data with the chosen scaler
-                                    X_scaled_vis = feature_scaler.transform(X)
-                                    X_2d = pca.fit_transform(X_scaled_vis)
+                                    # X_full_scaled is already transformed
+                                    X_2d = pca.fit_transform(X_full_scaled)
                                     
                                     visualization_data = {
                                         "x": X_2d[:, 0].tolist(),
                                         "y": X_2d[:, 1].tolist(),
-                                        "genres": y.tolist(),
+                                        "genres": y_clusters.tolist(), # Use clusters as labels
                                         "scaler": best_model,
                                         "metrics": model_performance_metrics
                                     }
@@ -254,16 +260,20 @@ async def startup_cache():
                                 # Measures how well the selected model creates separable clusters on completely unseen data
                                 if len(set(y_test)) > 1:
                                     try:
-                                        test_embed = feature_scaler.transform(X_test)
-                                        final_acc = silhouette_score(test_embed, y_test)
-                                        model_performance_metrics["test_score"] = round(final_acc, 4)
-                                        console.log(f"   ✅ Final Test Set Performance: {final_acc:.4f} (Silhouette Score)")
+                                        # Recalculate silhouette on the CLUSTERS, not genres
+                                        # Note: x_test from original split corresponds to some indices, 
+                                        # but existing X_test/y_test are genre-based splits.
+                                        # We should check silhouette of the K-Means clusters on the whole dataset
+                                        final_acc = silhouette_score(X_full_scaled, y_clusters)
+                                        model_performance_metrics["silhouette_score"] = round(final_acc, 4)
+                                        model_performance_metrics["test_score"] = round(final_acc, 4) # Legacy key
+                                        console.log(f"   ✅ Cluster Separation: {final_acc:.4f} (Silhouette Score)")
                                     except:
                                         model_performance_metrics["test_score"] = 0.0
-                                        console.log("   ⚠️ Could not calculate final test score due to label distribution")
+                                        console.log("   ⚠️ Could not calculate final test score")
                                 
                             else:
-                                console.log(f"⚠️ Not enough data to train ML model (Found {len(feature_vectors)} tracks - need >10)")
+                                console.log(f"⚠️ Not enough data to train ML model (Found {len(feature_vectors)} tracks - need >50)")
                             
                         except Exception as e:
                             console.log(f"⚠️ ML Initialization warning: {e}")
@@ -294,6 +304,10 @@ def classify_genre_from_features(tempo: float, energy: float, valence: float, da
     global feature_scaler, knn_classifier
             
     try:
+        # Check if model is initialized
+        if feature_scaler is None:
+            return "Unknown"
+
         # 1. Manual Pre-normalization (Must match startup_cache logic lines 107-117)
         # Note: We use defaults for the spectral/advanced features not provided by the quick preview analysis
         input_vector = [

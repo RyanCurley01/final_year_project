@@ -1,5 +1,6 @@
 # Multi-stage build for payments-service
-FROM gradle:8.14.3-jdk21-alpine AS builder
+# Switch from Alpine to standard JDK image to avoid TLS/SSL handshake issues
+FROM gradle:8.14.3-jdk21 AS builder
 
 WORKDIR /app
 

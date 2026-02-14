@@ -328,6 +328,22 @@ const MLVisualization = () => {
                   <p className="text-xs text-gray-500">Cross-Validation Accuracy</p>
                </div>
              )}
+
+             {metrics.precision !== undefined && (
+               <div className="bg-gray-700/50 p-4 rounded-lg">
+                  <h4 className="text-gray-400 text-sm mb-1">Precision</h4>
+                  <p className="text-2xl font-bold text-purple-400">{metrics.precision}</p>
+                  <p className="text-xs text-gray-500">Weighted Average</p>
+               </div>
+             )}
+
+             {metrics.recall !== undefined && (
+               <div className="bg-gray-700/50 p-4 rounded-lg">
+                  <h4 className="text-gray-400 text-sm mb-1">Recall</h4>
+                  <p className="text-2xl font-bold text-pink-400">{metrics.recall}</p>
+                  <p className="text-xs text-gray-500">Weighted Average</p>
+               </div>
+             )}
           </div>
 
           <p className="text-sm text-gray-400 mt-6">
