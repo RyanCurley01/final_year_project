@@ -10,31 +10,25 @@ export const orderService = {
     });
   },
 
-  // Get order by ID
-  getOrderById: async (id, email, password) => {
-    return apiCall(`${BASE_URL}/${id}`, {
-      headers: getBasicAuthHeaders(email, password),
-    });
+  // Get order by ID (public access for verification)
+  getOrderById: async (id) => {
+    return apiCall(`${BASE_URL}/${id}`);
   },
 
   // Get orders by account ID
-  getOrdersByAccountId: async (accountId, email, password) => {
-    const options = {};
-    if (email && password && password !== 'undefined') {
-        options.headers = getBasicAuthHeaders(email, password);
-    }
-    return apiCall(`${BASE_URL}/account/${accountId}`, options);
+  getOrdersByAccountId: async (accountId) => {
+    // Public endpoint for customer viewing their own orders
+    return apiCall(`${BASE_URL}/account/${accountId}`);
   },
 
   // Create order
-  createOrder: async (orderData, email, password) => {
+  createOrder: async (orderData) => {
     const options = {
       method: 'POST',
       body: JSON.stringify(orderData),
+      // Explicitly NO headers for createOrder as it is a public endpoint
+      // Sending invalid/partial Basic Auth headers causes 401 even on permitted endpoints
     };
-    if (email && password) {
-      options.headers = getBasicAuthHeaders(email, password);
-    }
     return apiCall(BASE_URL, options);
   },
 
