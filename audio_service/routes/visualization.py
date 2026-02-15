@@ -176,5 +176,6 @@ async def get_visualization_data():
         "y": ml_service.visualization_data['y'],
         "genres": ml_service.visualization_data['genres'],
         "scaler": ml_service.visualization_data['scaler'],
-        "metrics": ml_service.visualization_data['metrics']
+        "metrics": ml_service.visualization_data['metrics'],
+        "decision_boundary": ml_service.visualization_data.get('decision_boundary')
     }

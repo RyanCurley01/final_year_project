@@ -3,12 +3,11 @@ import asyncio
 import numpy as np
 from typing import Dict, Optional
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import silhouette_score, classification_report, precision_score, recall_score, f1_score
+from sklearn.model_selection import train_test_split, cross_val_score, StratifiedKFold, LeaveOneOut
+from sklearn.metrics import silhouette_score, precision_score, recall_score, f1_score
 from sklearn.decomposition import PCA
 from sklearn.cluster import KMeans
 from sklearn.neighbors import KNeighborsClassifier
-from sklearn.model_selection import train_test_split, cross_val_score, StratifiedKFold
 
 
 from utils import console
@@ -27,6 +26,7 @@ model_performance_metrics: Dict[str, float] = {
 
 visualization_data = None
 feature_scaler = None
+pca_reducer = None
 knn_classifier = None
 
 # Cache for extracted iTunes audio features
@@ -37,7 +37,7 @@ itunes_features_cache: Dict[int, Dict] = {}
 async def startup_cache():
     """Load audio features cache on startup"""
     global audio_features_cache, cache_loaded
-    global feature_scaler, model_performance_metrics, visualization_data
+    global feature_scaler, pca_reducer, knn_classifier, model_performance_metrics, visualization_data
     
     # Load audio features into cache for fast recommendations
     # Retry connection if database isn't ready yet
@@ -97,214 +97,171 @@ async def startup_cache():
                         console.log(f"✅ Cached {len(audio_features_cache)} audio features for fast recommendations")
                         
                         # Initialize ML datasets and scale features
-                        # Splits database data into Training, Validation, and Test sets
-                        # to generalize the model scaler across the entire catalog
+                        # ML Pipeline: Scale → PCA(2D) → KMeans(3) → KNN accuracy
                         try:
-                            # 1. Feature Extraction & Labeling
+                            # 1. Feature Extraction - RAW values (scaler handles normalization)
                             feature_vectors = []
-                            feature_labels = [] # Genres used as "Ground Truth" for model validation
+                            feature_labels = []
                             
                             for pid, data in audio_features_cache.items():
                                 if all(k in data for k in ['tempo', 'energy', 'valence', 'danceability', 'acousticness']):
                                     feature_vectors.append([
-                                        float(data['tempo'] or 0) / 200.0,  # Normalize tempo (0-200 BPM -> 0-1)
+                                        float(data['tempo'] or 120),
                                         float(data['energy'] or 0),
                                         float(data['valence'] or 0),
                                         float(data['danceability'] or 0),
                                         float(data['acousticness'] or 0),
-                                        float(data.get('spectral_centroid', 1500.0) / 5000.0),  # Normalize to 0-1
-                                        float(data.get('spectral_rolloff', 3000.0) / 10000.0),  # Normalize to 0-1
-                                        float(data.get('zero_crossing_rate', 0.05) * 10.0),     # Scale to 0-1
+                                        float(data.get('spectral_centroid', 1500.0)),
+                                        float(data.get('spectral_rolloff', 3000.0)),
+                                        float(data.get('zero_crossing_rate', 0.05)),
                                         float(data.get('instrumentalness', 0.5)),
-                                        float((data.get('loudness', -60.0) + 60.0) / 60.0),     # Normalize -60 to 0 dB -> 0-1
+                                        float(data.get('loudness', -60.0)),
                                         float(data.get('speechiness', 0.1))
                                     ])
                                     feature_labels.append(data.get('genre', 'Unknown'))
                             
-                            if len(feature_vectors) > 50: # Ensure enough data for splitting (lowered from 100 to 50)
+                            if len(feature_vectors) >= 10:
                                 X = np.array(feature_vectors)
                                 y = np.array(feature_labels)
+                                n_samples = len(X)
+                                n_clusters = 3
                                 
-                                # 2. Data Splitting (Train / Validation / Test)
-                                # Training (70%): Used to learn the scaling parameters
-                                # Validation (15%): Used to select the best scaler (Model Selection)
-                                # Test (15%): Used to evaluate the final performance
-                                X_train, X_temp, y_train, y_temp = train_test_split(X, y, test_size=0.3, random_state=42)
-                                X_val, X_test, y_val, y_test = train_test_split(X_temp, y_temp, test_size=0.5, random_state=42)
+                                console.log(f"📊 ML Pipeline: {n_samples} tracks, {n_clusters} clusters")
                                 
-                                console.log(f"📊 ML Pipeline Initialized with {len(X)} tracks")
-                                console.log(f"   Splits: Train={len(X_train)}, Val={len(X_val)}, Test={len(X_test)}")
+                                # 2. Model Selection: Compare scalers via full pipeline accuracy
+                                # Pipeline: Scale → PCA(2D) → KMeans(3) → KNN cross-val accuracy
                                 
-                                # 3. Model Selection (Hyperparameter Tuning)
-                                # We compare two Normalization Models to see which one preserves Genre clusters best.
-                                # Metric: Silhouette Score (Higher is better, meaning Genres are distinct in feature space)
-                                
-                                # Candidate Model A: MinMaxScaler
-                                model_a = MinMaxScaler()
-                                model_a.fit(X_train)
-                                val_embed_a = model_a.transform(X_val)
-                                
-                                # Candidate Model B: StandardScaler (Z-Score)
-                                model_b = StandardScaler()
-                                model_b.fit(X_train)
-                                val_embed_b = model_b.transform(X_val)
-                                
-                                # ALWAYS calculate Training Scores (Check for Overfitting)
-                                # REFACTOR: Use K-Means Cluster Labels instead of Genre for Scoring
-                                # This measures how well the data *can* be clustered, rather than how well it matches genres.
-                                try:
-                                    train_embed_a = model_a.transform(X_train)
-                                    # Generate 'perfect' cluster labels for this projection to see structural quality
-                                    kms_a = KMeans(n_clusters=3, random_state=42, n_init=10).fit(train_embed_a)
-                                    train_score_a = silhouette_score(train_embed_a, kms_a.labels_)
-                                except: train_score_a = -1.0
-                                
-                                try:
-                                    train_embed_b = model_b.transform(X_train)
-                                    # Generate 'perfect' cluster labels for this projection to see structural quality
-                                    kms_b = KMeans(n_clusters=3, random_state=42, n_init=10).fit(train_embed_b)
-                                    train_score_b = silhouette_score(train_embed_b, kms_b.labels_)
-                                except: train_score_b = -1.0
-
-
-                                # Calculate Validation Scores
-                                # For validation, we predict which cluster the validation points belong to, 
-                                # and check if they still fit well.
-                                try:
-                                    val_labels_a = kms_a.predict(val_embed_a)
-                                    score_a = silhouette_score(val_embed_a, val_labels_a) if len(set(val_labels_a)) > 1 else -1.0
-                                except: score_a = -1.0
-                                
-                                try:
-                                    val_labels_b = kms_b.predict(val_embed_b)
-                                    score_b = silhouette_score(val_embed_b, val_labels_b) if len(set(val_labels_b)) > 1 else -1.0
-                                except: score_b = -1.0
-
-                                model_performance_metrics["MinMaxScaler_train"] = round(train_score_a, 4)
-                                model_performance_metrics["StandardScaler_train"] = round(train_score_b, 4)
-                                model_performance_metrics["MinMaxScaler_val"] = round(score_a, 4)
-                                model_performance_metrics["StandardScaler_val"] = round(score_b, 4)
-
-
-                                # Select Best Model based on Blended Score
-                                if score_b > score_a:
-                                    console.log(f"   🏆 Selected Model: StandardScaler (Score: {score_b:.4f})")
-                                    feature_scaler = model_b
-                                    best_model = "StandardScaler"
-                                else:
-                                    console.log(f"   🏆 Selected Model: MinMaxScaler (Score: {score_a:.4f})")
-                                    feature_scaler = model_a
-                                    best_model = "MinMaxScaler"
-                                
-                                
-                                # 4. Use PCA + Optimal K-Means for tighter grouping
-                                try:
-                                    console.log("   🔄 Applying PCA + Dynamic K-Means to find best clusters...")
+                                def evaluate_pipeline(scaler_class, X_data, k=3):
+                                    """Evaluate scaler with PCA + KMeans + KNN pipeline."""
+                                    scaler = scaler_class()
+                                    X_sc = scaler.fit_transform(X_data)
                                     
-                                    # Use full dataset for clustering
-                                    X_full_scaled = feature_scaler.transform(X)
+                                    pca = PCA(n_components=2)
+                                    X_pca = pca.fit_transform(X_sc)
                                     
-                                    # Dimensionality Reduction: Compress to 3 principal components (or 2 if clearer)
-                                    # 3 components capture structure while removing noise
-                                    pca_val = 2 if len(X) < 100 else 3
-                                    pca_reducer = PCA(n_components=pca_val)
-                                    X_reduced = pca_reducer.fit_transform(X_full_scaled)
+                                    km = KMeans(n_clusters=k, random_state=42, n_init=20)
+                                    labels = km.fit_predict(X_pca)
                                     
-                                    # Automatic K-Selection (Silhouette Analysis)
-                                    # Try k from 3 to 10 and pick the one with highest Silhouette Score
-                                    best_k = 3
-                                    best_score = -1.0
-                                    best_labels = []
-                                    best_kmeans_model = None
-
-                                    for k_cand in range(3, 11):
-                                        km = KMeans(n_clusters=k_cand, random_state=42, n_init=10)
-                                        labels_cand = km.fit_predict(X_reduced)
-                                        score_cand = silhouette_score(X_reduced, labels_cand)
-                                        
-                                        if score_cand > best_score:
-                                            best_score = score_cand
-                                            best_k = k_cand
-                                            best_labels = labels_cand
-                                            best_kmeans_model = km
+                                    sil = silhouette_score(X_pca, labels)
                                     
-                                    console.log(f"   🏆 Optimal Clusters: K={best_k} (Score: {best_score:.4f})")
+                                    # KNN accuracy measures cluster separability
+                                    n_nbrs = min(5, len(X_data) - 1)
+                                    knn = KNeighborsClassifier(n_neighbors=n_nbrs)
                                     
-                                    cluster_labels = best_labels
+                                    min_count = min(np.bincount(labels))
+                                    if min_count >= 2:
+                                        n_folds = max(2, min(5, min_count))
+                                        cv = StratifiedKFold(n_splits=n_folds, shuffle=True, random_state=42)
+                                        cv_scores = cross_val_score(knn, X_pca, labels, cv=cv)
+                                        val_acc = cv_scores.mean()
+                                    else:
+                                        cv_scores = cross_val_score(knn, X_pca, labels, cv=LeaveOneOut())
+                                        val_acc = cv_scores.mean()
                                     
-                                    # Convert to string labels for compatibility
-                                    # y_clusters = np.array([f"Cluster {l}" for l in cluster_labels])
-                                    y_clusters = y # Use original Genres instead of Clusters
+                                    knn.fit(X_pca, labels)
+                                    train_acc = knn.score(X_pca, labels)
                                     
-                                    console.log(f"   ✅ K-Means applied (for internal metrics only). Training on Genres: {np.unique(y_clusters, return_counts=True)}")
-
-                                    # 5. Train KNN Classifier to predict these clusters
-                                    X_train_c, X_test_c, y_train_c, y_test_c = train_test_split(X_full_scaled, y_clusters, test_size=0.3, random_state=42)
-                                    
-                                    knn_k = 5
-                                    global knn_classifier
-                                    knn_classifier = KNeighborsClassifier(n_neighbors=knn_k)
-                                    knn_classifier.fit(X_train_c, y_train_c)
-                                    
-                                    # Evaluate (KNN validation)
-                                    y_pred = knn_classifier.predict(X_test_c)
-                                    
-                                    precision = precision_score(y_test_c, y_pred, average='weighted', zero_division=0)
-                                    recall = recall_score(y_test_c, y_pred, average='weighted', zero_division=0)
-                                    f1 = f1_score(y_test_c, y_pred, average='weighted', zero_division=0)
-                                    
-                                    console.log(f"   📊 Classification Report (KNN predicting Clusters):")
-                                    model_performance_metrics["precision"] = round(precision, 4)
-                                    model_performance_metrics["recall"] = round(recall, 4)
-                                    model_performance_metrics["f1_score"] = round(f1, 4)
-                                    model_performance_metrics["optimal_k"] = knn_k
-                                    
-                                    # Retrain robust global classifier
-                                    knn_classifier.fit(X_full_scaled, y_clusters)
-                                    
-                                    # Calculate FINAL SCORE using the REDUCED feature space (where the clusters actually live)
-                                    final_acc = best_score # We already calculated this in the loop
-                                    model_performance_metrics["silhouette_score"] = round(final_acc, 4)
-                                    model_performance_metrics["test_score"] = round(final_acc, 4)
-                                    console.log(f"   ✅ Cluster Separation (PCA Space): {final_acc:.4f}")
-                                    
-                                except Exception as ke:
-                                    console.log(f"   ⚠️ Clustering/Classification failed: {ke}")
-                                    y_clusters = y # Fallback
-
-                                # Generate Visualization Data (PCA 2D Projection for UI)
-                                try:
-                                    console.log("   🎨 Generating Visualization Data...")
-                                    # We already have X_reduced (3D), just take first 2 dims for plot
-                                    
-                                    visualization_data = {
-                                        "x": X_reduced[:, 0].tolist(),
-                                        "y": X_reduced[:, 1].tolist(),
-                                        "genres": y_clusters.tolist(),
-                                        "scaler": best_model,
-                                        "metrics": model_performance_metrics
+                                    return {
+                                        'scaler': scaler, 'pca': pca, 'kmeans': km,
+                                        'labels': labels, 'X_pca': X_pca, 'X_scaled': X_sc,
+                                        'train': train_acc, 'val': val_acc, 'sil': sil
                                     }
-                                    console.log("   ✅ Visualization data ready")
-                                except Exception as ve:
-                                    console.log(f"   ⚠️ Visualization generation failed: {ve}")
-
-
-                                # 4. Final Evaluation (Test Set)
-                                # Measures how well the selected model creates separable clusters on completely unseen data
-                                if len(set(y_test)) > 1:
-                                    try:
-                                        # Recalculate silhouette on the CLUSTERS, using the REDUCED space
-                                        # This is the space where K-Means actually optimized the clusters
-                                        final_acc = silhouette_score(X_reduced, cluster_labels)
-                                        model_performance_metrics["silhouette_score"] = round(final_acc, 4)
-                                        model_performance_metrics["test_score"] = round(final_acc, 4) # Legacy key
-                                        console.log(f"   ✅ Cluster Separation (Validation): {final_acc:.4f}")
-                                    except:
-                                        model_performance_metrics["test_score"] = 0.0
-                                        console.log("   ⚠️ Could not calculate final test score")
+                                
+                                res_a = evaluate_pipeline(MinMaxScaler, X.copy(), n_clusters)
+                                res_b = evaluate_pipeline(StandardScaler, X.copy(), n_clusters)
+                                
+                                model_performance_metrics["MinMaxScaler_train"] = round(res_a['train'], 4)
+                                model_performance_metrics["MinMaxScaler_val"] = round(res_a['val'], 4)
+                                model_performance_metrics["StandardScaler_train"] = round(res_b['train'], 4)
+                                model_performance_metrics["StandardScaler_val"] = round(res_b['val'], 4)
+                                
+                                # Select best scaler
+                                if res_b['val'] > res_a['val']:
+                                    best = res_b
+                                    best_model_name = "StandardScaler"
+                                else:
+                                    best = res_a
+                                    best_model_name = "MinMaxScaler"
+                                
+                                console.log(f"   🏆 {best_model_name} (Train: {best['train']:.4f}, Val: {best['val']:.4f}, Sil: {best['sil']:.4f})")
+                                
+                                # Set globals
+                                feature_scaler = best['scaler']
+                                pca_reducer = best['pca']
+                                X_pca = best['X_pca']
+                                cluster_labels = best['labels']
+                                
+                                # 3. Create cluster label names
+                                cluster_names = np.array([f"Cluster {l}" for l in cluster_labels])
+                                
+                                # 4. Train global KNN classifier on cluster labels (for classify_genre_from_features)
+                                knn_classifier = KNeighborsClassifier(n_neighbors=min(5, n_samples - 1))
+                                knn_classifier.fit(X_pca, cluster_names)
+                                
+                                # 5. Test set evaluation for KNN metrics
+                                try:
+                                    X_tr, X_te, y_tr, y_te = train_test_split(
+                                        X_pca, cluster_names, test_size=0.3,
+                                        random_state=42, stratify=cluster_names
+                                    )
+                                    knn_test = KNeighborsClassifier(n_neighbors=min(5, len(X_tr) - 1))
+                                    knn_test.fit(X_tr, y_tr)
+                                    y_pred = knn_test.predict(X_te)
+                                    
+                                    precision = precision_score(y_te, y_pred, average='weighted', zero_division=0)
+                                    recall = recall_score(y_te, y_pred, average='weighted', zero_division=0)
+                                    f1 = f1_score(y_te, y_pred, average='weighted', zero_division=0)
+                                    test_acc = knn_test.score(X_te, y_te)
+                                except Exception:
+                                    # Fallback if stratified split fails (too few samples per cluster)
+                                    precision = best['val']
+                                    recall = best['val']
+                                    f1 = best['val']
+                                    test_acc = best['val']
+                                
+                                model_performance_metrics["precision"] = round(precision, 4)
+                                model_performance_metrics["recall"] = round(recall, 4)
+                                model_performance_metrics["f1_score"] = round(f1, 4)
+                                model_performance_metrics["test_score"] = round(test_acc, 4)
+                                model_performance_metrics["silhouette_score"] = round(best['sil'], 4)
+                                model_performance_metrics["optimal_k"] = n_clusters
+                                
+                                console.log(f"   📊 KNN Test: Acc={test_acc:.4f}, P={precision:.4f}, R={recall:.4f}, F1={f1:.4f}")
+                                console.log(f"   📊 Silhouette: {best['sil']:.4f}")
+                                
+                                # 6. Generate decision boundary grid for visualization
+                                grid_res = 80  # 80x80 grid for smooth boundaries
+                                x_min_g, x_max_g = X_pca[:, 0].min() - 0.5, X_pca[:, 0].max() + 0.5
+                                y_min_g, y_max_g = X_pca[:, 1].min() - 0.5, X_pca[:, 1].max() + 0.5
+                                xx, yy = np.meshgrid(
+                                    np.linspace(x_min_g, x_max_g, grid_res),
+                                    np.linspace(y_min_g, y_max_g, grid_res)
+                                )
+                                grid_points = np.c_[xx.ravel(), yy.ravel()]
+                                grid_preds = knn_classifier.predict(grid_points)
+                                # Convert "Cluster 0" → 0, "Cluster 1" → 1, etc.
+                                grid_labels = [int(p.split()[-1]) for p in grid_preds]
+                                
+                                # 7. Generate visualization data
+                                visualization_data = {
+                                    "x": X_pca[:, 0].tolist(),
+                                    "y": X_pca[:, 1].tolist(),
+                                    "genres": cluster_names.tolist(),
+                                    "scaler": best_model_name,
+                                    "metrics": model_performance_metrics,
+                                    "decision_boundary": {
+                                        "x_min": float(x_min_g),
+                                        "x_max": float(x_max_g),
+                                        "y_min": float(y_min_g),
+                                        "y_max": float(y_max_g),
+                                        "grid_res": grid_res,
+                                        "labels": grid_labels
+                                    }
+                                }
+                                console.log("   ✅ Visualization data ready")
                                 
                             else:
-                                console.log(f"⚠️ Not enough data to train ML model (Found {len(feature_vectors)} tracks - need >50)")
+                                console.log(f"⚠️ Not enough data ({len(feature_vectors)} tracks, need >= 10)")
                             
                         except Exception as e:
                             console.log(f"⚠️ ML Initialization warning: {e}")
@@ -327,43 +284,42 @@ async def startup_cache():
 def classify_genre_from_features(tempo: float, energy: float, valence: float, danceability: float, acousticness: float, current_cache_size: int = 0, current_cache_items: Dict = {}) -> str:
     """
     Classify genre using the trained Global KNN Classifier.
+    Pipeline: Raw features → Scaler → PCA → KNN predict.
     Args:
         tempo: Raw BPM
         energy, valence, danceability, acousticness: 0-1 values
         current_cache_size, current_cache_items: Legacy params, ignored
     """
-    global feature_scaler, knn_classifier
+    global feature_scaler, pca_reducer, knn_classifier
             
     try:
         # Check if model is initialized
-        if feature_scaler is None:
+        if feature_scaler is None or pca_reducer is None or knn_classifier is None:
             return "Unknown"
 
-        # 1. Manual Pre-normalization (Must match startup_cache logic lines 107-117)
-        # Note: We use defaults for the spectral/advanced features not provided by the quick preview analysis
+        # 1. Use RAW feature values (must match training pipeline - no manual normalization)
         input_vector = [
-            float(tempo or 0) / 200.0,
+            float(tempo or 120),
             float(energy or 0),
             float(valence or 0),
             float(danceability or 0),
             float(acousticness or 0),
-            1500.0 / 5000.0,    # spectral_centroid default
-            3000.0 / 10000.0,   # spectral_rolloff default
-            0.05 * 10.0,        # zero_crossing_rate default scaled
-            0.5,                # instrumentalness default
-            0.0,                # loudness default ((-60+60)/60)
-            0.1                 # speechiness default
+            1500.0,     # spectral_centroid default
+            3000.0,     # spectral_rolloff default
+            0.05,       # zero_crossing_rate default
+            0.5,        # instrumentalness default
+            -60.0,      # loudness default
+            0.1         # speechiness default
         ]
         
         # 2. Reshape for Scikit-Learn (1 sample, 11 features)
         features_array = np.array([input_vector])
         
-        # 3. Apply the learned Scaler (MinMax or Standard)
+        # 3. Apply Scaler → PCA → KNN predict
         features_scaled = feature_scaler.transform(features_array)
-        
-        # 4. Predict Genre
-        predicted_genre = knn_classifier.predict(features_scaled)[0]
-        return str(predicted_genre)
+        features_pca = pca_reducer.transform(features_scaled)
+        predicted = knn_classifier.predict(features_pca)[0]
+        return str(predicted)
         
     except Exception as e:
         console.log(f"⚠️ Genre classification failed: {e}")

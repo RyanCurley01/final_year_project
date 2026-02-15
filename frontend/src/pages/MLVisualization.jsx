@@ -42,7 +42,7 @@ const MLVisualization = () => {
   }
 
   // Process data for visualization
-  const { x, y, genres, scaler, metrics } = data;
+  const { x, y, genres, scaler, metrics, decision_boundary } = data;
   
   // Group data by genre
   const genreGroups = {};
@@ -215,6 +215,43 @@ const MLVisualization = () => {
               });
             })()}
 
+            {/* Decision Boundaries - colored background mesh */}
+            {decision_boundary && (() => {
+              const { x_min: gxMin, x_max: gxMax, y_min: gyMin, y_max: gyMax, grid_res, labels } = decision_boundary;
+              const cellW = (chartWidth - 2 * padding) * ((gxMax - gxMin) / grid_res) / xRange;
+              const cellH = (chartHeight - 2 * padding) * ((gyMax - gyMin) / grid_res) / yRange;
+              // Build boundary colors from actual genreColors so they match data points
+              const boundaryColorMap = {};
+              Object.entries(genreColors).forEach(([genre, hex]) => {
+                const num = parseInt(genre.replace('Cluster ', ''));
+                if (!isNaN(num)) {
+                  const r = parseInt(hex.slice(1, 3), 16);
+                  const g = parseInt(hex.slice(3, 5), 16);
+                  const b = parseInt(hex.slice(5, 7), 16);
+                  boundaryColorMap[num] = `rgba(${r},${g},${b},0.2)`;
+                }
+              });
+              const cells = [];
+              for (let row = 0; row < grid_res; row++) {
+                for (let col = 0; col < grid_res; col++) {
+                  const gx = gxMin + (col / grid_res) * (gxMax - gxMin);
+                  const gy = gyMin + (row / grid_res) * (gyMax - gyMin);
+                  const label = labels[row * grid_res + col];
+                  cells.push(
+                    <rect
+                      key={`db-${row}-${col}`}
+                      x={scaleX(gx)}
+                      y={scaleY(gy + (gyMax - gyMin) / grid_res)}
+                      width={Math.ceil(cellW + 1)}
+                      height={Math.ceil(cellH + 1)}
+                      fill={boundaryColorMap[label] || 'rgba(128,128,128,0.1)'}
+                    />
+                  );
+                }
+              }
+              return <g className="decision-boundary">{cells}</g>;
+            })()}
+
             {/* Data points - use original genre groups */}
             {Object.entries(genreGroups).map(([genre, points]) => (
               <g key={genre}>
@@ -306,9 +343,9 @@ const MLVisualization = () => {
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
              <div className="bg-gray-700/50 p-4 rounded-lg">
-                <h4 className="text-gray-400 text-sm mb-1">Final Test Score</h4>
-                <p className="text-2xl font-bold text-white">{metrics.test_score !== undefined ? metrics.test_score : 'N/A'}</p>
-                <p className="text-xs text-gray-500">Silhouette Score on unseen data</p>
+                <h4 className="text-gray-400 text-sm mb-1">Silhouette Score</h4>
+                <p className="text-2xl font-bold text-white">{metrics.silhouette_score !== undefined ? metrics.silhouette_score : 'N/A'}</p>
+                <p className="text-xs text-gray-500">Measure of cluster separation (-1 to 1)</p>
              </div>
              
              {metrics.optimal_k !== undefined && (

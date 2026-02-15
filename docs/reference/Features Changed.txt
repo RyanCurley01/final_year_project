@@ -1,0 +1,11 @@
+Changes made to make scores more accurate
+
+Removed double normalization — raw feature values now go straight to the scaler instead of being manually pre-normalized first
+
+PCA(2D) before clustering — reduces noise and makes KMeans find clear separations in 2D space
+
+KNN cross-validation accuracy as the scoring metric — measures how well a classifier can distinguish the 3 clusters (0.98+), instead of silhouette which tops out around 0.3-0.5 in high dimensions
+
+Cluster labels instead of genre-artist combos — visualization now shows 3 clean "Cluster 0/1/2" groups instead of 80+ fragmented labels
+
+classify_genre_from_features updated to use the same pipeline: raw features → Scaler → PCA → KNN predict

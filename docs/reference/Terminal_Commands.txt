@@ -208,8 +208,11 @@ docker compose -f docker-compose.services.yml -p gamestore_services build
 To rebuild docker images with no cache
 docker compose -f docker-compose.services.yml -p gamestore_services build --no-cache
 
-To rebuild just audio service container
-docker compose -f docker-compose.services.yml -p gamestore_services build audio-service && docker compose -f docker-compose.services.yml -p gamestore_services up -d audio-service
+To rebuild docker images 
+docker compose -f docker-compose.services.yml -p gamestore_services up -d 
+
+To build just audio service container with new image and replace the running container with it
+docker compose -f docker-compose.services.yml -p gamestore_services build --no-cache audio-service && docker compose -f docker-compose.services.yml -p gamestore_services up -d audio-service
 
 To remove database volume
 docker volume rm gamestore_services_mysql-data
