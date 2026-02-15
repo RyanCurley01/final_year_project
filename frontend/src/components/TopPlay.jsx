@@ -13,7 +13,7 @@ import Error from './Error';
 const TopChartCard = ({ song, i, isPlaying, activeSong, handlePauseClick, handlePlayClick, songEnded }) => {
   const coverMedia = song?.albumCoverImageUrl || song?.images?.coverart;
   const isVideo = coverMedia && coverMedia.toLowerCase().includes('.mp4');
-  const isThisSongActive = activeSong?.albumTitle === song?.albumTitle;
+  const isThisSongActive = activeSong?.productId === song?.productId;
 
   return (
   <>
@@ -57,7 +57,7 @@ const TopChartCard = ({ song, i, isPlaying, activeSong, handlePauseClick, handle
     </div>
     {song.fileUrl && (
       <PlayPause
-        isPlaying={isPlaying && activeSong?.albumTitle === song.albumTitle}
+        isPlaying={isPlaying && activeSong?.productId === song.productId}
         activeSong={activeSong}
         handlePause={handlePauseClick}
         handlePlay={() => handlePlayClick(song, i)}

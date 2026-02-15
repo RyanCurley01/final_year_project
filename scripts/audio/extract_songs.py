@@ -11,12 +11,19 @@ import sys
 import mysql.connector
 import yaml
 import boto3
+from dotenv import load_dotenv
 from pathlib import Path
 from botocore.exceptions import ClientError, NoCredentialsError
 from urllib.parse import quote
 
+# Load environment variables from .env.docker if it exists
+load_dotenv('.env.docker')
+if not os.getenv('AWS_ACCESS_KEY_ID'):
+    # Try .env if .env.docker didn't set it (fallback)
+    load_dotenv()
+
 # Configuration
-ALBUM_COVER_URL = 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Music Cover Image and cloud movement script/cloud-animation.mp4'
+ALBUM_COVER_URL = 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/Music%20Cover%20Image%20and%20cloud%20movement%20script/cloud-animation.mp4'
 S3_SONGS_BASE_URL = 'https://game-and-music-files.s3.eu-west-1.amazonaws.com/songs/'
 S3_SONGS_PREFIX = 'songs/'
 PRICE_PER_SONG = 0.50
@@ -30,6 +37,21 @@ DB_CONFIG = {
     'database': os.getenv('MYSQL_DATABASE', 'Game_Store_System')
 }
 
+def resolve_placeholder(value):
+    """Resolve Spring Boot style placeholders ${VAR:default}"""
+    if not isinstance(value, str):
+        return value
+    
+    # Simple check for ${...}
+    if value.startswith('${') and value.endswith('}'):
+        content = value[2:-1]
+        if ':' in content:
+            var_name, default_val = content.split(':', 1)
+            return os.getenv(var_name, default_val)
+        else:
+            return os.getenv(content, value)
+    return value
+
 def load_aws_config():
     """Load AWS credentials from application.yml"""
     yml_path = '/workspaces/final_year_project/backend/products-service/src/main/resources/application.yml'
@@ -39,10 +61,10 @@ def load_aws_config():
             config = yaml.safe_load(f)
         
         aws_config = {
-            'region': config['aws']['region'],
-            'access_key_id': config['aws']['access-key-id'],
-            'secret_access_key': config['aws']['secret-access-key'],
-            'bucket_name': config['aws']['s3']['bucket-name']
+            'region': resolve_placeholder(config['aws']['region']),
+            'access_key_id': resolve_placeholder(config['aws']['access-key-id']),
+            'secret_access_key': resolve_placeholder(config['aws']['secret-access-key']),
+            'bucket_name': resolve_placeholder(config['aws']['s3']['bucket-name'])
         }
         
         print(f"✅ Loaded AWS credentials from application.yml")
@@ -146,10 +168,9 @@ def insert_songs_to_database(songs):
         # Prepare INSERT statement
         insert_query = """
         INSERT INTO Products 
-        (GameTitle, AlbumTitle, Platform, GamePrice, AlbumPrice, 
-         albumCoverImageUrl, gameCoverImageUrl, file_url, preview_url, StockQuantity) 
+        (AlbumTitle, AlbumPrice, albumCoverImageUrl, file_url, preview_url, StockQuantity) 
         VALUES 
-        (NULL, %s, NULL, NULL, %s, %s, NULL, %s, NULL, %s)
+        (%s, %s, %s, %s, %s, %s)
         """
         
         inserted_count = 0
@@ -163,7 +184,7 @@ def insert_songs_to_database(songs):
             file_url = f"{S3_SONGS_BASE_URL}{encoded_filename}"
             
             # Insert into database
-            values = (song_name, PRICE_PER_SONG, ALBUM_COVER_URL, file_url, STOCK_QUANTITY)
+            values = (song_name, PRICE_PER_SONG, ALBUM_COVER_URL, file_url, file_url, STOCK_QUANTITY)
             
             try:
                 cursor.execute(insert_query, values)
@@ -194,7 +215,7 @@ def generate_sql_file(songs, output_file="insert_songs.sql"):
     sql_lines = [
         "-- Insert individual songs from Selected Electronic Works",
         "USE Game_Store_System;\n",
-        "INSERT INTO Products (GameTitle, AlbumTitle, Platform, GamePrice, AlbumPrice, albumCoverImageUrl, gameCoverImageUrl, file_url, preview_url, StockQuantity) VALUES"
+        "INSERT INTO Products (AlbumTitle, AlbumPrice, albumCoverImageUrl, file_url, preview_url, StockQuantity) VALUES"
     ]
     
     values = []
@@ -205,7 +226,12 @@ def generate_sql_file(songs, output_file="insert_songs.sql"):
         encoded_filename = quote(song_filename, safe='')
         file_url = f"{S3_SONGS_BASE_URL}{encoded_filename}"
         
-        value = f"(NULL, '{song_name}', NULL, NULL, {PRICE_PER_SONG}, '{ALBUM_COVER_URL}', NULL, '{file_url}', '{file_url}', {STOCK_QUANTITY})"
+        # Replace single quotes in song_name with escaped quotes for SQL (e.g. Ted's -> Ted\'s)
+        # Note: In standard SQL, escaping a single quote is often done by doubling it (''), but here we use backslash depending on MySQL mode.
+        # Actually standard SQL uses doubling: 'Ted''s'. Let's use doubling to be safe.
+        song_name_sql = song_name.replace("'", "''")
+        
+        value = f"('{song_name_sql}', {PRICE_PER_SONG}, '{ALBUM_COVER_URL}', '{file_url}', '{file_url}', {STOCK_QUANTITY})"
         values.append(value)
     
     sql_lines.append(",\n".join(values) + ";")
@@ -238,7 +264,9 @@ def main():
     
     # Step 3: Download songs for local processing (optional, for audio feature extraction)
     print("\n" + "=" * 60)
-    download_response = input("Do you want to download songs locally? (yes/no): ").strip().lower()
+    # download_response = input("Do you want to download songs locally? (yes/no): ").strip().lower()
+    download_response = 'no' 
+    print("Skipping download (SQL generation only mode)")
     
     if download_response in ['yes', 'y']:
         downloaded = download_songs_from_s3(aws_config, songs)

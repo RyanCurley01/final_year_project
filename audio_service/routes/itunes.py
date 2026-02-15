@@ -98,6 +98,170 @@ async def clear_imported_songs():
         raise HTTPException(status_code=500, detail=f"Cleanup failed: {str(e)}")
 
 # EXECUTION ORDER: Router endpoint.
+@router.post("/api/itunes/import-top-songs")
+async def import_top_songs(limit: int = 150):
+    """
+    Import the current Top 150 US Pop Songs from iTunes RSS Feed.
+    This ensures we have a high-quality, diverse dataset for the ML model.
+    """
+    try:
+        console.log(f"🎵 Starting Top {limit} Songs Import from iTunes RSS...")
+        
+        # 1. Fetch RSS Feed
+        # Updated URL to generic 'topsongs' which matches curl results
+        rss_url = f"https://itunes.apple.com/us/rss/topsongs/limit={limit}/json"
+        
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.get(rss_url)
+            if response.status_code != 200:
+                raise HTTPException(status_code=response.status_code, detail="iTunes RSS error")
+            
+            data = response.json()
+            # The RSS feed structure is different from the Search API
+            entries = data.get('feed', {}).get('entry', [])
+        
+        console.log(f"   Found {len(entries)} songs in RSS feed")
+        
+        # 2. Extract features and insert
+        imported_count = 0
+        skipped_count = 0
+        error_count = 0
+        
+        loop = asyncio.get_running_loop()
+
+        for entry in entries:
+            try:
+                # RSS feed parsing
+                track_id_str = entry.get('id', {}).get('attributes', {}).get('im:id')
+                track_id = int(track_id_str) if track_id_str else 0
+                
+                track_name = entry.get('im:name', {}).get('label', 'Unknown')
+                artist_name = entry.get('im:artist', {}).get('label', 'Unknown')
+                
+                # Preview URL is often in 'link' list with type 'audio/x-m4a' or similar
+                links = entry.get('link', [])
+                preview_url = None
+                if isinstance(links, list):
+                    for link in links:
+                        link_type = link.get('attributes', {}).get('type', '')
+                        if 'audio' in link_type or 'video' in link_type: # type is typically 'audio/x-m4a'
+                            preview_url = link.get('attributes', {}).get('href')
+                            break
+                    if not preview_url and len(links) >= 2:
+                         # Fallback: often the second link is the preview
+                         preview_url = links[1].get('attributes', {}).get('href')
+                elif isinstance(links, dict):
+                     preview_url = links.get('attributes', {}).get('href')
+                
+                image_url = entry.get('im:image', [{}])[-1].get('label', '') # Get largest image
+                price_str = entry.get('im:price', {}).get('attributes', {}).get('amount', '0.99')
+                try:
+                    price = float(price_str)
+                except:
+                    price = 0.99
+                
+                if not preview_url or not track_id:
+                    skipped_count += 1
+                    continue
+
+                # Use negative IDs for imported songs
+                product_id = -track_id
+                
+                # Check DB existence
+                with get_db_connection() as conn:
+                    if conn:
+                        with conn.cursor() as cursor:
+                            cursor.execute("SELECT ProductID FROM Products WHERE ProductID = %s", (product_id,))
+                            if cursor.fetchone():
+                                skipped_count += 1
+                                continue
+                
+                # Extract Audio Features
+                features = await loop.run_in_executor(
+                    executor,
+                    extract_audio_features_from_preview,
+                    preview_url,
+                    track_id
+                )
+                
+                if not features:
+                    error_count += 1
+                    continue
+
+                # Insert into DB
+                with get_db_connection() as conn:
+                    if conn:
+                        with conn.cursor() as cursor:
+                            # Products
+                            # Note: Products table schema uses AlbumTitle for track name, and albumCoverImageUrl
+                            cursor.execute("""
+                                INSERT INTO Products (
+                                    ProductID, AlbumTitle, AlbumPrice, 
+                                    albumCoverImageUrl, file_url, preview_url
+                                ) VALUES (%s, %s, %s, %s, %s, %s)
+                            """, (
+                                product_id,
+                                track_name, # Storing track name in AlbumTitle as per schema
+                                price,
+                                image_url,
+                                preview_url,
+                                preview_url
+                            ))
+                            
+                            # AudioFeatures
+                            # Convert arrays to JSON string if needed
+                            import json
+                            mfcc_json = json.dumps(features.get('mfcc_mean', [])) if features.get('mfcc_mean') else None
+                            chroma_json = json.dumps(features.get('chroma_mean', [])) if features.get('chroma_mean') else None
+
+                            cursor.execute("""
+                                INSERT INTO AudioFeatures (
+                                    ProductID, Tempo, Energy, Danceability, Valence,
+                                    Acousticness, Instrumentalness, Loudness, Speechiness,
+                                    SpectralCentroid, SpectralRolloff, ZeroCrossingRate, Genre,
+                                    MfccMean, ChromaMean
+                                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            """, (
+                                product_id,
+                                features['tempo'],
+                                features['energy'],
+                                features['danceability'],
+                                features['valence'],
+                                features['acousticness'],
+                                features.get('instrumentalness', 0.5),
+                                features.get('loudness', -60.0),
+                                features.get('speechiness', 0.1),
+                                features.get('spectral_centroid', 1500.0),
+                                features.get('spectral_rolloff', 3000.0),
+                                features.get('zero_crossing_rate', 0.05),
+                                f"Pop - {artist_name}", # Pseudo-genre for variety
+                                mfcc_json,
+                                chroma_json
+                            ))
+                            conn.commit()
+                
+                imported_count += 1
+                console.log(f"   ✅ Imported: {track_name} by {artist_name}")
+
+            except Exception as e:
+                error_count += 1
+                console.log(f"   ❌ Error processing entry {entry.get('im:name', {}).get('label')}: {e}")
+        
+        # 3. Reload Cache
+        await ml_service.startup_cache()
+        
+        return {
+            "status": "success",
+            "imported": imported_count,
+            "skipped": skipped_count,
+            "errors": error_count
+        }
+
+    except Exception as e:
+        console.log(f"❌ RSS Import Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/api/itunes/import-to-database")
 async def import_itunes_songs_to_database(limit: int = 100, genre: str = "electronic"):
     """

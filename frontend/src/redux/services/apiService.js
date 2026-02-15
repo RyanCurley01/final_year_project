@@ -90,8 +90,7 @@ export const musicServiceApi = createApi({
         method: 'POST',
         body: interaction,
       }),
-      // Don't invalidate tags to avoid constant refetching on errors
-      // invalidatesTags: ['TopPlayedSongs'],
+      invalidatesTags: ['TopPlayedSongs'],
     }),
   }),
 });

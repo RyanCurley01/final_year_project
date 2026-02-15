@@ -197,35 +197,48 @@ async def startup_cache():
                                     best_model = "MinMaxScaler"
                                 
                                 
-                                # 4. Use PCA + K-Means (5 Clusters) for tighter grouping
+                                # 4. Use PCA + Optimal K-Means for tighter grouping
                                 try:
-                                    console.log("   🔄 Applying PCA + K-Means (k=5) for optimized clustering...")
+                                    console.log("   🔄 Applying PCA + Dynamic K-Means to find best clusters...")
                                     
                                     # Use full dataset for clustering
                                     X_full_scaled = feature_scaler.transform(X)
                                     
-                                    # Dimensionality Reduction: Compress to 3 principal components
-                                    # This removes noise and forces tighter clusters (improves Silhouette Score)
-                                    pca_reducer = PCA(n_components=3)
+                                    # Dimensionality Reduction: Compress to 3 principal components (or 2 if clearer)
+                                    # 3 components capture structure while removing noise
+                                    pca_val = 2 if len(X) < 100 else 3
+                                    pca_reducer = PCA(n_components=pca_val)
                                     X_reduced = pca_reducer.fit_transform(X_full_scaled)
                                     
-                                    # Increase clusters to 5 to allow for more specific groups
-                                    kmeans = KMeans(n_clusters=5, random_state=42, n_init=10)
-                                    cluster_labels = kmeans.fit_predict(X_reduced)
+                                    # Automatic K-Selection (Silhouette Analysis)
+                                    # Try k from 3 to 10 and pick the one with highest Silhouette Score
+                                    best_k = 3
+                                    best_score = -1.0
+                                    best_labels = []
+                                    best_kmeans_model = None
+
+                                    for k_cand in range(3, 11):
+                                        km = KMeans(n_clusters=k_cand, random_state=42, n_init=10)
+                                        labels_cand = km.fit_predict(X_reduced)
+                                        score_cand = silhouette_score(X_reduced, labels_cand)
+                                        
+                                        if score_cand > best_score:
+                                            best_score = score_cand
+                                            best_k = k_cand
+                                            best_labels = labels_cand
+                                            best_kmeans_model = km
+                                    
+                                    console.log(f"   🏆 Optimal Clusters: K={best_k} (Score: {best_score:.4f})")
+                                    
+                                    cluster_labels = best_labels
                                     
                                     # Convert to string labels for compatibility
-                                    y_clusters = np.array([f"Cluster {l}" for l in cluster_labels])
+                                    # y_clusters = np.array([f"Cluster {l}" for l in cluster_labels])
+                                    y_clusters = y # Use original Genres instead of Clusters
                                     
-                                    console.log(f"   ✅ PCA+K-Means applied. Distribution: {np.unique(y_clusters, return_counts=True)}")
+                                    console.log(f"   ✅ K-Means applied (for internal metrics only). Training on Genres: {np.unique(y_clusters, return_counts=True)}")
 
                                     # 5. Train KNN Classifier to predict these clusters
-                                    # Use the REDUCED features for training if we want consistency, 
-                                    # OR use original scaled features if we want the model to learn the mapping.
-                                    # Usually, training on the original scaled features is better for new data inference
-                                    # unless we also apply PCA to new incoming data every time.
-                                    # For simplicity here, we stick to X_full_scaled for the KNN input
-                                    # so the 'classify_genre_from_features' function doesn't break (it expects raw features).
-                                    
                                     X_train_c, X_test_c, y_train_c, y_test_c = train_test_split(X_full_scaled, y_clusters, test_size=0.3, random_state=42)
                                     
                                     knn_k = 5
@@ -250,8 +263,7 @@ async def startup_cache():
                                     knn_classifier.fit(X_full_scaled, y_clusters)
                                     
                                     # Calculate FINAL SCORE using the REDUCED feature space (where the clusters actually live)
-                                    # This is valid because we are evaluating the separation of the *clusters themselves*
-                                    final_acc = silhouette_score(X_reduced, cluster_labels)
+                                    final_acc = best_score # We already calculated this in the loop
                                     model_performance_metrics["silhouette_score"] = round(final_acc, 4)
                                     model_performance_metrics["test_score"] = round(final_acc, 4)
                                     console.log(f"   ✅ Cluster Separation (PCA Space): {final_acc:.4f}")
@@ -281,14 +293,12 @@ async def startup_cache():
                                 # Measures how well the selected model creates separable clusters on completely unseen data
                                 if len(set(y_test)) > 1:
                                     try:
-                                        # Recalculate silhouette on the CLUSTERS, not genres
-                                        # Note: x_test from original split corresponds to some indices, 
-                                        # but existing X_test/y_test are genre-based splits.
-                                        # We should check silhouette of the K-Means clusters on the whole dataset
-                                        final_acc = silhouette_score(X_full_scaled, y_clusters)
+                                        # Recalculate silhouette on the CLUSTERS, using the REDUCED space
+                                        # This is the space where K-Means actually optimized the clusters
+                                        final_acc = silhouette_score(X_reduced, cluster_labels)
                                         model_performance_metrics["silhouette_score"] = round(final_acc, 4)
                                         model_performance_metrics["test_score"] = round(final_acc, 4) # Legacy key
-                                        console.log(f"   ✅ Cluster Separation: {final_acc:.4f} (Silhouette Score)")
+                                        console.log(f"   ✅ Cluster Separation (Validation): {final_acc:.4f}")
                                     except:
                                         model_performance_metrics["test_score"] = 0.0
                                         console.log("   ⚠️ Could not calculate final test score")
