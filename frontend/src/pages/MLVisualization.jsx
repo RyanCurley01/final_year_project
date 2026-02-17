@@ -356,11 +356,11 @@ const MLVisualization = () => {
                </div>
              )}
 
-             {metrics.knn_cv_accuracy !== undefined && (
+             {metrics.test_score !== undefined && (
                <div className="bg-gray-700/50 p-4 rounded-lg">
-                  <h4 className="text-gray-400 text-sm mb-1">test score</h4>
-                  <p className="text-2xl font-bold text-green-400">{metrics.test_acc}</p>
-                  <p className="text-xs text-gray-500">Cross-Validation Accuracy</p>
+                  <h4 className="text-gray-400 text-sm mb-1">Test Score</h4>
+                  <p className="text-2xl font-bold text-green-400">{metrics.test_score}</p>
+                  <p className="text-xs text-gray-500">Test Set Accuracy</p>
                </div>
              )}
 
