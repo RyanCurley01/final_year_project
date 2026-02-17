@@ -188,6 +188,21 @@ async def import_top_songs(limit: int = 150):
                     error_count += 1
                     continue
 
+                # Classify genre using ML pipeline (same as import-to-database)
+                genre_label = ml_service.classify_genre_from_features(
+                    features['tempo'],
+                    features['energy'],
+                    features['valence'],
+                    features['danceability'],
+                    features['acousticness'],
+                    spectral_centroid=features.get('spectral_centroid', 1500.0),
+                    spectral_rolloff=features.get('spectral_rolloff', 3000.0),
+                    zero_crossing_rate=features.get('zero_crossing_rate', 0.05),
+                    instrumentalness=features.get('instrumentalness', 0.5),
+                    loudness=features.get('loudness', -60.0),
+                    speechiness=features.get('speechiness', 0.1)
+                )
+
                 # Insert into DB
                 with get_db_connection() as conn:
                     if conn:
@@ -219,8 +234,8 @@ async def import_top_songs(limit: int = 150):
                                     ProductID, Tempo, Energy, Danceability, Valence,
                                     Acousticness, Instrumentalness, Loudness, Speechiness,
                                     SpectralCentroid, SpectralRolloff, ZeroCrossingRate, Genre,
-                                    MfccMean, ChromaMean
-                                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                    MfccMean, ChromaMean, Key_Signature, TimeSignature, Duration
+                                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                             """, (
                                 product_id,
                                 features['tempo'],
@@ -234,14 +249,17 @@ async def import_top_songs(limit: int = 150):
                                 features.get('spectral_centroid', 1500.0),
                                 features.get('spectral_rolloff', 3000.0),
                                 features.get('zero_crossing_rate', 0.05),
-                                f"Pop - {artist_name}", # Pseudo-genre for variety
+                                genre_label,
                                 mfcc_json,
-                                chroma_json
+                                chroma_json,
+                                features.get('key_signature', None),
+                                features.get('time_signature', None),
+                                features.get('duration', None)
                             ))
                             conn.commit()
                 
                 imported_count += 1
-                console.log(f"   ✅ Imported: {track_name} by {artist_name}")
+                console.log(f"   ✅ Imported: {track_name} by {artist_name} (Genre: {genre_label})")
 
             except Exception as e:
                 error_count += 1

@@ -107,6 +107,7 @@ async def startup_cache():
                             # 1. Feature Extraction - RAW values (scaler handles normalization)
                             feature_vectors = []
                             feature_labels = []
+                            feature_product_ids = []  # Track ProductIDs for DB genre sync
                             
                             required_features = [
                                 'tempo', 'energy', 'valence', 'danceability', 'acousticness',
@@ -130,6 +131,7 @@ async def startup_cache():
                                         float(data['speechiness'])
                                     ])
                                     feature_labels.append(data.get('genre', 'Unknown'))
+                                    feature_product_ids.append(pid)
                             
                             if len(feature_vectors) >= 10:
                                 X = np.array(feature_vectors)
@@ -246,6 +248,32 @@ async def startup_cache():
                                 
                                 # 3. Converts raw numbers (e.g., 0, 1, 2) into human-readable strings (e.g., "Cluster 0").
                                 cluster_names = np.array([f"Cluster {l}" for l in cluster_labels])
+                                
+                                # 3b. Sync stale Genre labels in cache and database.
+                                # Songs imported via import-top-songs had hardcoded "Pop - ArtistName"
+                                # genres. Now that KMeans has assigned proper cluster labels,
+                                # update any song whose DB genre doesn't match its cluster.
+                                stale_updates = []
+                                for i, pid in enumerate(feature_product_ids):
+                                    new_genre = cluster_names[i]
+                                    old_genre = audio_features_cache[pid].get('genre', '')
+                                    if old_genre != new_genre:
+                                        stale_updates.append((new_genre, pid))
+                                        audio_features_cache[pid]['genre'] = new_genre
+                                
+                                if stale_updates:
+                                    try:
+                                        with get_db_connection() as conn2:
+                                            if conn2:
+                                                with conn2.cursor() as cur2:
+                                                    cur2.executemany(
+                                                        "UPDATE AudioFeatures SET Genre = %s WHERE ProductID = %s",
+                                                        stale_updates
+                                                    )
+                                                    conn2.commit()
+                                        console.log(f"   🔄 Synced {len(stale_updates)} stale Genre labels to DB (e.g. 'Pop - ...' → 'Cluster X')")
+                                    except Exception as sync_e:
+                                        console.log(f"   ⚠️ Genre sync failed (non-fatal): {sync_e}")
                                 
                                 # 4. Build Ensemble: KNN + Random Forest + SVM (Voting Classifier)
                                 # Each model learns the cluster boundaries differently:

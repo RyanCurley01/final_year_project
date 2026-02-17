@@ -20,14 +20,15 @@ router = APIRouter()
 
 # EXECUTION ORDER: Router endpoint.
 @router.post("/api/audio/extract-all-features")
-async def extract_all_product_features(limit: int = 197, save_to_db: bool = True):
+async def extract_all_product_features(limit: int = 197, save_to_db: bool = True, reprocess_incomplete: bool = True):
     """
     Extract audio features for all music products using librosa.
     This replaces the hardcoded genre/mood classification with industry-standard audio analysis.
     
     Args:
-        limit: Maximum number of products to process (default 50 for safety)
+        limit: Maximum number of products to process (default 197 for safety)
         save_to_db: Whether to save extracted features to AudioFeatures table (default True)
+        reprocess_incomplete: Also re-extract songs that have NULL MfccMean/ChromaMean (default True)
     
     Returns:
         Summary of extraction results
@@ -39,17 +40,30 @@ async def extract_all_product_features(limit: int = 197, save_to_db: bool = True
                 raise HTTPException(status_code=503, detail="Database connection unavailable")
             
             with conn.cursor() as cursor:
-                # Optimized query to only fetch products WITHOUT existing audio features
-                cursor.execute("""
-                    SELECT p.ProductID, p.AlbumTitle, p.file_url 
-                    FROM Products p
-                    LEFT JOIN AudioFeatures af ON p.ProductID = af.ProductID
-                    WHERE p.AlbumTitle IS NOT NULL 
-                    AND p.AlbumTitle != 'Selected Electronic Works'
-                    AND p.file_url IS NOT NULL
-                    AND af.ProductID IS NULL
-                    LIMIT %s
-                """, (limit,))
+                # Fetch products WITHOUT existing audio features,
+                # OR with incomplete features (NULL MfccMean) if reprocess_incomplete is True
+                if reprocess_incomplete:
+                    cursor.execute("""
+                        SELECT p.ProductID, p.AlbumTitle, p.file_url 
+                        FROM Products p
+                        LEFT JOIN AudioFeatures af ON p.ProductID = af.ProductID
+                        WHERE p.AlbumTitle IS NOT NULL 
+                        AND p.AlbumTitle != 'Selected Electronic Works'
+                        AND p.file_url IS NOT NULL
+                        AND (af.ProductID IS NULL OR af.MfccMean IS NULL)
+                        LIMIT %s
+                    """, (limit,))
+                else:
+                    cursor.execute("""
+                        SELECT p.ProductID, p.AlbumTitle, p.file_url 
+                        FROM Products p
+                        LEFT JOIN AudioFeatures af ON p.ProductID = af.ProductID
+                        WHERE p.AlbumTitle IS NOT NULL 
+                        AND p.AlbumTitle != 'Selected Electronic Works'
+                        AND p.file_url IS NOT NULL
+                        AND af.ProductID IS NULL
+                        LIMIT %s
+                    """, (limit,))
                 products = cursor.fetchall()
         
         console.log(f"🎵 Starting librosa feature extraction for {len(products)} products...")
@@ -122,6 +136,10 @@ async def extract_all_product_features(limit: int = 197, save_to_db: bool = True
                         saved = False
                         if save_to_db:
                             try:
+                                import json
+                                mfcc_json = json.dumps(features.get('mfcc_mean', [])) if features.get('mfcc_mean') else None
+                                chroma_json = json.dumps(features.get('chroma_mean', [])) if features.get('chroma_mean') else None
+
                                 with get_db_connection() as conn:
                                     if conn:
                                         with conn.cursor() as cursor:
@@ -129,9 +147,10 @@ async def extract_all_product_features(limit: int = 197, save_to_db: bool = True
                                                 INSERT INTO AudioFeatures (
                                                     ProductID, Tempo, Energy, Danceability, Valence,
                                                     Acousticness, Instrumentalness, Loudness, Speechiness,
-                                                    SpectralCentroid, SpectralRolloff, ZeroCrossingRate, Genre
+                                                    SpectralCentroid, SpectralRolloff, ZeroCrossingRate, Genre,
+                                                    MfccMean, ChromaMean, Key_Signature, TimeSignature, Duration
                                                 ) VALUES (
-                                                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                                                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                                                 )
                                                 ON DUPLICATE KEY UPDATE
                                                     Tempo = VALUES(Tempo),
@@ -145,7 +164,12 @@ async def extract_all_product_features(limit: int = 197, save_to_db: bool = True
                                                     SpectralCentroid = VALUES(SpectralCentroid),
                                                     SpectralRolloff = VALUES(SpectralRolloff),
                                                     ZeroCrossingRate = VALUES(ZeroCrossingRate),
-                                                    Genre = VALUES(Genre)
+                                                    Genre = VALUES(Genre),
+                                                    MfccMean = VALUES(MfccMean),
+                                                    ChromaMean = VALUES(ChromaMean),
+                                                    Key_Signature = VALUES(Key_Signature),
+                                                    TimeSignature = VALUES(TimeSignature),
+                                                    Duration = VALUES(Duration)
                                             """
                                             cursor.execute(sql, (
                                                 product_id,
@@ -160,7 +184,12 @@ async def extract_all_product_features(limit: int = 197, save_to_db: bool = True
                                                 features.get('spectral_centroid', 1500.0),
                                                 features.get('spectral_rolloff', 3000.0),
                                                 features.get('zero_crossing_rate', 0.05),
-                                                genre
+                                                genre,
+                                                mfcc_json,
+                                                chroma_json,
+                                                features.get('key_signature', None),
+                                                features.get('time_signature', None),
+                                                features.get('duration', None)
                                             ))
                                             conn.commit()
                                             saved = True
