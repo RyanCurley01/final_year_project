@@ -525,11 +525,7 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
                 float(match_features.get('speechiness') if match_features.get('speechiness') is not None else 0.1)
             ]
             
-            # Recalculate similarity with live target
-            # We need to compute similarity between live_target and EACH candidate
-            # But candidates_scaled is already processed for the whole batch.
-            # Ideally we would just scale live_target and compare to candidates_scaled
-            
+            # Recalculate similarity with live target         
             live_target_vector = np.array([live_target_list]) # Shape (1, 11)
             
             if ml_service.feature_scaler:

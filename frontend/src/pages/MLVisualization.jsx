@@ -358,10 +358,8 @@ const MLVisualization = () => {
 
              {metrics.knn_cv_accuracy !== undefined && (
                <div className="bg-gray-700/50 p-4 rounded-lg">
-                  <h4 className="text-gray-400 text-sm mb-1">KNN Accuracy</h4>
-                  <p className="text-2xl font-bold text-green-400">
-                    {typeof metrics.knn_cv_accuracy === 'number' ? (metrics.knn_cv_accuracy * 100).toFixed(1) + '%' : metrics.knn_cv_accuracy}
-                  </p>
+                  <h4 className="text-gray-400 text-sm mb-1">test score</h4>
+                  <p className="text-2xl font-bold text-green-400">{metrics.test_acc}</p>
                   <p className="text-xs text-gray-500">Cross-Validation Accuracy</p>
                </div>
              )}
@@ -381,12 +379,15 @@ const MLVisualization = () => {
                   <p className="text-xs text-gray-500">Weighted Average</p>
                </div>
              )}
-          </div>
 
-          <p className="text-sm text-gray-400 mt-6">
-            <strong>Note:</strong> Higher silhouette score indicates better separation between genres. 
-            Training vs Validation scores help detect overfitting. Test score confirms generalization.
-          </p>
+            {metrics.f1_score !== undefined && (
+               <div className="bg-gray-700/50 p-4 rounded-lg">
+                  <h4 className="text-gray-400 text-sm mb-1">F1 Score</h4>
+                  <p className="text-2xl font-bold text-yellow-400">{metrics.f1_score}</p>
+                  <p className="text-xs text-gray-500">Weighted Average</p>
+               </div>
+             )}
+          </div>
         </div>
       </div>
     </div>

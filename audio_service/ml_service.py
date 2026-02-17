@@ -186,8 +186,9 @@ async def startup_cache():
                                     else:
                                         # Runs the KNN model multiple times on different slices of data 
                                         # except ONE item, tests on that item, and repeats for every single item
-                                        # and returns a list of accuracy scores and the average accuracy score
+                                        # and returns a list of accuracy scores
                                         cv_scores = cross_val_score(knn, X_pca, labels, cv=LeaveOneOut())
+                                        
                                         val_acc = cv_scores.mean()
                                     
                                     # Trains the final KNN model on the entire dataset
