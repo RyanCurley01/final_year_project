@@ -21,6 +21,13 @@ class AudioFeatures(BaseModel):
     danceability: Optional[float] = None
     valence: Optional[float] = None
     acousticness: Optional[float] = None
+    # Extended features for full 11D similarity matching
+    spectral_centroid: Optional[float] = None
+    spectral_rolloff: Optional[float] = None
+    zero_crossing_rate: Optional[float] = None
+    instrumentalness: Optional[float] = None
+    loudness: Optional[float] = None
+    speechiness: Optional[float] = None
 
     class Config:
         extra = 'ignore'

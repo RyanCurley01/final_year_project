@@ -177,5 +177,7 @@ async def get_visualization_data():
         "genres": ml_service.visualization_data['genres'],
         "scaler": ml_service.visualization_data['scaler'],
         "metrics": ml_service.visualization_data['metrics'],
-        "decision_boundary": ml_service.visualization_data.get('decision_boundary')
+        "decision_boundary": ml_service.visualization_data.get('decision_boundary'),
+        "model_boundaries": ml_service.visualization_data.get('model_boundaries'),
+        "per_model_metrics": ml_service.visualization_data.get('per_model_metrics')
     }

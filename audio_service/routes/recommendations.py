@@ -456,101 +456,20 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
         if not candidate_vectors:
             return {"status": "success", "recommendations": []}
 
-        # Calculate using sklearn
-        X = np.array([target_vector] + candidate_vectors)
-        if ml_service.feature_scaler:
-             try:
-                X_scaled = ml_service.feature_scaler.transform(X)
-             except:
-                X_scaled = X
-        else:
-             X_scaled = X 
-             
-        target_scaled = X_scaled[0].reshape(1, -1)
-        candidates_scaled = X_scaled[1:]
+        # 4. Pure cosine similarity on manually-normalized vectors
+        target_arr = np.array(target_vector).reshape(1, -1)
+        candidates_arr = np.array(candidate_vectors)
         
-        sims = cosine_similarity(target_scaled, candidates_scaled)[0]
-        
-        # Determine LIVE comparison features
-        # For matching scores (UI), we want to compare against the ACTUAL LIVE MOMENT
-        match_features = target_features.copy()
-        # LIVE UPDATE DISABLED: We force static comparison only
-        if request.audio_features:
-             live_features = request.audio_features.dict()
-             
-             # Robust Update: Only use live features if they are non-zero/valid.
-             # This allows the Visualizer to fallback to Cached features during silence/loading.
-             if live_features.get('energy') and live_features.get('energy') > 0.01: 
-                  match_features['energy'] = live_features['energy']
-             if live_features.get('valence') and live_features.get('valence') > 0.01: 
-                  match_features['valence'] = live_features['valence']
-             if live_features.get('danceability') and live_features.get('danceability') > 0.01: 
-                  match_features['danceability'] = live_features['danceability']
-             
-             # Tempo logic
-             req_f = request.audio_features
-             rate = req_f.playback_rate if req_f.playback_rate else 1.0
-             
-             new_tempo = None
-             if req_f.effective_tempo and req_f.effective_tempo > 10:
-                  new_tempo = req_f.effective_tempo
-             elif req_f.tempo and req_f.tempo > 10:
-                  new_tempo = req_f.tempo * rate
-                  
-             if new_tempo:
-                  match_features['tempo'] = new_tempo
-        
-        # 4. Filter and Sort
-        # Recalculate similarity with live features if they differ from target_features
-        use_live_similarity = (request.audio_features is not None and 
-                               match_features != target_features)
-        
-        # Force False since we disabled live updates
-        use_live_similarity = False
-        
-        if use_live_similarity:
-            # Build live target vector with updated features (1D list)
-            # Use explicit None checks to avoid defaulting 0.0 values to 0.5 (which happens with 'or')
-            live_target_list = [
-                float(match_features.get('tempo') if match_features.get('tempo') is not None else 120) / 200.0,
-                float(match_features.get('energy') if match_features.get('energy') is not None else 0.5),
-                float(match_features.get('valence') if match_features.get('valence') is not None else 0.5),
-                float(match_features.get('danceability') if match_features.get('danceability') is not None else 0.5),
-                float(match_features.get('acousticness') if match_features.get('acousticness') is not None else 0.5),
-                float(match_features.get('spectral_centroid') if match_features.get('spectral_centroid') is not None else 1500.0) / 5000.0,
-                float(match_features.get('spectral_rolloff') if match_features.get('spectral_rolloff') is not None else 3000.0) / 10000.0,
-                float(match_features.get('zero_crossing_rate') if match_features.get('zero_crossing_rate') is not None else 0.05) * 10.0,
-                float(match_features.get('instrumentalness') if match_features.get('instrumentalness') is not None else 0.5),
-                float((match_features.get('loudness') if match_features.get('loudness') is not None else -60.0) + 60.0) / 60.0,
-                float(match_features.get('speechiness') if match_features.get('speechiness') is not None else 0.1)
-            ]
-            
-            # Recalculate similarity with live target         
-            live_target_vector = np.array([live_target_list]) # Shape (1, 11)
-            
-            if ml_service.feature_scaler:
-                try:
-                    live_target_scaled = ml_service.feature_scaler.transform(live_target_vector) # Expects (n_samples, n_features)
-                except:
-                    live_target_scaled = live_target_vector
-            else:
-                live_target_scaled = live_target_vector
-            
-            # Recalculate similarity against efficiently against ALL candidates at once
-            # candidates_scaled is (N, 11)
-            live_sims = cosine_similarity(live_target_scaled, candidates_scaled)[0] # Result (N,)
-            
-        else:
-            live_sims = sims
+        sims = cosine_similarity(target_arr, candidates_arr)[0]
         
         recommendations = []
-        for i, score in enumerate(live_sims):
+        for i, score in enumerate(sims):
             p = candidate_objs[i]
             
-            tempo_match=1.0 - min(abs(match_features.get('tempo',120) - p.get('tempo',120)), 100)/100
-            energy_match=1.0 - abs(match_features.get('energy',0.5) - p.get('energy',0.5))
-            mood_match=1.0 - abs(match_features.get('valence',0.5) - p.get('valence',0.5))
-            dance_match=1.0 - abs(match_features.get('danceability',0.5) - p.get('danceability',0.5))
+            tempo_match=1.0 - min(abs(target_features.get('tempo',120) - (p.get('tempo') or 120)), 100)/100
+            energy_match=1.0 - abs(target_features.get('energy',0.5) - (p.get('energy') or 0.5))
+            mood_match=1.0 - abs(target_features.get('valence',0.5) - (p.get('valence') or 0.5))
+            dance_match=1.0 - abs(target_features.get('danceability',0.5) - (p.get('danceability') or 0.5))
             
             matches = [
                 ('tempo', tempo_match, f"Matching rhythm ({p.get('tempo', 0):.0f} BPM)"),
