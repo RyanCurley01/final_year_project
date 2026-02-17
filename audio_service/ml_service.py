@@ -103,20 +103,26 @@ async def startup_cache():
                             feature_vectors = []
                             feature_labels = []
                             
+                            required_features = [
+                                'tempo', 'energy', 'valence', 'danceability', 'acousticness',
+                                'spectral_centroid', 'spectral_rolloff', 'zero_crossing_rate',
+                                'instrumentalness', 'loudness', 'speechiness'
+                            ]
+                            
                             for pid, data in audio_features_cache.items():
-                                if all(k in data for k in ['tempo', 'energy', 'valence', 'danceability', 'acousticness']):
+                                if all(k in data for k in required_features):
                                     feature_vectors.append([
-                                        float(data['tempo'] or 120),
-                                        float(data['energy'] or 0),
-                                        float(data['valence'] or 0),
-                                        float(data['danceability'] or 0),
-                                        float(data['acousticness'] or 0),
-                                        float(data.get('spectral_centroid', 1500.0)),
-                                        float(data.get('spectral_rolloff', 3000.0)),
-                                        float(data.get('zero_crossing_rate', 0.05)),
-                                        float(data.get('instrumentalness', 0.5)),
-                                        float(data.get('loudness', -60.0)),
-                                        float(data.get('speechiness', 0.1))
+                                        float(data['tempo']),
+                                        float(data['energy']),
+                                        float(data['valence']),
+                                        float(data['danceability']),
+                                        float(data['acousticness']),
+                                        float(data['spectral_centroid']),
+                                        float(data['spectral_rolloff']),
+                                        float(data['zero_crossing_rate']),
+                                        float(data['instrumentalness']),
+                                        float(data['loudness']),
+                                        float(data['speechiness'])
                                     ])
                                     feature_labels.append(data.get('genre', 'Unknown'))
                             
@@ -133,32 +139,62 @@ async def startup_cache():
                                 
                                 def evaluate_pipeline(scaler_class, X_data, k=3):
                                     """Evaluate scaler with PCA + KMeans + KNN pipeline."""
+                                    
+                                    # Fits the scaler to the raw audio features (X_data) to calculate stats 
+                                    # (like min/max or mean/std) and immediately transforms the data. 
+                                    # This normalizes the data so features with large numbers (like Tempo: 120) 
+                                    # don't overpower small ones (like Speechiness: 0.1)
                                     scaler = scaler_class()
                                     X_sc = scaler.fit_transform(X_data)
                                     
+                                    # Compresses the scaled 11-dimensional audio features down to 2 dimensions 
+                                    # while keeping as much "information" (variance) as possible.
                                     pca = PCA(n_components=2)
                                     X_pca = pca.fit_transform(X_sc)
                                     
+                                    # Runs the clustering on the 2D data. It assigns every song to a cluster 
+                                    # (e.g., 0, 1, or 2). These labels become the "Truth" for the next steps
                                     km = KMeans(n_clusters=k, random_state=42, n_init=20)
                                     labels = km.fit_predict(X_pca)
                                     
+                                    # Calculates how well-separated the clusters are
                                     sil = silhouette_score(X_pca, labels)
                                     
                                     # KNN accuracy measures cluster separability
                                     n_nbrs = min(5, len(X_data) - 1)
                                     knn = KNeighborsClassifier(n_neighbors=n_nbrs)
                                     
+                                    # Checks the size of the smallest cluster. If one cluster has only 1 song, 
+                                    # standard cross-validation will crash because 
+                                    # it can't split that 1 song into training and test sets.
                                     min_count = min(np.bincount(labels))
+                                    
+                                    # if all clusters have at least 2 songs
                                     if min_count >= 2:
+                                        # Decides how many "folds" to split the data into (Between 2 and 5).
                                         n_folds = max(2, min(5, min_count))
+                                        
+                                        # Ensures each "fold" has a proportional mix of cluster labels (stratified)
                                         cv = StratifiedKFold(n_splits=n_folds, shuffle=True, random_state=42)
+                                        
+                                        # Runs the KNN model multiple times on different slices of data 
+                                        # and returns a list of accuracy scores
                                         cv_scores = cross_val_score(knn, X_pca, labels, cv=cv)
+                                        
+                                        # Gets the average accuracy across all KNN model runs
                                         val_acc = cv_scores.mean()
                                     else:
+                                        # Runs the KNN model multiple times on different slices of data 
+                                        # except ONE item, tests on that item, and repeats for every single item
+                                        # and returns a list of accuracy scores and the average accuracy score
                                         cv_scores = cross_val_score(knn, X_pca, labels, cv=LeaveOneOut())
                                         val_acc = cv_scores.mean()
                                     
+                                    # Trains the final KNN model on the entire dataset
                                     knn.fit(X_pca, labels)
+                                    
+                                    # Calculates the training accuracy (how well the model knows the data it has already seen). 
+                                    # This is usually high, but checked against val_acc to spot overfitting.
                                     train_acc = knn.score(X_pca, labels)
                                     
                                     return {
@@ -167,6 +203,7 @@ async def startup_cache():
                                         'train': train_acc, 'val': val_acc, 'sil': sil
                                     }
                                 
+                                # Runs the entire pipeline (Scale -> PCA -> KMeans -> KNN) using MinMaxScaler and StandardScaler
                                 res_a = evaluate_pipeline(MinMaxScaler, X.copy(), n_clusters)
                                 res_b = evaluate_pipeline(StandardScaler, X.copy(), n_clusters)
                                 
@@ -175,7 +212,7 @@ async def startup_cache():
                                 model_performance_metrics["StandardScaler_train"] = round(res_b['train'], 4)
                                 model_performance_metrics["StandardScaler_val"] = round(res_b['val'], 4)
                                 
-                                # Select best scaler
+                                # Compares the validation accuracy (how well the clusters separate) of the two methods.
                                 if res_b['val'] > res_a['val']:
                                     best = res_b
                                     best_model_name = "StandardScaler"
@@ -185,35 +222,46 @@ async def startup_cache():
                                 
                                 console.log(f"   🏆 {best_model_name} (Train: {best['train']:.4f}, Val: {best['val']:.4f}, Sil: {best['sil']:.4f})")
                                 
-                                # Set globals
+                                # Updates the global variables with the trained objects from the winning pipeline
+                                # to be used later when a user asks to classify a new song that wasn't in the database at startup.
                                 feature_scaler = best['scaler']
                                 pca_reducer = best['pca']
                                 X_pca = best['X_pca']
                                 cluster_labels = best['labels']
                                 
-                                # 3. Create cluster label names
+                                # 3. Converts raw numbers (e.g., 0, 1, 2) into human-readable strings (e.g., "Cluster 0").
                                 cluster_names = np.array([f"Cluster {l}" for l in cluster_labels])
                                 
-                                # 4. Train global KNN classifier on cluster labels (for classify_genre_from_features)
+                                # 4. Trains the main KNN classifier on all available data 
+                                # to answer "What genre is this song?" queries during runtime.
                                 knn_classifier = KNeighborsClassifier(n_neighbors=min(5, n_samples - 1))
                                 knn_classifier.fit(X_pca, cluster_names)
                                 
                                 # 5. Test set evaluation for KNN metrics
                                 try:
+                                    # Splits the data one last time (70% train, 30% test) 
+                                    # to calculate final performance metrics like Precision/Recall.
                                     X_tr, X_te, y_tr, y_te = train_test_split(
                                         X_pca, cluster_names, test_size=0.3,
                                         random_state=42, stratify=cluster_names
                                     )
                                     knn_test = KNeighborsClassifier(n_neighbors=min(5, len(X_tr) - 1))
+                                    
+                                    # Trains a temporary model just for this test.
                                     knn_test.fit(X_tr, y_tr)
+                                    
+                                    # Predicts cluster labels for the test set to see 
+                                    # if they match the actual cluster labels.
                                     y_pred = knn_test.predict(X_te)
                                     
+                                    # Standard ML metrics to ensure the model isn't biased towards one massive cluster.
                                     precision = precision_score(y_te, y_pred, average='weighted', zero_division=0)
                                     recall = recall_score(y_te, y_pred, average='weighted', zero_division=0)
                                     f1 = f1_score(y_te, y_pred, average='weighted', zero_division=0)
                                     test_acc = knn_test.score(X_te, y_te)
                                 except Exception:
-                                    # Fallback if stratified split fails (too few samples per cluster)
+                                    # If a cluster is tiny (e.g., 2 songs), splitting it further for testing will crash. 
+                                    # If that happens, it falls back to the validation score.
                                     precision = best['val']
                                     recall = best['val']
                                     f1 = best['val']
@@ -229,8 +277,13 @@ async def startup_cache():
                                 console.log(f"   📊 KNN Test: Acc={test_acc:.4f}, P={precision:.4f}, R={recall:.4f}, F1={f1:.4f}")
                                 console.log(f"   📊 Silhouette: {best['sil']:.4f}")
                                 
+                                
                                 # 6. Generate decision boundary grid for visualization
-                                grid_res = 80  # 80x80 grid for smooth boundaries
+                                
+                                # 80x80 grid for smooth boundaries
+                                grid_res = 80  
+                                
+                                # Creates a virtual "grid" covering the entire 2D chart area.
                                 x_min_g, x_max_g = X_pca[:, 0].min() - 0.5, X_pca[:, 0].max() + 0.5
                                 y_min_g, y_max_g = X_pca[:, 1].min() - 0.5, X_pca[:, 1].max() + 0.5
                                 xx, yy = np.meshgrid(
@@ -238,11 +291,15 @@ async def startup_cache():
                                     np.linspace(y_min_g, y_max_g, grid_res)
                                 )
                                 grid_points = np.c_[xx.ravel(), yy.ravel()]
+                                
+                                # Predicts a cluster for every single point on the empty grid
                                 grid_preds = knn_classifier.predict(grid_points)
+                                
                                 # Convert "Cluster 0" → 0, "Cluster 1" → 1, etc.
                                 grid_labels = [int(p.split()[-1]) for p in grid_preds]
                                 
-                                # 7. Generate visualization data
+                                # 7. Stores the X/Y coordinates of every song, their cluster labels, and the grid data. 
+                                # This dictionary is saved in memory so it can be sent to the frontend later for plotting.
                                 visualization_data = {
                                     "x": X_pca[:, 0].tolist(),
                                     "y": X_pca[:, 1].tolist(),
@@ -258,9 +315,9 @@ async def startup_cache():
                                         "labels": grid_labels
                                     }
                                 }
-                                console.log("   ✅ Visualization data ready")
-                                
+                                console.log("   ✅ Visualization data ready")                       
                             else:
+                                # If there are fewer than 10 songs, it skips ML training to avoids errors.
                                 console.log(f"⚠️ Not enough data ({len(feature_vectors)} tracks, need >= 10)")
                             
                         except Exception as e:
@@ -268,7 +325,10 @@ async def startup_cache():
                         
                         console.log(f"📊 Final model_performance_metrics: {model_performance_metrics}", flush=True)
 
-                        return  # Success - exit retry loop
+                        # If everything succeeds, it returns from the function, exiting the retry loop
+                        return 
+        
+        # If loop crashes, the outer except block catches it and retries after a delay.           
         except Exception as e:
             console.log(f"⚠️ Attempt {attempt + 1}/{max_retries} - Failed to load audio features cache: {e}")
             if attempt < max_retries - 1:
@@ -280,10 +340,27 @@ async def startup_cache():
                 console.log(f"   Service will start but similarity will be slower (real-time analysis)")
                 cache_loaded = False
 
+
 # EXECUTION ORDER: Called by routes (iTunes, Feature Processing) to classify new tracks
-def classify_genre_from_features(tempo: float, energy: float, valence: float, danceability: float, acousticness: float, current_cache_size: int = 0, current_cache_items: Dict = {}) -> str:
+def classify_genre_from_features(
+    tempo: float, 
+    energy: float, 
+    valence: float, 
+    danceability: float, 
+    acousticness: float,
+    spectral_centroid: float = 1500.0,
+    spectral_rolloff: float = 3000.0,
+    zero_crossing_rate: float = 0.05,
+    instrumentalness: float = 0.5,
+    loudness: float = -60.0,
+    speechiness: float = 0.1,
+    current_cache_size: int = 0, 
+    current_cache_items: Dict = {}
+) -> str:
     """
-    Classify genre using the trained Global KNN Classifier.
+    Takes raw audio features (like Tempo and Energy) from a new song and 
+    predict its "Genre" (or Cluster ID) using the global machine learning models 
+    (Scaler, PCA, KNN) that were trained during the startup phase
     Pipeline: Raw features → Scaler → PCA → KNN predict.
     Args:
         tempo: Raw BPM
@@ -299,25 +376,34 @@ def classify_genre_from_features(tempo: float, energy: float, valence: float, da
 
         # 1. Use RAW feature values (must match training pipeline - no manual normalization)
         input_vector = [
-            float(tempo or 120),
+            # Inputs converted to decimals.
+            float(tempo if tempo != 0 else 0),
             float(energy or 0),
             float(valence or 0),
             float(danceability or 0),
             float(acousticness or 0),
-            1500.0,     # spectral_centroid default
-            3000.0,     # spectral_rolloff default
-            0.05,       # zero_crossing_rate default
-            0.5,        # instrumentalness default
-            -60.0,      # loudness default
-            0.1         # speechiness default
+            float(spectral_centroid),
+            float(spectral_rolloff),
+            float(zero_crossing_rate),
+            float(instrumentalness),
+            float(loudness),
+            float(speechiness)
         ]
         
         # 2. Reshape for Scikit-Learn (1 sample, 11 features)
         features_array = np.array([input_vector])
         
         # 3. Apply Scaler → PCA → KNN predict
+        # "Normalizes" the data. For example, it might convert a Tempo of 120 
+        # into 0.5 if the training data range was 60–180.
         features_scaled = feature_scaler.transform(features_array)
+        
+        # Compresses those 11 normalized numbers down to just 2 coordinates (X and Y), 
+        # placing this song on the internal 2D "map" the AI created.
         features_pca = pca_reducer.transform(features_scaled)
+        
+        # Looks at that X,Y point on the map, finds the nearest neighbors, 
+        # and decides "This point belongs to Cluster 2."
         predicted = knn_classifier.predict(features_pca)[0]
         return str(predicted)
         

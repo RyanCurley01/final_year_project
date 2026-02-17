@@ -345,7 +345,13 @@ async def import_itunes_songs_to_database(limit: int = 100, genre: str = "electr
                     features['energy'],
                     features['valence'],
                     features['danceability'],
-                    features['acousticness']
+                    features['acousticness'],
+                    spectral_centroid=features.get('spectral_centroid', 1500.0),
+                    spectral_rolloff=features.get('spectral_rolloff', 3000.0),
+                    zero_crossing_rate=features.get('zero_crossing_rate', 0.05),
+                    instrumentalness=features.get('instrumentalness', 0.5),
+                    loudness=features.get('loudness', -60.0),
+                    speechiness=features.get('speechiness', 0.1)
                 )
                 
                 # Insert into Products table

@@ -91,6 +91,12 @@ async def extract_all_product_features(limit: int = 197, save_to_db: bool = True
                             features['valence'],
                             features['danceability'],
                             features['acousticness'],
+                            spectral_centroid=features.get('spectral_centroid', 1500.0),
+                            spectral_rolloff=features.get('spectral_rolloff', 3000.0),
+                            zero_crossing_rate=features.get('zero_crossing_rate', 0.05),
+                            instrumentalness=features.get('instrumentalness', 0.5),
+                            loudness=features.get('loudness', -60.0),
+                            speechiness=features.get('speechiness', 0.1),
                             current_cache_size=len(current_cache),
                             current_cache_items=current_cache
                         )
