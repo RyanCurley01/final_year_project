@@ -1,5 +1,6 @@
 # audio_service/ml_service.py
 import asyncio
+import json
 import numpy as np
 from collections import Counter
 from typing import Dict, List, Optional
@@ -15,6 +16,32 @@ from sklearn.svm import SVC
 
 from utils import console
 from database import get_db_connection
+from feature_extraction import derive_mood
+
+# Key name → numeric index for ML feature vectors
+KEY_NAME_TO_INDEX = {
+    'C': 0, 'C#': 1, 'D': 2, 'D#': 3, 'E': 4, 'F': 5,
+    'F#': 6, 'G': 7, 'G#': 8, 'A': 9, 'A#': 10, 'B': 11
+}
+
+# Time signature string → beats-per-measure numeric value
+TIME_SIG_TO_BEATS = {
+    '4/4': 4.0, '3/4': 3.0, '6/8': 6.0, '2/4': 2.0, '5/4': 5.0, '7/8': 7.0
+}
+
+def _parse_json_list(val, expected_len: int, default_val: float = 0.0) -> List[float]:
+    """Safely parse a JSON text field into a list of floats."""
+    if val is None:
+        return [default_val] * expected_len
+    if isinstance(val, list):
+        return [float(x) for x in val]
+    try:
+        parsed = json.loads(val)
+        if isinstance(parsed, list):
+            return [float(x) for x in parsed]
+    except (json.JSONDecodeError, TypeError):
+        pass
+    return [default_val] * expected_len
 
 # EXECUTION ORDER: Global state initialization.
 # Cache for audio features - loaded once at startup to avoid repeated DB queries
@@ -63,12 +90,18 @@ async def startup_cache():
                                 Danceability,
                                 Acousticness,
                                 Genre,
+                                Mood,
                                 SpectralCentroid,
                                 SpectralRolloff,
                                 ZeroCrossingRate,
                                 Instrumentalness,
                                 Loudness,
-                                Speechiness
+                                Speechiness,
+                                Key_Signature,
+                                TimeSignature,
+                                Duration,
+                                MfccMean,
+                                ChromaMean
                             FROM AudioFeatures
                             WHERE Tempo IS NOT NULL
                             AND Energy IS NOT NULL
@@ -81,6 +114,20 @@ async def startup_cache():
                             # Sanitize Tempo: If 0, set to default 120 (prevents visualizer issues)
                             if row['Tempo'] == 0:
                                 row['Tempo'] = 120.0
+                            
+                            # Parse MFCC and Chroma JSON arrays
+                            mfcc_list = _parse_json_list(row.get('MfccMean'), 13)
+                            chroma_list = _parse_json_list(row.get('ChromaMean'), 12)
+                            
+                            # Derive mood if NULL in DB
+                            mood_val = row.get('Mood')
+                            if not mood_val:
+                                mood_val = derive_mood(
+                                    float(row.get('Valence', 0.5)),
+                                    float(row.get('Energy', 0.5)),
+                                    float(row.get('Danceability', 0.5)),
+                                    float(row.get('Acousticness', 0.5))
+                                )
                                 
                             audio_features_cache[row['ProductID']] = {
                                 'id': row['ProductID'],
@@ -90,12 +137,18 @@ async def startup_cache():
                                 'danceability': row['Danceability'],
                                 'acousticness': row['Acousticness'],
                                 'genre': row['Genre'],
+                                'mood': mood_val,
                                 'spectral_centroid': row.get('SpectralCentroid', 1500.0),
                                 'spectral_rolloff': row.get('SpectralRolloff', 3000.0),
                                 'zero_crossing_rate': row.get('ZeroCrossingRate', 0.05),
                                 'instrumentalness': row.get('Instrumentalness', 0.5),
                                 'loudness': row.get('Loudness', -60.0),
-                                'speechiness': row.get('Speechiness', 0.1)
+                                'speechiness': row.get('Speechiness', 0.1),
+                                'key_signature': row.get('Key_Signature'),
+                                'time_signature': row.get('TimeSignature'),
+                                'duration': row.get('Duration', 0),
+                                'mfcc_mean': mfcc_list,
+                                'chroma_mean': chroma_list
                             }
                         
                         cache_loaded = True
@@ -105,6 +158,8 @@ async def startup_cache():
                         # ML Pipeline: Scale → PCA(2D) → KMeans(3) → KNN accuracy
                         try:
                             # 1. Feature Extraction - RAW values (scaler handles normalization)
+                            # Uses ALL AudioFeatures columns as the feature vector:
+                            # 11 core + 1 duration + 1 key_index + 1 time_sig_beats + 13 MFCC + 12 Chroma = 39D
                             feature_vectors = []
                             feature_labels = []
                             feature_product_ids = []  # Track ProductIDs for DB genre sync
@@ -117,7 +172,8 @@ async def startup_cache():
                             
                             for pid, data in audio_features_cache.items():
                                 if all(k in data for k in required_features):
-                                    feature_vectors.append([
+                                    # Core 11 features
+                                    vec = [
                                         float(data['tempo']),
                                         float(data['energy']),
                                         float(data['valence']),
@@ -129,7 +185,27 @@ async def startup_cache():
                                         float(data['instrumentalness']),
                                         float(data['loudness']),
                                         float(data['speechiness'])
-                                    ])
+                                    ]
+                                    # Duration (seconds)
+                                    vec.append(float(data.get('duration', 0) or 0))
+                                    # Key signature as numeric index (0-11)
+                                    key_str = data.get('key_signature', '')
+                                    vec.append(float(KEY_NAME_TO_INDEX.get(key_str, 0)))
+                                    # Time signature as beats per measure
+                                    ts_str = data.get('time_signature', '4/4')
+                                    vec.append(float(TIME_SIG_TO_BEATS.get(ts_str, 4.0)))
+                                    # MFCC means (13 timbral coefficients)
+                                    mfcc = data.get('mfcc_mean', [0.0] * 13)
+                                    if not isinstance(mfcc, list) or len(mfcc) != 13:
+                                        mfcc = _parse_json_list(mfcc, 13)
+                                    vec.extend(mfcc)
+                                    # Chroma means (12 pitch class values)
+                                    chroma = data.get('chroma_mean', [0.0] * 12)
+                                    if not isinstance(chroma, list) or len(chroma) != 12:
+                                        chroma = _parse_json_list(chroma, 12)
+                                    vec.extend(chroma)
+                                    
+                                    feature_vectors.append(vec)
                                     feature_labels.append(data.get('genre', 'Unknown'))
                                     feature_product_ids.append(pid)
                             
@@ -625,18 +701,18 @@ def classify_genre_from_features(
     instrumentalness: float = 0.5,
     loudness: float = -60.0,
     speechiness: float = 0.1,
+    duration: float = 0.0,
+    key_signature: str = 'C',
+    time_signature: str = '4/4',
+    mfcc_mean: List[float] = None,
+    chroma_mean: List[float] = None,
     current_cache_size: int = 0, 
     current_cache_items: Dict = {}
 ) -> str:
     """
-    Takes raw audio features (like Tempo and Energy) from a new song and 
-    predict its "Genre" (or Cluster ID) using the global machine learning models 
-    (Scaler, PCA, KNN) that were trained during the startup phase
-    Pipeline: Raw features → Scaler → PCA → KNN predict.
-    Args:
-        tempo: Raw BPM
-        energy, valence, danceability, acousticness: 0-1 values
-        current_cache_size, current_cache_items: Legacy params, ignored
+    Takes raw audio features from a new song and predicts its Genre/Cluster
+    using the global ML models (Scaler, PCA, KNN/Ensemble) trained at startup.
+    Pipeline: Raw 39D features → Scaler → PCA → Best classifier predict.
     """
     global feature_scaler, pca_reducer, knn_classifier, ensemble_classifier, best_classifier
             
@@ -649,9 +725,8 @@ def classify_genre_from_features(
         if best_classifier is None and ensemble_classifier is None and knn_classifier is None:
             return "Unknown"
 
-        # 1. Use RAW feature values (must match training pipeline - no manual normalization)
+        # 1. Build 39D input vector matching training pipeline
         input_vector = [
-            # Inputs converted to decimals.
             float(tempo if tempo != 0 else 0),
             float(energy or 0),
             float(valence or 0),
@@ -662,10 +737,23 @@ def classify_genre_from_features(
             float(zero_crossing_rate),
             float(instrumentalness),
             float(loudness),
-            float(speechiness)
+            float(speechiness),
+            float(duration or 0),
+            float(KEY_NAME_TO_INDEX.get(key_signature, 0)),
+            float(TIME_SIG_TO_BEATS.get(time_signature, 4.0))
         ]
+        # MFCC means (13 coefficients)
+        if mfcc_mean and isinstance(mfcc_mean, list) and len(mfcc_mean) == 13:
+            input_vector.extend([float(x) for x in mfcc_mean])
+        else:
+            input_vector.extend([0.0] * 13)
+        # Chroma means (12 pitch classes)
+        if chroma_mean and isinstance(chroma_mean, list) and len(chroma_mean) == 12:
+            input_vector.extend([float(x) for x in chroma_mean])
+        else:
+            input_vector.extend([0.0] * 12)
         
-        # 2. Reshape for Scikit-Learn (1 sample, 11 features)
+        # 2. Reshape for Scikit-Learn (1 sample, 39 features)
         features_array = np.array([input_vector])
         
         # 3. Apply Scaler → PCA → Ensemble predict

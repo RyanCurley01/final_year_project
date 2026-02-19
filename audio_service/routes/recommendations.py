@@ -1,6 +1,7 @@
 # audio_service/routes/recommendations.py
 from fastapi import APIRouter, HTTPException
 from typing import List, Optional, Dict
+import json
 import asyncio
 import httpx
 import numpy as np
@@ -28,8 +29,55 @@ from feature_extraction import (
     extract_audio_features_from_preview_async
 )
 import ml_service
+from ml_service import KEY_NAME_TO_INDEX, TIME_SIG_TO_BEATS, _parse_json_list
 
 router = APIRouter()
+
+
+def _build_similarity_vector(f: dict) -> list:
+    """
+    Build a normalized similarity vector from audio features dict.
+    Uses ALL AudioFeatures columns for comprehensive similarity matching:
+    11 core + 1 duration + 1 key_index + 1 time_sig_beats + 13 MFCC + 12 Chroma = 39D
+    """
+    vec = [
+        float(f.get('tempo') if f.get('tempo') is not None else 120) / 200.0,
+        float(f.get('energy') if f.get('energy') is not None else 0.5),
+        float(f.get('valence') if f.get('valence') is not None else 0.5),
+        float(f.get('danceability') if f.get('danceability') is not None else 0.5),
+        float(f.get('acousticness') if f.get('acousticness') is not None else 0.5),
+        float(f.get('spectral_centroid') if f.get('spectral_centroid') is not None else 1500.0) / 5000.0,
+        float(f.get('spectral_rolloff') if f.get('spectral_rolloff') is not None else 3000.0) / 10000.0,
+        float(f.get('zero_crossing_rate') if f.get('zero_crossing_rate') is not None else 0.05) * 10.0,
+        float(f.get('instrumentalness') if f.get('instrumentalness') is not None else 0.5),
+        float((f.get('loudness') if f.get('loudness') is not None else -60.0) + 60.0) / 60.0,
+        float(f.get('speechiness') if f.get('speechiness') is not None else 0.1),
+        # Duration normalized (0-300s typical range)
+        float(f.get('duration') if f.get('duration') is not None else 0) / 300.0,
+        # Key signature as index (0-11) normalized
+        float(KEY_NAME_TO_INDEX.get(f.get('key_signature', ''), 0)) / 11.0,
+        # Time signature beats normalized
+        float(TIME_SIG_TO_BEATS.get(f.get('time_signature', '4/4'), 4.0)) / 7.0,
+    ]
+    # MFCC means (13 coefficients) - normalize roughly by dividing by 300
+    mfcc = f.get('mfcc_mean')
+    if mfcc and isinstance(mfcc, list) and len(mfcc) == 13:
+        vec.extend([float(x) / 300.0 for x in mfcc])
+    elif isinstance(mfcc, str):
+        parsed = _parse_json_list(mfcc, 13)
+        vec.extend([float(x) / 300.0 for x in parsed])
+    else:
+        vec.extend([0.0] * 13)
+    # Chroma means (12 pitch classes) - already 0-1 range
+    chroma = f.get('chroma_mean')
+    if chroma and isinstance(chroma, list) and len(chroma) == 12:
+        vec.extend([float(x) for x in chroma])
+    elif isinstance(chroma, str):
+        parsed = _parse_json_list(chroma, 12)
+        vec.extend([float(x) for x in parsed])
+    else:
+        vec.extend([0.0] * 12)
+    return vec
 
 # ============================================
 # CACHED AUDIO FEATURES ENDPOINT (for artist songs)
@@ -72,9 +120,13 @@ async def get_cached_audio_features(artist_only: bool = True):
                     "speechiness": data.get('speechiness', 0.1),
                     "loudness": data.get('loudness', -60),
                     "genre": data.get('genre', 'Unknown'),
+                    "mood": data.get('mood', 'Unknown'),
                     "spectralCentroid": data.get('spectral_centroid', 1500),
                     "spectralRolloff": data.get('spectral_rolloff', 3000),
-                    "zeroCrossingRate": data.get('zero_crossing_rate', 0.05)
+                    "zeroCrossingRate": data.get('zero_crossing_rate', 0.05),
+                    "keySignature": data.get('key_signature'),
+                    "timeSignature": data.get('time_signature'),
+                    "duration": data.get('duration', 0)
                 }
                 for pid, data in ml_service.audio_features_cache.items()
                 if pid < 0  # Negative IDs are iTunes artist songs
@@ -93,9 +145,13 @@ async def get_cached_audio_features(artist_only: bool = True):
                     "speechiness": data.get('speechiness', 0.1),
                     "loudness": data.get('loudness', -60),
                     "genre": data.get('genre', 'Unknown'),
+                    "mood": data.get('mood', 'Unknown'),
                     "spectralCentroid": data.get('spectral_centroid', 1500),
                     "spectralRolloff": data.get('spectral_rolloff', 3000),
-                    "zeroCrossingRate": data.get('zero_crossing_rate', 0.05)
+                    "zeroCrossingRate": data.get('zero_crossing_rate', 0.05),
+                    "keySignature": data.get('key_signature'),
+                    "timeSignature": data.get('time_signature'),
+                    "duration": data.get('duration', 0)
                 }
                 for pid, data in ml_service.audio_features_cache.items()
             }
@@ -419,37 +475,13 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
         if not candidates:
              return {"status": "success", "recommendations": []}
 
-        target_vector = [
-            float(target_features.get('tempo') if target_features.get('tempo') is not None else 120) / 200.0,
-            float(target_features.get('energy') if target_features.get('energy') is not None else 0.5),
-            float(target_features.get('valence') if target_features.get('valence') is not None else 0.5),
-            float(target_features.get('danceability') if target_features.get('danceability') is not None else 0.5),
-            float(target_features.get('acousticness') if target_features.get('acousticness') is not None else 0.5),
-            float(target_features.get('spectral_centroid') if target_features.get('spectral_centroid') is not None else 1500.0) / 5000.0,
-            float(target_features.get('spectral_rolloff') if target_features.get('spectral_rolloff') is not None else 3000.0) / 10000.0,
-            float(target_features.get('zero_crossing_rate') if target_features.get('zero_crossing_rate') is not None else 0.05) * 10.0,
-            float(target_features.get('instrumentalness') if target_features.get('instrumentalness') is not None else 0.5),
-            float((target_features.get('loudness') if target_features.get('loudness') is not None else -60.0) + 60.0) / 60.0,
-            float(target_features.get('speechiness') if target_features.get('speechiness') is not None else 0.1)
-        ]
+        target_vector = _build_similarity_vector(target_features)
         
         candidate_vectors = []
         candidate_objs = []
         
         for p in candidates:
-             vec = [
-                float(p.get('tempo') if p.get('tempo') is not None else 120) / 200.0,
-                float(p.get('energy') if p.get('energy') is not None else 0.5),
-                float(p.get('valence') if p.get('valence') is not None else 0.5),
-                float(p.get('danceability') if p.get('danceability') is not None else 0.5),
-                float(p.get('acousticness') if p.get('acousticness') is not None else 0.5),
-                float(p.get('spectral_centroid') if p.get('spectral_centroid') is not None else 1500.0) / 5000.0,
-                float(p.get('spectral_rolloff') if p.get('spectral_rolloff') is not None else 3000.0) / 10000.0,
-                float(p.get('zero_crossing_rate') if p.get('zero_crossing_rate') is not None else 0.05) * 10.0,
-                float(p.get('instrumentalness') if p.get('instrumentalness') is not None else 0.5),
-                float((p.get('loudness') if p.get('loudness') is not None else -60.0) + 60.0) / 60.0,
-                float(p.get('speechiness') if p.get('speechiness') is not None else 0.1)
-            ]
+             vec = _build_similarity_vector(p)
              candidate_vectors.append(vec)
              candidate_objs.append(p)
              

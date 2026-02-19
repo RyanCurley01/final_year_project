@@ -14,6 +14,23 @@ from config import executor
 from s3_service import generate_presigned_url
 
 
+def derive_mood(valence: float, energy: float, danceability: float = 0.5, acousticness: float = 0.5) -> str:
+    """
+    Derive mood from audio features using Russell's Circumplex Model of Affect.
+    Maps valence (positivity) and energy (arousal) to four mood quadrants.
+    
+    Returns one of: 'energetic', 'happy', 'calm', 'sad'
+    """
+    if energy >= 0.55 and valence >= 0.45:
+        return "energetic"
+    elif valence >= 0.45 and energy < 0.55:
+        return "happy"
+    elif energy < 0.45 and valence < 0.45:
+        return "sad"
+    else:
+        return "calm"
+
+
 # EXECUTION ORDER: Can be called any time to analyze a URL.
 # Uses 'executor' for CPU-bound tasks in background.
 async def extract_features_for_product_async(product_id: int, file_url: str) -> Optional[Dict]:
@@ -101,7 +118,11 @@ def extract_audio_features_librosa(audio_url: str, product_id: int) -> Optional[
             # Extract tempo using beat tracking
             print("Extracting features with librosa...")
             tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
-            tempo = float(tempo) if hasattr(tempo, '__float__') else float(tempo[0]) if len(tempo) > 0 else 120.0
+            # Handle numpy array return from newer librosa versions
+            if isinstance(tempo, np.ndarray):
+                tempo = float(tempo.flat[0]) if tempo.size > 0 else 120.0
+            else:
+                tempo = float(tempo) if tempo else 120.0
             
             # ===== ENERGY =====
             # RMS energy normalized to 0-1 range
@@ -168,6 +189,9 @@ def extract_audio_features_librosa(audio_url: str, product_id: int) -> Optional[
             # ===== DURATION =====
             duration = int(len(y) / sr)  # Duration in seconds
             
+            # ===== MOOD (derived from valence + energy) =====
+            mood = derive_mood(valence, energy, danceability, acousticness)
+            
             features = {
                 'product_id': product_id,
                 'tempo': round(tempo, 2),
@@ -185,10 +209,11 @@ def extract_audio_features_librosa(audio_url: str, product_id: int) -> Optional[
                 'chroma_mean': chroma_mean,
                 'key_signature': key_signature,
                 'time_signature': time_signature,
-                'duration': duration
+                'duration': duration,
+                'mood': mood
             }
             
-            console.log(f"✅ Librosa extracted FULL features for product {product_id}: tempo={tempo:.1f}, energy={energy:.2f}, key={key_signature}")
+            console.log(f"✅ Librosa extracted FULL features for product {product_id}: tempo={tempo:.1f}, energy={energy:.2f}, key={key_signature}, mood={mood}")
             return features
             
         finally:
@@ -245,7 +270,11 @@ def extract_audio_features_from_preview(audio_url: str, track_id: int) -> Option
             
             # Extract tempo (BPM) using beat tracking
             tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
-            tempo = float(tempo) if hasattr(tempo, '__float__') else float(tempo[0]) if len(tempo) > 0 else 120.0
+            # Handle numpy array return from newer librosa versions
+            if isinstance(tempo, np.ndarray):
+                tempo = float(tempo.flat[0]) if tempo.size > 0 else 120.0
+            else:
+                tempo = float(tempo) if tempo else 120.0
             
             # Extract energy (RMS energy normalized to 0-1)
             rms = librosa.feature.rms(y=y)[0]
@@ -308,6 +337,9 @@ def extract_audio_features_from_preview(audio_url: str, track_id: int) -> Option
             # ===== DURATION =====
             duration = int(len(y) / sr)  # Duration in seconds
             
+            # ===== MOOD (derived from valence + energy) =====
+            mood = derive_mood(valence, energy, danceability, acousticness)
+            
             features = {
                 'track_id': track_id,
                 'tempo': round(tempo, 1),
@@ -325,10 +357,11 @@ def extract_audio_features_from_preview(audio_url: str, track_id: int) -> Option
                 'chroma_mean': chroma_mean,
                 'key_signature': key_signature,
                 'time_signature': time_signature,
-                'duration': duration
+                'duration': duration,
+                'mood': mood
             }
             
-            console.log(f"✅ Extracted FULL features for track {track_id}: tempo={tempo:.1f}, energy={energy:.2f}, key={key_signature}")
+            console.log(f"✅ Extracted FULL features for track {track_id}: tempo={tempo:.1f}, energy={energy:.2f}, key={key_signature}, mood={mood}")
             return features
             
         finally:

@@ -8,7 +8,8 @@ from config import executor
 from database import get_db_connection
 from feature_extraction import (
     extract_audio_features_from_preview,
-    extract_features_for_product_async
+    extract_features_for_product_async,
+    derive_mood
 )
 import ml_service
 
@@ -41,7 +42,7 @@ async def extract_all_product_features(limit: int = 197, save_to_db: bool = True
             
             with conn.cursor() as cursor:
                 # Fetch products WITHOUT existing audio features,
-                # OR with incomplete features (NULL MfccMean) if reprocess_incomplete is True
+                # OR with incomplete features (NULL MfccMean/Mood/Key) if reprocess_incomplete is True
                 if reprocess_incomplete:
                     cursor.execute("""
                         SELECT p.ProductID, p.AlbumTitle, p.file_url 
@@ -50,7 +51,8 @@ async def extract_all_product_features(limit: int = 197, save_to_db: bool = True
                         WHERE p.AlbumTitle IS NOT NULL 
                         AND p.AlbumTitle != 'Selected Electronic Works'
                         AND p.file_url IS NOT NULL
-                        AND (af.ProductID IS NULL OR af.MfccMean IS NULL)
+                        AND (af.ProductID IS NULL OR af.MfccMean IS NULL OR af.Mood IS NULL 
+                             OR af.Key_Signature IS NULL OR af.TimeSignature IS NULL OR af.Duration IS NULL)
                         LIMIT %s
                     """, (limit,))
                 else:
@@ -111,6 +113,11 @@ async def extract_all_product_features(limit: int = 197, save_to_db: bool = True
                             instrumentalness=features.get('instrumentalness', 0.5),
                             loudness=features.get('loudness', -60.0),
                             speechiness=features.get('speechiness', 0.1),
+                            duration=features.get('duration', 0),
+                            key_signature=features.get('key_signature', 'C'),
+                            time_signature=features.get('time_signature', '4/4'),
+                            mfcc_mean=features.get('mfcc_mean'),
+                            chroma_mean=features.get('chroma_mean'),
                             current_cache_size=len(current_cache),
                             current_cache_items=current_cache
                         )
@@ -124,12 +131,18 @@ async def extract_all_product_features(limit: int = 197, save_to_db: bool = True
                             'danceability': features['danceability'],
                             'acousticness': features['acousticness'],
                             'genre': genre,
+                            'mood': features.get('mood', derive_mood(features['valence'], features['energy'], features['danceability'], features['acousticness'])),
                             'spectral_centroid': features.get('spectral_centroid', 1500.0),
                             'spectral_rolloff': features.get('spectral_rolloff', 3000.0),
                             'zero_crossing_rate': features.get('zero_crossing_rate', 0.05),
                             'instrumentalness': features.get('instrumentalness', 0.5),
                             'loudness': features.get('loudness', -60.0),
-                            'speechiness': features.get('speechiness', 0.1)
+                            'speechiness': features.get('speechiness', 0.1),
+                            'key_signature': features.get('key_signature'),
+                            'time_signature': features.get('time_signature'),
+                            'duration': features.get('duration'),
+                            'mfcc_mean': features.get('mfcc_mean', []),
+                            'chroma_mean': features.get('chroma_mean', [])
                         }
 
                         # Insert into database if requested
@@ -143,14 +156,15 @@ async def extract_all_product_features(limit: int = 197, save_to_db: bool = True
                                 with get_db_connection() as conn:
                                     if conn:
                                         with conn.cursor() as cursor:
+                                            mood = features.get('mood', derive_mood(features['valence'], features['energy'], features['danceability'], features['acousticness']))
                                             sql = """
                                                 INSERT INTO AudioFeatures (
                                                     ProductID, Tempo, Energy, Danceability, Valence,
                                                     Acousticness, Instrumentalness, Loudness, Speechiness,
                                                     SpectralCentroid, SpectralRolloff, ZeroCrossingRate, Genre,
-                                                    MfccMean, ChromaMean, Key_Signature, TimeSignature, Duration
+                                                    Mood, MfccMean, ChromaMean, Key_Signature, TimeSignature, Duration
                                                 ) VALUES (
-                                                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                                                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                                                 )
                                                 ON DUPLICATE KEY UPDATE
                                                     Tempo = VALUES(Tempo),
@@ -165,6 +179,7 @@ async def extract_all_product_features(limit: int = 197, save_to_db: bool = True
                                                     SpectralRolloff = VALUES(SpectralRolloff),
                                                     ZeroCrossingRate = VALUES(ZeroCrossingRate),
                                                     Genre = VALUES(Genre),
+                                                    Mood = VALUES(Mood),
                                                     MfccMean = VALUES(MfccMean),
                                                     ChromaMean = VALUES(ChromaMean),
                                                     Key_Signature = VALUES(Key_Signature),
@@ -185,6 +200,7 @@ async def extract_all_product_features(limit: int = 197, save_to_db: bool = True
                                                 features.get('spectral_rolloff', 3000.0),
                                                 features.get('zero_crossing_rate', 0.05),
                                                 genre,
+                                                mood,
                                                 mfcc_json,
                                                 chroma_json,
                                                 features.get('key_signature', None),
@@ -242,4 +258,56 @@ async def extract_all_product_features(limit: int = 197, save_to_db: bool = True
         }
     except Exception as e:
         console.log(f"❌ Error in extract_all_product_features: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/api/audio/backfill-mood")
+async def backfill_mood():
+    """
+    Backfill NULL Mood values in AudioFeatures from existing Valence/Energy.
+    This is a lightweight operation — no audio re-download needed.
+    Derives mood using Russell's Circumplex Model (energetic/happy/calm/sad).
+    """
+    try:
+        updated = 0
+        with get_db_connection() as conn:
+            if not conn:
+                raise HTTPException(status_code=503, detail="Database connection unavailable")
+            with conn.cursor() as cursor:
+                cursor.execute("""
+                    SELECT ProductID, Valence, Energy, Danceability, Acousticness
+                    FROM AudioFeatures
+                    WHERE Mood IS NULL AND Valence IS NOT NULL AND Energy IS NOT NULL
+                """)
+                rows = cursor.fetchall()
+
+                for row in rows:
+                    mood = derive_mood(
+                        float(row['Valence']),
+                        float(row['Energy']),
+                        float(row.get('Danceability', 0.5) or 0.5),
+                        float(row.get('Acousticness', 0.5) or 0.5)
+                    )
+                    cursor.execute(
+                        "UPDATE AudioFeatures SET Mood = %s WHERE ProductID = %s",
+                        (mood, row['ProductID'])
+                    )
+                    updated += 1
+
+                conn.commit()
+
+        # Update in-memory cache too
+        for pid, data in ml_service.audio_features_cache.items():
+            if not data.get('mood'):
+                data['mood'] = derive_mood(
+                    float(data.get('valence', 0.5)),
+                    float(data.get('energy', 0.5)),
+                    float(data.get('danceability', 0.5)),
+                    float(data.get('acousticness', 0.5))
+                )
+
+        console.log(f"✅ Backfilled Mood for {updated} rows")
+        return {"status": "success", "updated": updated}
+    except Exception as e:
+        console.log(f"❌ Error in backfill_mood: {e}")
         raise HTTPException(status_code=500, detail=str(e))

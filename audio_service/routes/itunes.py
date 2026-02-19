@@ -7,7 +7,8 @@ import os
 from utils import console
 from config import executor, ITUNES_API_BASE_URL
 from database import get_db_connection
-from feature_extraction import extract_audio_features_from_preview
+from feature_extraction import extract_audio_features_from_preview, derive_mood
+from ml_service import _parse_json_list
 import ml_service
 
 router = APIRouter()
@@ -200,7 +201,12 @@ async def import_top_songs(limit: int = 150):
                     zero_crossing_rate=features.get('zero_crossing_rate', 0.05),
                     instrumentalness=features.get('instrumentalness', 0.5),
                     loudness=features.get('loudness', -60.0),
-                    speechiness=features.get('speechiness', 0.1)
+                    speechiness=features.get('speechiness', 0.1),
+                    duration=features.get('duration', 0),
+                    key_signature=features.get('key_signature', 'C'),
+                    time_signature=features.get('time_signature', '4/4'),
+                    mfcc_mean=features.get('mfcc_mean'),
+                    chroma_mean=features.get('chroma_mean')
                 )
 
                 # Insert into DB
@@ -369,7 +375,12 @@ async def import_itunes_songs_to_database(limit: int = 100, genre: str = "electr
                     zero_crossing_rate=features.get('zero_crossing_rate', 0.05),
                     instrumentalness=features.get('instrumentalness', 0.5),
                     loudness=features.get('loudness', -60.0),
-                    speechiness=features.get('speechiness', 0.1)
+                    speechiness=features.get('speechiness', 0.1),
+                    duration=features.get('duration', 0),
+                    key_signature=features.get('key_signature', 'C'),
+                    time_signature=features.get('time_signature', '4/4'),
+                    mfcc_mean=features.get('mfcc_mean'),
+                    chroma_mean=features.get('chroma_mean')
                 )
                 
                 # Insert into Products table
@@ -402,8 +413,8 @@ async def import_itunes_songs_to_database(limit: int = 100, genre: str = "electr
                                     ProductID, Tempo, Energy, Danceability, Valence,
                                     Acousticness, Instrumentalness, Loudness, Speechiness,
                                     SpectralCentroid, SpectralRolloff, ZeroCrossingRate, Genre,
-                                    MfccMean, ChromaMean, Key_Signature, TimeSignature, Duration
-                                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                    Mood, MfccMean, ChromaMean, Key_Signature, TimeSignature, Duration
+                                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                             """, (
                                 product_id,
                                 features['tempo'],
@@ -418,6 +429,7 @@ async def import_itunes_songs_to_database(limit: int = 100, genre: str = "electr
                                 features.get('spectral_rolloff', 3000.0),
                                 features.get('zero_crossing_rate', 0.05),
                                 genre_label,
+                                features.get('mood', derive_mood(features['valence'], features['energy'], features['danceability'], features['acousticness'])),
                                 mfcc_json,
                                 chroma_json,
                                 features.get('key_signature', None),
@@ -452,8 +464,9 @@ async def import_itunes_songs_to_database(limit: int = 100, genre: str = "electr
                     sql = """
                         SELECT 
                             ProductID, Tempo, Energy, Valence, Danceability,
-                            Acousticness, Genre, SpectralCentroid, SpectralRolloff,
-                            ZeroCrossingRate, Instrumentalness, Loudness, Speechiness
+                            Acousticness, Genre, Mood, SpectralCentroid, SpectralRolloff,
+                            ZeroCrossingRate, Instrumentalness, Loudness, Speechiness,
+                            Key_Signature, TimeSignature, Duration, MfccMean, ChromaMean
                         FROM AudioFeatures
                         WHERE Tempo IS NOT NULL AND Energy IS NOT NULL
                     """
@@ -462,6 +475,14 @@ async def import_itunes_songs_to_database(limit: int = 100, genre: str = "electr
                     
                     ml_service.audio_features_cache.clear()
                     for row in feature_results:
+                        mfcc_list = _parse_json_list(row.get('MfccMean'), 13)
+                        chroma_list = _parse_json_list(row.get('ChromaMean'), 12)
+                        mood_val = row.get('Mood') or derive_mood(
+                            float(row.get('Valence', 0.5)),
+                            float(row.get('Energy', 0.5)),
+                            float(row.get('Danceability', 0.5)),
+                            float(row.get('Acousticness', 0.5))
+                        )
                         ml_service.audio_features_cache[row['ProductID']] = {
                             'id': row['ProductID'],
                             'tempo': row['Tempo'],
@@ -470,12 +491,18 @@ async def import_itunes_songs_to_database(limit: int = 100, genre: str = "electr
                             'danceability': row['Danceability'],
                             'acousticness': row['Acousticness'],
                             'genre': row['Genre'],
+                            'mood': mood_val,
                             'spectral_centroid': row['SpectralCentroid'],
                             'spectral_rolloff': row['SpectralRolloff'],
                             'zero_crossing_rate': row['ZeroCrossingRate'],
                             'instrumentalness': row['Instrumentalness'],
                             'loudness': row['Loudness'],
-                            'speechiness': row['Speechiness']
+                            'speechiness': row['Speechiness'],
+                            'key_signature': row.get('Key_Signature'),
+                            'time_signature': row.get('TimeSignature'),
+                            'duration': row.get('Duration', 0),
+                            'mfcc_mean': mfcc_list,
+                            'chroma_mean': chroma_list
                         }
         
         ml_service.cache_loaded = True
