@@ -80,7 +80,10 @@ export default function Register() {
       const backendUser = await accountService.firebaseLogin(token, user.email, user.uid, nameRef.current.value, phoneNumber);
       
       // 3. Store user details
-      setUser(backendUser);
+      setUser({
+        ...backendUser,
+        password: passwordRef.current.value,
+      });
 
       navigate('/');
     } catch (err) {

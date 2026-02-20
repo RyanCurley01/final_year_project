@@ -6,6 +6,7 @@ import MusicPlayer from './MusicPlayer';
 import Loader from './Loader';
 import Error from './Error';
 import CartIcon from './CartIcon';
+import WishlistIcon from './WishlistIcon';
 
 export {
   TopPlay,
@@ -16,4 +17,5 @@ export {
   Loader,
   Error,
   CartIcon,
+  WishlistIcon,
 };

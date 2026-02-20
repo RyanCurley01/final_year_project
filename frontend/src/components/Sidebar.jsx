@@ -9,6 +9,7 @@ import { useAuth } from '../context/AuthContext';
 import { logo } from '../assets';
 import { links } from '../assets/constants';
 import CartIcon from './CartIcon';
+import WishlistIcon from './WishlistIcon';
 import { resetPlayer } from '../redux/features/playerSlice';
 
 const NavLinks = ({ handleClick, onResetPlayer }) => {
@@ -58,6 +59,19 @@ const NavLinks = ({ handleClick, onResetPlayer }) => {
     >
       <CartIcon />
       <span className="ml-4">Cart</span>
+    </NavLink>
+    
+    {/* Wishlist Link */}
+    <NavLink
+      to="/wishlist"
+      className="flex flex-row justify-start items-center my-8 text-sm font-medium text-gray-300 hover:text-primary-light"
+      onClick={() => {
+        onResetPlayer && onResetPlayer();
+        handleClick && handleClick();
+      }}
+    >
+      <WishlistIcon />
+      <span className="ml-4">Wishlist</span>
     </NavLink>
     
     {/* Purchase History Link */}

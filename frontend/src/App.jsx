@@ -3,7 +3,7 @@ import { Route, Routes, useLocation, Navigate } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 
 import { Searchbar, Sidebar, MusicPlayer, TopPlay } from './components';
-import { ArtistDetails, CustomerScreen, Search, SongDetails, TopCharts, SimilarSongs, MLVisualization, Login, Register } from './pages';
+import { ArtistDetails, CustomerScreen, Search, SongDetails, TopCharts, SimilarSongs, MLVisualization, Login, Register, WishlistPage } from './pages';
 import AlbumDetails from './pages/AlbumDetails';
 import Cart from './pages/Cart';
 import PurchaseHistory from './pages/PurchaseHistory';
@@ -73,6 +73,7 @@ const AuthenticatedApp = () => {
               <Route path="/songs/:songid" element={<SongDetails />} />
               <Route path="/search/:searchTerm" element={<Search />} />
               <Route path="/cart" element={<Cart />} />
+              <Route path="/wishlist" element={<WishlistPage />} />
               <Route path="/purchase-history" element={<PurchaseHistory />} />
               <Route path="/artists/:artistName" element={<ArtistDetails />} />
               <Route path="/albums/:albumName" element={<AlbumDetails />} />

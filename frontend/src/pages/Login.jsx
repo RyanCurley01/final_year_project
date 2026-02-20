@@ -7,7 +7,7 @@ import { FcGoogle } from "react-icons/fc";
 export default function Login() {
   const emailRef = useRef();
   const passwordRef = useRef();
-  const { login, loginWithGoogle, syncWithBackend } = useAuth();
+  const { login, loginWithGoogle, syncWithBackend, setUser } = useAuth();
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
@@ -68,7 +68,8 @@ export default function Login() {
       // Combine backend data with Firebase UID for consistent identity checks
       setUser({
         ...backendUser,
-        firebaseUid: user.uid
+        firebaseUid: user.uid,
+        password,
       });
 
       navigate('/');
@@ -85,6 +86,7 @@ export default function Login() {
             accountName: response.accountName,
             accountType: response.accountType,
             accountEmailAddress: response.email,
+            password,
             // Legacy users have no firebaseUid
           };
           setUser(legacyUser);

@@ -2,11 +2,14 @@ import { useNavigate } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
 import { useEffect, useState } from 'react';
 import { FiShoppingCart } from 'react-icons/fi';
-import { FaPauseCircle, FaPlayCircle } from 'react-icons/fa';
+import { FaPauseCircle, FaPlayCircle, FaStar, FaRegStar } from 'react-icons/fa';
 
 import AudioReactiveVideo from './AudioReactiveVideo';
 import { playPause, setActiveSong, setPlaybackRate } from '../redux/features/playerSlice';
 import { addToCart } from '../redux/features/cartSlice';
+import { addToWishlistLocal, removeFromWishlistLocal, addWishlistItem, removeWishlistItem } from '../redux/features/wishlistSlice';
+import { useAuth } from '../context/AuthContext';
+import { auth as firebaseAuth } from '../firebase';
 import placeholders from '../utils/placeholderImage';
 
 const SongCard = ({ product, payment, i, data }) => {
@@ -28,6 +31,13 @@ const SongCard = ({ product, payment, i, data }) => {
   const dispatch = useDispatch();
   const navigate = useNavigate();
   const { activeSong, isPlaying, songEnded, playbackRate } = useSelector((state) => state.player);
+  const { items: wishlistItems } = useSelector((state) => state.wishlist);
+  const { currentUser } = useAuth();
+
+  // Check if this product is in the wishlist
+  const isWishlisted = wishlistItems.some(
+    (item) => item.productId === product.id || item.product?.id === product.id
+  );
   
   // Handle playback rate change - dispatch to Redux for recommendations update
   const handlePlaybackRateChange = (e) => {
@@ -58,6 +68,55 @@ const SongCard = ({ product, payment, i, data }) => {
 
   const handleAddToCart = () => {
     dispatch(addToCart(product));
+  };
+
+  const handleToggleWishlist = async (e) => {
+    e.stopPropagation();
+    if (!currentUser) return;
+
+    const accountId = currentUser.id;
+    const email = currentUser.email || currentUser.accountEmailAddress;
+    const password = currentUser.password; // may be undefined for Firebase users
+    const isFirebaseUser = !!currentUser.firebaseUid;
+
+    // Get auth params (Basic Auth or Firebase token)
+    let authParams = {};
+    if (email && password) {
+      authParams = { email, password };
+    } else if (isFirebaseUser && firebaseAuth.currentUser) {
+      try {
+        const token = await firebaseAuth.currentUser.getIdToken();
+        authParams = { email, firebaseToken: token };
+      } catch (err) {
+        console.warn('Failed to get Firebase token for wishlist:', err);
+      }
+    }
+    const hasAuth = !!(authParams.password || authParams.firebaseToken);
+
+    if (isWishlisted) {
+      // Find the wishlist entry for this product
+      const entry = wishlistItems.find(
+        (item) => item.productId === product.id || item.product?.id === product.id
+      );
+      if (entry) {
+        dispatch(removeFromWishlistLocal({ productId: product.id, accountId }));
+        // Only attempt backend sync when credentials exist
+        if (hasAuth) {
+          dispatch(removeWishlistItem({ id: entry.id, ...authParams }));
+        }
+      }
+    } else {
+      dispatch(addToWishlistLocal({ ...product, accountId }));
+      // Only attempt backend sync when credentials exist
+      if (hasAuth) {
+        dispatch(
+          addWishlistItem({
+            wishlistData: { accountId, productId: product.id },
+            ...authParams,
+          })
+        );
+      }
+    }
   };
 
   // Handle song title click for music items
@@ -160,6 +219,19 @@ const SongCard = ({ product, payment, i, data }) => {
             </div>
           </div>
         )}
+
+        {/* Wishlist Star - top right */}
+        <button
+          onClick={handleToggleWishlist}
+          className="absolute top-2 right-2 z-20 p-1.5 rounded-full bg-black/50 backdrop-blur-sm hover:bg-black/70 transition-all hover:scale-110"
+          title={isWishlisted ? 'Remove from Wishlist' : 'Add to Wishlist'}
+        >
+          {isWishlisted ? (
+            <FaStar className="w-5 h-5 text-yellow-400 drop-shadow-lg" />
+          ) : (
+            <FaRegStar className="w-5 h-5 text-white/80 hover:text-yellow-400 drop-shadow-lg transition-colors" />
+          )}
+        </button>
 
         {/* Playing indicator - bottom right */}
         {isThisSongActive && isPlaying && (

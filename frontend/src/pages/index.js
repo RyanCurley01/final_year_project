@@ -9,6 +9,7 @@ import SimilarSongs from './SimilarSongs';
 import MLVisualization from './MLVisualization';
 import Login from './Login';
 import Register from './Register';
+import WishlistPage from './WishlistPage';
 
 export {
   CustomerScreen,
@@ -22,4 +23,5 @@ export {
   MLVisualization,
   Login,
   Register,
+  WishlistPage,
 };

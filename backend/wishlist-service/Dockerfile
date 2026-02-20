@@ -8,6 +8,9 @@ COPY settings.gradle build.gradle ./
 COPY wishlist-service/build.gradle wishlist-service/
 COPY wishlist-service/src wishlist-service/src
 
+# Copy Firebase credentials from accounts-service (shared across authenticated services)
+COPY accounts-service/src/main/resources/firebase-service-account.json wishlist-service/src/main/resources/firebase-service-account.json
+
 # Build the application
 RUN gradle wishlist-service:bootJar --no-daemon
 
