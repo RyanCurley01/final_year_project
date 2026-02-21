@@ -1,8 +1,9 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 
-import { nextSong, prevSong, playPause, songEnded } from '../../redux/features/playerSlice';
+import { nextSong, prevSong, playPause, songEnded, toggleQuantumMode } from '../../redux/features/playerSlice';
 import { useRecordInteractionMutation } from '../../redux/services/apiService';
+import globalAudioContext from '../../utils/globalAudioContext';
 import Controls from './Controls';
 import Player from './Player';
 import Seekbar from './Seekbar';
@@ -10,7 +11,7 @@ import Track from './Track';
 import VolumeBar from './VolumeBar';
 
 const MusicPlayer = () => {
-  const { activeSong, currentSongs, currentIndex, isActive, isPlaying, playbackRate } = useSelector((state) => state.player);
+  const { activeSong, currentSongs, currentIndex, isActive, isPlaying, playbackRate, quantumMode } = useSelector((state) => state.player);
   const [duration, setDuration] = useState(0);
   const [seekTime, setSeekTime] = useState(0);
   const [appTime, setAppTime] = useState(0);
@@ -18,6 +19,7 @@ const MusicPlayer = () => {
   const [volume, setVolume] = useState(0.3);
   const [repeat, setRepeat] = useState(false);
   const [shuffle, setShuffle] = useState(false);
+  const [quantumState, setQuantumState] = useState(null); // Current collapsed qubit state for UI
   const dispatch = useDispatch();
   
   // Track play interactions
@@ -69,6 +71,38 @@ const MusicPlayer = () => {
     }
   }, [isPlaying, activeSong?.productId, activeSong?.ProductID, activeSong?.id, recordInteraction, duration]);
 
+  // Sync quantum mode state with globalAudioContext and register onset handler
+  useEffect(() => {
+    globalAudioContext.setQuantumMode(quantumMode);
+
+    if (!quantumMode) {
+      setQuantumState(null);
+      return;
+    }
+
+    // When quantum mode is ON, apply quantum panning on every transient hit
+    const handleQuantumOnset = (onset) => {
+      globalAudioContext.applyQuantumState(onset);
+    };
+
+    globalAudioContext.onOnset(handleQuantumOnset);
+
+    // Listen for quantum state changes to update UI
+    const handleQuantumStateChange = (state) => {
+      setQuantumState(state);
+    };
+    globalAudioContext.onQuantumState(handleQuantumStateChange);
+
+    return () => {
+      globalAudioContext.offOnset(handleQuantumOnset);
+      globalAudioContext.offQuantumState(handleQuantumStateChange);
+    };
+  }, [quantumMode]);
+
+  const handleQuantumToggle = useCallback(() => {
+    dispatch(toggleQuantumMode());
+  }, [dispatch]);
+
   const handlePlayPause = () => {
     if (!isActive) return;
 
@@ -115,6 +149,9 @@ const MusicPlayer = () => {
           handlePlayPause={handlePlayPause}
           handlePrevSong={handlePrevSong}
           handleNextSong={handleNextSong}
+          quantumMode={quantumMode}
+          handleQuantumToggle={handleQuantumToggle}
+          quantumState={quantumState}
         />
         <Seekbar
           value={appTime}

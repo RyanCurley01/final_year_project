@@ -96,3 +96,19 @@ input[type="range"]::-moz-range-thumb:hover {
   box-shadow: 0 0 8px rgba(59, 130, 246, 0.8);
   transform: scale(1.1);
 }
+
+/* Quantum Mode — background slide animations */
+@keyframes quantum-slide-down {
+  from { transform: translateY(-100%); }
+  to   { transform: translateY(0); }
+}
+@keyframes quantum-slide-up {
+  from { transform: translateY(0); }
+  to   { transform: translateY(-100%); }
+}
+
+/* Quantum Mode button spin animation */
+@keyframes quantum-spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}

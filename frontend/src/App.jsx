@@ -1,6 +1,6 @@
 import { useSelector, useDispatch } from 'react-redux';
 import { Route, Routes, useLocation, Navigate } from 'react-router-dom';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 
 import { Searchbar, Sidebar, MusicPlayer, TopPlay } from './components';
 import { ArtistDetails, CustomerScreen, Search, SongDetails, TopCharts, SimilarSongs, MLVisualization, Login, Register, WishlistPage } from './pages';
@@ -16,13 +16,33 @@ import { productService } from './redux/services';
 import { setActiveSong, playPause as playPauseAction } from './redux/features/playerSlice';
 
 const AuthenticatedApp = () => {
-  const { activeSong, isPlaying } = useSelector((state) => state.player);
+  const { activeSong, isPlaying, quantumMode } = useSelector((state) => state.player);
   const { modalState, closeModal } = useVideoModal();
   const dispatch = useDispatch();
   const location = useLocation();
   const [sessionId] = useState(`session_${Date.now()}`);
   const [products, setProducts] = useState([]);
   const { currentUser } = useAuth();
+
+  // Quantum background slide animation state: 'off' | 'sliding-down' | 'on' | 'sliding-up'
+  const [quantumBg, setQuantumBg] = useState('off');
+  const prevQuantumMode = useRef(quantumMode);
+
+  useEffect(() => {
+    // Only animate on actual changes (not initial render)
+    if (quantumMode === prevQuantumMode.current) return;
+    prevQuantumMode.current = quantumMode;
+
+    if (quantumMode) {
+      setQuantumBg('sliding-down');
+      const timer = setTimeout(() => setQuantumBg('on'), 600);
+      return () => clearTimeout(timer);
+    } else {
+      setQuantumBg('sliding-up');
+      const timer = setTimeout(() => setQuantumBg('off'), 600);
+      return () => clearTimeout(timer);
+    }
+  }, [quantumMode]);
   
   // Fetch products for recommendations
   useEffect(() => {
@@ -60,8 +80,26 @@ const AuthenticatedApp = () => {
   return (
     <div className="relative flex h-screen overflow-hidden">
       <Sidebar />
-      <div className="flex-1 flex flex-col bg-gradient-to-br from-[#041529] to-[#2970c2] overflow-hidden">
-        <div className={`px-6 flex flex-col lg:flex-row ${(activeSong?.albumTitle) ? 'h-[calc(100vh-7rem)]' : 'h-screen'} overflow-y-auto`}>
+      <div className="flex-1 flex flex-col overflow-hidden relative">
+        {/* Base blue background */}
+        <div className="absolute inset-0 bg-gradient-to-br from-[#041529] to-[#2970c2]" />
+        {/* Quantum red overlay — slides down on activate, slides up on deactivate */}
+        {quantumBg !== 'off' && (
+          <div
+            className="absolute inset-0 bg-gradient-to-br from-[#290404] to-[#c22929]"
+            style={{
+              zIndex: 1,
+              animation:
+                quantumBg === 'sliding-down'
+                  ? 'quantum-slide-down 0.6s cubic-bezier(0.4,0,0.2,1) forwards'
+                  : quantumBg === 'sliding-up'
+                    ? 'quantum-slide-up 0.6s cubic-bezier(0.4,0,0.2,1) forwards'
+                    : 'none',
+              transform: quantumBg === 'on' ? 'translateY(0)' : undefined,
+            }}
+          />
+        )}
+        <div className={`relative z-[2] px-6 flex flex-col lg:flex-row ${(activeSong?.albumTitle) ? 'h-[calc(100vh-7rem)]' : 'h-screen'} overflow-y-auto`}>
           <div className="flex-1 pb-4">
             <Searchbar />
 

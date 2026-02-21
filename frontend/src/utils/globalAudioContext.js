@@ -16,6 +16,11 @@ class GlobalAudioContext {
     this.glitchCallbacks = [];
     // Track elements that have already been connected (can only call createMediaElementSource once per element EVER)
     this.connectedElements = new WeakSet();
+    
+    // Quantum Mode: StereoPanner for qubit-based 4-directional panning
+    this.stereoPanner = null;
+    this.quantumMode = false;
+    this.quantumCallbacks = []; // Callbacks to notify UI of quantum state changes
   }
 
   /**
@@ -62,7 +67,11 @@ class GlobalAudioContext {
           });
 
           // IMPORTANT: Connect to destination so audio plays!
-          this.mediaSource.connect(this.onsetDetector.analyser);
+          // Graph: mediaSource -> stereoPanner -> analyser -> destination
+          this.stereoPanner = this.audioContext.createStereoPanner();
+          this.stereoPanner.pan.value = 0; // Center by default
+          this.mediaSource.connect(this.stereoPanner);
+          this.stereoPanner.connect(this.onsetDetector.analyser);
           this.onsetDetector.analyser.connect(this.audioContext.destination);
           
         } catch (mediaElementError) {
@@ -96,7 +105,11 @@ class GlobalAudioContext {
         });
 
         // Connect stream (no need for destination with captureStream)
-        this.mediaSource.connect(this.onsetDetector.analyser);
+        // Graph: mediaSource -> stereoPanner -> analyser
+        this.stereoPanner = this.audioContext.createStereoPanner();
+        this.stereoPanner.pan.value = 0; // Center by default
+        this.mediaSource.connect(this.stereoPanner);
+        this.stereoPanner.connect(this.onsetDetector.analyser);
       }
 
       // Set up onset callback to trigger all registered callbacks
@@ -168,6 +181,95 @@ class GlobalAudioContext {
   }
 
   /**
+   * Quantum Mode: Uses qubit-inspired superposition for 4-directional stereo panning.
+   * Instead of classical bits (0=left, 1=right), qubits collapse to one of 4 basis states:
+   *   |00⟩ = Hard left   (-1.0)
+   *   |01⟩ = Hard right  (+1.0)
+   *   |10⟩ = Soft left   (-0.4)
+   *   |11⟩ = Soft right  (+0.4)
+   * Each transient hit triggers a "measurement" that collapses the qubit state.
+   */
+
+  /**
+   * Enable/disable quantum mode
+   */
+  setQuantumMode(enabled) {
+    this.quantumMode = enabled;
+    if (!enabled) {
+      // Reset panner to center when disabling
+      if (this.stereoPanner && this.audioContext) {
+        this.stereoPanner.pan.setTargetAtTime(0, this.audioContext.currentTime, 0.02);
+      }
+      // Notify UI that quantum state is reset
+      this._notifyQuantumState(null);
+    }
+  }
+
+  /**
+   * Simulate qubit measurement - returns one of 4 quantum basis states
+   * Uses quantum-inspired probability amplitudes where each state
+   * has equal probability (|α|² = |β|² = 0.25 for each basis state)
+   */
+  measureQubit() {
+    // Generate two "qubit" measurements (each 0 or 1 with equal probability)
+    // This gives us 4 basis states: |00⟩, |01⟩, |10⟩, |11⟩
+    const qubit1 = Math.random() < 0.5 ? 0 : 1;
+    const qubit2 = Math.random() < 0.5 ? 0 : 1;
+    
+    const states = [
+      { bits: '|00⟩', label: 'HARD LEFT',  pan: -1.0, direction: 'left' },
+      { bits: '|01⟩', label: 'HARD RIGHT', pan:  1.0, direction: 'right' },
+      { bits: '|10⟩', label: 'SOFT LEFT',  pan: -0.4, direction: 'soft-left' },
+      { bits: '|11⟩', label: 'SOFT RIGHT', pan:  0.4, direction: 'soft-right' },
+    ];
+    
+    return states[qubit1 * 2 + qubit2];
+  }
+
+  /**
+   * Apply quantum state to audio on transient hit
+   * Called from the onset callback when quantum mode is active
+   */
+  applyQuantumState(onset) {
+    if (!this.quantumMode || !this.audioContext) return;
+    
+    const state = this.measureQubit();
+    const now = this.audioContext.currentTime;
+    
+    // Apply stereo pan with fast but smooth transition
+    if (this.stereoPanner) {
+      this.stereoPanner.pan.cancelScheduledValues(now);
+      this.stereoPanner.pan.setTargetAtTime(state.pan, now, 0.01);
+    }
+    
+    // Notify UI of the collapsed quantum state
+    this._notifyQuantumState(state);
+  }
+
+  /**
+   * Register a callback for quantum state change events
+   */
+  onQuantumState(callback) {
+    if (!this.quantumCallbacks.includes(callback)) {
+      this.quantumCallbacks.push(callback);
+    }
+  }
+
+  /**
+   * Unregister a quantum state callback
+   */
+  offQuantumState(callback) {
+    this.quantumCallbacks = this.quantumCallbacks.filter(cb => cb !== callback);
+  }
+
+  /**
+   * Notify all quantum state listeners
+   */
+  _notifyQuantumState(state) {
+    this.quantumCallbacks.forEach(cb => cb(state));
+  }
+
+  /**
    * Cleanup resources
    */
   cleanup() {
@@ -175,6 +277,11 @@ class GlobalAudioContext {
       this.onsetDetector.stop();
       this.onsetDetector.disconnect();
       this.onsetDetector = null;
+    }
+
+    if (this.stereoPanner) {
+      this.stereoPanner.disconnect();
+      this.stereoPanner = null;
     }
 
     if (this.mediaSource) {
@@ -191,6 +298,8 @@ class GlobalAudioContext {
     this.isInitialized = false;
     this.onsetCallbacks = [];
     this.glitchCallbacks = [];
+    this.quantumCallbacks = [];
+    this.quantumMode = false;
   }
 }
 

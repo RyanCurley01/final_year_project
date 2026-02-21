@@ -9,6 +9,7 @@ const initialState = {
   genreListId: '',
   songEnded: false,
   playbackRate: 1.0,
+  quantumMode: false,
 };
 
 const playerSlice = createSlice({
@@ -77,6 +78,10 @@ const playerSlice = createSlice({
       state.genreListId = action.payload;
     },
 
+    toggleQuantumMode: (state) => {
+      state.quantumMode = !state.quantumMode;
+    },
+
     resetPlayer: (state) => {
       state.currentSongs = [];
       state.currentIndex = 0;
@@ -84,10 +89,11 @@ const playerSlice = createSlice({
       state.isPlaying = false;
       state.activeSong = {};
       state.songEnded = false;
+      state.quantumMode = false;
     },
   },
 });
 
-export const { setActiveSong, nextSong, prevSong, playPause, setPlaybackRate, songEnded, selectGenreListId, resetPlayer } = playerSlice.actions;
+export const { setActiveSong, nextSong, prevSong, playPause, setPlaybackRate, songEnded, selectGenreListId, toggleQuantumMode, resetPlayer } = playerSlice.actions;
 
 export default playerSlice.reducer;
