@@ -11,8 +11,9 @@ import { links } from '../assets/constants';
 import CartIcon from './CartIcon';
 import WishlistIcon from './WishlistIcon';
 import { resetPlayer } from '../redux/features/playerSlice';
+import { clearWishlist } from '../redux/features/wishlistSlice';
 
-const NavLinks = ({ handleClick, onResetPlayer }) => {
+const NavLinks = ({ handleClick, onResetPlayer, onClearWishlist }) => {
   const { logout, currentUser } = useAuth();
   const navigate = useNavigate();
   const isManager = currentUser?.accountType === 'Manager';
@@ -23,6 +24,7 @@ const NavLinks = ({ handleClick, onResetPlayer }) => {
       localStorage.removeItem('currentUser');
       navigate('/login');
       if (onResetPlayer) onResetPlayer();
+      if (onClearWishlist) onClearWishlist();
       if (handleClick) handleClick();
     } catch (error) {
       console.error('Failed to log out', error);
@@ -124,6 +126,10 @@ const Sidebar = () => {
     dispatch(resetPlayer());
   };
 
+  const handleClearWishlist = () => {
+    dispatch(clearWishlist());
+  };
+
   return (
     <>
       {/* Desktop Sidebar */}
@@ -131,7 +137,7 @@ const Sidebar = () => {
       py-10 px-4 bg-[#252246] relative z-20">
         <img src={logo} alt="logo" className="rounded w-full h-[100px] 
         object-contain" />
-        <NavLinks onResetPlayer={handleResetPlayer} />
+        <NavLinks onResetPlayer={handleResetPlayer} onClearWishlist={handleClearWishlist} />
       </div>
 
       {/* Mobile Hamburger Button */}
@@ -152,7 +158,7 @@ const Sidebar = () => {
             onClick={() => setMobileMenuOpen(false)} 
           />
           <img src={logo} alt="logo" className="rounded w-full h-[80px] object-contain mb-4" />
-          <NavLinks handleClick={() => setMobileMenuOpen(false)} onResetPlayer={handleResetPlayer} />
+          <NavLinks handleClick={() => setMobileMenuOpen(false)} onResetPlayer={handleResetPlayer} onClearWishlist={handleClearWishlist} />
         </div>
       </div>
 

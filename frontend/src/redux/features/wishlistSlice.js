@@ -107,6 +107,7 @@ const initialState = {
   error: null,
   priceAlerts: loadFromStorage(BASE_ALERTS_KEY, {}),
   shareToken: loadFromStorage(BASE_TOKEN_KEY, null),
+  pendingRemovals: [],  // productIds recently removed locally, not yet confirmed by backend
 };
 
 const wishlistSlice = createSlice({
@@ -144,6 +145,13 @@ const wishlistSlice = createSlice({
           (item) => !(item.productId === productId && item.accountId === accountId)
         );
       }
+      // Track as pending removal so refetches don't bring it back
+      if (!state.pendingRemovals.includes(productId)) {
+        state.pendingRemovals.push(productId);
+      }
+      // Clear any price alert for this product
+      delete state.priceAlerts[productId];
+      saveToStorage(BASE_ALERTS_KEY, state.priceAlerts);
       saveToStorage(BASE_STORAGE_KEY, state.items);
     },
 
@@ -197,6 +205,7 @@ const wishlistSlice = createSlice({
       state.totalItems = 0;
       state.priceAlerts = {};
       state.shareToken = null;
+      state.pendingRemovals = [];
       try { localStorage.removeItem(storageKey(BASE_STORAGE_KEY)); } catch {}
       try { localStorage.removeItem(storageKey(BASE_ALERTS_KEY)); } catch {}
       try { localStorage.removeItem(storageKey(BASE_TOKEN_KEY)); } catch {}
@@ -212,11 +221,14 @@ const wishlistSlice = createSlice({
       .addCase(fetchWishlist.fulfilled, (state, action) => {
         state.loading = false;
         // Merge backend items with any local-only items
-        const backendItems = action.payload || [];
+        const backendItems = (action.payload || []).filter(
+          (item) => !state.pendingRemovals.includes(item.productId)
+        );
         const localOnlyItems = state.items.filter(
           (local) =>
             String(local.id).startsWith('temp-') &&
-            !backendItems.some((b) => b.productId === local.productId)
+            !backendItems.some((b) => b.productId === local.productId) &&
+            !state.pendingRemovals.includes(local.productId)
         );
         state.items = [...backendItems, ...localOnlyItems];
         state.totalItems = state.items.length;
@@ -256,12 +268,20 @@ const wishlistSlice = createSlice({
       // Remove item
       .addCase(removeWishlistItem.fulfilled, (state, action) => {
         const deletedId = action.payload;
+        // Find the productId before filtering so we can clear pending removal
+        const deletedItem = state.items.find((item) => item.id === deletedId);
         state.items = state.items.filter((item) => item.id !== deletedId);
         state.totalItems = state.items.length;
         // Also remove from allWishlistItems so the tracking tab updates instantly
         state.allWishlistItems = state.allWishlistItems.filter(
           (item) => item.id !== deletedId
         );
+        // Backend confirmed deletion — clear from pending removals
+        if (deletedItem) {
+          state.pendingRemovals = state.pendingRemovals.filter(
+            (pid) => pid !== deletedItem.productId
+          );
+        }
         saveToStorage(BASE_STORAGE_KEY, state.items);
       })
       .addCase(removeWishlistItem.rejected, (state) => {

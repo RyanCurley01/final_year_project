@@ -87,17 +87,17 @@ const SongCard = ({ product, payment, i, data }) => {
     const password = currentUser.password; // may be undefined for Firebase users
     const isFirebaseUser = !!currentUser.firebaseUid;
 
-    // Get auth params (Basic Auth or Firebase token)
+    // Get auth params (Firebase token preferred, Basic Auth fallback for legacy users)
     let authParams = {};
-    if (email && password) {
-      authParams = { email, password };
-    } else if (isFirebaseUser && firebaseAuth.currentUser) {
+    if (isFirebaseUser && firebaseAuth.currentUser) {
       try {
         const token = await firebaseAuth.currentUser.getIdToken();
         authParams = { email, firebaseToken: token };
       } catch (err) {
         console.warn('Failed to get Firebase token for wishlist:', err);
       }
+    } else if (email && password) {
+      authParams = { email, password };
     }
     const hasAuth = !!(authParams.password || authParams.firebaseToken);
 

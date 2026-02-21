@@ -167,6 +167,11 @@ public class AccountService {
                 account.getAccountEmailAddress()
             );
         } else {
+            // Check if this is a Firebase/Google-linked account
+            if (account.getFirebaseUid() != null && !account.getFirebaseUid().isEmpty()) {
+                System.out.println("Login attempt on Firebase-linked account: " + email);
+                return new LoginResponse(false, "FIREBASE_ACCOUNT", null, null, null, null);
+            }
             return new LoginResponse(false, "Invalid password", null, null, null, null);
         }
     }

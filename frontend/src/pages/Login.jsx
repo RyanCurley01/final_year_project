@@ -91,6 +91,9 @@ export default function Login() {
           };
           setUser(legacyUser);
           navigate('/');
+        } else if (response.message === 'FIREBASE_ACCOUNT') {
+          // Account is linked to Google/Firebase — password login won't work
+          setError('Email already associated with a Google account. Please login with your Google account.');
         } else {
           setError(response.message || 'Failed to log in');
         }

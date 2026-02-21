@@ -60,10 +60,9 @@ export default function Register() {
         user = userCredential.user;
       } catch (signupErr) {
         if (signupErr.code === 'auth/email-already-in-use') {
-          // If already in Firebase, try to sign in to verify and sync
-          console.log("Email already in use, attempting to login and sync...");
-          const userCredential = await login(emailRef.current.value, passwordRef.current.value);
-          user = userCredential.user;
+          setError('Email already exists. Please login.');
+          setLoading(false);
+          return;
         } else {
           throw signupErr;
         }
@@ -79,9 +78,11 @@ export default function Register() {
       
       const backendUser = await accountService.firebaseLogin(token, user.email, user.uid, nameRef.current.value, phoneNumber);
       
-      // 3. Store user details
+      // 3. Store user details (include firebaseUid so wishlist uses Firebase token auth,
+      //    not Basic Auth — the backend stores a random password for Firebase users)
       setUser({
         ...backendUser,
+        firebaseUid: user.uid,
         password: passwordRef.current.value,
       });
 

@@ -24,6 +24,7 @@ import {
   generateShareToken,
   updatePriceAlert,
   clearPriceAlert,
+  clearWishlist,
   rehydrateForUser,
 } from '../redux/features/wishlistSlice';
 import { addToCart } from '../redux/features/cartSlice';
@@ -88,6 +89,8 @@ const PriceDropCard = ({ alert, product, onDismiss }) => {
 // ─── Manager Tracking Row ────────────────────────────────────────────
 const ManagerTrackingRow = ({ product, wishlistCount }) => {
   const isVideo = product.albumCoverImageUrl?.toLowerCase().includes('.mp4');
+  const hasDiscount = product.id != null && product.id % 2 === 0;
+  const effectivePrice = hasDiscount ? product.albumPrice / 2 : product.albumPrice;
   return (
   <tr className="border-b border-white/5 hover:bg-white/5 transition-colors">
     <td className="py-3 px-4">
@@ -118,8 +121,17 @@ const ManagerTrackingRow = ({ product, wishlistCount }) => {
     <td className="py-3 px-4 text-center">
       <span className="text-yellow-400 font-bold">{wishlistCount}</span>
     </td>
-    <td className="py-3 px-4 text-right text-white">
-      ${product.albumPrice?.toFixed(2) || '0.00'}
+    <td className="py-3 px-4 text-right">
+      <div className="flex items-center justify-end gap-1.5">
+        {hasDiscount && (
+          <span className="text-gray-500 line-through text-xs">
+            ${product.albumPrice?.toFixed(2)}
+          </span>
+        )}
+        <span className={`font-bold ${hasDiscount ? 'text-green-400' : 'text-white'}`}>
+          ${effectivePrice?.toFixed(2) || '0.00'}
+        </span>
+      </div>
     </td>
     <td className="py-3 px-4 text-center">
       <div className="w-full bg-gray-700 rounded-full h-2">
@@ -145,21 +157,18 @@ const WishlistPage = () => {
 
   const isManager = currentUser?.accountType === 'Manager';
 
-  // Auth info — supports both Basic Auth (legacy/seeded) and Firebase Bearer token (Google users)
+  // Auth info — supports both Firebase Bearer token and Basic Auth (legacy/seeded users)
   const userEmail = currentUser?.email || currentUser?.accountEmailAddress;
   const hasBasicAuth = !!(userEmail && currentUser?.password);
   const isFirebaseUser = !!(currentUser?.firebaseUid);
-  const auth = hasBasicAuth
+  // For RTK Query (products): Firebase users can't use Basic Auth (backend stores random password)
+  const auth = (hasBasicAuth && !isFirebaseUser)
     ? { email: userEmail, password: currentUser.password }
     : undefined;
 
   // Helper to get auth params for dispatching thunks
-  // Returns { email, password, firebaseToken } with whichever is available
+  // Firebase token takes priority; Basic Auth only for legacy/seeded users
   const getAuthParams = useCallback(async () => {
-    if (hasBasicAuth) {
-      return { email: userEmail, password: currentUser.password };
-    }
-    // For Firebase/Google users, get a fresh ID token
     if (isFirebaseUser && firebaseAuth.currentUser) {
       try {
         const token = await firebaseAuth.currentUser.getIdToken();
@@ -167,6 +176,9 @@ const WishlistPage = () => {
       } catch (err) {
         console.warn('Failed to get Firebase token:', err);
       }
+    }
+    if (hasBasicAuth) {
+      return { email: userEmail, password: currentUser.password };
     }
     return null;
   }, [hasBasicAuth, isFirebaseUser, userEmail, currentUser?.password]);
@@ -177,8 +189,9 @@ const WishlistPage = () => {
   });
   const allProducts = productsData || [];
 
-  // Rehydrate wishlist from localStorage whenever the logged-in user changes
+  // Clear old user data and rehydrate from localStorage whenever the logged-in user changes
   useEffect(() => {
+    dispatch(clearWishlist());
     dispatch(rehydrateForUser());
   }, [dispatch, currentUser?.id]);
 
@@ -251,13 +264,13 @@ const WishlistPage = () => {
 
       const existingAlert = priceAlerts[product.id];
       if (!existingAlert) {
-        // First time seeing this product — record its ORIGINAL (undiscounted)
-        // price so the next render can detect the discount as a drop.
+        // First time seeing this product — seed with original full price vs
+        // the effective (possibly discounted) price so a drop shows immediately.
         dispatch(
           updatePriceAlert({
             productId: product.id,
             previousPrice: product.albumPrice, // original full price
-            currentPrice: product.albumPrice,   // no drop yet
+            currentPrice: effectivePrice,       // discounted price (may equal full price)
           })
         );
       } else if (existingAlert.currentPrice !== effectivePrice) {
@@ -289,6 +302,7 @@ const WishlistPage = () => {
 
   // ─── Handlers ──────────────────────────────────────────────────────
   const handleRemove = async (product) => {
+    // removeFromWishlistLocal clears price alert + marks as pending removal
     dispatch(removeFromWishlistLocal({ productId: product.id, accountId: currentUser?.id }));
     if (product.wishlistEntryId) {
       const authParams = await getAuthParams();
@@ -298,11 +312,7 @@ const WishlistPage = () => {
             id: product.wishlistEntryId,
             ...authParams,
           })
-        ).then(() => {
-          // Refresh data after backend confirms removal
-          fetchUserWishlist();
-          fetchManagerWishlists();
-        });
+        );
       }
     }
   };
@@ -506,7 +516,9 @@ const WishlistPage = () => {
                 Active Price Drops
               </h3>
               {activeAlerts.map(([productId, alert]) => {
-                const product = allProducts.find((p) => p.id === Number(productId));
+                const numId = Number(productId);
+                const product = allProducts.find((p) => p.id === numId || p.id === productId)
+                  || wishlistProducts.find((p) => p.id === numId || p.id === productId);
                 return (
                   <PriceDropCard
                     key={productId}
@@ -539,6 +551,8 @@ const WishlistPage = () => {
               <div className="space-y-2">
                 {wishlistProducts.map((product) => {
                   const isVideo = product.albumCoverImageUrl?.toLowerCase().includes('.mp4');
+                  const hasDiscount = product.id != null && product.id % 2 === 0;
+                  const effectivePrice = hasDiscount ? product.albumPrice / 2 : product.albumPrice;
                   return (
                     <div
                       key={product.id}
@@ -567,9 +581,16 @@ const WishlistPage = () => {
                           {product.albumTitle}
                         </p>
                       </div>
-                      <p className="text-white font-bold text-sm">
-                        ${product.albumPrice?.toFixed(2)}
-                      </p>
+                      <div className="flex items-center gap-1.5">
+                        {hasDiscount && (
+                          <span className="text-gray-500 line-through text-xs">
+                            ${product.albumPrice?.toFixed(2)}
+                          </span>
+                        )}
+                        <p className={`font-bold text-sm ${hasDiscount ? 'text-green-400' : 'text-white'}`}>
+                          ${effectivePrice?.toFixed(2)}
+                        </p>
+                      </div>
                       <FaBell className="text-yellow-400 w-3.5 h-3.5" />
                     </div>
                   );
