@@ -13,8 +13,9 @@ import WishlistIcon from './WishlistIcon';
 import { resetPlayer } from '../redux/features/playerSlice';
 
 const NavLinks = ({ handleClick, onResetPlayer }) => {
-  const { logout } = useAuth();
+  const { logout, currentUser } = useAuth();
   const navigate = useNavigate();
+  const isManager = currentUser?.accountType === 'Manager';
 
   const handleLogout = async () => {
     try {
@@ -87,18 +88,20 @@ const NavLinks = ({ handleClick, onResetPlayer }) => {
       Purchase History
     </NavLink>
     
-    {/* ML Visualization Link */}
-    <NavLink
-      to="/ml-visualization"
-      className="flex flex-row justify-start items-center my-8 text-sm font-medium text-gray-300 hover:text-primary-light"
-      onClick={() => {
-        onResetPlayer && onResetPlayer();
-        handleClick && handleClick();
-      }}
-    >
-      <FaChartLine className="w-6 h-6 mr-2" />
-      ML Visualization
-    </NavLink>
+    {/* ML Visualization Link - visible to Managers only */}
+    {isManager && (
+      <NavLink
+        to="/ml-visualization"
+        className="flex flex-row justify-start items-center my-8 text-sm font-medium text-gray-300 hover:text-primary-light"
+        onClick={() => {
+          onResetPlayer && onResetPlayer();
+          handleClick && handleClick();
+        }}
+      >
+        <FaChartLine className="w-6 h-6 mr-2" />
+        ML Visualization
+      </NavLink>
+    )}
 
     {/* Logout Button */}
     <button

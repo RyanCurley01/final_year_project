@@ -10,6 +10,9 @@ class UserInteractionRequest(BaseModel):
     product_id: int | str
     interaction_type: str  # 'play', 'preview', 'pause', 'purchase', 'wishlist', 'view', 'click'
     duration_seconds: Optional[int] = None
+    completion_percentage: Optional[float] = None  # 0.0‑1.0 how much of the track was played
+    engagement_score: Optional[float] = None        # Computed engagement metric
+    device_type: Optional[str] = None               # 'desktop', 'mobile', 'tablet'
     session_id: Optional[str] = None
 
 class AudioFeatures(BaseModel):

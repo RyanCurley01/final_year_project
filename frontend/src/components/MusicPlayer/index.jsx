@@ -24,6 +24,14 @@ const MusicPlayer = () => {
   const [recordInteraction] = useRecordInteractionMutation();
   const wasPlayingRef = useRef(false); // Track previous playing state
 
+  // Detect device type from user agent
+  const getDeviceType = () => {
+    const ua = navigator.userAgent;
+    if (/tablet|ipad|playbook|silk/i.test(ua)) return 'tablet';
+    if (/mobile|iphone|ipod|android|blackberry|opera mini|iemobile/i.test(ua)) return 'mobile';
+    return 'desktop';
+  };
+
   useEffect(() => {
     if (currentSongs.length) dispatch(playPause(true));
   }, [currentIndex]);
@@ -42,12 +50,17 @@ const MusicPlayer = () => {
     // Record if we just started playing and have a valid song
     if (justStartedPlaying && activeSong && songProductId) {
       // Fire and forget - don't wait for response or let errors affect playback
+      // Calculate completion percentage from current playback position
+      const completionPct = duration > 0 ? parseFloat((appTime / duration).toFixed(4)) : 0.0;
+
       try {
         recordInteraction({
           account_id: 1,
           product_id: songProductId,
           interaction_type: 'play',
           duration_seconds: Math.floor(duration),
+          completion_percentage: completionPct,
+          device_type: getDeviceType(),
           session_id: sessionStorage.getItem('sessionId') || `session-${Date.now()}`
         });
       } catch {

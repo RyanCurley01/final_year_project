@@ -37,16 +37,29 @@ import SongCard from '../components/SongCard';
 // ─── Price Drop Notification Card ────────────────────────────────────
 const PriceDropCard = ({ alert, product, onDismiss }) => {
   if (!alert?.dropped || !product) return null;
+  const isVideo = product.albumCoverImageUrl?.toLowerCase().includes('.mp4');
 
   return (
     <div className="flex items-center gap-4 p-4 bg-gradient-to-r from-green-900/40 to-emerald-900/30 border border-green-500/30 rounded-xl backdrop-blur-sm animate-slideup">
       <div className="relative w-14 h-14 rounded-lg overflow-hidden flex-shrink-0">
-        <img
-          src={product.albumCoverImageUrl || placeholders.large}
-          alt={product.albumTitle}
-          className="w-full h-full object-cover"
-          onError={(e) => { e.target.src = placeholders.large; }}
-        />
+        {isVideo ? (
+          <video
+            src={product.albumCoverImageUrl}
+            className="w-full h-full object-cover"
+            muted
+            loop
+            autoPlay
+            playsInline
+            crossOrigin="anonymous"
+          />
+        ) : (
+          <img
+            src={product.albumCoverImageUrl || placeholders.large}
+            alt={product.albumTitle}
+            className="w-full h-full object-cover"
+            onError={(e) => { e.target.src = placeholders.large; }}
+          />
+        )}
         <div className="absolute inset-0 flex items-center justify-center bg-green-500/30">
           <FaArrowDown className="text-green-300 w-5 h-5 animate-bounce" />
         </div>
@@ -211,37 +224,54 @@ const WishlistPage = () => {
     };
   }, [fetchUserWishlist, fetchManagerWishlists, isManager, activeTab]);
 
-  // Map wishlist items to full product data
+  // Map wishlist items to full product data (keep original prices — SongCard handles discount display)
   const wishlistProducts = useMemo(() => {
     return wishlistItems
       .map((item) => {
         // Try to find from fetched products first
         const product = allProducts.find((p) => p.id === item.productId);
-        if (product) return { ...product, wishlistEntryId: item.id };
-        // Fall back to embedded product data from local add
-        if (item.product) return { ...item.product, wishlistEntryId: item.id };
-        return null;
+        const base = product
+          ? { ...product, wishlistEntryId: item.id }
+          : item.product
+            ? { ...item.product, wishlistEntryId: item.id }
+            : null;
+        return base;
       })
       .filter(Boolean);
   }, [wishlistItems, allProducts]);
 
-  // Simulate price drop detection by comparing current prices to a "previous" snapshot
-  // In production this would compare against stored prices from when the item was wishlisted
+  // ─── Price drop detection ─────────────────────────────────────────
+  // Seed an initial price snapshot when a product is first wishlisted,
+  // then fire an alert whenever the current (discounted) price diverges.
   useEffect(() => {
     wishlistProducts.forEach((product) => {
+      // Compute the effective price the customer sees (mirrors SongCard discount logic)
+      const hasDiscount = product.id != null && product.id % 2 === 0;
+      const effectivePrice = hasDiscount ? product.albumPrice / 2 : product.albumPrice;
+
       const existingAlert = priceAlerts[product.id];
-      // Only create alert if we have a stored previous price and it changed
-      if (existingAlert && existingAlert.currentPrice !== product.albumPrice) {
+      if (!existingAlert) {
+        // First time seeing this product — record its ORIGINAL (undiscounted)
+        // price so the next render can detect the discount as a drop.
+        dispatch(
+          updatePriceAlert({
+            productId: product.id,
+            previousPrice: product.albumPrice, // original full price
+            currentPrice: product.albumPrice,   // no drop yet
+          })
+        );
+      } else if (existingAlert.currentPrice !== effectivePrice) {
+        // Price changed since last snapshot — fire a drop / rise alert
         dispatch(
           updatePriceAlert({
             productId: product.id,
             previousPrice: existingAlert.currentPrice,
-            currentPrice: product.albumPrice,
+            currentPrice: effectivePrice,
           })
         );
       }
     });
-  }, [wishlistProducts]);
+  }, [wishlistProducts, allProducts]);
 
   // ─── Manager: Product tracking data (from ALL users via backend) ───
   const trackingData = useMemo(() => {
@@ -431,14 +461,6 @@ const WishlistPage = () => {
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
               {wishlistProducts.map((product, i) => (
                 <div key={product.id} className="relative">
-                  {/* Price drop badge - moved to top-right below star or adjusted */}
-                  {priceAlerts[product.id]?.dropped && (
-                    <div className="absolute top-16 left-6 z-30 px-2 py-1 bg-green-500/90 rounded-full text-xs font-bold text-white flex items-center gap-1 shadow-lg">
-                      <FaArrowDown className="w-2.5 h-2.5" />
-                      {priceAlerts[product.id].percentage}% OFF
-                    </div>
-                  )}
-
                   {/* Reuse SongCard for full playback + video support */}
                   <SongCard
                     product={product}

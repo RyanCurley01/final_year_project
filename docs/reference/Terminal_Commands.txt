@@ -171,3 +171,6 @@ docker volume rm gamestore_services_mysql-data
 
 Checks logs of entire container for services
 docker logs gamestore_services-db-1 2>&1 | tail -n 50
+
+To dump AudioFeatures from DB and update railway-init.sql (run from project root in Git Bash)
+docker exec gamestore_services-db-1 mysqldump -u root -prootpassword Game_Store_System AudioFeatures --no-create-info --skip-lock-tables --compact --skip-extended-insert | grep "^INSERT" > deployment/audiofeatures_dump.sql && sed -i '/^INSERT INTO `AudioFeatures`/d' deployment/railway-init.sql && sed -i '/^-- Insert AudioFeatures for music products$/d' deployment/railway-init.sql && (echo "-- Insert AudioFeatures for music products" && cat deployment/audiofeatures_dump.sql) > deployment/af_temp.sql && sed -i '/^INSERT INTO Wishlist/r deployment/af_temp.sql' deployment/railway-init.sql && rm deployment/af_temp.sql

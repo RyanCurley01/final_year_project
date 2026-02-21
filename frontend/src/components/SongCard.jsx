@@ -19,6 +19,10 @@ const SongCard = ({ product, payment, i, data }) => {
   const price = product.albumPrice;
   const coverMedia = product.albumCoverImageUrl;
 
+  // Half-price discount: apply to every other product (by id) to test price drop notifications
+  const hasDiscount = product.id != null && product.id % 2 === 0;
+  const discountedPrice = hasDiscount ? price / 2 : null;
+
   // Check if the cover media is a video (mp4)
   const isVideo = coverMedia && coverMedia.toLowerCase().includes('.mp4');
   
@@ -67,7 +71,11 @@ const SongCard = ({ product, payment, i, data }) => {
   };
 
   const handleAddToCart = () => {
-    dispatch(addToCart(product));
+    // Pass discounted price to cart if applicable
+    const cartProduct = hasDiscount
+      ? { ...product, albumPrice: discountedPrice }
+      : product;
+    dispatch(addToCart(cartProduct));
   };
 
   const handleToggleWishlist = async (e) => {
@@ -289,9 +297,23 @@ const SongCard = ({ product, payment, i, data }) => {
           <p className="text-sm text-white">
             Music
           </p>
-          <p className="text-sm font-bold text-white">
-            ${price?.toFixed(2) || '0.00'}
-          </p>
+          {hasDiscount ? (
+            <div className="flex flex-col items-end">
+              <span className="px-1.5 py-0.5 bg-green-500/90 rounded text-[10px] font-bold text-white mb-0.5">
+                50% OFF
+              </span>
+              <p className="text-xs text-gray-400 line-through">
+                ${price?.toFixed(2) || '0.00'}
+              </p>
+              <p className="text-sm font-bold text-green-400">
+                ${discountedPrice?.toFixed(2)}
+              </p>
+            </div>
+          ) : (
+            <p className="text-sm font-bold text-white">
+              ${price?.toFixed(2) || '0.00'}
+            </p>
+          )}
         </div>
         <button 
           onClick={handleAddToCart}

@@ -96,8 +96,8 @@ async def record_interaction(interaction: UserInteractionRequest):
                     # Adds the new row to the UserInteractions table so a new interaction can keep being recorded
                     sql = """
                         INSERT INTO UserInteractions 
-                        (AccountID, ProductID, InteractionType, DurationSeconds, SessionID)
-                        VALUES (%s, %s, %s, %s, %s)
+                        (AccountID, ProductID, InteractionType, DurationSeconds, CompletionPercentage, EngagementScore, DeviceType, SessionID)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                     """
                     real_product_id = interaction.product_id
                     
@@ -112,12 +112,25 @@ async def record_interaction(interaction: UserInteractionRequest):
 
                     # Execute the insertion
                     # We wrap in try-except specifically for foreign key constraints in case the product doesn't exist
+                    # Compute completion percentage from duration if not provided
+                    completion_pct = interaction.completion_percentage
+                    # Compute engagement score: weighted combo of duration and completion
+                    engagement = interaction.engagement_score
+                    if engagement is None and interaction.duration_seconds and interaction.duration_seconds > 0:
+                        # Simple heuristic: longer listens = higher engagement (capped at 1.0)
+                        dur_score = min(interaction.duration_seconds / 300.0, 1.0)  # 5 min = max
+                        comp_score = completion_pct if completion_pct is not None else 0.0
+                        engagement = round(0.4 * dur_score + 0.6 * comp_score, 4)
+
                     try:
                         cursor.execute(sql, (
                             interaction.account_id,
                             real_product_id,
                             interaction.interaction_type,
                             interaction.duration_seconds,
+                            completion_pct,
+                            engagement,
+                            interaction.device_type,
                             interaction.session_id
                         ))
                         conn.commit()
