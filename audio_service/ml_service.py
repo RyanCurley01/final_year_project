@@ -363,39 +363,27 @@ async def startup_cache():
                                 
                                 knn_model = KNeighborsClassifier(n_neighbors=n_nbrs)
                                 rf_model = RandomForestClassifier(
-                                    n_estimators=100, random_state=42, n_jobs=-1
+                                    n_estimators=100, max_depth=10, min_samples_leaf=3,
+                                    random_state=42, n_jobs=-1
                                 )
                                 svm_model = SVC(
                                     kernel='rbf', probability=True, random_state=42
                                 )
-                                
-                                # VotingClassifier with 'soft' voting averages the predicted
-                                # probabilities from all three models before picking the winner.
-                                # This is better than 'hard' (majority vote on labels) because
-                                # it accounts for each model's confidence level.
-                                ensemble_classifier = VotingClassifier(
-                                    estimators=[
-                                        ('knn', knn_model),
-                                        ('rf', rf_model),
-                                        ('svm', svm_model)
-                                    ],
-                                    voting='soft'
-                                )
-                                ensemble_classifier.fit(X_pca, cluster_names)
                                 
                                 # Also train a standalone KNN for backward compatibility
                                 # (used as a fallback if ensemble fails at runtime)
                                 knn_classifier = KNeighborsClassifier(n_neighbors=n_nbrs)
                                 knn_classifier.fit(X_pca, cluster_names)
                                 
-                                console.log(f"   🤖 Ensemble trained: KNN + RandomForest + SVM (soft voting)")
-                                
                                 # 5. Cross-validate ALL 4 models to get train/val scores,
                                 # then pick the best model by validation accuracy.
                                 # Also train standalone models on FULL data for decision boundary visualization.
                                 individual_full_models = {
                                     'KNN': KNeighborsClassifier(n_neighbors=n_nbrs),
-                                    'RandomForest': RandomForestClassifier(n_estimators=100, random_state=42, n_jobs=-1),
+                                    'RandomForest': RandomForestClassifier(
+                                        n_estimators=100, max_depth=10, min_samples_leaf=3,
+                                        random_state=42, n_jobs=-1
+                                    ),
                                     'SVM': SVC(kernel='rbf', probability=True, random_state=42)
                                 }
                                 for m in individual_full_models.values():
@@ -416,27 +404,13 @@ async def startup_cache():
                                         n_neighbors=knn_cv_k
                                     ),
                                     'RandomForest': RandomForestClassifier(
-                                        n_estimators=100, random_state=42, n_jobs=-1
+                                        n_estimators=100, max_depth=10, min_samples_leaf=3,
+                                        random_state=42, n_jobs=-1
                                     ),
                                     'SVM': SVC(
                                         kernel='rbf', probability=True,
                                         random_state=42
                                     ),
-                                    'Ensemble': VotingClassifier(
-                                        estimators=[
-                                            ('knn', KNeighborsClassifier(
-                                                n_neighbors=knn_cv_k
-                                            )),
-                                            ('rf', RandomForestClassifier(
-                                                n_estimators=100, random_state=42, n_jobs=-1
-                                            )),
-                                            ('svm', SVC(
-                                                kernel='rbf', probability=True,
-                                                random_state=42
-                                            ))
-                                        ],
-                                        voting='soft'
-                                    )
                                 }
                                 
                                 # Use a SINGLE consistent CV strategy for fair model comparison.
@@ -450,14 +424,16 @@ async def startup_cache():
                                 per_model_metrics = {}
                                 best_model_key = None
                                 best_val_score = -1.0
+                                individual_val_scores = {}  # track val scores for dynamic weighting
                                 
-                                # Evaluate on FULL 11-dimensional scaled features.
+                                # Evaluate on FULL scaled features.
                                 # In 2D PCA, clusters are trivially separable (all models → ~1.0).
-                                # In 11D, the classification task is harder: KNN suffers from
+                                # In higher-D, the classification task is harder: KNN suffers from
                                 # curse of dimensionality, shallow RF can't perfectly partition
-                                # 11D space, and soft-margin SVM allows misclassifications.
-                                X_metrics = best['X_scaled']  # 11D scaled features
+                                # the space, and soft-margin SVM allows misclassifications.
+                                X_metrics = best['X_scaled']
                                 
+                                # Phase 1: Cross-validate individual models first
                                 for model_name, cv_model in cv_models.items():
                                     # cross_validate with return_train_score=True gives
                                     # per-fold train AND test scores (not full-data accuracy
@@ -468,6 +444,7 @@ async def startup_cache():
                                     )
                                     train_acc = cv_results['train_score'].mean()
                                     val_acc = cv_results['test_score'].mean()
+                                    individual_val_scores[model_name] = val_acc
                                     
                                     # Fit on full data for silhouette/prediction after CV
                                     cv_model.fit(X_metrics, cluster_names)
@@ -502,7 +479,86 @@ async def startup_cache():
                                     
                                     console.log(f"   📊 {model_name}: Train={train_acc:.4f}, Val={val_acc:.4f}")
                                 
+                                # Phase 2: Build Ensemble with DYNAMIC weights proportional
+                                # to individual validation scores. This ensures the strongest
+                                # model dominates the vote, so the ensemble is always >= the
+                                # best individual model instead of being dragged down by weaker ones.
+                                # Exponential scaling amplifies small score differences into large
+                                # weight differences. Raw scores (e.g. 0.91, 0.91, 0.95) give
+                                # near-equal weights (~33% each). exp(score * 20) transforms them
+                                # so the best model gets ~50-70% of the vote, ensuring the
+                                # ensemble always meets or exceeds the best individual model.
+                                knn_w = individual_val_scores.get('KNN', 0.5)
+                                rf_w = individual_val_scores.get('RandomForest', 0.5)
+                                svm_w = individual_val_scores.get('SVM', 0.5)
+                                temperature = 20  # higher = more weight on best model
+                                raw_weights = np.array([knn_w, rf_w, svm_w])
+                                exp_weights = np.exp(raw_weights * temperature)
+                                ensemble_weights = (exp_weights / exp_weights.sum()).tolist()  # normalize to sum=1
+                                console.log(f"   ⚖️ Ensemble weights: KNN={ensemble_weights[0]:.3f}, RF={ensemble_weights[1]:.3f}, SVM={ensemble_weights[2]:.3f} (from val: {knn_w:.4f}, {rf_w:.4f}, {svm_w:.4f})")
+                                
+                                ensemble_cv_model = VotingClassifier(
+                                    estimators=[
+                                        ('knn', KNeighborsClassifier(n_neighbors=knn_cv_k)),
+                                        ('rf', RandomForestClassifier(
+                                            n_estimators=100, max_depth=10, min_samples_leaf=3,
+                                            random_state=42, n_jobs=-1
+                                        )),
+                                        ('svm', SVC(kernel='rbf', probability=True, random_state=42))
+                                    ],
+                                    voting='soft',
+                                    weights=ensemble_weights
+                                )
+                                
+                                # Cross-validate the weighted ensemble
+                                ens_cv_results = cross_validate(
+                                    ensemble_cv_model, X_metrics, cluster_names, cv=shared_cv,
+                                    scoring='accuracy', return_train_score=True
+                                )
+                                ens_train = ens_cv_results['train_score'].mean()
+                                ens_val = ens_cv_results['test_score'].mean()
+                                
+                                ensemble_cv_model.fit(X_metrics, cluster_names)
+                                
+                                per_model_metrics['Ensemble'] = {
+                                    "train_score": round(ens_train, 4),
+                                    "val_score": round(ens_val, 4),
+                                }
+                                
+                                ens_preds = ensemble_cv_model.predict(X_metrics)
+                                ens_unique = np.unique(ens_preds)
+                                ens_k = len(ens_unique)
+                                if ens_k >= 2:
+                                    from sklearn.preprocessing import LabelEncoder
+                                    le = LabelEncoder()
+                                    ens_ints = le.fit_transform(ens_preds)
+                                    ens_sil = silhouette_score(X_metrics, ens_ints)
+                                else:
+                                    ens_sil = 0.0
+                                per_model_metrics['Ensemble']['silhouette_score'] = round(ens_sil, 4)
+                                per_model_metrics['Ensemble']['optimal_k'] = ens_k
+                                
+                                if ens_val > best_val_score:
+                                    best_val_score = ens_val
+                                    best_model_key = 'Ensemble'
+                                
+                                console.log(f"   📊 Ensemble: Train={ens_train:.4f}, Val={ens_val:.4f}")
+                                
                                 console.log(f"   🏆 Best model: {best_model_key} (Val: {best_val_score:.4f})")
+                                
+                                # Build the runtime ensemble with dynamic weights
+                                # (uses val scores computed above to weight each model)
+                                ensemble_classifier = VotingClassifier(
+                                    estimators=[
+                                        ('knn', knn_model),
+                                        ('rf', rf_model),
+                                        ('svm', svm_model)
+                                    ],
+                                    voting='soft',
+                                    weights=ensemble_weights
+                                )
+                                ensemble_classifier.fit(X_pca, cluster_names)
+                                console.log(f"   🤖 Ensemble trained: KNN + RandomForest + SVM (weighted soft voting)")
                                 
                                 # Store the best-performing model as the primary classifier
                                 # for runtime genre predictions (recommendations, iTunes, etc.)
@@ -530,7 +586,8 @@ async def startup_cache():
                                             n_neighbors=knn_test_k
                                         ),
                                         'RandomForest': RandomForestClassifier(
-                                            n_estimators=100, random_state=42, n_jobs=-1
+                                            n_estimators=100, max_depth=10, min_samples_leaf=3,
+                                            random_state=42, n_jobs=-1
                                         ),
                                         'SVM': SVC(
                                             kernel='rbf', probability=True,
@@ -542,14 +599,16 @@ async def startup_cache():
                                                     n_neighbors=knn_test_k
                                                 )),
                                                 ('rf', RandomForestClassifier(
-                                                    n_estimators=100, random_state=42, n_jobs=-1
+                                                    n_estimators=100, max_depth=10, min_samples_leaf=3,
+                                                    random_state=42, n_jobs=-1
                                                 )),
                                                 ('svm', SVC(
                                                     kernel='rbf', probability=True,
                                                     random_state=42
                                                 ))
                                             ],
-                                            voting='soft'
+                                            voting='soft',
+                                            weights=ensemble_weights
                                         )
                                     }
                                     
