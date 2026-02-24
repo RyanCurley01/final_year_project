@@ -1,6 +1,7 @@
 import { createApi, fetchBaseQuery } from '@reduxjs/toolkit/query/react';
 import envConfig from '../../config/environment.js';
 import { getServiceUrl } from './api';
+import { fixTextDeep } from '../../utils/fixText';
 
 // Check for ngrok at request time
 const isNgrokHost = () => {
@@ -54,7 +55,12 @@ const dynamicBaseQuery = async (args, api, extraOptions) => {
 
   // Use fetch directly
   const fetchFn = fetchBaseQuery({ baseUrl: '' });
-  return fetchFn(requestArgs, api, extraOptions);
+  const result = await fetchFn(requestArgs, api, extraOptions);
+  // Fix mojibake / curly quotes in all string fields
+  if (result.data) {
+    result.data = fixTextDeep(result.data);
+  }
+  return result;
 };
 
 export const productsApi = createApi({

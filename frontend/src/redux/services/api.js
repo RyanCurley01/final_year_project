@@ -1,5 +1,6 @@
 // Base API configuration with dynamic environment support
 import envConfig from '../../config/environment.js';
+import { fixTextDeep } from '../../utils/fixText';
 
 // Get backend base URL using our environment configuration
 const BACKEND_BASE_URL = envConfig.getBackendApiUrl();
@@ -194,7 +195,9 @@ export const apiCall = async (url, options = {}) => {
       return null;
     }
 
-    return await response.json();
+    // Fix mojibake / curly quotes in all string fields
+    const data = await response.json();
+    return fixTextDeep(data);
   } catch (error) {
     throw error;
   }

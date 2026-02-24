@@ -1,6 +1,7 @@
 // src/redux/services/apiService.js
 import { createApi, fetchBaseQuery } from '@reduxjs/toolkit/query/react';
 import envConfig from '../../config/environment.js';
+import { fixTextDeep } from '../../utils/fixText';
 
 // Check for ngrok at request time
 const isNgrokHost = () => {
@@ -70,7 +71,12 @@ const dynamicBaseQuery = async (args, api, extraOptions) => {
       return defaultHeaders;
     }
   });
-  return fetchFn(adjustedArgs, api, extraOptions);
+  const result = await fetchFn(adjustedArgs, api, extraOptions);
+  // Fix mojibake / curly quotes in all string fields
+  if (result.data) {
+    result.data = fixTextDeep(result.data);
+  }
+  return result;
 };
 
 export const musicServiceApi = createApi({

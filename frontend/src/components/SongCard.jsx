@@ -253,8 +253,8 @@ const SongCard = ({ product, payment, i, data }) => {
         )}
       </div>
 
-      {/* Tempo Slider - shown only for videos when this song is active */}
-      {isVideo && isThisSongActive && (
+      {/* Tempo Slider - always shown for video song cards */}
+      {isVideo && (
         <div className="mt-2 px-2">
           <div className="flex items-center justify-between mb-1">
             <label className="text-xs text-white/70">Playback Speed</label>
@@ -287,27 +287,29 @@ const SongCard = ({ product, payment, i, data }) => {
         <p className="font-semibold text-lg text-gray-300">
           <span 
             onClick={handleSongTitleClick}
-            className="block break-words hover:text-cyan-400 transition-colors cursor-pointer"
+            className="block hover:text-cyan-400 transition-colors cursor-pointer"
             title="Click to see 20 most similar songs"
           >
             {productName || 'Unknown'}
           </span>
         </p>
-        <div className="flex justify-between items-center mt-2">
+        <div className="flex justify-between items-end mt-2">
           <p className="text-sm text-white">
             Music
           </p>
           {hasDiscount ? (
-            <div className="flex flex-col items-end">
-              <span className="px-1.5 py-0.5 bg-green-500/90 rounded text-[10px] font-bold text-white mb-0.5">
+            <div className="flex flex-row items-start gap-1.5">
+              <span className="px-1.5 py-0.5 bg-green-500/90 rounded text-[10px] font-bold text-white">
                 50% OFF
               </span>
-              <p className="text-xs text-gray-400 line-through">
-                ${price?.toFixed(2) || '0.00'}
-              </p>
-              <p className="text-sm font-bold text-green-400">
-                ${discountedPrice?.toFixed(2)}
-              </p>
+              <div className="flex flex-row items-center gap-1.5">
+                <p className="text-sm text-gray-400 line-through">
+                  ${price?.toFixed(2) || '0.00'}
+                </p>
+                <p className="text-sm font-bold text-green-400">
+                  ${discountedPrice?.toFixed(2)}
+                </p>
+              </div>
             </div>
           ) : (
             <p className="text-sm font-bold text-white">
@@ -317,7 +319,7 @@ const SongCard = ({ product, payment, i, data }) => {
         </div>
         <button 
           onClick={handleAddToCart}
-          className="mt-2 w-full px-3 py-2 bg-blue-700 hover:bg-blue-800 rounded font-semibold text-white text-sm leading-none flex items-center justify-center gap-2"
+          className="mt-auto pt-2 w-full px-3 py-2 bg-blue-700 hover:bg-blue-800 rounded font-semibold text-white text-sm leading-none flex items-center justify-center gap-2"
         >
           <FiShoppingCart />
           Add to Cart
