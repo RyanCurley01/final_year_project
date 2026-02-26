@@ -321,39 +321,37 @@ const SongCard = ({ product, payment, i, data }) => {
             </button>
           </div>
 
-          {/* Fullscreen video */}
-          <div className="w-full h-full flex items-center justify-center">
-            <div className="w-full h-full max-w-[100vw] max-h-[100vh]" style={{ aspectRatio: '16/9' }}>
-              <AudioReactiveVideo
-                src={coverMedia}
-                alt={productName}
-                className="w-full h-full object-contain"
-                isPlaying={isPlaying && isThisSongActive}
-                isActive={isThisSongActive}
-                playbackRate={isThisSongActive ? playbackRate : 1.0}
-              />
-            </div>
+          {/* Fullscreen video - fills entire viewport, letterboxed to preserve aspect ratio */}
+          <div className="absolute inset-0 w-full h-full">
+            <AudioReactiveVideo
+              src={coverMedia}
+              alt={productName}
+              className="w-full h-full object-contain"
+              isPlaying={isPlaying && isThisSongActive}
+              isActive={isThisSongActive}
+              playbackRate={isThisSongActive ? playbackRate : 1.0}
+            />
           </div>
         </div>,
         document.body
       )}
 
-      <div className="flex flex-col mt-4">
-        <p className="font-semibold text-lg text-gray-300">
+      <div className="flex flex-col flex-1 mt-4">
+        <p className="font-semibold text-lg text-gray-300 h-7 overflow-hidden">
           <span 
             onClick={handleSongTitleClick}
-            className="block hover:text-cyan-400 transition-colors cursor-pointer"
-            title="Click to see 20 most similar songs"
+            className="block hover:text-cyan-400 transition-colors cursor-pointer line-clamp-2"
+            title={productName || 'Unknown'}
           >
             {productName || 'Unknown'}
           </span>
         </p>
-        <div className="flex justify-between items-end mt-2">
+        <div className="flex justify-between items-end mt-auto pt-2">
           <p className="text-sm text-white">
             Music
           </p>
           {hasDiscount ? (
-            <div className="flex flex-row items-start gap-1.5">
+            <div className="flex flex-col items-start gap-1.5">
               <span className="px-1.5 py-0.5 bg-green-500/90 rounded text-[10px] font-bold text-white">
                 50% OFF
               </span>
@@ -374,7 +372,7 @@ const SongCard = ({ product, payment, i, data }) => {
         </div>
         <button 
           onClick={handleAddToCart}
-          className="mt-auto pt-2 w-full px-3 py-2 bg-blue-700 hover:bg-blue-800 rounded font-semibold text-white text-sm leading-none flex items-center justify-center gap-2"
+          className="w-full mt-2 px-3 py-2 bg-blue-700 hover:bg-blue-800 rounded font-semibold text-white text-sm leading-none flex items-center justify-center gap-2"
         >
           <FiShoppingCart />
           Add to Cart

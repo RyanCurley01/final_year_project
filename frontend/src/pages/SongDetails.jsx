@@ -1,10 +1,16 @@
 import { useState, useEffect } from 'react';
 import { useParams, useLocation, useNavigate } from 'react-router-dom';
 import { useSelector, useDispatch } from 'react-redux';
-import { FaPauseCircle, FaPlayCircle, FaArrowLeft, FaMusic } from 'react-icons/fa';
+import { FaPauseCircle, FaPlayCircle, FaArrowLeft, FaMusic, FaStar, FaRegStar } from 'react-icons/fa';
+import { FiShoppingCart, FiMaximize2, FiMinimize2 } from 'react-icons/fi';
 import { useRef } from 'react';
+import { createPortal } from 'react-dom';
 
-import { setActiveSong, playPause } from '../redux/features/playerSlice';
+import { setActiveSong, playPause, setPlaybackRate } from '../redux/features/playerSlice';
+import { addToCart } from '../redux/features/cartSlice';
+import { addToWishlistLocal, removeFromWishlistLocal, addWishlistItem, removeWishlistItem } from '../redux/features/wishlistSlice';
+import { useAuth } from '../context/AuthContext';
+import { auth as firebaseAuth } from '../firebase';
 import Loader from '../components/Loader';
 import AudioReactiveVideo from '../components/AudioReactiveVideo';
 import envConfig from '../config/environment';
@@ -50,13 +56,65 @@ const FeatureBadge = ({ label, value }) => {
 
 // Similar Song Card Component
 const SimilarSongCard = ({ song, isPlaying, activeSong, onPlay, onPause, rank, playbackRate }) => {
+  const dispatch = useDispatch();
   const isThisSongActive = (activeSong?.trackId && String(activeSong.trackId) === String(song.trackId)) || 
                            (activeSong?.id && String(activeSong.id) === String(song.trackId));
   const albumArt = song.artworkUrl100?.replace('100x100', '600x600') || song.albumCoverImageUrl || fallbackImage;
   const [isHovered, setIsHovered] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
   
   // Check if the cover media is a video
   const isVideo = albumArt && albumArt.toLowerCase().includes('.mp4');
+  // Library songs have a fileUrl from our DB (S3) - NOT just previewUrl/artworkUrl100 which iTunes songs also have
+  const isLibrarySong = !!(song.fileUrl && song.fileUrl.includes('amazonaws.com'));
+
+  // Discount logic matching CustomerScreen SongCard (even IDs get 50% off)
+  const songPrice = song.price || song.albumPrice || 0;
+  const songId = song.trackId || song.id;
+  const hasDiscount = isLibrarySong && songId != null && songId % 2 === 0;
+  const discountedPrice = hasDiscount ? songPrice / 2 : null;
+
+  // Wishlist support
+  const { items: wishlistItems } = useSelector((state) => state.wishlist);
+  const { currentUser } = useAuth();
+  const isWishlisted = isLibrarySong && wishlistItems.some(
+    (item) => item.productId === songId || item.product?.id === songId
+  );
+
+  const handleToggleWishlist = async (e) => {
+    e.stopPropagation();
+    if (!currentUser || !isLibrarySong) return;
+    const accountId = currentUser.id;
+    const email = currentUser.email || currentUser.accountEmailAddress;
+    const password = currentUser.password;
+    const isFirebaseUser = !!currentUser.firebaseUid;
+    let authParams = {};
+    if (isFirebaseUser && firebaseAuth.currentUser) {
+      try {
+        const token = await firebaseAuth.currentUser.getIdToken();
+        authParams = { email, firebaseToken: token };
+      } catch (err) { console.warn('Failed to get Firebase token for wishlist:', err); }
+    } else if (email && password) {
+      authParams = { email, password };
+    }
+    const hasAuth = !!(authParams.password || authParams.firebaseToken);
+    if (isWishlisted) {
+      const entry = wishlistItems.find((item) => item.productId === songId || item.product?.id === songId);
+      if (entry) {
+        dispatch(removeFromWishlistLocal({ productId: songId, accountId }));
+        if (hasAuth) dispatch(removeWishlistItem({ id: entry.id, ...authParams }));
+      }
+    } else {
+      dispatch(addToWishlistLocal({ ...song, id: songId, accountId }));
+      if (hasAuth) dispatch(addWishlistItem({ wishlistData: { accountId, productId: songId }, ...authParams }));
+    }
+  };
+
+  // Handle playback rate change for videos
+  const handlePlaybackRateChange = (e) => {
+    const newRate = parseFloat(e.target.value);
+    dispatch(setPlaybackRate(newRate));
+  };
 
   return (
     <div className="flex flex-col p-4 bg-white/5 backdrop-blur-sm rounded-lg cursor-pointer hover:bg-white/10 transition-all">
@@ -111,8 +169,34 @@ const SimilarSongCard = ({ song, isPlaying, activeSong, onPlay, onPause, rank, p
           {rank}
         </div>
 
-        {/* Similarity score */}
-        <div className={`absolute top-2 right-2 px-2 py-1 rounded-full text-[12px] font-bold text-white shadow-lg ${
+        {/* Maximise button for video cards - beside wishlist */}
+        {isVideo && (
+          <button
+            onClick={(e) => { e.stopPropagation(); setIsFullscreen(true); }}
+            className="absolute top-2 right-10 z-20 p-1.5 rounded-full bg-black/50 backdrop-blur-sm hover:bg-black/70 transition-all hover:scale-110"
+            title="Maximise video"
+          >
+            <FiMaximize2 className="w-5 h-5 text-white/80 hover:text-white drop-shadow-lg transition-colors" />
+          </button>
+        )}
+
+        {/* Wishlist Star - top right, beside maximise button */}
+        {isLibrarySong && (
+          <button
+            onClick={handleToggleWishlist}
+            className="absolute top-2 right-2 z-20 p-1.5 rounded-full bg-black/50 backdrop-blur-sm hover:bg-black/70 transition-all hover:scale-110"
+            title={isWishlisted ? 'Remove from Wishlist' : 'Add to Wishlist'}
+          >
+            {isWishlisted ? (
+              <FaStar className="w-5 h-5 text-yellow-400 drop-shadow-lg" />
+            ) : (
+              <FaRegStar className="w-5 h-5 text-white/80 hover:text-yellow-400 drop-shadow-lg transition-colors" />
+            )}
+          </button>
+        )}
+
+        {/* Similarity score - top-right for artist songs, below buttons for library songs */}
+        <div className={`absolute ${isLibrarySong ? 'top-10' : 'top-2'} right-2 px-2 py-1 rounded-full text-[12px] font-bold text-white shadow-lg ${
           song.similarity_score >= 0.8 ? 'bg-green-500' : 
           song.similarity_score >= 0.6 ? 'bg-yellow-500' : 
           'bg-orange-500'
@@ -132,11 +216,98 @@ const SimilarSongCard = ({ song, isPlaying, activeSong, onPlay, onPause, rank, p
         )}
       </div>
 
+      {/* Tempo Slider - shown on all video cards for consistent row height, only interactive for the active song */}
+      {isVideo && (
+        <div className={`mt-2 px-2${isThisSongActive ? '' : ' opacity-40 pointer-events-none'}`}>
+          <div className="flex items-center justify-between mb-1">
+            <label className="text-xs text-white/70">Playback Speed</label>
+            <span className="text-xs text-white font-mono">{isThisSongActive ? (playbackRate || 1.0).toFixed(2) : '1.00'}x</span>
+          </div>
+          <input
+            type="range"
+            min="0.1"
+            max="2.0"
+            step="0.05"
+            value={isThisSongActive ? (playbackRate || 1.0) : 1.0}
+            onChange={handlePlaybackRateChange}
+            disabled={!isThisSongActive}
+            className="w-full h-1 bg-gray-600 rounded-lg appearance-none cursor-pointer
+                     slider-thumb:appearance-none slider-thumb:w-3 slider-thumb:h-3 
+                     slider-thumb:bg-blue-500 slider-thumb:rounded-full slider-thumb:cursor-pointer
+                     hover:bg-gray-500 transition-colors"
+            style={{
+              background: isThisSongActive
+                ? `linear-gradient(to right, #3b82f6 0%, #3b82f6 ${(((playbackRate || 1.0) - 0.1) / 1.9) * 100}%, #4b5563 ${(((playbackRate || 1.0) - 0.1) / 1.9) * 100}%, #4b5563 100%)`
+                : '#4b5563'
+            }}
+          />
+          <div className="flex justify-between text-xs text-white/50 mt-0.5">
+            <span>0.1x</span>
+            <span>1.0x</span>
+            <span>2.0x</span>
+          </div>
+        </div>
+      )}
+
+      {/* Fullscreen video overlay portal */}
+      {isVideo && isFullscreen && createPortal(
+        <div className="fixed inset-0 bg-black flex flex-col items-center justify-center" style={{ zIndex: 99999 }}>
+          <div className="absolute top-0 left-0 right-0 flex items-center justify-between px-6 py-4 bg-gradient-to-b from-black/80 to-transparent z-10">
+            <h3 className="text-white font-semibold text-lg truncate">{song.trackName}</h3>
+            <button onClick={() => setIsFullscreen(false)} className="p-2 rounded-full bg-white/10 hover:bg-white/20 transition-all hover:scale-110" title="Minimise video">
+              <FiMinimize2 className="w-6 h-6 text-white" />
+            </button>
+          </div>
+          <div className="absolute inset-0 w-full h-full">
+            <AudioReactiveVideo src={albumArt} alt={song.trackName} className="w-full h-full object-contain" isPlaying={isPlaying && isThisSongActive} isActive={isThisSongActive} playbackRate={isThisSongActive ? (playbackRate || 1.0) : 1.0} />
+          </div>
+        </div>,
+        document.body
+      )}
+
       <div className="mt-3 flex flex-col gap-1">
         <p className="font-semibold text-sm text-white truncate leading-tight">{song.trackName}</p>
+        {!isLibrarySong && song.artistName && (
+          <p className="text-xs text-gray-400 truncate">{song.artistName}</p>
+        )}
         <p className="text-xs text-gray-400 truncate">{song.collectionName}</p>
         <p className="text-xs text-cyan-400 truncate">{song.match_reason}</p>
       </div>
+
+      {/* Price and Add to Cart for library songs */}
+      {isLibrarySong && (
+        <div className="mt-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <p className="text-sm text-white">Music</p>
+              {hasDiscount ? (
+                <div className="flex items-center gap-1.5">
+                  <span className="px-1.5 py-0.5 bg-green-500/90 rounded text-[10px] font-bold text-white">
+                    50% OFF
+                  </span>
+                  <p className="text-sm text-gray-400 line-through">${songPrice.toFixed(2)}</p>
+                  <p className="text-sm font-bold text-green-400">${discountedPrice.toFixed(2)}</p>
+                </div>
+              ) : (
+                <p className="text-sm font-bold text-white">${songPrice.toFixed(2)}</p>
+              )}
+            </div>
+            <button 
+              onClick={(e) => {
+                e.stopPropagation();
+                const cartProduct = hasDiscount
+                  ? { ...song, id: songId, albumPrice: discountedPrice, albumTitle: song.trackName }
+                  : { ...song, id: songId, albumPrice: songPrice, albumTitle: song.trackName };
+                dispatch(addToCart(cartProduct));
+              }}
+              className="px-3 py-2 bg-blue-700 hover:bg-blue-800 rounded font-semibold text-white text-sm leading-none flex items-center gap-2"
+            >
+              <FiShoppingCart />
+              Add to Cart
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Feature match badges */}
       <div className="mt-2 grid grid-cols-2 sm:grid-cols-4 gap-1">
@@ -379,13 +550,26 @@ const SongDetails = () => {
       if (data.status === 'success') {
         // Backend returns "recommendations" which are the scored candidates
         // Filter out songs with 0 or negative similarity scores and map product_id to trackId
+        // Build a lookup from original candidates by trackId to preserve price and other fields
+        const candidateLookup = {};
+        comparisonSongs.forEach(c => {
+            const cid = String(c.trackId || c.id || 0);
+            candidateLookup[cid] = c;
+        });
         const validRecommendations = (data.recommendations || [])
             .filter(song => song.similarity_score > 0)
-            .map(song => ({
-                ...song,
-                trackId: song.product_id,
-                id: song.product_id
-            }));
+            .map(song => {
+                const original = candidateLookup[String(song.product_id)] || {};
+                return {
+                    ...original,
+                    ...song,
+                    trackId: song.product_id,
+                    id: song.product_id,
+                    // Preserve price from original candidate data
+                    price: original.price || original.albumPrice || song.price || 0,
+                    albumPrice: original.albumPrice || original.price || song.albumPrice || 0,
+                };
+            });
         setSimilarSongs(validRecommendations);
         
         // It also returns "target_features" (or source_features)
@@ -585,7 +769,7 @@ const SongDetails = () => {
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6">
             {similarSongs.map((song, index) => (
               <SimilarSongCard
-                key={song.trackId}
+                key={`${song.trackId}-${index}`}
                 song={song}
                 isPlaying={isPlaying}
                 activeSong={activeSong}

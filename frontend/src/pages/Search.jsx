@@ -1,15 +1,19 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { useNavigate, useParams } from 'react-router-dom';
+import { createPortal } from 'react-dom';
 
 import Loader from '../components/Loader';
 import AudioReactiveVideo from '../components/AudioReactiveVideo';
 import { useAudioFeatures } from '../context/AudioFeaturesContext';
 import { setActiveSong, playPause, setPlaybackRate } from '../redux/features/playerSlice';
 import { addToCart } from '../redux/features/cartSlice';
+import { addToWishlistLocal, removeFromWishlistLocal, addWishlistItem, removeWishlistItem } from '../redux/features/wishlistSlice';
+import { useAuth } from '../context/AuthContext';
+import { auth as firebaseAuth } from '../firebase';
 import { productService } from '../redux/services';
-import { FaPauseCircle, FaPlayCircle } from 'react-icons/fa';
-import { FiShoppingCart } from 'react-icons/fi';
+import { FaPauseCircle, FaPlayCircle, FaStar, FaRegStar } from 'react-icons/fa';
+import { FiShoppingCart, FiMaximize2, FiMinimize2 } from 'react-icons/fi';
 import envConfig from '../config/environment';
 import blissImage from '../assets/bliss.png';
 
@@ -61,8 +65,52 @@ const SongCard = ({ song, isPlaying, activeSong, onPlay, onPause, index, onSongN
   // Enable video only for database songs (discover page style)
   const isVideo = song.source === 'database' && albumArt && albumArt.toLowerCase().includes('.mp4');
   const coverMedia = albumArt;
+  const isLibrarySong = song.source === 'database';
   
   const [isHovered, setIsHovered] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  // Discount logic matching CustomerScreen SongCard (even IDs get 50% off)
+  const songPrice = song.matchedDbSong?.albumPrice || song.price || 0;
+  const songId = song.matchedDbSong?.id || song.id;
+  const hasDiscount = isLibrarySong && songId != null && songId % 2 === 0;
+  const discountedPrice = hasDiscount ? songPrice / 2 : null;
+
+  // Wishlist support
+  const { items: wishlistItems } = useSelector((state) => state.wishlist);
+  const { currentUser } = useAuth();
+  const isWishlisted = isLibrarySong && wishlistItems.some(
+    (item) => item.productId === songId || item.product?.id === songId
+  );
+
+  const handleToggleWishlist = async (e) => {
+    e.stopPropagation();
+    if (!currentUser || !isLibrarySong) return;
+    const accountId = currentUser.id;
+    const email = currentUser.email || currentUser.accountEmailAddress;
+    const password = currentUser.password;
+    const isFirebaseUser = !!currentUser.firebaseUid;
+    let authParams = {};
+    if (isFirebaseUser && firebaseAuth.currentUser) {
+      try {
+        const token = await firebaseAuth.currentUser.getIdToken();
+        authParams = { email, firebaseToken: token };
+      } catch (err) { console.warn('Failed to get Firebase token for wishlist:', err); }
+    } else if (email && password) {
+      authParams = { email, password };
+    }
+    const hasAuth = !!(authParams.password || authParams.firebaseToken);
+    if (isWishlisted) {
+      const entry = wishlistItems.find((item) => item.productId === songId || item.product?.id === songId);
+      if (entry) {
+        dispatch(removeFromWishlistLocal({ productId: songId, accountId }));
+        if (hasAuth) dispatch(removeWishlistItem({ id: entry.id, ...authParams }));
+      }
+    } else {
+      dispatch(addToWishlistLocal({ ...(song.matchedDbSong || song), accountId }));
+      if (hasAuth) dispatch(addWishlistItem({ wishlistData: { accountId, productId: songId }, ...authParams }));
+    }
+  };
 
   // Handle playback rate change for videos
   const handlePlaybackRateChange = (e) => {
@@ -163,6 +211,32 @@ const SongCard = ({ song, isPlaying, activeSong, onPlay, onPause, index, onSongN
           </div>
         )}
 
+        {/* Maximise button for video cards - top right */}
+        {isVideo && (
+          <button
+            onClick={(e) => { e.stopPropagation(); setIsFullscreen(true); }}
+            className="absolute top-2 right-10 z-20 p-1.5 rounded-full bg-black/50 backdrop-blur-sm hover:bg-black/70 transition-all hover:scale-110"
+            title="Maximise video"
+          >
+            <FiMaximize2 className="w-5 h-5 text-white/80 hover:text-white drop-shadow-lg transition-colors" />
+          </button>
+        )}
+
+        {/* Wishlist Star - for library songs */}
+        {isLibrarySong && (
+          <button
+            onClick={handleToggleWishlist}
+            className="absolute top-2 right-2 z-20 p-1.5 rounded-full bg-black/50 backdrop-blur-sm hover:bg-black/70 transition-all hover:scale-110"
+            title={isWishlisted ? 'Remove from Wishlist' : 'Add to Wishlist'}
+          >
+            {isWishlisted ? (
+              <FaStar className="w-5 h-5 text-yellow-400 drop-shadow-lg" />
+            ) : (
+              <FaRegStar className="w-5 h-5 text-white/80 hover:text-yellow-400 drop-shadow-lg transition-colors" />
+            )}
+          </button>
+        )}
+
         {isThisSongActive && isPlaying && (
           <div className="absolute bottom-2 right-2 flex items-center gap-1 bg-green-500/90 px-2 py-1 rounded-full z-30">
             <div className="flex gap-0.5">
@@ -174,24 +248,29 @@ const SongCard = ({ song, isPlaying, activeSong, onPlay, onPause, index, onSongN
         )}
       </div>
 
-      {/* Tempo Slider - shown only for videos when this song is active */}
-      {/* Playback bar commented out as per request
-      {isVideo && isThisSongActive && (
-        <div className="mt-2 px-2">
+      {/* Tempo Slider - shown on all video cards for consistent row height, only interactive for the active song */}
+      {isVideo && (
+        <div className={`mt-2 px-2${isThisSongActive ? '' : ' opacity-40 pointer-events-none'}`}>
           <div className="flex items-center justify-between mb-1">
             <label className="text-xs text-white/70">Playback Speed</label>
-            <span className="text-xs text-white font-mono">{(playbackRate || 1.0).toFixed(2)}x</span>
+            <span className="text-xs text-white font-mono">{isThisSongActive ? (playbackRate || 1.0).toFixed(2) : '1.00'}x</span>
           </div>
           <input
             type="range"
             min="0.1"
             max="2.0"
             step="0.05"
-            value={playbackRate || 1.0}
+            value={isThisSongActive ? (playbackRate || 1.0) : 1.0}
             onChange={handlePlaybackRateChange}
-            className="w-full h-1 bg-gray-600 rounded-lg appearance-none cursor-pointer hover:bg-gray-500 transition-colors"
+            disabled={!isThisSongActive}
+            className="w-full h-1 bg-gray-600 rounded-lg appearance-none cursor-pointer
+                     slider-thumb:appearance-none slider-thumb:w-3 slider-thumb:h-3 
+                     slider-thumb:bg-blue-500 slider-thumb:rounded-full slider-thumb:cursor-pointer
+                     hover:bg-gray-500 transition-colors"
             style={{
-              background: `linear-gradient(to right, #3b82f6 0%, #3b82f6 ${(((playbackRate || 1.0) - 0.1) / 1.9) * 100}%, #4b5563 ${(((playbackRate || 1.0) - 0.1) / 1.9) * 100}%, #4b5563 100%)`
+              background: isThisSongActive
+                ? `linear-gradient(to right, #3b82f6 0%, #3b82f6 ${(((playbackRate || 1.0) - 0.1) / 1.9) * 100}%, #4b5563 ${(((playbackRate || 1.0) - 0.1) / 1.9) * 100}%, #4b5563 100%)`
+                : '#4b5563'
             }}
           />
           <div className="flex justify-between text-xs text-white/50 mt-0.5">
@@ -201,33 +280,67 @@ const SongCard = ({ song, isPlaying, activeSong, onPlay, onPause, index, onSongN
           </div>
         </div>
       )}
-      */}
+
+      {/* Fullscreen video overlay portal */}
+      {isVideo && isFullscreen && createPortal(
+        <div className="fixed inset-0 bg-black flex flex-col items-center justify-center" style={{ zIndex: 99999 }}>
+          <div className="absolute top-0 left-0 right-0 flex items-center justify-between px-6 py-4 bg-gradient-to-b from-black/80 to-transparent z-10">
+            <h3 className="text-white font-semibold text-lg truncate">{song.trackName || song.albumTitle}</h3>
+            <button onClick={() => setIsFullscreen(false)} className="p-2 rounded-full bg-white/10 hover:bg-white/20 transition-all hover:scale-110" title="Minimise video">
+              <FiMinimize2 className="w-6 h-6 text-white" />
+            </button>
+          </div>
+          <div className="absolute inset-0 w-full h-full">
+            <AudioReactiveVideo src={coverMedia} alt={song.trackName} className="w-full h-full object-contain" isPlaying={isPlaying && isThisSongActive} isActive={isThisSongActive} playbackRate={isThisSongActive ? (playbackRate || 1.0) : 1.0} />
+          </div>
+        </div>,
+        document.body
+      )}
 
       {/* Song Info - Different layout for database songs vs artist songs */}
       {song.source === 'database' ? (
         /* Database song layout - same as Discover page */
-        <div className="flex flex-col mt-4">
-          <p className="font-semibold text-lg text-gray-300">
+        <div className="flex flex-col flex-1 mt-4">
+          <p className="font-semibold text-lg text-gray-300 h-7 overflow-hidden">
             <span 
               onClick={handleSongNameClick}
-              className="block break-words hover:text-cyan-400 transition-colors cursor-pointer"
-              title="Click to see 20 most similar songs"
+              className="block hover:text-cyan-400 transition-colors cursor-pointer line-clamp-2"
+              title={song.trackName || song.albumTitle || 'Unknown'}
             >
               {song.trackName || song.albumTitle || 'Unknown'}
             </span>
           </p>
-          <div className="flex justify-between items-center mt-2">
+          <div className="flex justify-between items-end mt-auto pt-2">
             <p className="text-sm text-white">Music</p>
-            <p className="text-sm font-bold text-white">
-              ${(song.matchedDbSong?.albumPrice || song.price || 0).toFixed(2)}
-            </p>
+            {hasDiscount ? (
+              <div className="flex flex-col items-start gap-1.5">
+                <span className="px-1.5 py-0.5 bg-green-500/90 rounded text-[10px] font-bold text-white">
+                  50% OFF
+                </span>
+                <div className="flex flex-row items-center gap-1.5">
+                  <p className="text-sm text-gray-400 line-through">
+                    ${songPrice.toFixed(2)}
+                  </p>
+                  <p className="text-sm font-bold text-green-400">
+                    ${discountedPrice.toFixed(2)}
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <p className="text-sm font-bold text-white">
+                ${songPrice.toFixed(2)}
+              </p>
+            )}
           </div>
           <button 
             onClick={(e) => {
               e.stopPropagation();
-              dispatch(addToCart(song.matchedDbSong || song));
+              const cartProduct = hasDiscount
+                ? { ...(song.matchedDbSong || song), albumPrice: discountedPrice }
+                : (song.matchedDbSong || song);
+              dispatch(addToCart(cartProduct));
             }}
-            className="mt-2 w-full px-3 py-2 bg-blue-700 hover:bg-blue-800 rounded font-semibold text-white text-sm leading-none flex items-center justify-center gap-2"
+            className="w-full mt-2 px-3 py-2 bg-blue-700 hover:bg-blue-800 rounded font-semibold text-white text-sm leading-none flex items-center justify-center gap-2"
           >
             <FiShoppingCart />
             Add to Cart
