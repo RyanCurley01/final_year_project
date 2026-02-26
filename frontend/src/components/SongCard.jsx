@@ -1,8 +1,9 @@
 import { useNavigate } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
 import { useEffect, useState } from 'react';
-import { FiShoppingCart } from 'react-icons/fi';
+import { FiShoppingCart, FiMaximize2, FiMinimize2 } from 'react-icons/fi';
 import { FaPauseCircle, FaPlayCircle, FaStar, FaRegStar } from 'react-icons/fa';
+import { createPortal } from 'react-dom';
 
 import AudioReactiveVideo from './AudioReactiveVideo';
 import { playPause, setActiveSong, setPlaybackRate } from '../redux/features/playerSlice';
@@ -31,6 +32,8 @@ const SongCard = ({ product, payment, i, data }) => {
   
   // Hover state for showing play button
   const [isHovered, setIsHovered] = useState(false);
+  // Fullscreen state for video cards
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   const dispatch = useDispatch();
   const navigate = useNavigate();
@@ -228,6 +231,20 @@ const SongCard = ({ product, payment, i, data }) => {
           </div>
         )}
 
+        {/* Maximise button for video cards - top right */}
+        {isVideo && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setIsFullscreen(true);
+            }}
+            className="absolute top-2 right-10 z-20 p-1.5 rounded-full bg-black/50 backdrop-blur-sm hover:bg-black/70 transition-all hover:scale-110"
+            title="Maximise video"
+          >
+            <FiMaximize2 className="w-5 h-5 text-white/80 hover:text-white drop-shadow-lg transition-colors" />
+          </button>
+        )}
+
         {/* Wishlist Star - top right */}
         <button
           onClick={handleToggleWishlist}
@@ -253,26 +270,29 @@ const SongCard = ({ product, payment, i, data }) => {
         )}
       </div>
 
-      {/* Tempo Slider - always shown for video song cards */}
+      {/* Tempo Slider - shown on all video cards for consistent row height, only interactive for the active song */}
       {isVideo && (
-        <div className="mt-2 px-2">
+        <div className={`mt-2 px-2${isThisSongActive ? '' : ' opacity-40 pointer-events-none'}`}>
           <div className="flex items-center justify-between mb-1">
             <label className="text-xs text-white/70">Playback Speed</label>
-            <span className="text-xs text-white font-mono">{playbackRate.toFixed(2)}x</span>
+            <span className="text-xs text-white font-mono">{isThisSongActive ? playbackRate.toFixed(2) : '1.00'}x</span>
           </div>
           <input
             type="range"
             min="0.1"
             max="2.0"
             step="0.05"
-            value={playbackRate}
+            value={isThisSongActive ? playbackRate : 1.0}
             onChange={handlePlaybackRateChange}
+            disabled={!isThisSongActive}
             className="w-full h-1 bg-gray-600 rounded-lg appearance-none cursor-pointer
                      slider-thumb:appearance-none slider-thumb:w-3 slider-thumb:h-3 
                      slider-thumb:bg-blue-500 slider-thumb:rounded-full slider-thumb:cursor-pointer
                      hover:bg-gray-500 transition-colors"
             style={{
-              background: `linear-gradient(to right, #3b82f6 0%, #3b82f6 ${((playbackRate - 0.1) / 1.9) * 100}%, #4b5563 ${((playbackRate - 0.1) / 1.9) * 100}%, #4b5563 100%)`
+              background: isThisSongActive
+                ? `linear-gradient(to right, #3b82f6 0%, #3b82f6 ${((playbackRate - 0.1) / 1.9) * 100}%, #4b5563 ${((playbackRate - 0.1) / 1.9) * 100}%, #4b5563 100%)`
+                : '#4b5563'
             }}
           />
           <div className="flex justify-between text-xs text-white/50 mt-0.5">
@@ -281,6 +301,41 @@ const SongCard = ({ product, payment, i, data }) => {
             <span>2.0x</span>
           </div>
         </div>
+      )}
+
+      {/* Fullscreen video overlay portal */}
+      {isVideo && isFullscreen && createPortal(
+        <div
+          className="fixed inset-0 bg-black flex flex-col items-center justify-center"
+          style={{ zIndex: 99999 }}
+        >
+          {/* Header bar with title and minimise button */}
+          <div className="absolute top-0 left-0 right-0 flex items-center justify-between px-6 py-4 bg-gradient-to-b from-black/80 to-transparent z-10">
+            <h3 className="text-white font-semibold text-lg truncate">{productName}</h3>
+            <button
+              onClick={() => setIsFullscreen(false)}
+              className="p-2 rounded-full bg-white/10 hover:bg-white/20 transition-all hover:scale-110"
+              title="Minimise video"
+            >
+              <FiMinimize2 className="w-6 h-6 text-white" />
+            </button>
+          </div>
+
+          {/* Fullscreen video */}
+          <div className="w-full h-full flex items-center justify-center">
+            <div className="w-full h-full max-w-[100vw] max-h-[100vh]" style={{ aspectRatio: '16/9' }}>
+              <AudioReactiveVideo
+                src={coverMedia}
+                alt={productName}
+                className="w-full h-full object-contain"
+                isPlaying={isPlaying && isThisSongActive}
+                isActive={isThisSongActive}
+                playbackRate={isThisSongActive ? playbackRate : 1.0}
+              />
+            </div>
+          </div>
+        </div>,
+        document.body
       )}
 
       <div className="flex flex-col mt-4">
