@@ -1,6 +1,6 @@
 import { getServiceUrl, apiCall, getBasicAuthHeaders } from './api';
 
-const BASE_URL = `${getServiceUrl('PURCHASED_PRODUCTS')}/api/purchasedProducts`;
+const BASE_URL = `${getServiceUrl('PURCHASED_PRODUCTS')}/api/purchased-products`;
 
 export const purchasedProductsService = {
   // Get all purchased products

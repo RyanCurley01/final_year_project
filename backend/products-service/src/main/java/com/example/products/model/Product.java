@@ -34,7 +34,4 @@ public class Product {
 
     @Column(name = "preview_url", length = 255)
     private String previewUrl; // URL for preview/demo
-
-    @Column(name = "StockQuantity")
-    private Integer stockQuantity;
 }

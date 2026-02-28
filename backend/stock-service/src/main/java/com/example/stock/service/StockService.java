@@ -50,7 +50,7 @@ public class StockService {
         Stock stock = stockRepository.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Stock not found with id: " + id));
 
-        Integer oldQuantity = stock.getStockQuantity();
+        Boolean oldAvailability = stock.getIsAvailable();
         
         if (stockDetails.getProductId() != null && !stockDetails.getProductId().equals(stock.getProductId())) {
             if (stockRepository.existsByProductId(stockDetails.getProductId())) {
@@ -58,14 +58,14 @@ public class StockService {
             }
             stock.setProductId(stockDetails.getProductId());
         }
-        if (stockDetails.getStockQuantity() != null) {
-            stock.setStockQuantity(stockDetails.getStockQuantity());
+        if (stockDetails.getIsAvailable() != null) {
+            stock.setIsAvailable(stockDetails.getIsAvailable());
         }
 
         Stock updatedStock = stockRepository.save(stock);
         
         // Broadcast stock update via WebSocket
-        broadcastStockUpdate(updatedStock, oldQuantity, "UPDATED");
+        broadcastStockUpdate(updatedStock, oldAvailability, "UPDATED");
         
         return updatedStock;
     }
@@ -78,24 +78,24 @@ public class StockService {
         
         // Get stock before deletion for notification
         Stock stock = stockRepository.findById(id).orElseThrow();
-        Integer oldQuantity = stock.getStockQuantity();
+        Boolean oldAvailability = stock.getIsAvailable();
         
         stockRepository.deleteById(id);
         
         // Broadcast stock deletion via WebSocket
-        broadcastStockUpdate(stock, oldQuantity, "DELETED");
+        broadcastStockUpdate(stock, oldAvailability, "DELETED");
     }
 
     /**
      * Broadcasts stock update notifications to all connected WebSocket clients
      */
-    private void broadcastStockUpdate(Stock stock, Integer oldQuantity, String updateType) {
+    private void broadcastStockUpdate(Stock stock, Boolean oldAvailability, String updateType) {
         try {
             StockUpdateNotification notification = new StockUpdateNotification(
                 stock.getId(),
                 stock.getProductId(),
-                oldQuantity,
-                stock.getStockQuantity(),
+                oldAvailability,
+                stock.getIsAvailable(),
                 updateType,
                 java.time.LocalDateTime.now()
             );
@@ -109,8 +109,8 @@ public class StockService {
                 notification
             );
             
-            log.info("Broadcasted {} stock update for productId: {}, quantity: {} -> {}", 
-                updateType, stock.getProductId(), oldQuantity, stock.getStockQuantity());
+            log.info("Broadcasted {} stock update for productId: {}, available: {} -> {}", 
+                updateType, stock.getProductId(), oldAvailability, stock.getIsAvailable());
                 
         } catch (Exception e) {
             log.error("Failed to broadcast stock update for productId: {}", stock.getProductId(), e);

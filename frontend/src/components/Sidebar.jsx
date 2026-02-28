@@ -15,6 +15,8 @@ import { clearWishlist } from '../redux/features/wishlistSlice';
 import UserInteractionsSidebar from './UserInteractionsSidebar';
 import SoldProductsSidebar from './SoldProductsSidebar';
 import CustomerSummarySidebar from './CustomerSummarySidebar';
+import PurchasedProductsSidebar from './PurchasedProductsSidebar';
+import StockSidebar from './StockSidebar';
 
 const NavLinks = ({ handleClick, onResetPlayer, onClearWishlist }) => {
   const { logout, currentUser } = useAuth();
@@ -110,6 +112,12 @@ const NavLinks = ({ handleClick, onResetPlayer, onClearWishlist }) => {
 
     {/* User Interactions component */}
     <UserInteractionsSidebar />
+
+    {/* Purchased Products - Employee & Manager */}
+    <PurchasedProductsSidebar />
+
+    {/* Stock Availability - Employee & Manager */}
+    <StockSidebar />
 
     {/* Sold Products component */}
     <SoldProductsSidebar />

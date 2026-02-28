@@ -14,13 +14,13 @@ public class ProductResponse {
     private Long id;
     private String albumTitle;
     private BigDecimal albumPrice;
-    private String albumCoverImageUrl;     // Presigned URL
-    private String fileUrl;                // Presigned URL
-    private String previewUrl;             // Presigned URL
-    private Integer stockQuantity;
+    private String albumCoverImageUrl;
+    private String fileUrl;
+    private String previewUrl;
 
-    public static ProductResponse fromProduct(Product product, 
-                                             String signedAlbumCoverUrl, String signedFileUrl, 
+    public static ProductResponse fromProduct(Product product,
+                                             String signedAlbumCoverUrl,
+                                             String signedFileUrl,
                                              String signedPreviewUrl) {
         return new ProductResponse(
                 product.getId(),
@@ -28,8 +28,7 @@ public class ProductResponse {
                 product.getAlbumPrice(),
                 signedAlbumCoverUrl,
                 signedFileUrl,
-                signedPreviewUrl,
-                product.getStockQuantity()
+                signedPreviewUrl
         );
     }
 }

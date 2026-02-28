@@ -12,15 +12,15 @@ import java.time.LocalDateTime;
 public class StockUpdateNotification {
     private Long stockId;
     private Long productId;
-    private Integer oldQuantity;
-    private Integer newQuantity;
+    private Boolean oldAvailability;
+    private Boolean newAvailability;
     private String updateType; // CREATED, UPDATED, DELETED
     private LocalDateTime timestamp;
 
-    public StockUpdateNotification(Long stockId, Long productId, Integer newQuantity, String updateType) {
+    public StockUpdateNotification(Long stockId, Long productId, Boolean newAvailability, String updateType) {
         this.stockId = stockId;
         this.productId = productId;
-        this.newQuantity = newQuantity;
+        this.newAvailability = newAvailability;
         this.updateType = updateType;
         this.timestamp = LocalDateTime.now();
     }

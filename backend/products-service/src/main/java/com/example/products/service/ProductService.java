@@ -72,9 +72,6 @@ public class ProductService {
         if (productDetails.getPreviewUrl() != null) {
             product.setPreviewUrl(productDetails.getPreviewUrl());
         }
-        if (productDetails.getStockQuantity() != null) {
-            product.setStockQuantity(productDetails.getStockQuantity());
-        }
 
         return productRepository.save(product);
     }
