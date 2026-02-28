@@ -1,5 +1,5 @@
 import { useSelector, useDispatch } from 'react-redux';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { FaTrash, FaMinus, FaPlus } from 'react-icons/fa';
 import { PayPalButtons } from "@paypal/react-paypal-js";
 import { useState } from 'react';
@@ -9,6 +9,8 @@ import { addPurchase } from '../redux/features/purchaseSlice';
 import { paymentService } from '../redux/services/paymentService';
 import { orderService } from '../redux/services/orderService';
 import { orderItemService } from '../redux/services/orderItemService';
+import { customerSummaryService } from '../redux/services/customerSummaryService';
+import { soldProductsService } from '../redux/services/soldProductsService';
 import placeholders from '../utils/placeholderImage';
 import { downloadMultipleFiles, generateFilename } from '../utils/downloadHelper';
 
@@ -16,6 +18,7 @@ import { useAuth } from '../context/AuthContext';
 
 const Cart = () => {
   const dispatch = useDispatch();
+  const navigate = useNavigate();
   const { items, totalAmount, totalItems } = useSelector((state) => state.cart);
   const [showPayPal, setShowPayPal] = useState(false);
   const [processingPayment, setProcessingPayment] = useState(false);
@@ -61,7 +64,11 @@ const Cart = () => {
           quantity: item.quantity,
           unitPrice: item.albumPrice
         };
-        await orderItemService.createOrderItem(orderItemData);
+        const orderItem = await orderItemService.createOrderItem(orderItemData);
+        
+        // Note: Sold_Products, Purchased_Products, and CustomerSummary tables 
+        // are automatically populated by the database trigger After_Order_Item_Insert 
+        // whenever an Order_Item is created.
       }
       
       // Step 3: Create PayPal order (use first product ID for backward compatibility)
@@ -115,15 +122,16 @@ const Cart = () => {
       if (filesToDownload.length > 0) {
         try {
           await downloadMultipleFiles(filesToDownload);
-          alert("Payment successful! Your files are downloading. Check your purchase history for details.");
+          alert("Payment successful! Your files are downloading. Redirecting to purchase history.");
         } catch (downloadError) {
-          alert("Payment successful! However, some files failed to download. Check your purchase history to download them manually.");
+          alert("Payment successful! However, some files failed to download. You can download them from purchase history.");
         }
       } else {
-        alert("Payment successful! Check your purchase history.");
+        alert("Payment successful! Redirecting to purchase history.");
       }
       
       setShowPayPal(false);
+      navigate('/purchase-history');
     } catch (error) {
       alert("Payment failed!");
     } finally {
@@ -137,12 +145,20 @@ const Cart = () => {
         <FaTrash className="text-gray-400 text-6xl mb-4" />
         <h2 className="text-white text-2xl font-bold mb-2">Your cart is empty</h2>
         <p className="text-gray-400 mb-6">Add some products to get started!</p>
-        <Link 
-          to="/"
-          className="px-6 py-3 bg-blue-700 hover:bg-blue-800 text-white font-semibold rounded-lg"
-        >
-          Continue Shopping
-        </Link>
+        <div className="flex gap-4">
+          <Link 
+            to="/"
+            className="px-6 py-3 bg-blue-700 hover:bg-blue-800 text-white font-semibold rounded-lg"
+          >
+            Continue Shopping
+          </Link>
+          <Link 
+            to="/purchase-history"
+            className="px-6 py-3 bg-green-700 hover:bg-green-800 text-white font-semibold rounded-lg"
+          >
+            View Purchase History
+          </Link>
+        </div>
       </div>
     );
   }

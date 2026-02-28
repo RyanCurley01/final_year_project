@@ -90,6 +90,10 @@ export const musicServiceApi = createApi({
       // Refresh every 30 seconds instead of 1 second to reduce load
       pollingInterval: 30000,
     }),
+    getAllInteractions: builder.query({
+      query: () => '/interactions',
+      providesTags: ['TopPlayedSongs'],
+    }),
     recordInteraction: builder.mutation({
       query: (interaction) => ({
         url: '/interactions/record',
@@ -101,4 +105,4 @@ export const musicServiceApi = createApi({
   }),
 });
 
-export const { useGetTopPlayedSongsQuery, useRecordInteractionMutation } = musicServiceApi;
+export const { useGetTopPlayedSongsQuery, useGetAllInteractionsQuery, useRecordInteractionMutation } = musicServiceApi;

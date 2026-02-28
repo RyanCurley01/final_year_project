@@ -1,6 +1,6 @@
 import { getServiceUrl, apiCall, getBasicAuthHeaders } from './api';
 
-const BASE_URL = `${getServiceUrl('SOLD_PRODUCTS')}/api/soldProducts`;
+const BASE_URL = `${getServiceUrl('SOLD_PRODUCTS')}/api/sold-products`;
 
 export const soldProductsService = {
   // Get all sold products
@@ -33,11 +33,14 @@ export const soldProductsService = {
 
   // Create sold product
   createSoldProduct: async (soldProductData, email, password) => {
-    return apiCall(BASE_URL, {
+    const options = {
       method: 'POST',
-      headers: getBasicAuthHeaders(email, password),
       body: JSON.stringify(soldProductData),
-    });
+    };
+    if (email && password) {
+      options.headers = getBasicAuthHeaders(email, password);
+    }
+    return apiCall(BASE_URL, options);
   },
 
   // Update sold product

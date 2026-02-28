@@ -219,7 +219,7 @@ services:
   #     context: ../backend
   #     dockerfile: ./purchasedProducts-service/Dockerfile
   #   ports:
-  #     - "8088:8088"
+  #     - "8089:8089"
   #   environment:
   #     SPRING_DATASOURCE_URL: jdbc:mysql://db:3306/Game_Store_System?createDatabaseIfNotExist=true
   #     SPRING_DATASOURCE_USERNAME: ${MYSQL_USER:-gamestore_user}
@@ -241,7 +241,7 @@ services:
       context: ../backend
       dockerfile: ./soldProducts-service/Dockerfile
     ports:
-      - "8089:8089"
+      - "8088:8088"
     environment:
       SPRING_DATASOURCE_URL: jdbc:mysql://db:3306/Game_Store_System?createDatabaseIfNotExist=true
       SPRING_DATASOURCE_USERNAME: ${MYSQL_USER:-gamestore_user}

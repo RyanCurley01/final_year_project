@@ -1,9 +1,10 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { Provider } from 'react-redux'
+import { PersistGate } from 'redux-persist/integration/react'
 import { BrowserRouter } from 'react-router-dom'
 import { PayPalScriptProvider } from "@paypal/react-paypal-js";
-import { store } from './redux/store'
+import { store, persistor } from './redux/store'
 import './index.css'
 import App from './App.jsx'
 import 'bootstrap/dist/css/bootstrap.min.css';
@@ -34,11 +35,13 @@ const paypalOptions = {
 createRoot(document.getElementById('root')).render(
   <StrictMode>
     <Provider store={store}>
-      <BrowserRouter>
-        <PayPalScriptProvider options={paypalOptions}>
-          <App />
-        </PayPalScriptProvider>
-      </BrowserRouter>
+      <PersistGate loading={null} persistor={persistor}>
+        <BrowserRouter>
+          <PayPalScriptProvider options={paypalOptions}>
+            <App />
+          </PayPalScriptProvider>
+        </BrowserRouter>
+      </PersistGate>
     </Provider>
   </StrictMode>,
 )

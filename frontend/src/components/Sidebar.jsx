@@ -12,6 +12,9 @@ import CartIcon from './CartIcon';
 import WishlistIcon from './WishlistIcon';
 import { resetPlayer } from '../redux/features/playerSlice';
 import { clearWishlist } from '../redux/features/wishlistSlice';
+import UserInteractionsSidebar from './UserInteractionsSidebar';
+import SoldProductsSidebar from './SoldProductsSidebar';
+import CustomerSummarySidebar from './CustomerSummarySidebar';
 
 const NavLinks = ({ handleClick, onResetPlayer, onClearWishlist }) => {
   const { logout, currentUser } = useAuth();
@@ -104,6 +107,15 @@ const NavLinks = ({ handleClick, onResetPlayer, onClearWishlist }) => {
         ML Visualization
       </NavLink>
     )}
+
+    {/* User Interactions component */}
+    <UserInteractionsSidebar />
+
+    {/* Sold Products component */}
+    <SoldProductsSidebar />
+
+    {/* Customer Summary component */}
+    <CustomerSummarySidebar />
 
     {/* Logout Button */}
     <button

@@ -149,3 +149,40 @@ async def record_interaction(interaction: UserInteractionRequest):
     except Exception as e:
         console.log(f"Error recording interaction: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+# ============================================
+# ALL INTERACTIONS ENDPOINT (from UserInteractions)
+# ============================================
+
+@router.get("/api/interactions")
+async def get_all_interactions():
+    """
+    Get all user interactions for the manager dashboard.
+    """
+    try:
+        with get_db_connection() as conn:
+            if conn:
+                with conn.cursor() as cursor:
+                    sql = """
+                        SELECT 
+                            InteractionID as interactionId,
+                            AccountID as accountId,
+                            ProductID as productId,
+                            InteractionType as interactionType,
+                            InteractionTimestamp as interactionTimestamp,
+                            DurationSeconds as durationSeconds,
+                            CompletionPercentage as completionPercentage,
+                            EngagementScore as engagementScore,
+                            DeviceType as deviceType,
+                            SessionID as sessionId
+                        FROM UserInteractions
+                        ORDER BY InteractionTimestamp ASC
+                    """
+                    cursor.execute(sql)
+                    results = cursor.fetchall()
+                    return results
+            else:
+                raise HTTPException(status_code=503, detail="Database connection unavailable")
+    except Exception as e:
+        console.log(f"Error fetching interactions: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

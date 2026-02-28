@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import { Link } from 'react-router-dom';
 import { FaReceipt, FaCalendar, FaDollarSign, FaDownload } from 'react-icons/fa';
@@ -8,26 +8,38 @@ import { useAuth } from '../context/AuthContext';
 import { orderService } from '../redux/services/orderService';
 import { orderItemService } from '../redux/services/orderItemService';
 import { productService } from '../redux/services/productService';
-import { setPurchases, setLoading } from '../redux/features/purchaseSlice';
+import { setPurchases, setLoading, setError } from '../redux/features/purchaseSlice';
 
 const PurchaseHistory = () => {
-  const { purchases, loading } = useSelector((state) => state.purchase);
+  const { purchases, loading, error } = useSelector((state) => state.purchase);
   const { currentUser } = useAuth();
   const dispatch = useDispatch();
+  const lastFetchedId = useRef(null);
+  const [fetched, setFetched] = useState(false);
 
   useEffect(() => {
     const fetchHistory = async () => {
+      // Debug: log what currentUser looks like
+      console.log("PurchaseHistory: currentUser =", JSON.stringify(currentUser, null, 2));
+      console.log("PurchaseHistory: currentUser?.id =", currentUser?.id);
+      console.log("PurchaseHistory: localStorage currentUser =", localStorage.getItem('currentUser'));
+      
       // Only fetch if we have a logged-in user with a valid Database ID
-      if (currentUser?.id) {
+      const accountId = currentUser?.id;
+      if (accountId && accountId !== lastFetchedId.current) {
+        lastFetchedId.current = accountId;
         try {
           dispatch(setLoading(true));
-          console.log("Fetching order history for Account ID:", currentUser.id);
+          dispatch(setError(null));
+          console.log("Fetching order history for Account ID:", accountId);
+          console.log("Orders API URL:", `orders/account/${accountId}`);
           
           // 1. Fetch orders from backend
           // Note: We do NOT pass email/password here because these services have their own auth
           // and the endpoints are configured as permitAll() for customers.
           // Passing credentials for a user that doesn't exist in the microservice DB triggers a 401.
-          const orders = await orderService.getOrdersByAccountId(currentUser.id);
+          const orders = await orderService.getOrdersByAccountId(accountId);
+          console.log("Orders fetched:", orders?.length || 0, orders);
           
           if (!orders || orders.length === 0) {
             dispatch(setPurchases([]));
@@ -45,14 +57,6 @@ const PurchaseHistory = () => {
               const itemsWithDetails = await Promise.all(orderItems.map(async (item) => {
                 try {
                   const product = await productService.getProductById(item.productId);
-                  return {
-                    ...item,
-                    albumTitle: product.albumTitle || 'Unknown Product',
-                    albumPrice: item.unitPrice, 
-                    albumCoverImageUrl: product.albumCoverImageUrl,
-                    fileUrl: product.fileUrl,
-                    quantity: item.quantity
-                  };
                   return {
                     ...item,
                     albumTitle: product.albumTitle || 'Unknown Product',
@@ -98,14 +102,20 @@ const PurchaseHistory = () => {
           dispatch(setPurchases(enrichedPurchases));
         } catch (error) {
           console.error("Failed to fetch purchase history:", error);
+          dispatch(setError(error.message || 'Failed to load purchase history'));
+          lastFetchedId.current = null; // Allow retry on next render
         } finally {
+          setFetched(true);
           dispatch(setLoading(false));
         }
+      } else if (!accountId) {
+        // No logged-in user — mark as fetched so we show empty state
+        setFetched(true);
       }
     };
 
     fetchHistory();
-  }, [currentUser, dispatch]);
+  }, [currentUser?.id, dispatch]);
 
   const handleDownload = (item) => {
     if (item.fileUrl) {
@@ -116,6 +126,31 @@ const PurchaseHistory = () => {
       }
     }
   };
+
+  if (loading || (!fetched && currentUser?.id)) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[60vh]">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500 mb-4"></div>
+        <p className="text-gray-400">Loading purchase history...</p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[60vh]">
+        <FaReceipt className="text-red-400 text-6xl mb-4" />
+        <h2 className="text-white text-2xl font-bold mb-2">Failed to load purchases</h2>
+        <p className="text-gray-400 mb-6">{error}</p>
+        <button
+          onClick={() => { lastFetchedId.current = null; window.location.reload(); }}
+          className="px-6 py-3 bg-blue-700 hover:bg-blue-800 text-white font-semibold rounded-lg"
+        >
+          Try Again
+        </button>
+      </div>
+    );
+  }
 
   if (purchases.length === 0) {
     return (

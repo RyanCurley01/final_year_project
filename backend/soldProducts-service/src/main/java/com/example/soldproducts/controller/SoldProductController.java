@@ -39,4 +39,10 @@ public class SoldProductController {
                 .map(ResponseEntity::ok)
                 .orElse(ResponseEntity.notFound().build());
     }
+
+    @PostMapping
+    public ResponseEntity<SoldProduct> createSoldProduct(@Valid @RequestBody SoldProduct soldProduct) {
+        SoldProduct createdProduct = soldProductService.createSoldProduct(soldProduct);
+        return ResponseEntity.status(HttpStatus.CREATED).body(createdProduct);
+    }
 }

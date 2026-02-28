@@ -62,9 +62,14 @@ export default defineConfig({
         rewrite: (path) => path.replace(/^\/proxy\/customer-summary/, ''),
       },
       '/proxy/sold-products': {
-        target: 'http://host.docker.internal:8089',
+        target: 'http://host.docker.internal:8088',
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/proxy\/sold-products/, ''),
+      },
+      '/proxy/purchased-products': {
+        target: 'http://host.docker.internal:8089',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/proxy\/purchased-products/, ''),
       },
     },
     hmr: {

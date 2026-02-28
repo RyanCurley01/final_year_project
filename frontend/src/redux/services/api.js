@@ -65,7 +65,7 @@ export const getServiceUrl = (service) => {
       8086: '/proxy/order-items',
       8087: '/proxy/customer-summary',
       8088: '/proxy/sold-products',
-      8089: '/proxy/purchased-products', // Fixed mapping
+      8089: '/proxy/purchased-products',
     };
     // Default to backend if port not found
     const url = proxyMap[port] || `/proxy/backend`;
@@ -97,7 +97,7 @@ export const getServiceUrl = (service) => {
       8086: '/proxy/order-items',
       8087: '/proxy/customer-summary',
       8088: '/proxy/sold-products',
-      8089: '/proxy/sold-products',
+      8089: '/proxy/purchased-products',
     };
     const url = proxyMap[port] || `/proxy/backend`;
     return url;

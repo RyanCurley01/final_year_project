@@ -1,6 +1,6 @@
 import { getServiceUrl, apiCall, getBasicAuthHeaders } from './api';
 
-const BASE_URL = `${getServiceUrl('CUSTOMER_SUMMARY')}/api/customerSummary`;
+const BASE_URL = `${getServiceUrl('CUSTOMER_SUMMARY')}/api/customer-summary`;
 
 export const customerSummaryService = {
   // Get all customer summaries
@@ -26,11 +26,14 @@ export const customerSummaryService = {
 
   // Create customer summary
   createCustomerSummary: async (summaryData, email, password) => {
-    return apiCall(BASE_URL, {
+    const options = {
       method: 'POST',
-      headers: getBasicAuthHeaders(email, password),
       body: JSON.stringify(summaryData),
-    });
+    };
+    if (email && password) {
+      options.headers = getBasicAuthHeaders(email, password);
+    }
+    return apiCall(BASE_URL, options);
   },
 
   // Update customer summary

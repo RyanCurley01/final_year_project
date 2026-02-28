@@ -43,4 +43,10 @@ public class CustomerSummaryController {
                 .map(ResponseEntity::ok)
                 .orElse(ResponseEntity.notFound().build());
     }
+
+    @PostMapping
+    public ResponseEntity<CustomerSummary> createCustomerSummary(@Valid @RequestBody CustomerSummary customerSummary) {
+        CustomerSummary createdSummary = customerSummaryService.createCustomerSummary(customerSummary);
+        return ResponseEntity.status(HttpStatus.CREATED).body(createdSummary);
+    }
 }
