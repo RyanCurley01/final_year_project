@@ -171,8 +171,8 @@ const Sidebar = () => {
       </div>
 
       {/* Mobile Menu Overlay */}
-      <div className={`md:hidden fixed top-0 left-0 w-2/3 max-w-[250px] h-full bg-gradient-to-br from-[#252246] to-[#1a1a3e] z-50 transform transition-transform duration-300 ${mobileMenuOpen ? 'translate-x-0' : '-translate-x-full'}`}>
-        <div className="p-4">
+      <div className={`md:hidden fixed top-0 left-0 w-2/3 max-w-[250px] h-full overflow-y-auto bg-gradient-to-br from-[#252246] to-[#1a1a3e] z-50 transform transition-transform duration-300 ${mobileMenuOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+        <div className="p-4 pb-20">
           <RiCloseLine 
             className="w-8 h-8 text-white cursor-pointer mb-4" 
             onClick={() => setMobileMenuOpen(false)} 

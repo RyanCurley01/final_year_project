@@ -8,6 +8,7 @@ import { setActiveSong, playPause } from '../redux/features/playerSlice';
 import { productService } from '../redux/services';
 import { FaPauseCircle, FaPlayCircle } from 'react-icons/fa';
 import envConfig from '../config/environment';
+import { fixTextDeep } from '../utils/fixText';
 
 const ARTISTS = ['Aphex Twin', 'Boards of Canada', 'Squarepusher'];
 
@@ -210,7 +211,7 @@ const TopCharts = () => {
         const audioApiUrl = envConfig.getApiBaseUrl();
         const response = await fetch(`${audioApiUrl}/api/audio/cached-features?artist_only=false`);
         if (response.ok) {
-          const data = await response.json();
+          const data = fixTextDeep(await response.json());
           // Backend returns a dictionary/object mapped by ID, use it directly
           setCachedAudioFeatures(data.features);
           console.log(`[TopCharts] Loaded ${data.count} cached audio features for artist songs`);
@@ -263,7 +264,7 @@ const TopCharts = () => {
             const response = await fetch(
               `${apiBaseUrl}/itunes/search?term=${encodeURIComponent(artist)}&media=music&entity=song&limit=200`
             );
-            const data = await response.json();
+            const data = fixTextDeep(await response.json());
 
              // Check if results exist before filtering
             if (!data.results) {
@@ -403,7 +404,7 @@ const TopCharts = () => {
         });
 
         if (response.ok) {
-           const data = await response.json();
+           const data = fixTextDeep(await response.json());
            if (data.recommendations) {
                setRecommendations(data.recommendations);
            }

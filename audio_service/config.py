@@ -9,8 +9,8 @@ load_dotenv()
 
 # EXECUTION ORDER: Run on module import.
 # Thread pool for audio analysis
-# Increased workers to 15 to handle parallel downloads and analysis faster
-executor = ThreadPoolExecutor(max_workers=15)
+# Keep concurrency modest to avoid OOM in the Docker container
+executor = ThreadPoolExecutor(max_workers=4)
 
 # Database configuration
 # EXECUTION ORDER: Run on module import.

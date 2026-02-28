@@ -98,7 +98,8 @@ USE Game_Store_System;
         StockID INT AUTO_INCREMENT PRIMARY KEY,
         StockQuantity INT,
         ProductID INT,
-        FOREIGN KEY(ProductID) REFERENCES Products(ProductID)
+        FOREIGN KEY(ProductID) REFERENCES Products(ProductID),
+        UNIQUE KEY idx_stock_product (ProductID)
     );
 
     -- Wishlist Table

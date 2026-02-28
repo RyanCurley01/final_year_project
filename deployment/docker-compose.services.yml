@@ -264,6 +264,10 @@ services:
       dockerfile: Dockerfile
     ports:
       - "5000:5000"
+    deploy:
+      resources:
+        limits:
+          memory: 1G
     environment:
       MODEL_PATH: /app/models/recommendation_model.onnx
       # AWS S3 credentials for presigned URLs

@@ -16,6 +16,7 @@ import { FaPauseCircle, FaPlayCircle, FaStar, FaRegStar } from 'react-icons/fa';
 import { FiShoppingCart, FiMaximize2, FiMinimize2 } from 'react-icons/fi';
 import envConfig from '../config/environment';
 import blissImage from '../assets/bliss.png';
+import { fixTextDeep } from '../utils/fixText';
 
 const ARTISTS = ['Aphex Twin', 'Boards of Canada', 'Squarepusher'];
 
@@ -462,7 +463,7 @@ const Search = () => {
             );
 
             // process results into allArtistSongs
-            const data = await response.json();
+            const data = fixTextDeep(await response.json());
             
             const artistLower = artist.toLowerCase();
             const artistSongs = data.results
@@ -604,7 +605,7 @@ const Search = () => {
         const response = await fetch(`${audioServiceUrl}/api/audio/cached-features?artist_only=false`);
         
         if (response.ok) {
-          const data = await response.json();
+          const data = fixTextDeep(await response.json());
           if (data.status === 'success' && data.features) {
             // Backend returns a dictionary/object mapped by ID, use it directly
             setCachedAudioFeatures(data.features);
@@ -673,7 +674,7 @@ const Search = () => {
                 });
                 
                 if (response.ok) {
-                    const data = await response.json();
+                    const data = fixTextDeep(await response.json());
                     const matches = data.matches || [];
                     
                     if (matches.length > 0) {
@@ -796,7 +797,7 @@ const Search = () => {
         });
 
         if (response.ok) {
-           const data = await response.json();
+           const data = fixTextDeep(await response.json());
            if (data.recommendations) {
                setRecommendations(data.recommendations);
            }

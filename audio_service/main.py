@@ -43,11 +43,24 @@ async def startup_event():
     2. Load audio features from DB into memory cache
     3. Train/Load ML Scaler for feature normalization
     4. Compute PCA projection for visualization
+    5. Start background top-charts auto-refresh scheduler
     """
     console.log("🚀 Starting Audio Analysis Service...")
     
     # Initialize ML components (Cache, Scaler, PCA)
-    await ml_service.startup_cache()
+    # Wrapped in try/except so the server starts accepting requests even if
+    # the ML pipeline is slow or the DB isn't reachable on first boot.
+    try:
+        await ml_service.startup_cache()
+    except Exception as e:
+        console.log(f"⚠️ ML startup cache failed (will retry on first request): {e}")
+
+    # Start the background job that keeps iTunes top-charts in sync
+    try:
+        from routes.itunes import start_refresh_scheduler
+        start_refresh_scheduler()
+    except Exception as e:
+        console.log(f"⚠️ Refresh scheduler failed to start: {e}")
     
     console.log("✅ Service startup complete. API ready.")
 
@@ -56,6 +69,11 @@ async def startup_event():
 async def shutdown_event():
     """Cleanup resources on shutdown"""
     console.log("🛑 Shutting down service...")
+
+    # Cancel the background top-charts refresh
+    from routes.itunes import stop_refresh_scheduler
+    stop_refresh_scheduler()
+
     executor.shutdown(wait=True)
     console.log("✅ Executor shut down.")
 

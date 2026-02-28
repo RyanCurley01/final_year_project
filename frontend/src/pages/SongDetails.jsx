@@ -16,6 +16,7 @@ import AudioReactiveVideo from '../components/AudioReactiveVideo';
 import envConfig from '../config/environment';
 import { productService } from '../redux/services';
 import { useAudioFeatures } from '../context/AudioFeaturesContext';
+import { fixTextDeep } from '../utils/fixText';
 
 // Fallback image for missing album art
 const fallbackImage = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="250" height="250" viewBox="0 0 250 250"><rect width="250" height="250" fill="#374151"/><circle cx="125" cy="125" r="80" fill="#4B5563"/><circle cx="125" cy="125" r="30" fill="#374151"/><circle cx="125" cy="125" r="10" fill="#6B7280"/></svg>');
@@ -55,8 +56,9 @@ const FeatureBadge = ({ label, value }) => {
 };
 
 // Similar Song Card Component
-const SimilarSongCard = ({ song, isPlaying, activeSong, onPlay, onPause, rank, playbackRate }) => {
+const SimilarSongCard = ({ song, isPlaying, activeSong, onPlay, onPause, rank, playbackRate, allSimilarSongs }) => {
   const dispatch = useDispatch();
+  const navigate = useNavigate();
   const isThisSongActive = (activeSong?.trackId && String(activeSong.trackId) === String(song.trackId)) || 
                            (activeSong?.id && String(activeSong.id) === String(song.trackId));
   const albumArt = song.artworkUrl100?.replace('100x100', '600x600') || song.albumCoverImageUrl || fallbackImage;
@@ -266,11 +268,52 @@ const SimilarSongCard = ({ song, isPlaying, activeSong, onPlay, onPause, rank, p
       )}
 
       <div className="mt-3 flex flex-col gap-1">
-        <p className="font-semibold text-sm text-white truncate leading-tight">{song.trackName}</p>
+        <p
+          className="font-semibold text-[17px] text-gray-300 truncate leading-tight hover:text-cyan-400 transition-colors cursor-pointer"
+          onClick={(e) => {
+            e.stopPropagation();
+            const id = song.trackId || song.id;
+            navigate(`/songs/${id}`, {
+              state: {
+                song,
+                artistSongs: allSimilarSongs || [],
+                fromDiscover: true,
+              },
+            });
+          }}
+        >
+          {song.trackName}
+        </p>
         {!isLibrarySong && song.artistName && (
-          <p className="text-xs text-gray-400 truncate">{song.artistName}</p>
+          <p
+            className="text-xs text-gray-400 truncate hover:text-cyan-400 transition-colors cursor-pointer"
+            onClick={(e) => {
+              e.stopPropagation();
+              const slug = song.artistName.toLowerCase().replace(/\s+/g, '-');
+              navigate(`/artists/${slug}`);
+            }}
+            title="Click to view artist details"
+          >
+            {song.artistName}
+          </p>
         )}
-        <p className="text-xs text-gray-400 truncate">{song.collectionName}</p>
+        {!isLibrarySong && song.collectionName && (
+          <p
+            className="text-xs text-gray-500 truncate hover:text-cyan-400 transition-colors cursor-pointer"
+            onClick={(e) => {
+              e.stopPropagation();
+              navigate(`/albums/${encodeURIComponent(song.collectionName)}`, {
+                state: {
+                  song,
+                  albumArtwork: (song.artworkUrl100 || song.albumCoverImageUrl || '').replace('100x100', '600x600'),
+                },
+              });
+            }}
+            title="Click to view album details"
+          >
+            {song.collectionName}
+          </p>
+        )}
         <p className="text-xs text-cyan-400 truncate">{song.match_reason}</p>
       </div>
 
@@ -311,33 +354,33 @@ const SimilarSongCard = ({ song, isPlaying, activeSong, onPlay, onPause, rank, p
 
       {/* Feature match badges */}
       <div className="mt-2 grid grid-cols-2 sm:grid-cols-4 gap-1">
-        <div className={`px-1 py-1 rounded text-[9px] sm:text-[10px] text-center leading-tight truncate ${
+        <div className={`px-1 py-1 rounded text-[12px] text-center leading-tight truncate ${
           song.tempo_match >= 0.7 ? 'bg-green-500/30 text-green-300' : 
           song.tempo_match >= 0.5 ? 'bg-yellow-500/30 text-yellow-300' : 
           'bg-red-500/30 text-red-300'
         }`}>
-          <span className="hidden sm:inline">Tempo:</span><span className="sm:hidden">T:</span>{Math.round(song.tempo_match * 100)}%
+          Tempo: {Math.round(song.tempo_match * 100)}%
         </div>
-        <div className={`px-1 py-1 rounded text-[9px] sm:text-[10px] text-center leading-tight truncate ${
+        <div className={`px-1 py-1 rounded text-[12px] text-center leading-tight truncate ${
           song.energy_match >= 0.7 ? 'bg-green-500/30 text-green-300' : 
           song.energy_match >= 0.5 ? 'bg-yellow-500/30 text-yellow-300' : 
           'bg-red-500/30 text-red-300'
         }`}>
-          <span className="hidden sm:inline">Energy:</span><span className="sm:hidden">E:</span>{Math.round(song.energy_match * 100)}%
+          Energy: {Math.round(song.energy_match * 100)}%
         </div>
-        <div className={`px-1 py-1 rounded text-[9px] sm:text-[10px] text-center leading-tight truncate ${
+        <div className={`px-1 py-1 rounded text-[12px] text-center leading-tight truncate ${
           song.mood_match >= 0.7 ? 'bg-green-500/30 text-green-300' : 
           song.mood_match >= 0.5 ? 'bg-yellow-500/30 text-yellow-300' : 
           'bg-red-500/30 text-red-300'
         }`}>
-          <span className="hidden sm:inline">Mood:</span><span className="sm:hidden">M:</span>{Math.round(song.mood_match * 100)}%
+          Mood: {Math.round(song.mood_match * 100)}%
         </div>
-        <div className={`px-1 py-1 rounded text-[9px] sm:text-[10px] text-center leading-tight truncate ${
+        <div className={`px-1 py-1 rounded text-[12px] text-center leading-tight truncate ${
           song.dance_match >= 0.7 ? 'bg-green-500/30 text-green-300' : 
           song.dance_match >= 0.5 ? 'bg-yellow-500/30 text-yellow-300' : 
           'bg-red-500/30 text-red-300'
         }`}>
-          <span className="hidden sm:inline">Dance:</span><span className="sm:hidden">D:</span>{Math.round(song.dance_match * 100)}%
+          Dance: {Math.round(song.dance_match * 100)}%
         </div>
       </div>
     </div>
@@ -545,7 +588,7 @@ const SongDetails = () => {
         throw new Error(`ML Service Error: ${response.status}`);
       }
 
-      const data = await response.json();
+      const data = fixTextDeep(await response.json());
       
       if (data.status === 'success') {
         // Backend returns "recommendations" which are the scored candidates
@@ -777,6 +820,7 @@ const SongDetails = () => {
                 onPause={handlePause}
                 rank={index + 1}
                 playbackRate={playbackRate}
+                allSimilarSongs={similarSongs}
               />
             ))}
           </div>

@@ -8,5 +8,9 @@ ALTER TABLE Stock ADD COLUMN IsAvailable BOOLEAN NOT NULL DEFAULT 1;
 -- 2. Remove StockQuantity from Products table (no longer needed)
 ALTER TABLE Products DROP COLUMN StockQuantity;
 
--- 3. Populate availability for all products (~95% available, ~5% unavailable)
-UPDATE Stock SET IsAvailable = CASE WHEN RAND() < 0.05 THEN 0 ELSE 1 END;
+-- 3. Ensure one Stock row per product (required for ON DUPLICATE KEY UPDATE)
+ALTER TABLE Stock ADD UNIQUE INDEX idx_stock_product (ProductID);
+
+-- 4. Populate availability based on real product data
+-- (see populate_stock.sql for the full logic)
+UPDATE Stock SET IsAvailable = 1;
