@@ -1,12 +1,16 @@
 import React, { useState, useEffect } from "react";
 import { useAuth } from "../context/AuthContext";
 import { soldProductsService } from "../redux/services/soldProductsService";
+import { productService } from "../redux/services/productService";
+import { orderItemService } from "../redux/services/orderItemService";
 import { FaBoxOpen } from "react-icons/fa";
 
 const SoldProductsSidebar = () => {
   const { currentUser } = useAuth();
   const [isOpen, setIsOpen] = useState(false);
   const [data, setData] = useState([]);
+  const [productMap, setProductMap] = useState({});
+  const [orderItemMap, setOrderItemMap] = useState({});
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
 
@@ -24,8 +28,39 @@ const SoldProductsSidebar = () => {
       const email = currentUser?.email || currentUser?.accountEmailAddress;
       soldProductsService
         .getAllSoldProducts(email, currentUser?.password)
-        .then((res) => {
+        .then(async (res) => {
           setData(res);
+
+          // Enrich with product names
+          const uniqueProductIds = [...new Set(res.map((r) => r.productId))];
+          const pMap = {};
+          await Promise.all(
+            uniqueProductIds.map(async (pid) => {
+              try {
+                const product = await productService.getProductById(pid);
+                pMap[pid] = product;
+              } catch {
+                pMap[pid] = null;
+              }
+            })
+          );
+          setProductMap(pMap);
+
+          // Enrich with order item details
+          const uniqueOrderItemIds = [...new Set(res.map((r) => r.orderItemId))];
+          const oiMap = {};
+          await Promise.all(
+            uniqueOrderItemIds.map(async (oiid) => {
+              try {
+                const oi = await orderItemService.getOrderItemById(oiid, email, currentUser?.password);
+                oiMap[oiid] = oi;
+              } catch {
+                oiMap[oiid] = null;
+              }
+            })
+          );
+          setOrderItemMap(oiMap);
+
           setIsLoading(false);
         })
         .catch((err) => {
@@ -73,24 +108,47 @@ const SoldProductsSidebar = () => {
                 <table className="w-full text-left text-sm text-gray-300 whitespace-nowrap">
                   <thead className="text-xs uppercase bg-[#333] text-gray-300">
                     <tr>
-                      <th className="px-4 py-2">SoldProductsID</th>
-                      <th className="px-4 py-2">OrderItemID</th>
-                      <th className="px-4 py-2">ProductID</th>
+                      <th className="px-4 py-2">#</th>
+                      <th className="px-4 py-2">Product</th>
+                      <th className="px-4 py-2">Cover</th>
+                      <th className="px-4 py-2">Qty</th>
+                      <th className="px-4 py-2">Unit Price</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {data.map((item, i) => (
-                      <tr
-                        key={i}
-                        className="border-b border-gray-700 hover:bg-gray-800"
-                      >
-                        <td className="px-4 py-2">
-                          {item.id || item.soldProductsId}
-                        </td>
-                        <td className="px-4 py-2">{item.orderItemId}</td>
-                        <td className="px-4 py-2">{item.productId}</td>
-                      </tr>
-                    ))}
+                    {data.map((item, i) => {
+                      const product = productMap[item.productId];
+                      const orderItem = orderItemMap[item.orderItemId];
+                      return (
+                        <tr
+                          key={i}
+                          className="border-b border-gray-700 hover:bg-gray-800"
+                        >
+                          <td className="px-4 py-2">{i + 1}</td>
+                          <td className="px-4 py-2">
+                            {product?.albumTitle || "—"}
+                          </td>
+                          <td className="px-4 py-2">
+                            {product?.albumCoverImageUrl ? (
+                              <img
+                                src={product.albumCoverImageUrl.endsWith('.mp4') ? '/cloud-cover.webp' : product.albumCoverImageUrl}
+                                alt={product.albumTitle}
+                                className="w-10 h-10 rounded object-cover"
+                                onError={(e) => { e.target.onerror = null; e.target.src = '/cloud-cover.webp'; }}
+                              />
+                            ) : (
+                              "—"
+                            )}
+                          </td>
+                          <td className="px-4 py-2">
+                            {orderItem?.quantity ?? "—"}
+                          </td>
+                          <td className="px-4 py-2">
+                            {orderItem?.unitPrice != null ? `$${Number(orderItem.unitPrice).toFixed(2)}` : "—"}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               )}

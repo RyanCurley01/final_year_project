@@ -1,12 +1,18 @@
 import React, { useState, useEffect } from "react";
 import { useAuth } from "../context/AuthContext";
 import { customerSummaryService } from "../redux/services/customerSummaryService";
+import { accountService } from "../redux/services/accountService";
+import { productService } from "../redux/services/productService";
+import { orderService } from "../redux/services/orderService";
 import { FaUserFriends } from "react-icons/fa";
 
 const CustomerSummarySidebar = () => {
   const { currentUser } = useAuth();
   const [isOpen, setIsOpen] = useState(false);
   const [data, setData] = useState([]);
+  const [accountMap, setAccountMap] = useState({});
+  const [productMap, setProductMap] = useState({});
+  const [orderMap, setOrderMap] = useState({});
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
 
@@ -24,8 +30,54 @@ const CustomerSummarySidebar = () => {
       const email = currentUser?.email || currentUser?.accountEmailAddress;
       customerSummaryService
         .getAllCustomerSummaries(email, currentUser?.password)
-        .then((res) => {
+        .then(async (res) => {
           setData(res);
+
+          // Enrich with account names
+          const uniqueAccountIds = [...new Set(res.map((r) => r.accountId))];
+          const aMap = {};
+          await Promise.all(
+            uniqueAccountIds.map(async (aid) => {
+              try {
+                const account = await accountService.getAccountById(aid, email, currentUser?.password);
+                aMap[aid] = account;
+              } catch {
+                aMap[aid] = null;
+              }
+            })
+          );
+          setAccountMap(aMap);
+
+          // Enrich with product names
+          const uniqueProductIds = [...new Set(res.map((r) => r.productId))];
+          const pMap = {};
+          await Promise.all(
+            uniqueProductIds.map(async (pid) => {
+              try {
+                const product = await productService.getProductById(pid);
+                pMap[pid] = product;
+              } catch {
+                pMap[pid] = null;
+              }
+            })
+          );
+          setProductMap(pMap);
+
+          // Enrich with order details
+          const uniqueOrderIds = [...new Set(res.map((r) => r.orderId))];
+          const oMap = {};
+          await Promise.all(
+            uniqueOrderIds.map(async (oid) => {
+              try {
+                const order = await orderService.getOrderById(oid);
+                oMap[oid] = order;
+              } catch {
+                oMap[oid] = null;
+              }
+            })
+          );
+          setOrderMap(oMap);
+
           setIsLoading(false);
         })
         .catch((err) => {
@@ -77,26 +129,39 @@ const CustomerSummarySidebar = () => {
                 <table className="w-full text-left text-sm text-gray-300 whitespace-nowrap">
                   <thead className="text-xs uppercase bg-[#333] text-gray-300">
                     <tr>
-                      <th className="px-4 py-2">CustomerSummaryID</th>
-                      <th className="px-4 py-2">AccountID</th>
-                      <th className="px-4 py-2">ProductID</th>
-                      <th className="px-4 py-2">OrderID</th>
+                      <th className="px-4 py-2">#</th>
+                      <th className="px-4 py-2">Customer</th>
+                      <th className="px-4 py-2">Product</th>
+                      <th className="px-4 py-2">Order Date</th>
+                      <th className="px-4 py-2">Order Total</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {data.map((item, i) => (
-                      <tr
-                        key={i}
-                        className="border-b border-gray-700 hover:bg-gray-800"
-                      >
-                        <td className="px-4 py-2">
-                          {item.id || item.customerSummaryId}
-                        </td>
-                        <td className="px-4 py-2">{item.accountId}</td>
-                        <td className="px-4 py-2">{item.productId}</td>
-                        <td className="px-4 py-2">{item.orderId}</td>
-                      </tr>
-                    ))}
+                    {data.map((item, i) => {
+                      const account = accountMap[item.accountId];
+                      const product = productMap[item.productId];
+                      const order = orderMap[item.orderId];
+                      return (
+                        <tr
+                          key={i}
+                          className="border-b border-gray-700 hover:bg-gray-800"
+                        >
+                          <td className="px-4 py-2">{i + 1}</td>
+                          <td className="px-4 py-2">
+                            {account?.accountName || account?.accountEmailAddress || "—"}
+                          </td>
+                          <td className="px-4 py-2">
+                            {product?.albumTitle || "—"}
+                          </td>
+                          <td className="px-4 py-2">
+                            {order?.orderDate ? new Date(order.orderDate).toLocaleDateString() : "—"}
+                          </td>
+                          <td className="px-4 py-2">
+                            {order?.totalAmount != null ? `$${Number(order.totalAmount).toFixed(2)}` : "—"}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               )}

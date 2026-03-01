@@ -1,11 +1,15 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useAuth } from "../context/AuthContext";
 import { useGetAllInteractionsQuery } from "../redux/services/apiService";
+import { productService } from "../redux/services/productService";
+import { accountService } from "../redux/services/accountService";
 import { FaDatabase } from "react-icons/fa";
 
 const UserInteractionsSidebar = () => {
   const { currentUser } = useAuth();
   const [isOpen, setIsOpen] = useState(false);
+  const [productMap, setProductMap] = useState({});
+  const [accountMap, setAccountMap] = useState({});
 
   const isGoogleAccount = !!currentUser?.firebaseUid;
   const isManager = currentUser?.accountType === "Manager";
@@ -24,6 +28,44 @@ const UserInteractionsSidebar = () => {
   } = useGetAllInteractionsQuery(undefined, {
     skip: !isOpen || !canView, // Only fetch when open and authorized
   });
+
+  // Enrich interactions with product and account names
+  useEffect(() => {
+    if (!interactions || interactions.length === 0) return;
+    const email = currentUser?.email || currentUser?.accountEmailAddress;
+
+    const enrichData = async () => {
+      const uniqueProductIds = [...new Set(interactions.map((i) => i.productId).filter(Boolean))];
+      const pMap = {};
+      await Promise.all(
+        uniqueProductIds.map(async (pid) => {
+          try {
+            const product = await productService.getProductById(pid);
+            pMap[pid] = product;
+          } catch {
+            pMap[pid] = null;
+          }
+        })
+      );
+      setProductMap(pMap);
+
+      const uniqueAccountIds = [...new Set(interactions.map((i) => i.accountId).filter(Boolean))];
+      const aMap = {};
+      await Promise.all(
+        uniqueAccountIds.map(async (aid) => {
+          try {
+            const account = await accountService.getAccountById(aid, email, currentUser?.password);
+            aMap[aid] = account;
+          } catch {
+            aMap[aid] = null;
+          }
+        })
+      );
+      setAccountMap(aMap);
+    };
+
+    enrichData();
+  }, [interactions, currentUser]);
 
   if (!canView) return null;
 
@@ -65,50 +107,58 @@ const UserInteractionsSidebar = () => {
                   <table className="w-full text-left text-sm text-gray-300 whitespace-nowrap">
                     <thead className="text-xs uppercase bg-[#333] text-gray-300">
                       <tr>
-                        <th className="px-4 py-2">InteractionID</th>
-                        <th className="px-4 py-2">AccountID</th>
-                        <th className="px-4 py-2">ProductID</th>
-                        <th className="px-4 py-2">InteractionType</th>
-                        <th className="px-4 py-2">InteractionTimestamp</th>
-                        <th className="px-4 py-2">DurationSeconds</th>
-                        <th className="px-4 py-2">CompletionPercentage</th>
-                        <th className="px-4 py-2">EngagementScore</th>
-                        <th className="px-4 py-2">DeviceType</th>
-                        <th className="px-4 py-2">SessionID</th>
+                        <th className="px-4 py-2">#</th>
+                        <th className="px-4 py-2">Customer</th>
+                        <th className="px-4 py-2">Product</th>
+                        <th className="px-4 py-2">Type</th>
+                        <th className="px-4 py-2">Timestamp</th>
+                        <th className="px-4 py-2">Duration (s)</th>
+                        <th className="px-4 py-2">Completion %</th>
+                        <th className="px-4 py-2">Engagement</th>
+                        <th className="px-4 py-2">Device</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {interactions.map((interaction, i) => (
-                        <tr
-                          key={i}
-                          className="border-b border-gray-700 hover:bg-gray-800"
-                        >
-                          <td className="px-4 py-2">
-                            {interaction.interactionId}
-                          </td>
-                          <td className="px-4 py-2">{interaction.accountId}</td>
-                          <td className="px-4 py-2">{interaction.productId}</td>
-                          <td className="px-4 py-2">
-                            {interaction.interactionType}
-                          </td>
-                          <td className="px-4 py-2">
-                            {interaction.interactionTimestamp}
-                          </td>
-                          <td className="px-4 py-2">
-                            {interaction.durationSeconds ?? "NULL"}
-                          </td>
-                          <td className="px-4 py-2">
-                            {interaction.completionPercentage ?? "NULL"}
-                          </td>
-                          <td className="px-4 py-2">
-                            {interaction.engagementScore ?? "NULL"}
-                          </td>
-                          <td className="px-4 py-2">
-                            {interaction.deviceType}
-                          </td>
-                          <td className="px-4 py-2">{interaction.sessionId}</td>
-                        </tr>
-                      ))}
+                      {interactions.map((interaction, i) => {
+                        const account = accountMap[interaction.accountId];
+                        const product = productMap[interaction.productId];
+                        return (
+                          <tr
+                            key={i}
+                            className="border-b border-gray-700 hover:bg-gray-800"
+                          >
+                            <td className="px-4 py-2">{i + 1}</td>
+                            <td className="px-4 py-2">
+                              {account?.accountName || account?.accountEmailAddress || "—"}
+                            </td>
+                            <td className="px-4 py-2">
+                              {product?.albumTitle || "—"}
+                            </td>
+                            <td className="px-4 py-2">
+                              {interaction.interactionType}
+                            </td>
+                            <td className="px-4 py-2">
+                              {interaction.interactionTimestamp
+                                ? new Date(interaction.interactionTimestamp).toLocaleString()
+                                : "—"}
+                            </td>
+                            <td className="px-4 py-2">
+                              {interaction.durationSeconds ?? "—"}
+                            </td>
+                            <td className="px-4 py-2">
+                              {interaction.completionPercentage != null
+                                ? `${interaction.completionPercentage}%`
+                                : "—"}
+                            </td>
+                            <td className="px-4 py-2">
+                              {interaction.engagementScore ?? "—"}
+                            </td>
+                            <td className="px-4 py-2">
+                              {interaction.deviceType || "—"}
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 )}

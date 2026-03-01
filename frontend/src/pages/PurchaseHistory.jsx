@@ -179,7 +179,7 @@ const PurchaseHistory = () => {
             <div className="flex flex-wrap justify-between items-start mb-4 pb-4 border-b border-gray-600">
               <div>
                 <h3 className="text-white font-semibold text-lg mb-2">
-                  Order ID: {String(purchase.id).replace('purchase-', '')}
+                  Order #{String(purchase.id).replace('purchase-', '').padStart(3, '0')}
                 </h3>
                 <div className="flex flex-wrap gap-4 text-gray-400 text-sm">
                   <div className="flex items-center gap-2">
@@ -270,7 +270,7 @@ const PurchaseHistory = () => {
             {purchase.paymentId && (
               <div className="mt-4 pt-4 border-t border-gray-600">
                 <p className="text-gray-400 text-sm">
-                  Payment ID: <span className="text-gray-300">{purchase.paymentId}</span>
+                  Transaction Ref: <span className="text-gray-300">{purchase.paymentId}</span>
                 </p>
               </div>
             )}

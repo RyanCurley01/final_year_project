@@ -128,8 +128,7 @@ const StockSidebar = () => {
                 <table className="w-full text-left text-sm text-gray-300 whitespace-nowrap">
                   <thead className="text-xs uppercase bg-[#333] text-gray-300">
                     <tr>
-                      <th className="px-4 py-2">Stock ID</th>
-                      <th className="px-4 py-2">Product ID</th>
+                      <th className="px-4 py-2">#</th>
                       <th className="px-4 py-2">Product Name</th>
                       <th className="px-4 py-2">Cover</th>
                       <th className="px-4 py-2">Status</th>
@@ -144,9 +143,8 @@ const StockSidebar = () => {
                           className="border-b border-gray-700 hover:bg-gray-800"
                         >
                           <td className="px-4 py-2">
-                            {item.id || item.stockId}
+                            {i + 1}
                           </td>
-                          <td className="px-4 py-2">{item.productId}</td>
                           <td className="px-4 py-2">
                             {product?.albumTitle || "—"}
                           </td>

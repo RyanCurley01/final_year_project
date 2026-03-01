@@ -78,7 +78,7 @@ public class SecurityConfig
                 // All other requests must be authenticated
                 .anyRequest().authenticated()
             )
-            .httpBasic(basic -> basic.disable()) // Disable HTTP Basic Authentication
+            .httpBasic(Customizer.withDefaults())
             .sessionManagement(session -> session
                 .sessionCreationPolicy(SessionCreationPolicy.STATELESS)
             )
