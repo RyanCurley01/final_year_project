@@ -3,7 +3,7 @@ import { Route, Routes, useLocation, Navigate } from 'react-router-dom';
 import { useState, useEffect, useRef } from 'react';
 
 import { Searchbar, Sidebar, MusicPlayer, TopPlay } from './components';
-import { ArtistDetails, CustomerScreen, Search, SongDetails, TopCharts, SimilarSongs, MLVisualization, Login, Register, WishlistPage } from './pages';
+import { ArtistDetails, CustomerScreen, Search, SongDetails, TopCharts, SimilarSongs, MLVisualization, SpectrogramCreator, Login, Register, WishlistPage } from './pages';
 import AlbumDetails from './pages/AlbumDetails';
 import Cart from './pages/Cart';
 import PurchaseHistory from './pages/PurchaseHistory';
@@ -11,6 +11,7 @@ import SmartRecommendationVisualizer from './components/SmartRecommendationVisua
 import { VideoModalProvider, useVideoModal } from './context/VideoModalContext';
 import { AudioFeaturesProvider } from './context/AudioFeaturesContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { SpectrogramLiveProvider } from './context/SpectrogramLiveContext';
 import VideoModal from './components/VideoModal';
 import { productService } from './redux/services';
 import { setActiveSong, playPause as playPauseAction } from './redux/features/playerSlice';
@@ -108,6 +109,7 @@ const AuthenticatedApp = () => {
               <Route path="/top-charts" element={<TopCharts />} />
               <Route path="/similar-songs" element={<SimilarSongs />} />
               <Route path="/ml-visualization" element={<MLVisualization />} />
+              <Route path="/spectrogram-creator" element={<SpectrogramCreator />} />
               <Route path="/songs/:songid" element={<SongDetails />} />
               <Route path="/search/:searchTerm" element={<Search />} />
               <Route path="/cart" element={<Cart />} />
@@ -214,7 +216,9 @@ const App = () => (
   <AuthProvider>
     <VideoModalProvider>
       <AudioFeaturesProvider>
-        <AppRoutes />
+        <SpectrogramLiveProvider>
+          <AppRoutes />
+        </SpectrogramLiveProvider>
       </AudioFeaturesProvider>
     </VideoModalProvider>
   </AuthProvider>

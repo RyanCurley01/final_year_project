@@ -7,6 +7,7 @@ import Cart from './Cart';
 import PurchaseHistory from './PurchaseHistory';
 import SimilarSongs from './SimilarSongs';
 import MLVisualization from './MLVisualization';
+import SpectrogramCreator from './SpectrogramCreator';
 import Login from './Login';
 import Register from './Register';
 import WishlistPage from './WishlistPage';
@@ -21,6 +22,7 @@ export {
   PurchaseHistory,
   SimilarSongs,
   MLVisualization,
+  SpectrogramCreator,
   Login,
   Register,
   WishlistPage,

@@ -3,9 +3,10 @@ import { Link, NavLink, useNavigate } from 'react-router-dom';
 import { useDispatch } from 'react-redux';
 import { HiOutlineMenu, HiOutlineLogout } from 'react-icons/hi';
 import { RiCloseLine } from 'react-icons/ri';
-import { FaReceipt, FaChartLine } from 'react-icons/fa';
+import { FaReceipt, FaChartLine, FaWaveSquare } from 'react-icons/fa';
 
 import { useAuth } from '../context/AuthContext';
+import { useSpectrogramLive } from '../context/SpectrogramLiveContext';
 import { logo } from '../assets';
 import { links } from '../assets/constants';
 import CartIcon from './CartIcon';
@@ -20,6 +21,7 @@ import StockSidebar from './StockSidebar';
 
 const NavLinks = ({ handleClick, onResetPlayer, onClearWishlist }) => {
   const { logout, currentUser } = useAuth();
+  const { isLiveRecording, activeSongTitle } = useSpectrogramLive();
   const navigate = useNavigate();
   const isManager = currentUser?.accountType === 'Manager';
 
@@ -95,6 +97,30 @@ const NavLinks = ({ handleClick, onResetPlayer, onClearWishlist }) => {
       Purchase History
     </NavLink>
     
+    {/* Spectrogram Creator - visible to all users */}
+    {/* NOTE: Do NOT call onResetPlayer here — the Spectrogram Creator's Live mode
+       needs the MusicPlayer and its audio source to stay alive so the analyser
+       can tap into the playing song's frequency data. */}
+    <NavLink
+      to="/spectrogram-creator"
+      className="flex flex-row justify-start items-center my-8 text-sm font-medium text-gray-300 hover:text-primary-light"
+      onClick={() => {
+        handleClick && handleClick();
+      }}
+      title={isLiveRecording ? `Recording "${activeSongTitle}"` : 'Spectrogram Creator'}
+    >
+      <div className="relative">
+        <FaWaveSquare className="w-6 h-6 mr-2" />
+        {isLiveRecording && (
+          <span className="absolute -top-1 -right-0.5 flex h-2.5 w-2.5">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-75" />
+            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-600" />
+          </span>
+        )}
+      </div>
+      Spectrogram Creator
+    </NavLink>
+
     {/* ML Visualization Link - visible to Managers only */}
     {isManager && (
       <NavLink
