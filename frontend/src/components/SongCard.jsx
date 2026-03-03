@@ -6,6 +6,7 @@ import { FaPauseCircle, FaPlayCircle, FaStar, FaRegStar } from 'react-icons/fa';
 import { createPortal } from 'react-dom';
 
 import AudioReactiveVideo from './AudioReactiveVideo';
+import OnsetImageCard from './OnsetImageCard';
 import { playPause, setActiveSong, setPlaybackRate } from '../redux/features/playerSlice';
 import { addToCart } from '../redux/features/cartSlice';
 import { addToWishlistLocal, removeFromWishlistLocal, addWishlistItem, removeWishlistItem } from '../redux/features/wishlistSlice';
@@ -26,6 +27,10 @@ const SongCard = ({ product, payment, i, data }) => {
 
   // Check if the cover media is a video (mp4)
   const isVideo = coverMedia && coverMedia.toLowerCase().includes('.mp4');
+  
+  // Teddy Emotion keeps the sky video; all other songs use AI-generated onset images
+  const isTeddyEmotion = productName && productName.toLowerCase().includes('teddy emotion');
+  const useOnsetImages = isVideo && !isTeddyEmotion;
   
   // Check if current song is a playable song 
   const isPlayableSong = product.albumTitle !== 'Selected Electronic Works';
@@ -173,7 +178,15 @@ const SongCard = ({ product, payment, i, data }) => {
         onMouseEnter={() => setIsHovered(true)}
         onMouseLeave={() => setIsHovered(false)}
       >
-        {isVideo ? (
+        {useOnsetImages ? (
+          <OnsetImageCard
+            songTitle={productName}
+            songId={product.id}
+            className="w-full h-full object-cover"
+            isPlaying={isPlaying && isThisSongActive}
+            isActive={isThisSongActive}
+          />
+        ) : isVideo ? (
           <AudioReactiveVideo
             src={coverMedia}
             alt={productName}
@@ -231,8 +244,8 @@ const SongCard = ({ product, payment, i, data }) => {
           </div>
         )}
 
-        {/* Maximise button for video cards - top right */}
-        {isVideo && (
+        {/* Maximise button for video/onset cards - top right */}
+        {(isVideo || useOnsetImages) && (
           <button
             onClick={(e) => {
               e.stopPropagation();
@@ -270,8 +283,8 @@ const SongCard = ({ product, payment, i, data }) => {
         )}
       </div>
 
-      {/* Tempo Slider - shown on all video cards for consistent row height, only interactive for the active song */}
-      {isVideo && (
+      {/* Tempo Slider - shown on all video/onset cards for consistent row height, only interactive for the active song */}
+      {(isVideo || useOnsetImages) && (
         <div className={`mt-2 px-2${isThisSongActive ? '' : ' opacity-40 pointer-events-none'}`}>
           <div className="flex items-center justify-between mb-1">
             <label className="text-xs text-white/70">Playback Speed</label>
@@ -303,8 +316,8 @@ const SongCard = ({ product, payment, i, data }) => {
         </div>
       )}
 
-      {/* Fullscreen video overlay portal */}
-      {isVideo && isFullscreen && createPortal(
+      {/* Fullscreen overlay portal */}
+      {(isVideo || useOnsetImages) && isFullscreen && createPortal(
         <div
           className="fixed inset-0 bg-black flex flex-col items-center justify-center"
           style={{ zIndex: 99999 }}
@@ -315,22 +328,32 @@ const SongCard = ({ product, payment, i, data }) => {
             <button
               onClick={() => setIsFullscreen(false)}
               className="p-2 rounded-full bg-white/10 hover:bg-white/20 transition-all hover:scale-110"
-              title="Minimise video"
+              title="Minimise"
             >
               <FiMinimize2 className="w-6 h-6 text-white" />
             </button>
           </div>
 
-          {/* Fullscreen video - fills entire viewport, letterboxed to preserve aspect ratio */}
+          {/* Fullscreen content */}
           <div className="absolute inset-0 w-full h-full">
-            <AudioReactiveVideo
-              src={coverMedia}
-              alt={productName}
-              className="w-full h-full object-contain"
-              isPlaying={isPlaying && isThisSongActive}
-              isActive={isThisSongActive}
-              playbackRate={isThisSongActive ? playbackRate : 1.0}
-            />
+            {useOnsetImages ? (
+              <OnsetImageCard
+                songTitle={productName}
+                songId={product.id}
+                className="w-full h-full object-contain"
+                isPlaying={isPlaying && isThisSongActive}
+                isActive={isThisSongActive}
+              />
+            ) : (
+              <AudioReactiveVideo
+                src={coverMedia}
+                alt={productName}
+                className="w-full h-full object-contain"
+                isPlaying={isPlaying && isThisSongActive}
+                isActive={isThisSongActive}
+                playbackRate={isThisSongActive ? playbackRate : 1.0}
+              />
+            )}
           </div>
         </div>,
         document.body

@@ -32,6 +32,7 @@ import { useAuth } from '../context/AuthContext';
 import { auth as firebaseAuth } from '../firebase';
 import { useGetAllProductsQuery } from '../redux/services/productsApi';
 import placeholders from '../utils/placeholderImage';
+import OnsetImageCard from '../components/OnsetImageCard';
 import Loader from '../components/Loader';
 import SongCard from '../components/SongCard';
 
@@ -39,11 +40,21 @@ import SongCard from '../components/SongCard';
 const PriceDropCard = ({ alert, product, onDismiss }) => {
   if (!alert?.dropped || !product) return null;
   const isVideo = product.albumCoverImageUrl?.toLowerCase().includes('.mp4');
+  const isTeddyEmotion = product.albumTitle?.toLowerCase().includes('teddy emotion');
+  const useOnsetImages = isVideo && !isTeddyEmotion;
 
   return (
     <div className="flex items-center gap-4 p-4 bg-gradient-to-r from-green-900/40 to-emerald-900/30 border border-green-500/30 rounded-xl backdrop-blur-sm animate-slideup">
       <div className="relative w-14 h-14 rounded-lg overflow-hidden flex-shrink-0">
-        {isVideo ? (
+        {useOnsetImages ? (
+          <OnsetImageCard
+            songTitle={product.albumTitle}
+            songId={product.id}
+            className="w-full h-full object-cover"
+            isPlaying={false}
+            isActive={false}
+          />
+        ) : isVideo ? (
           <video
             src={product.albumCoverImageUrl}
             className="w-full h-full object-cover"
@@ -89,13 +100,25 @@ const PriceDropCard = ({ alert, product, onDismiss }) => {
 // ─── Manager Tracking Row ────────────────────────────────────────────
 const ManagerTrackingRow = ({ product, wishlistCount }) => {
   const isVideo = product.albumCoverImageUrl?.toLowerCase().includes('.mp4');
+  const isTeddyEmotion = product.albumTitle?.toLowerCase().includes('teddy emotion');
+  const useOnsetImages = isVideo && !isTeddyEmotion;
   const hasDiscount = product.id != null && product.id % 2 === 0;
   const effectivePrice = hasDiscount ? product.albumPrice / 2 : product.albumPrice;
   return (
   <tr className="border-b border-white/5 hover:bg-white/5 transition-colors">
     <td className="py-3 px-4">
       <div className="flex items-center gap-3">
-        {isVideo ? (
+        {useOnsetImages ? (
+          <div className="w-10 h-10 rounded-lg overflow-hidden">
+            <OnsetImageCard
+              songTitle={product.albumTitle}
+              songId={product.id}
+              className="w-full h-full object-cover"
+              isPlaying={false}
+              isActive={false}
+            />
+          </div>
+        ) : isVideo ? (
           <video
             src={product.albumCoverImageUrl}
             className="w-10 h-10 rounded-lg object-cover"
@@ -551,6 +574,8 @@ const WishlistPage = () => {
               <div className="space-y-2">
                 {wishlistProducts.map((product) => {
                   const isVideo = product.albumCoverImageUrl?.toLowerCase().includes('.mp4');
+                  const isTeddyEmotion = product.albumTitle?.toLowerCase().includes('teddy emotion');
+                  const useOnsetImages = isVideo && !isTeddyEmotion;
                   const hasDiscount = product.id != null && product.id % 2 === 0;
                   const effectivePrice = hasDiscount ? product.albumPrice / 2 : product.albumPrice;
                   return (
@@ -558,7 +583,17 @@ const WishlistPage = () => {
                       key={product.id}
                       className="flex items-center gap-3 p-3 bg-white/5 rounded-lg"
                     >
-                      {isVideo ? (
+                      {useOnsetImages ? (
+                        <div className="w-10 h-10 rounded overflow-hidden">
+                          <OnsetImageCard
+                            songTitle={product.albumTitle}
+                            songId={product.id}
+                            className="w-full h-full object-cover"
+                            isPlaying={false}
+                            isActive={false}
+                          />
+                        </div>
+                      ) : isVideo ? (
                         <video
                           src={product.albumCoverImageUrl}
                           className="w-10 h-10 rounded object-cover"

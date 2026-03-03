@@ -1,6 +1,7 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { useSelector } from 'react-redux';
 import placeholders from '../../utils/placeholderImage';
+import OnsetImageCard from '../OnsetImageCard';
 
 const Track = ({ isPlaying, isActive, activeSong }) => {
   const videoRef = useRef(null);
@@ -18,6 +19,9 @@ const Track = ({ isPlaying, isActive, activeSong }) => {
   
   const coverMedia = getCoverMedia();
   const isVideo = coverMedia && coverMedia.toLowerCase().includes('.mp4');
+  const songTitle = activeSong?.albumTitle || activeSong?.trackName || '';
+  const isTeddyEmotion = songTitle.toLowerCase().includes('teddy emotion');
+  const useOnsetImages = isVideo && !isTeddyEmotion;
   
   // Reset video error when song changes
   useEffect(() => {
@@ -50,7 +54,17 @@ const Track = ({ isPlaying, isActive, activeSong }) => {
   return (
   <div className="flex items-center justify-start flex-shrink-0">
     <div className={`${isPlaying && isActive ? 'animate-spin' : ''} block h-12 w-12 sm:h-16 sm:w-16 mr-2 sm:mr-4 flex-shrink-0`} style={{ animationDuration: '3s' }}>
-      {isVideo && !videoError ? (
+      {useOnsetImages ? (
+        <div className="rounded-full overflow-hidden w-full h-full">
+          <OnsetImageCard
+            songTitle={songTitle}
+            songId={activeSong?.id}
+            className="w-full h-full object-cover"
+            isPlaying={isPlaying && isActive}
+            isActive={isActive}
+          />
+        </div>
+      ) : isVideo && !videoError ? (
         <video
           ref={videoRef}
           src={coverMedia}

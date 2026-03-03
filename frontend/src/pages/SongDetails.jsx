@@ -13,6 +13,7 @@ import { useAuth } from '../context/AuthContext';
 import { auth as firebaseAuth } from '../firebase';
 import Loader from '../components/Loader';
 import AudioReactiveVideo from '../components/AudioReactiveVideo';
+import OnsetImageCard from '../components/OnsetImageCard';
 import envConfig from '../config/environment';
 import { productService } from '../redux/services';
 import { useAudioFeatures } from '../context/AudioFeaturesContext';
@@ -67,6 +68,9 @@ const SimilarSongCard = ({ song, isPlaying, activeSong, onPlay, onPause, rank, p
   
   // Check if the cover media is a video
   const isVideo = albumArt && albumArt.toLowerCase().includes('.mp4');
+  const simSongTitle = song.trackName || song.albumTitle || '';
+  const simIsTeddyEmotion = simSongTitle.toLowerCase().includes('teddy emotion');
+  const simUseOnsetImages = isVideo && !simIsTeddyEmotion;
   // Library songs have a fileUrl from our DB (S3) - NOT just previewUrl/artworkUrl100 which iTunes songs also have
   const isLibrarySong = !!(song.fileUrl && song.fileUrl.includes('amazonaws.com'));
 
@@ -125,7 +129,15 @@ const SimilarSongCard = ({ song, isPlaying, activeSong, onPlay, onPause, rank, p
         onMouseEnter={() => setIsHovered(true)}
         onMouseLeave={() => setIsHovered(false)}
       >
-        {isVideo ? (
+        {simUseOnsetImages ? (
+          <OnsetImageCard
+            songTitle={simSongTitle}
+            songId={song.trackId || song.id}
+            className="w-full h-full object-cover"
+            isPlaying={isPlaying && isThisSongActive}
+            isActive={isThisSongActive}
+          />
+        ) : isVideo ? (
           <AudioReactiveVideo
             src={albumArt}
             alt={song.trackName}
@@ -261,7 +273,11 @@ const SimilarSongCard = ({ song, isPlaying, activeSong, onPlay, onPause, rank, p
             </button>
           </div>
           <div className="absolute inset-0 w-full h-full">
-            <AudioReactiveVideo src={albumArt} alt={song.trackName} className="w-full h-full object-contain" isPlaying={isPlaying && isThisSongActive} isActive={isThisSongActive} playbackRate={isThisSongActive ? (playbackRate || 1.0) : 1.0} />
+            {simUseOnsetImages ? (
+              <OnsetImageCard songTitle={simSongTitle} songId={song.trackId || song.id} className="w-full h-full object-contain" isPlaying={isPlaying && isThisSongActive} isActive={isThisSongActive} />
+            ) : (
+              <AudioReactiveVideo src={albumArt} alt={song.trackName} className="w-full h-full object-contain" isPlaying={isPlaying && isThisSongActive} isActive={isThisSongActive} playbackRate={isThisSongActive ? (playbackRate || 1.0) : 1.0} />
+            )}
           </div>
         </div>,
         document.body
@@ -748,8 +764,19 @@ const SongDetails = () => {
               {(() => {
                 const coverMedia = targetSong?.albumCoverImageUrl || targetSong?.artworkUrl100?.replace('100x100', '600x600') || fallbackImage;
                 const isVideo = coverMedia && coverMedia.toLowerCase().includes('.mp4');
+                const detailTitle = targetSong?.trackName || targetSong?.albumTitle || '';
+                const detailIsTeddy = detailTitle.toLowerCase().includes('teddy emotion');
+                const detailUseOnset = isVideo && !detailIsTeddy;
                 
-                return isVideo ? (
+                return detailUseOnset ? (
+                  <OnsetImageCard
+                    songTitle={detailTitle}
+                    songId={targetSong?.trackId || targetSong?.id}
+                    className="w-full h-full rounded-lg object-cover shadow-xl"
+                    isPlaying={isPlaying && isTargetPlaying}
+                    isActive={isTargetPlaying}
+                  />
+                ) : isVideo ? (
                   <AudioReactiveVideo
                     src={coverMedia}
                     alt={targetSong?.trackName}

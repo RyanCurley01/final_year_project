@@ -15,7 +15,8 @@ from routes import (
     interactions,
     feature_processing,
     itunes,
-    visualization
+    visualization,
+    image_generation,
 )
 
 # Initialize FastAPI app
@@ -98,6 +99,9 @@ app.include_router(itunes.router)
 
 # Visualization
 app.include_router(visualization.router)
+
+# Image Generation (AI image proxy for onset-reactive visuals)
+app.include_router(image_generation.router)
 
 
 if __name__ == "__main__":

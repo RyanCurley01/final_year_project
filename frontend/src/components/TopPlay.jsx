@@ -3,6 +3,7 @@ import { useSelector, useDispatch } from 'react-redux';
 
 import PlayPause from './PlayPause';  
 import AudioReactiveVideo from './AudioReactiveVideo';
+import OnsetImageCard from './OnsetImageCard';
 import { playPause, setActiveSong } from '../redux/features/playerSlice';
 import { useGetTopPlayedSongsQuery } from '../redux/services/apiService';
 import placeholders from '../utils/placeholderImage';
@@ -13,6 +14,9 @@ import Error from './Error';
 const TopChartCard = ({ song, i, isPlaying, activeSong, handlePauseClick, handlePlayClick, songEnded }) => {
   const coverMedia = song?.albumCoverImageUrl || song?.images?.coverart;
   const isVideo = coverMedia && coverMedia.toLowerCase().includes('.mp4');
+  const songTitle = song?.albumTitle || song?.title || '';
+  const isTeddyEmotion = songTitle.toLowerCase().includes('teddy emotion');
+  const useOnsetImages = isVideo && !isTeddyEmotion;
   const isThisSongActive = activeSong?.productId === song?.productId;
 
   return (
@@ -22,10 +26,18 @@ const TopChartCard = ({ song, i, isPlaying, activeSong, handlePauseClick, handle
       <h3 className="font-bold text-base text-white mr-3">{i + 1}.</h3>
       <div className="flex-1 flex flex-row justify-between items-center">
         <div className="relative w-20 h-20 group">
-        {isVideo ? (
+        {useOnsetImages ? (
+          <OnsetImageCard
+            songTitle={songTitle}
+            songId={song?.productId || song?.id}
+            className="w-full h-full rounded-lg object-cover"
+            isPlaying={isPlaying && isThisSongActive}
+            isActive={isThisSongActive}
+          />
+        ) : isVideo ? (
           <AudioReactiveVideo
             src={coverMedia}
-            alt={song?.albumTitle || song?.title}
+            alt={songTitle}
             className="w-full h-full rounded-lg object-cover"
             isPlaying={isPlaying && isThisSongActive}
             isActive={isThisSongActive}

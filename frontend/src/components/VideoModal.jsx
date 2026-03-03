@@ -1,9 +1,15 @@
 import { MdClose } from 'react-icons/md';
 import { createPortal } from 'react-dom';
 import AudioReactiveVideo from './AudioReactiveVideo';
+import OnsetImageCard from './OnsetImageCard';
 
-const VideoModal = ({ isOpen, onClose, videoSrc, title, isPlaying, isActive }) => {
+const VideoModal = ({ isOpen, onClose, videoSrc, title, isPlaying, isActive, songId }) => {
   if (!isOpen) return null;
+
+  // Teddy Emotion keeps the sky video; all others use AI onset images
+  const isTeddyEmotion = title && title.toLowerCase().includes('teddy emotion');
+  const isVideo = videoSrc && videoSrc.toLowerCase().includes('.mp4');
+  const useOnsetImages = isVideo && !isTeddyEmotion;
 
   return createPortal(
     <div
@@ -31,16 +37,26 @@ const VideoModal = ({ isOpen, onClose, videoSrc, title, isPlaying, isActive }) =
           </button>
         </div>
 
-        {/* Video Content */}
+        {/* Video/Image Content */}
         <div className="p-3">
           <div className="relative w-full" style={{ aspectRatio: '16/9' }}>
-            <AudioReactiveVideo
-              src={videoSrc}
-              alt={title}
-              className="w-full h-full rounded-lg object-cover"
-              isPlaying={isPlaying}
-              isActive={isActive}
-            />
+            {useOnsetImages ? (
+              <OnsetImageCard
+                songTitle={title}
+                songId={songId}
+                className="w-full h-full rounded-lg object-cover"
+                isPlaying={isPlaying}
+                isActive={isActive}
+              />
+            ) : (
+              <AudioReactiveVideo
+                src={videoSrc}
+                alt={title}
+                className="w-full h-full rounded-lg object-cover"
+                isPlaying={isPlaying}
+                isActive={isActive}
+              />
+            )}
           </div>
         </div>
     </div>,

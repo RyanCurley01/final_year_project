@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom';
 
 import Loader from '../components/Loader';
 import AudioReactiveVideo from '../components/AudioReactiveVideo';
+import OnsetImageCard from '../components/OnsetImageCard';
 import { useAudioFeatures } from '../context/AudioFeaturesContext';
 import { setActiveSong, playPause, setPlaybackRate } from '../redux/features/playerSlice';
 import { addToCart } from '../redux/features/cartSlice';
@@ -67,6 +68,9 @@ const SongCard = ({ song, isPlaying, activeSong, onPlay, onPause, index, onSongN
   const isVideo = song.source === 'database' && albumArt && albumArt.toLowerCase().includes('.mp4');
   const coverMedia = albumArt;
   const isLibrarySong = song.source === 'database';
+  const songTitle = song.trackName || song.albumTitle || '';
+  const isTeddyEmotion = songTitle.toLowerCase().includes('teddy emotion');
+  const useOnsetImages = isVideo && !isTeddyEmotion;
   
   const [isHovered, setIsHovered] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -151,7 +155,15 @@ const SongCard = ({ song, isPlaying, activeSong, onPlay, onPause, index, onSongN
         onMouseLeave={() => setIsHovered(false)}
       >      
         {/* Album Art or Video */}
-        {isVideo ? (
+        {useOnsetImages ? (
+          <OnsetImageCard
+            songTitle={songTitle}
+            songId={song.id}
+            className="w-full h-full rounded-lg object-cover"
+            isPlaying={isPlaying && isThisSongActive}
+            isActive={isThisSongActive}
+          />
+        ) : isVideo ? (
           <AudioReactiveVideo
             src={coverMedia}
             alt={song.trackName}
@@ -212,8 +224,8 @@ const SongCard = ({ song, isPlaying, activeSong, onPlay, onPause, index, onSongN
           </div>
         )}
 
-        {/* Maximise button for video cards - top right */}
-        {isVideo && (
+        {/* Maximise button for video/onset cards - top right */}
+        {(isVideo || useOnsetImages) && (
           <button
             onClick={(e) => { e.stopPropagation(); setIsFullscreen(true); }}
             className="absolute top-2 right-10 z-20 p-1.5 rounded-full bg-black/50 backdrop-blur-sm hover:bg-black/70 transition-all hover:scale-110"
@@ -249,8 +261,8 @@ const SongCard = ({ song, isPlaying, activeSong, onPlay, onPause, index, onSongN
         )}
       </div>
 
-      {/* Tempo Slider - shown on all video cards for consistent row height, only interactive for the active song */}
-      {isVideo && (
+      {/* Tempo Slider - shown on all video/onset cards for consistent row height, only interactive for the active song */}
+      {(isVideo || useOnsetImages) && (
         <div className={`mt-2 px-2${isThisSongActive ? '' : ' opacity-40 pointer-events-none'}`}>
           <div className="flex items-center justify-between mb-1">
             <label className="text-xs text-white/70">Playback Speed</label>
@@ -282,17 +294,21 @@ const SongCard = ({ song, isPlaying, activeSong, onPlay, onPause, index, onSongN
         </div>
       )}
 
-      {/* Fullscreen video overlay portal */}
-      {isVideo && isFullscreen && createPortal(
+      {/* Fullscreen overlay portal */}
+      {(isVideo || useOnsetImages) && isFullscreen && createPortal(
         <div className="fixed inset-0 bg-black flex flex-col items-center justify-center" style={{ zIndex: 99999 }}>
           <div className="absolute top-0 left-0 right-0 flex items-center justify-between px-6 py-4 bg-gradient-to-b from-black/80 to-transparent z-10">
             <h3 className="text-white font-semibold text-lg truncate">{song.trackName || song.albumTitle}</h3>
-            <button onClick={() => setIsFullscreen(false)} className="p-2 rounded-full bg-white/10 hover:bg-white/20 transition-all hover:scale-110" title="Minimise video">
+            <button onClick={() => setIsFullscreen(false)} className="p-2 rounded-full bg-white/10 hover:bg-white/20 transition-all hover:scale-110" title="Minimise">
               <FiMinimize2 className="w-6 h-6 text-white" />
             </button>
           </div>
           <div className="absolute inset-0 w-full h-full">
-            <AudioReactiveVideo src={coverMedia} alt={song.trackName} className="w-full h-full object-contain" isPlaying={isPlaying && isThisSongActive} isActive={isThisSongActive} playbackRate={isThisSongActive ? (playbackRate || 1.0) : 1.0} />
+            {useOnsetImages ? (
+              <OnsetImageCard songTitle={songTitle} songId={song.id} className="w-full h-full object-contain" isPlaying={isPlaying && isThisSongActive} isActive={isThisSongActive} />
+            ) : (
+              <AudioReactiveVideo src={coverMedia} alt={song.trackName} className="w-full h-full object-contain" isPlaying={isPlaying && isThisSongActive} isActive={isThisSongActive} playbackRate={isThisSongActive ? (playbackRate || 1.0) : 1.0} />
+            )}
           </div>
         </div>,
         document.body

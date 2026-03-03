@@ -6,3 +6,4 @@ from . import interactions
 from . import feature_processing
 from . import itunes
 from . import visualization
+from . import image_generation

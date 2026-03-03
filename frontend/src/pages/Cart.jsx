@@ -12,6 +12,7 @@ import { orderItemService } from '../redux/services/orderItemService';
 import { customerSummaryService } from '../redux/services/customerSummaryService';
 import { soldProductsService } from '../redux/services/soldProductsService';
 import placeholders from '../utils/placeholderImage';
+import OnsetImageCard from '../components/OnsetImageCard';
 import { downloadMultipleFiles, generateFilename } from '../utils/downloadHelper';
 
 import { useAuth } from '../context/AuthContext';
@@ -175,12 +176,22 @@ const Cart = () => {
             const price = item.albumPrice;
             const coverMedia = item.albumCoverImageUrl;
             const isVideo = coverMedia && coverMedia.toLowerCase().includes('.mp4');
+            const isTeddyEmotion = productName && productName.toLowerCase().includes('teddy emotion');
+            const useOnsetImages = isVideo && !isTeddyEmotion;
 
             return (
               <div key={item.id} className="bg-white/5 backdrop-blur-sm rounded-lg p-4 flex gap-4">
                 {/* Product Image */}
                 <div className="w-24 h-24 flex-shrink-0">
-                  {isVideo ? (
+                  {useOnsetImages ? (
+                    <OnsetImageCard
+                      songTitle={productName}
+                      songId={item.id}
+                      className="w-full h-full rounded-lg object-cover"
+                      isPlaying={false}
+                      isActive={false}
+                    />
+                  ) : isVideo ? (
                     <video
                       src={coverMedia}
                       className="w-full h-full rounded-lg object-cover"
