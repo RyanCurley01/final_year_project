@@ -453,6 +453,8 @@ const Search = () => {
       }
       
       const searchLower = searchTerm.toLowerCase().trim();
+      // Strip apostrophes/punctuation so "teds" matches "Ted's", etc.
+      const normalize = (s) => s?.toLowerCase().replace(/[''`]/g, '') || '';
       
       try {
         // Fetch database songs
@@ -516,26 +518,25 @@ const Search = () => {
         setRecommendationPool(allArtistSongs);
         
         // Filter database songs based on search term
+        // ProductResponse fields: id, albumTitle, albumPrice, albumCoverImageUrl, fileUrl, previewUrl
+        const searchNorm = normalize(searchLower);
         const filteredDbSongs = musicProducts.filter(song => {
-          const albumMatch = song.albumTitle?.toLowerCase().includes(searchLower);
-          const artistMatch = song.artistName?.toLowerCase().includes(searchLower);
-          const nameMatch = song.productName?.toLowerCase().includes(searchLower);
-          const genreMatch = song.genre?.toLowerCase().includes(searchLower);
-          return albumMatch || artistMatch || nameMatch || genreMatch;
-        }).map((song, index) => ({
-          id: song.productId || `db-${index}`,
-          trackId: song.productId || `db-${index}`,
-          trackName: song.albumTitle || song.productName,
-          albumTitle: song.albumTitle || song.productName,
-          artistName: song.artistName || 'Unknown Artist',
+          const albumMatch = normalize(song.albumTitle).includes(searchNorm);
+          return albumMatch;
+        }).map((song) => ({
+          id: song.id,
+          trackId: song.id,
+          trackName: song.albumTitle,
+          albumTitle: song.albumTitle,
+          artistName: 'Unknown Artist',
           collectionName: song.albumTitle,
-          artworkUrl100: song.albumCoverImageUrl || song.coverImage || fallbackImage,
-          albumCoverImageUrl: song.albumCoverImageUrl || song.coverImage,
-          previewUrl: song.fileUrl,
+          artworkUrl100: song.albumCoverImageUrl || fallbackImage,
+          albumCoverImageUrl: song.albumCoverImageUrl,
+          previewUrl: song.fileUrl || song.previewUrl,
           fileUrl: song.fileUrl,
-          price: song.unitPrice || 1.29,
-          primaryGenreName: song.genre || 'Electronic',
-          trackTimeMillis: song.duration || 0,
+          price: song.albumPrice || 1.29,
+          primaryGenreName: 'Electronic',
+          trackTimeMillis: 0,
           matchedDbSong: song,
           source: 'database'
         }));
@@ -544,29 +545,26 @@ const Search = () => {
         // fetches all products from the database and filters them locally to see if 
         // the typed word is in the song name, Album Title, Artist Name, or Genre.
         const filteredArtistSongs = allArtistSongs.filter(song => {
-          // If song is already in matchedArtistSongs (which contains DB matches), exclude it
-          // Actually we haven't matched yet.
-          
-          const trackMatch = song.trackName?.toLowerCase().includes(searchLower);
-          const artistMatch = song.artistName?.toLowerCase().includes(searchLower);
-          const albumMatch = song.collectionName?.toLowerCase().includes(searchLower);
-          const genreMatch = song.primaryGenreName?.toLowerCase().includes(searchLower);
+          const trackMatch = normalize(song.trackName).includes(searchNorm);
+          const artistMatch = normalize(song.artistName).includes(searchNorm);
+          const albumMatch = normalize(song.collectionName).includes(searchNorm);
+          const genreMatch = normalize(song.primaryGenreName).includes(searchNorm);
           return trackMatch || artistMatch || albumMatch || genreMatch;
         });
         
         // Combine results and calculate relevance scores
         const allResults = [...filteredDbSongs, ...filteredArtistSongs].map(song => {
           let relevance = 0.5;
-          const title = (song.trackName || song.albumTitle || '').toLowerCase();
-          const artist = (song.artistName || '').toLowerCase();
+          const title = normalize(song.trackName || song.albumTitle || '');
+          const artist = normalize(song.artistName || '');
           
-          // Boost exact matches
-          if (title === searchLower) relevance = 1.0;
-          else if (artist === searchLower) relevance = 0.95;
-          else if (title.startsWith(searchLower)) relevance = 0.9;
-          else if (artist.startsWith(searchLower)) relevance = 0.85;
-          else if (title.includes(searchLower)) relevance = 0.75;
-          else if (artist.includes(searchLower)) relevance = 0.7;
+          // Boost exact matches (using normalized strings so punctuation doesn't break ranking)
+          if (title === searchNorm) relevance = 1.0;
+          else if (artist === searchNorm) relevance = 0.95;
+          else if (title.startsWith(searchNorm)) relevance = 0.9;
+          else if (artist.startsWith(searchNorm)) relevance = 0.85;
+          else if (title.includes(searchNorm)) relevance = 0.75;
+          else if (artist.includes(searchNorm)) relevance = 0.7;
           
           // Database songs get a small boost
           if (song.source === 'database') relevance += 0.05;
@@ -991,6 +989,16 @@ const Search = () => {
     <div className="flex flex-col lg:flex-row gap-6 scrollbar-hide overflow-x-hidden">
       {/* Main Content */}
       <div className={`flex-1 min-w-0`}>
+        {/* Back navigation */}
+        <div className="mb-4">
+          <button
+            onClick={() => navigate(-1)}
+            className="px-4 py-2 bg-white/10 text-white rounded-lg hover:bg-white/20 transition-all flex items-center gap-2"
+          >
+            ← Back
+          </button>
+        </div>
+
         <div className="mb-4 sm:mb-6">
           <h1 className="font-bold text-xl sm:text-2xl md:text-3xl text-white mb-2">
             Search Results for "{searchTerm}"
@@ -1055,17 +1063,31 @@ const Search = () => {
                 {(() => {
                   const coverMedia = activeSong.albumCoverImageUrl || activeSong.artworkUrl100?.replace('100x100', '200x200');
                   const isVideo = coverMedia && coverMedia.toLowerCase().includes('.mp4');
+                  const isTeddyEmotion = (activeSong.trackName || activeSong.albumTitle || '').toLowerCase().includes('teddy emotion');
+                  const useOnsetImages = isVideo && !isTeddyEmotion;
                   
                   return (
                     <div className="relative w-16 h-16 flex-shrink-0">
-                      <img 
-                        key={coverMedia || 'search-cover-1'}
-                        src={isVideo ? blissImage : (coverMedia || fallbackImage)}
-                        alt={activeSong.trackName || activeSong.albumTitle}
-                        className={`w-16 h-16 rounded-full object-cover border-2 border-cyan-500/50 ${isPlaying ? 'animate-spin' : ''}`}
-                        style={{ animationDuration: '3s' }}
-                        onError={(e) => { e.target.src = fallbackImage; }}
-                      />
+                      {useOnsetImages ? (
+                        <div className={`w-16 h-16 rounded-full overflow-hidden border-2 border-cyan-500/50 ${isPlaying ? 'animate-spin' : ''}`} style={{ animationDuration: '3s' }}>
+                          <OnsetImageCard
+                            songTitle={activeSong.trackName || activeSong.albumTitle}
+                            songId={activeSong.id}
+                            className="w-full h-full object-cover"
+                            isPlaying={isPlaying}
+                            isActive={true}
+                          />
+                        </div>
+                      ) : (
+                        <img 
+                          key={coverMedia || 'search-cover-1'}
+                          src={isVideo ? blissImage : (coverMedia || fallbackImage)}
+                          alt={activeSong.trackName || activeSong.albumTitle}
+                          className={`w-16 h-16 rounded-full object-cover border-2 border-cyan-500/50 ${isPlaying ? 'animate-spin' : ''}`}
+                          style={{ animationDuration: '3s' }}
+                          onError={(e) => { e.target.src = fallbackImage; }}
+                        />
+                      )}
                       <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                         <div className="w-4 h-4 rounded-full bg-gray-900 border border-gray-700"></div>
                       </div>
@@ -1138,17 +1160,31 @@ const Search = () => {
                 {(() => {
                   const coverMedia = activeSong.albumCoverImageUrl || activeSong.artworkUrl100?.replace('100x100', '200x200');
                   const isVideo = coverMedia && coverMedia.toLowerCase().includes('.mp4');
+                  const isTeddyEmotion = (activeSong.trackName || activeSong.albumTitle || '').toLowerCase().includes('teddy emotion');
+                  const useOnsetImages = isVideo && !isTeddyEmotion;
                   
                   return (
                     <div className="relative w-12 h-16 flex-shrink-0">
-                      <img 
-                        key={coverMedia || 'search-cover-2'}
-                        src={isVideo ? blissImage : (coverMedia || fallbackImage)}
-                        alt={activeSong.trackName || activeSong.albumTitle}
-                        className={`w-12 h-12 rounded-full object-cover border-2 border-cyan-500/50 ${isPlaying ? 'animate-spin' : ''}`}
-                        style={{ animationDuration: '3s' }}
-                        onError={(e) => { e.target.src = fallbackImage; }}
-                      />
+                      {useOnsetImages ? (
+                        <div className={`w-12 h-12 rounded-full overflow-hidden border-2 border-cyan-500/50 ${isPlaying ? 'animate-spin' : ''}`} style={{ animationDuration: '3s' }}>
+                          <OnsetImageCard
+                            songTitle={activeSong.trackName || activeSong.albumTitle}
+                            songId={activeSong.id}
+                            className="w-full h-full object-cover"
+                            isPlaying={isPlaying}
+                            isActive={true}
+                          />
+                        </div>
+                      ) : (
+                        <img 
+                          key={coverMedia || 'search-cover-2'}
+                          src={isVideo ? blissImage : (coverMedia || fallbackImage)}
+                          alt={activeSong.trackName || activeSong.albumTitle}
+                          className={`w-12 h-12 rounded-full object-cover border-2 border-cyan-500/50 ${isPlaying ? 'animate-spin' : ''}`}
+                          style={{ animationDuration: '3s' }}
+                          onError={(e) => { e.target.src = fallbackImage; }}
+                        />
+                      )}
                       <div className="absolute inset-0 flex items-center justify-center pointer-events-none -mt-4">
                         <div className="w-3 h-3 rounded-full bg-gray-900 border border-gray-700"></div>
                       </div>
@@ -1200,14 +1236,34 @@ const Search = () => {
                     <div className="flex items-center gap-2">
                       {/* Album Cover - Use real cover if available, otherwise gradient matches Discover page */}
                       <div className="w-12 h-12 rounded-md overflow-hidden flex-shrink-0 border border-gray-600 group-hover:border-cyan-500 transition-colors">
-                        {rec.albumCoverImageUrl || rec.artworkUrl100 ? (
-                           <img 
-                             src={rec.albumCoverImageUrl || rec.artworkUrl100} 
-                             alt={rec.trackName} 
-                             className="w-full h-full object-cover"
-                             onError={(e) => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'flex'; }}
-                           />
-                        ) : null}
+                        {(() => {
+                          const recMedia = rec.albumCoverImageUrl || rec.artworkUrl100;
+                          const recIsVideo = recMedia && recMedia.toLowerCase().includes('.mp4');
+                          const recIsTeddy = (rec.trackName || rec.albumTitle || '').toLowerCase().includes('teddy emotion');
+                          const recUseOnset = recIsVideo && !recIsTeddy;
+                          if (recUseOnset) {
+                            return (
+                              <OnsetImageCard
+                                songTitle={rec.trackName || rec.albumTitle}
+                                songId={rec.id}
+                                className="w-full h-full object-cover"
+                                isPlaying={false}
+                                isActive={false}
+                              />
+                            );
+                          }
+                          if (recMedia) {
+                            return (
+                              <img 
+                                src={recMedia} 
+                                alt={rec.trackName} 
+                                className="w-full h-full object-cover"
+                                onError={(e) => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'flex'; }}
+                              />
+                            );
+                          }
+                          return null;
+                        })()}
                          <div className="w-full h-full bg-gradient-to-br from-cyan-600 via-purple-600 to-pink-600 flex items-center justify-center" style={{ display: (rec.albumCoverImageUrl || rec.artworkUrl100) ? 'none' : 'flex' }}>
                           <svg className="w-8 h-8 text-blue-900" fill="currentColor" viewBox="0 0 24 24">
                             <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/>

@@ -4,6 +4,7 @@ import { purchasedProductsService } from "../redux/services/purchasedProductsSer
 import { productService } from "../redux/services/productService";
 import { FaShoppingBag } from "react-icons/fa";
 import OnsetImageCard from './OnsetImageCard';
+import SidebarSearchFilter from './SidebarSearchFilter';
 
 const PurchasedProductsSidebar = () => {
   const { currentUser } = useAuth();
@@ -103,6 +104,12 @@ const PurchasedProductsSidebar = () => {
               )}
 
               {!isLoading && !error && data && data.length > 0 && (
+                <SidebarSearchFilter
+                  data={data}
+                  getSearchableText={(item) => productMap[item.productId]?.albumTitle || ''}
+                  placeholder="Filter by song name…"
+                >
+                  {(filteredData) => (
                 <table className="w-full text-left text-sm text-gray-300 whitespace-nowrap">
                   <thead className="text-xs uppercase bg-[#333] text-gray-300">
                     <tr>
@@ -112,7 +119,7 @@ const PurchasedProductsSidebar = () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {data.map((item, i) => {
+                    {filteredData.map((item, i) => {
                       const product = productMap[item.productId];
                       return (
                         <tr
@@ -164,6 +171,8 @@ const PurchasedProductsSidebar = () => {
                     })}
                   </tbody>
                 </table>
+                  )}
+                </SidebarSearchFilter>
               )}
 
               {!isLoading && !error && data?.length === 0 && (

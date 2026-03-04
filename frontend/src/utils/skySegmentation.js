@@ -4,6 +4,7 @@
  */
 
 import * as tf from '@tensorflow/tfjs';
+import { glitchPixel } from './glitchEffects';
 
 // Track if we've already logged initialization
 let hasLoggedInit = false;
@@ -188,20 +189,12 @@ class SkySegmentation {
         
         // Apply glitch distortion only to sky pixels
         if (applyGlitch) {
-          // Increase saturation and apply color shift for glitch effect
-          blendFactor = 0.85; // Stronger blend during glitch
-          
-          // Hue rotation effect - shift RGB channels
-          const hueShift = Math.random() * 0.3 + 0.7; // Random shift factor
-          finalR = Math.min(255, color[2] * hueShift + 50); // Swap and shift
-          finalG = Math.min(255, color[0] * hueShift);
-          finalB = Math.min(255, color[1] * hueShift + 80);
-          
-          // Add some noise/grain to sky pixels during glitch
-          const noise = (Math.random() - 0.5) * 40;
-          finalR = Math.max(0, Math.min(255, finalR + noise));
-          finalG = Math.max(0, Math.min(255, finalG + noise));
-          finalB = Math.max(0, Math.min(255, finalB + noise));
+          // Use shared glitch pixel logic (same as CSS glitch uses conceptually)
+          const glitched = glitchPixel(r, g, b, color);
+          blendFactor = glitched.blendFactor;
+          finalR = glitched.r;
+          finalG = glitched.g;
+          finalB = glitched.b;
         }
         
         data[i] = Math.round(r * (1 - blendFactor) + finalR * blendFactor);

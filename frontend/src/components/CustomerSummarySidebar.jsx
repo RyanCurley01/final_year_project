@@ -5,6 +5,8 @@ import { accountService } from "../redux/services/accountService";
 import { productService } from "../redux/services/productService";
 import { orderService } from "../redux/services/orderService";
 import { FaUserFriends } from "react-icons/fa";
+import OnsetImageCard from './OnsetImageCard';
+import SidebarSearchFilter from './SidebarSearchFilter';
 
 const CustomerSummarySidebar = () => {
   const { currentUser } = useAuth();
@@ -126,18 +128,29 @@ const CustomerSummarySidebar = () => {
               )}
 
               {!isLoading && !error && data && data.length > 0 && (
+                <SidebarSearchFilter
+                  data={data}
+                  getSearchableText={(item) => {
+                    const account = accountMap[item.accountId];
+                    const product = productMap[item.productId];
+                    return [account?.accountName, account?.accountEmailAddress, product?.albumTitle].filter(Boolean).join(' ');
+                  }}
+                  placeholder="Filter by customer or song name…"
+                >
+                  {(filteredData) => (
                 <table className="w-full text-left text-sm text-gray-300 whitespace-nowrap">
                   <thead className="text-xs uppercase bg-[#333] text-gray-300">
                     <tr>
                       <th className="px-4 py-2">#</th>
                       <th className="px-4 py-2">Customer</th>
                       <th className="px-4 py-2">Product</th>
+                      <th className="px-4 py-2">Cover</th>
                       <th className="px-4 py-2">Order Date</th>
                       <th className="px-4 py-2">Order Total</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {data.map((item, i) => {
+                    {filteredData.map((item, i) => {
                       const account = accountMap[item.accountId];
                       const product = productMap[item.productId];
                       const order = orderMap[item.orderId];
@@ -154,6 +167,40 @@ const CustomerSummarySidebar = () => {
                             {product?.albumTitle || "—"}
                           </td>
                           <td className="px-4 py-2">
+                            {product?.albumCoverImageUrl ? (
+                              (() => {
+                                const coverUrl = product.albumCoverImageUrl;
+                                const isVideo = coverUrl && coverUrl.toLowerCase().includes('.mp4');
+                                const isTeddyEmotion = product.albumTitle?.toLowerCase().includes('teddy emotion');
+                                const useOnsetImages = isVideo && !isTeddyEmotion;
+
+                                if (useOnsetImages) {
+                                  return (
+                                    <div className="w-10 h-10">
+                                      <OnsetImageCard
+                                        songTitle={product.albumTitle}
+                                        songId={item.productId}
+                                        className="w-full h-full rounded object-cover"
+                                        isPlaying={false}
+                                        isActive={false}
+                                      />
+                                    </div>
+                                  );
+                                }
+                                return (
+                                  <img
+                                    src={isVideo ? '/cloud-cover.webp' : coverUrl}
+                                    alt={product.albumTitle}
+                                    className="w-10 h-10 rounded object-cover"
+                                    onError={(e) => { e.target.onerror = null; e.target.src = '/cloud-cover.webp'; }}
+                                  />
+                                );
+                              })()
+                            ) : (
+                              "—"
+                            )}
+                          </td>
+                          <td className="px-4 py-2">
                             {order?.orderDate ? new Date(order.orderDate).toLocaleDateString() : "—"}
                           </td>
                           <td className="px-4 py-2">
@@ -164,6 +211,8 @@ const CustomerSummarySidebar = () => {
                     })}
                   </tbody>
                 </table>
+                  )}
+                </SidebarSearchFilter>
               )}
 
               {!isLoading && !error && data?.length === 0 && (

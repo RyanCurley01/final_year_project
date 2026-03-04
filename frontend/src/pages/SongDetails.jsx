@@ -440,8 +440,8 @@ const SongDetails = () => {
               if (fetchedSong) {
                   // Normalize DB product to Song format
                   songData = {
-                      id: fetchedSong.productId,
-                      trackId: fetchedSong.productId,
+                      id: fetchedSong.id || fetchedSong.productId,
+                      trackId: fetchedSong.id || fetchedSong.productId,
                       trackName: fetchedSong.albumTitle,
                       artistName: fetchedSong.artistName,
                       collectionName: fetchedSong.albumTitle,

@@ -4,6 +4,7 @@ import { useGetAllInteractionsQuery } from "../redux/services/apiService";
 import { productService } from "../redux/services/productService";
 import { accountService } from "../redux/services/accountService";
 import { FaDatabase } from "react-icons/fa";
+import SidebarSearchFilter from './SidebarSearchFilter';
 
 const UserInteractionsSidebar = () => {
   const { currentUser } = useAuth();
@@ -104,6 +105,16 @@ const UserInteractionsSidebar = () => {
                 !error &&
                 interactions &&
                 interactions.length > 0 && (
+                  <SidebarSearchFilter
+                    data={interactions}
+                    getSearchableText={(interaction) => {
+                      const account = accountMap[interaction.accountId];
+                      const product = productMap[interaction.productId];
+                      return [account?.accountName, account?.accountEmailAddress, product?.albumTitle, interaction.interactionType, interaction.deviceType].filter(Boolean).join(' ');
+                    }}
+                    placeholder="Filter by customer, song, type, or device…"
+                  >
+                    {(filteredData) => (
                   <table className="w-full text-left text-sm text-gray-300 whitespace-nowrap">
                     <thead className="text-xs uppercase bg-[#333] text-gray-300">
                       <tr>
@@ -119,7 +130,7 @@ const UserInteractionsSidebar = () => {
                       </tr>
                     </thead>
                     <tbody>
-                      {interactions.map((interaction, i) => {
+                      {filteredData.map((interaction, i) => {
                         const account = accountMap[interaction.accountId];
                         const product = productMap[interaction.productId];
                         return (
@@ -161,6 +172,8 @@ const UserInteractionsSidebar = () => {
                       })}
                     </tbody>
                   </table>
+                    )}
+                  </SidebarSearchFilter>
                 )}
 
               {!isLoading && !error && interactions?.length === 0 && (

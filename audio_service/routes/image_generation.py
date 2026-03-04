@@ -236,7 +236,7 @@ def _build_mood_prompts(mood: str, energy: float, valence: float, tempo: float,
 @router.get("/pool")
 async def get_image_pool(
     song_title: str = Query(..., description="Song title for contextual image retrieval"),
-    song_id: Optional[int] = Query(None, description="Song ID for cache keying"),
+    song_id: Optional[str] = Query(None, description="Song ID for cache keying"),
     count: int = Query(30, ge=1, le=50, description="Number of images for the pool"),
     mood: Optional[str] = Query(None, description="Song mood from AudioFeatures (energetic/happy/calm/sad)"),
     energy: Optional[float] = Query(None, ge=0, le=1, description="Energy level 0-1"),

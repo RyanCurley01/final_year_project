@@ -448,6 +448,7 @@ class MCPImageOrchestrator {
     this._currentOnsetImage = null;
     this._onsetImageListeners = new Set();
     this._onsetGeneration = 0; // increments each onset
+    this._activeSongId = null; // track which song is currently driving onsets
 
     // Singleton onset registration: only one component drives onsets
     this._onsetRegistered = false;
@@ -505,7 +506,7 @@ class MCPImageOrchestrator {
   _notifyListeners(image) {
     for (const listener of this._onsetImageListeners) {
       try {
-        listener(image, this._onsetGeneration);
+        listener(image, this._onsetGeneration, this._activeSongId);
       } catch (e) {
         // Ignore callback errors
       }
@@ -517,6 +518,21 @@ class MCPImageOrchestrator {
    */
   getCurrentImage() {
     return this._currentOnsetImage;
+  }
+
+  /**
+   * Get the currently active song ID (the song driving onset images).
+   */
+  getActiveSongId() {
+    return this._activeSongId;
+  }
+
+  /**
+   * Check if an image URL belongs to a specific song's pool.
+   */
+  isImageInPool(songId, imageUrl) {
+    const pool = this.poolManager.getPool(songId);
+    return pool.images.includes(imageUrl);
   }
 
   /**
@@ -626,6 +642,7 @@ class MCPImageOrchestrator {
    * @param {string|number} songId
    */
   activateForPlayback(songId) {
+    this._activeSongId = songId;
     const pool = this.poolManager.getPool(songId);
     if (pool.images.length > 0) {
       // Use current shared image if it belongs to this pool, otherwise first image

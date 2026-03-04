@@ -4,6 +4,7 @@ import { stockService } from "../redux/services/stockService";
 import { productService } from "../redux/services/productService";
 import { FaWarehouse } from "react-icons/fa";
 import OnsetImageCard from './OnsetImageCard';
+import SidebarSearchFilter from './SidebarSearchFilter';
 
 const StockSidebar = () => {
   const { currentUser } = useAuth();
@@ -38,7 +39,15 @@ const StockSidebar = () => {
         .getAllStock(email, currentUser?.password)
         .then(async (res) => {
           clearTimeout(timeout);
-          setData(res);
+
+          // Deduplicate by productId — the DB has multiple stock rows per product
+          const seen = new Set();
+          const deduped = res.filter((item) => {
+            if (seen.has(item.productId)) return false;
+            seen.add(item.productId);
+            return true;
+          });
+          setData(deduped);
 
           // Enrich with product names
           const uniqueProductIds = [...new Set(res.map((r) => r.productId))];
@@ -126,6 +135,12 @@ const StockSidebar = () => {
               )}
 
               {!isLoading && !error && data && data.length > 0 && (
+                <SidebarSearchFilter
+                  data={data}
+                  getSearchableText={(item) => productMap[item.productId]?.albumTitle || ''}
+                  placeholder="Filter by song name…"
+                >
+                  {(filteredData) => (
                 <table className="w-full text-left text-sm text-gray-300 whitespace-nowrap">
                   <thead className="text-xs uppercase bg-[#333] text-gray-300">
                     <tr>
@@ -136,7 +151,7 @@ const StockSidebar = () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {data.map((item, i) => {
+                    {filteredData.map((item, i) => {
                       const product = productMap[item.productId];
                       return (
                         <tr
@@ -191,6 +206,8 @@ const StockSidebar = () => {
                     })}
                   </tbody>
                 </table>
+                  )}
+                </SidebarSearchFilter>
               )}
 
               {!isLoading && !error && data?.length === 0 && (

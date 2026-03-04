@@ -9,6 +9,7 @@ import { productService } from '../redux/services';
 import { FaPauseCircle, FaPlayCircle } from 'react-icons/fa';
 import envConfig from '../config/environment';
 import { fixTextDeep } from '../utils/fixText';
+import OnsetImageCard from '../components/OnsetImageCard';
 
 const ARTISTS = ['Aphex Twin', 'Boards of Canada', 'Squarepusher'];
 
@@ -60,6 +61,10 @@ const FeatureBadge = ({ label, value }) => {
 const SongCard = ({ song, isPlaying, activeSong, onPlay, onPause, index, onSongNameClick, onArtistClick, onAlbumClick }) => {
   const isThisSongActive = activeSong?.id === song.id;
   const albumArt = song.artworkUrl100?.replace('100x100', '600x600') || fallbackImage;
+  const coverMedia = song.albumCoverImageUrl || song.artworkUrl100;
+  const isVideo = coverMedia && coverMedia.toLowerCase().includes('.mp4');
+  const isTeddyEmotion = (song.trackName || song.albumTitle || '').toLowerCase().includes('teddy emotion');
+  const useOnsetImages = isVideo && !isTeddyEmotion;
   
   const [isHovered, setIsHovered] = useState(false);
 
@@ -95,12 +100,22 @@ const SongCard = ({ song, isPlaying, activeSong, onPlay, onPause, index, onSongN
         onMouseLeave={() => setIsHovered(false)}
       >      
         {/* Album Art */}
-        <img 
-          src={albumArt} 
-          alt={song.trackName} 
-          className="w-full h-full rounded-lg object-cover" 
-          onError={(e) => { e.target.src = fallbackImage; }} 
-        />
+        {useOnsetImages ? (
+          <OnsetImageCard
+            songTitle={song.trackName || song.albumTitle}
+            songId={song.id}
+            className="w-full h-full rounded-lg object-cover"
+            isPlaying={isPlaying && isThisSongActive}
+            isActive={isThisSongActive}
+          />
+        ) : (
+          <img 
+            src={albumArt} 
+            alt={song.trackName} 
+            className="w-full h-full rounded-lg object-cover" 
+            onError={(e) => { e.target.src = fallbackImage; }} 
+          />
+        )}
         
         {/* Play/Pause overlay - shows on hover */}
         {song.previewUrl && (
@@ -653,14 +668,35 @@ const TopCharts = () => {
               <div className="flex items-center gap-2 mb-2">
                 {/* Spinning Album Cover */}
                 <div className="relative w-12 h-16 flex-shrink-0">
-                  <img 
-                    key={activeSong?.albumCoverImageUrl || activeSong?.artworkUrl100 || 'no-cover'}
-                    src={activeSong?.albumCoverImageUrl || activeSong?.artworkUrl100?.replace('100x100', '200x200') || fallbackImage}
-                    alt={activeSong.trackName || activeSong.albumTitle}
-                    className={`w-12 h-12 rounded-full object-cover border-2 border-cyan-500/50 ${isPlaying ? 'animate-spin' : ''}`}
-                    style={{ animationDuration: '3s' }}
-                    onError={(e) => { e.target.src = fallbackImage; }}
-                  />
+                  {(() => {
+                    const activeMedia = activeSong?.albumCoverImageUrl || activeSong?.artworkUrl100;
+                    const activeIsVideo = activeMedia && activeMedia.toLowerCase().includes('.mp4');
+                    const activeIsTeddy = (activeSong?.trackName || activeSong?.albumTitle || '').toLowerCase().includes('teddy emotion');
+                    const activeUseOnset = activeIsVideo && !activeIsTeddy;
+                    if (activeUseOnset) {
+                      return (
+                        <div className={`w-12 h-12 rounded-full overflow-hidden border-2 border-cyan-500/50 ${isPlaying ? 'animate-spin' : ''}`} style={{ animationDuration: '3s' }}>
+                          <OnsetImageCard
+                            songTitle={activeSong.trackName || activeSong.albumTitle}
+                            songId={activeSong.id}
+                            className="w-full h-full object-cover"
+                            isPlaying={isPlaying}
+                            isActive={true}
+                          />
+                        </div>
+                      );
+                    }
+                    return (
+                      <img 
+                        key={activeSong?.albumCoverImageUrl || activeSong?.artworkUrl100 || 'no-cover'}
+                        src={activeSong?.albumCoverImageUrl || activeSong?.artworkUrl100?.replace('100x100', '200x200') || fallbackImage}
+                        alt={activeSong.trackName || activeSong.albumTitle}
+                        className={`w-12 h-12 rounded-full object-cover border-2 border-cyan-500/50 ${isPlaying ? 'animate-spin' : ''}`}
+                        style={{ animationDuration: '3s' }}
+                        onError={(e) => { e.target.src = fallbackImage; }}
+                      />
+                    );
+                  })()}
                   <div className="absolute inset-0 flex items-center justify-center pointer-events-none -mt-4">
                     <div className="w-3 h-3 rounded-full bg-gray-900 border border-gray-700"></div>
                   </div>
@@ -713,12 +749,31 @@ const TopCharts = () => {
                     <div className="flex items-center gap-2">
                       {/* Album Cover - Support both URL formats */}
                       <div className="w-12 h-12 rounded-md overflow-hidden flex-shrink-0 border border-gray-600 group-hover:border-cyan-500 transition-colors">
-                        <img 
-                          src={rec.albumCoverImageUrl || rec.artworkUrl100?.replace('100x100', '200x200') || fallbackImage}
-                          alt={rec.trackName}
-                          className="w-full h-full object-cover"
-                          onError={(e) => { e.target.src = fallbackImage; }}
-                        />
+                        {(() => {
+                          const recMedia = rec.albumCoverImageUrl || rec.artworkUrl100;
+                          const recIsVideo = recMedia && recMedia.toLowerCase().includes('.mp4');
+                          const recIsTeddy = (rec.trackName || rec.albumTitle || '').toLowerCase().includes('teddy emotion');
+                          const recUseOnset = recIsVideo && !recIsTeddy;
+                          if (recUseOnset) {
+                            return (
+                              <OnsetImageCard
+                                songTitle={rec.trackName || rec.albumTitle}
+                                songId={rec.id}
+                                className="w-full h-full object-cover"
+                                isPlaying={false}
+                                isActive={false}
+                              />
+                            );
+                          }
+                          return (
+                            <img 
+                              src={rec.albumCoverImageUrl || rec.artworkUrl100?.replace('100x100', '200x200') || fallbackImage}
+                              alt={rec.trackName}
+                              className="w-full h-full object-cover"
+                              onError={(e) => { e.target.src = fallbackImage; }}
+                            />
+                          );
+                        })()}
                       </div>
 
                       {/* Product Info */}

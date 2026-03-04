@@ -5,6 +5,7 @@ import { productService } from "../redux/services/productService";
 import { orderItemService } from "../redux/services/orderItemService";
 import { FaBoxOpen } from "react-icons/fa";
 import OnsetImageCard from './OnsetImageCard';
+import SidebarSearchFilter from './SidebarSearchFilter';
 
 const SoldProductsSidebar = () => {
   const { currentUser } = useAuth();
@@ -106,6 +107,12 @@ const SoldProductsSidebar = () => {
               )}
 
               {!isLoading && !error && data && data.length > 0 && (
+                <SidebarSearchFilter
+                  data={data}
+                  getSearchableText={(item) => productMap[item.productId]?.albumTitle || ''}
+                  placeholder="Filter by song name…"
+                >
+                  {(filteredData) => (
                 <table className="w-full text-left text-sm text-gray-300 whitespace-nowrap">
                   <thead className="text-xs uppercase bg-[#333] text-gray-300">
                     <tr>
@@ -117,7 +124,7 @@ const SoldProductsSidebar = () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {data.map((item, i) => {
+                    {filteredData.map((item, i) => {
                       const product = productMap[item.productId];
                       const orderItem = orderItemMap[item.orderItemId];
                       return (
@@ -174,6 +181,8 @@ const SoldProductsSidebar = () => {
                     })}
                   </tbody>
                 </table>
+                  )}
+                </SidebarSearchFilter>
               )}
 
               {!isLoading && !error && data?.length === 0 && (

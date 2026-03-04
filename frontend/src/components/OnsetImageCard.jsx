@@ -16,19 +16,39 @@ import { useRef, useEffect, useState, useCallback } from 'react';
 import { useSelector } from 'react-redux';
 import globalAudioContext from '../utils/globalAudioContext';
 import imageGenerationService from '../utils/imageGenerationService';
+import { GLITCH_DURATION_MS, glitchStyle } from '../utils/glitchEffects';
 
 // Transition duration for image crossfade (ms)
 const CROSSFADE_MS = 250;
 
+/**
+ * Normalize songId to ensure consistent pool keys across all components.
+ * Different APIs return the same product with different field names:
+ * - Products API: { id: 5163 }
+ * - TopPlayed API: { productId: 5163 }
+ * - Recommendations API: { product_id: 5163 }
+ * This strips any string prefix (e.g. 'db-') and returns the raw numeric ID.
+ */
+const normalizeId = (id) => {
+  if (id == null) return null;
+  const str = String(id);
+  // Strip common prefixes like 'db-'
+  const stripped = str.replace(/^db-/i, '');
+  const num = parseInt(stripped, 10);
+  return isNaN(num) ? str : num;
+};
+
 const OnsetImageCard = ({
   songTitle,
-  songId,
+  songId: rawSongId,
   className,
   isPlaying,
   isActive,
   onError,
   ...props
 }) => {
+  // Normalize the songId so all instances of the same song share one image pool
+  const songId = normalizeId(rawSongId);
   // Two-layer crossfade refs
   const containerRef = useRef(null);
   const [currentImage, setCurrentImage] = useState(null);
@@ -46,6 +66,9 @@ const OnsetImageCard = ({
   const initPromiseRef = useRef(null);
   // Track whether this instance is the "primary" onset driver (first active instance)
   const isPrimaryRef = useRef(false);
+  // Glitch state — mirrors AudioReactiveVideo's glitch effect exactly
+  const [isGlitching, setIsGlitching] = useState(false);
+  const glitchTimeoutRef = useRef(null);
 
   const { activeSong } = useSelector((state) => state.player);
 
@@ -62,6 +85,9 @@ const OnsetImageCard = ({
       isMountedRef.current = false;
       if (swapTimeoutRef.current) {
         clearTimeout(swapTimeoutRef.current);
+      }
+      if (glitchTimeoutRef.current) {
+        clearTimeout(glitchTimeoutRef.current);
       }
     };
   }, []);
@@ -174,6 +200,35 @@ const OnsetImageCard = ({
     };
   }, [isActive, songId, crossfadeTo]);
 
+  // Passive sync: non-active instances of the same song follow onset image changes
+  // This keeps wishlist, stock, purchased products etc. in sync with the playing song
+  useEffect(() => {
+    if (isActive) return; // Active instances are handled above
+    if (!songId) return;
+
+    const handlePassiveSync = (newImage, _generation, activeSongId) => {
+      // Only sync if the image change is for THIS song
+      if (activeSongId == songId) {
+        crossfadeTo(newImage);
+      }
+    };
+
+    // Also check on mount if the active song matches and has a current image
+    const currentActiveSongId = imageGenerationService.getActiveSongId();
+    if (currentActiveSongId == songId) {
+      const sharedImage = imageGenerationService.getCurrentImage();
+      if (sharedImage && sharedImage !== currentImageRef.current) {
+        setCurrentImage(sharedImage);
+        currentImageRef.current = sharedImage;
+      }
+    }
+
+    imageGenerationService.onImageChange(handlePassiveSync);
+    return () => {
+      imageGenerationService.offImageChange(handlePassiveSync);
+    };
+  }, [isActive, songId, crossfadeTo]);
+
   // Handle onset (drum hit) — only the primary instance advances the pool
   const handleOnset = useCallback((onset) => {
     if (!isMountedRef.current) return;
@@ -216,6 +271,29 @@ const OnsetImageCard = ({
     };
   }, [isActive, isPlaying, handleOnset]);
 
+  // Listen for glitch events (high-frequency transients) — same logic as AudioReactiveVideo
+  useEffect(() => {
+    if (!isActive || !isPlaying) return;
+
+    const handleGlitch = (glitch) => {
+      setIsGlitching(true);
+      if (glitchTimeoutRef.current) {
+        clearTimeout(glitchTimeoutRef.current);
+      }
+      glitchTimeoutRef.current = setTimeout(() => {
+        setIsGlitching(false);
+      }, GLITCH_DURATION_MS);
+    };
+
+    globalAudioContext.onGlitch(handleGlitch);
+    return () => {
+      globalAudioContext.offGlitch(handleGlitch);
+      if (glitchTimeoutRef.current) {
+        clearTimeout(glitchTimeoutRef.current);
+      }
+    };
+  }, [isActive, isPlaying]);
+
   // Handle image load errors
   const handleImageError = useCallback((e) => {
     // Replace with procedural fallback
@@ -228,6 +306,9 @@ const OnsetImageCard = ({
     }
     setImageError(true);
   }, []);
+
+  // Compute glitch styles once per render (random values refresh each render while glitching)
+  const activeGlitch = isActive && isPlaying ? glitchStyle(isGlitching) : glitchStyle(false);
 
   return (
     <div
@@ -243,8 +324,13 @@ const OnsetImageCard = ({
           className="absolute inset-0 w-full h-full object-cover"
           style={{
             opacity: showNext ? 0 : 1,
-            transition: `opacity ${CROSSFADE_MS}ms ease-in-out`,
+            transition: isGlitching
+              ? 'none'
+              : `opacity ${CROSSFADE_MS}ms ease-in-out, transform 0.1s ease-out, filter 0.1s ease-out`,
             borderRadius: 'inherit',
+            // Apply exact same glitch effects as AudioReactiveVideo
+            transform: activeGlitch.transform,
+            filter: activeGlitch.filter,
           }}
           onError={handleImageError}
           crossOrigin="anonymous"
@@ -259,11 +345,33 @@ const OnsetImageCard = ({
           className="absolute inset-0 w-full h-full object-cover"
           style={{
             opacity: showNext ? 1 : 0,
-            transition: `opacity ${CROSSFADE_MS}ms ease-in-out`,
+            transition: isGlitching
+              ? 'none'
+              : `opacity ${CROSSFADE_MS}ms ease-in-out, transform 0.1s ease-out, filter 0.1s ease-out`,
             borderRadius: 'inherit',
+            transform: activeGlitch.transform,
+            filter: activeGlitch.filter,
           }}
           onError={handleImageError}
           crossOrigin="anonymous"
+        />
+      )}
+
+      {/* Scanline / noise overlay — visible only during glitch (matches sky grain effect) */}
+      {isGlitching && isActive && isPlaying && (
+        <div
+          className="absolute inset-0 pointer-events-none"
+          style={{
+            borderRadius: 'inherit',
+            background: `repeating-linear-gradient(
+              0deg,
+              transparent,
+              transparent 2px,
+              rgba(255,255,255,0.03) 2px,
+              rgba(255,255,255,0.03) 4px
+            )`,
+            mixBlendMode: 'overlay',
+          }}
         />
       )}
 

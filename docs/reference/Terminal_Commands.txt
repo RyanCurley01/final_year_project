@@ -177,3 +177,7 @@ docker exec gamestore_services-db-1 mysqldump -u root -prootpassword Game_Store_
 
 To fix merge conflict with local and remote main branch
 git pull --no-rebase
+
+To restart the audio service container
+docker compose -f docker-compose.services.yml -p gamestore_services build --no-cache audio-service && \
+docker compose -f docker-compose.services.yml -p gamestore_services up -d audio-service

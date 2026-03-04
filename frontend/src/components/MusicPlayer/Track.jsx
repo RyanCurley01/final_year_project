@@ -58,7 +58,7 @@ const Track = ({ isPlaying, isActive, activeSong }) => {
         <div className="rounded-full overflow-hidden w-full h-full">
           <OnsetImageCard
             songTitle={songTitle}
-            songId={activeSong?.id}
+            songId={activeSong?.id || activeSong?.productId}
             className="w-full h-full object-cover"
             isPlaying={isPlaying && isActive}
             isActive={isActive}
