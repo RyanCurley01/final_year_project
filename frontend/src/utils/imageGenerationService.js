@@ -1,10 +1,10 @@
 /**
  * Image Generation Service
  * 
- * RAG-Enhanced AI Image Pool Manager for onset-reactive visuals.
+ * RAG-Enhanced Image Pool Manager for onset-reactive visuals.
  * Uses song metadata (title, genre, audio features) to construct contextually
- * relevant prompts, then retrieves pools of AI-generated images from Lexica.art
- * via the audio_service backend proxy (no CORS issues).
+ * relevant Flickr keyword tags, then retrieves pools of real photographs from
+ * LoremFlickr via the audio_service backend proxy.
  * 
  * MCP (Model Context Protocol) Pattern:
  * - Acts as a tool that the onset detection system invokes
@@ -319,8 +319,8 @@ class ImagePoolManager {
   constructor() {
     this.pools = new Map(); // songId → { images: string[], index: number, loading: boolean }
     this.preloadedImages = new Map(); // url → HTMLImageElement (for instant display)
-    this.maxPoolSize = 50;
-    this.refillThreshold = 5; // Refill when pool drops below this
+    this.maxPoolSize = 1000000; // Effectively infinite — never cap
+    this.refillThreshold = 20; // Refill when pool drops below this
   }
 
   /**
@@ -343,14 +343,16 @@ class ImagePoolManager {
    */
   addImages(songId, imageUrls) {
     const pool = this.getPool(songId);
+    // O(1) dedup with Set
+    const existing = new Set(pool.images);
     for (const url of imageUrls) {
-      if (!pool.images.includes(url)) {
+      if (!existing.has(url)) {
         pool.images.push(url);
-        // Pre-load image for instant display
+        existing.add(url);
         this._preloadImage(url);
       }
     }
-    // Cap pool size
+    // Cap pool size (very high — effectively infinite)
     if (pool.images.length > this.maxPoolSize) {
       pool.images = pool.images.slice(-this.maxPoolSize);
     }
@@ -363,8 +365,8 @@ class ImagePoolManager {
     const pool = this.getPool(songId);
     if (pool.images.length === 0) return null;
 
-    const image = pool.images[pool.index % pool.images.length];
-    pool.index = (pool.index + 1) % pool.images.length;
+    // Consuming queue: shift from front, never repeat
+    const image = pool.images.shift();
     return image;
   }
 
@@ -373,27 +375,52 @@ class ImagePoolManager {
    */
   needsRefill(songId) {
     const pool = this.getPool(songId);
-    const remaining = pool.images.length - (pool.index % Math.max(pool.images.length, 1));
-    return remaining < this.refillThreshold && !pool.loading;
+    // Consuming queue: just check remaining length
+    return pool.images.length < this.refillThreshold && !pool.loading;
   }
 
   /**
    * Pre-load an image for instant display.
+   * Returns a Promise that resolves when the image is loaded (or rejects on error).
    */
   _preloadImage(url) {
-    if (this.preloadedImages.has(url)) return;
-    if (url.startsWith('data:')) return; // Don't preload data URLs
+    if (this.preloadedImages.has(url)) {
+      return this.preloadedImages.get(url).promise || Promise.resolve();
+    }
+    if (url.startsWith('data:')) return Promise.resolve();
 
     const img = new Image();
-    img.crossOrigin = 'anonymous';
+    const promise = new Promise((resolve) => {
+      img.onload = () => resolve(true);
+      img.onerror = () => resolve(false); // resolve (not reject) so Promise.all doesn't abort
+    });
+    // No crossOrigin — LoremFlickr doesn't send CORS headers
     img.src = url;
-    this.preloadedImages.set(url, img);
+    this.preloadedImages.set(url, { img, promise });
 
     // Limit preload cache size
-    if (this.preloadedImages.size > 100) {
+    if (this.preloadedImages.size > 200) {
       const firstKey = this.preloadedImages.keys().next().value;
       this.preloadedImages.delete(firstKey);
     }
+
+    return promise;
+  }
+
+  /**
+   * Preload a batch of URLs and wait for them to finish loading.
+   * Used to ensure the first N images are ready before onset detection starts.
+   * @param {string[]} urls - URLs to preload
+   * @param {number} timeoutMs - Max time to wait (default 5s)
+   */
+  async _preloadPriorityBatch(urls, timeoutMs = 5000) {
+    if (!urls.length) return;
+    const promises = urls.map(url => this._preloadImage(url));
+    // Race: either all load or timeout expires — don't block forever
+    await Promise.race([
+      Promise.all(promises),
+      new Promise(resolve => setTimeout(resolve, timeoutMs)),
+    ]);
   }
 
   /**
@@ -421,7 +448,7 @@ class ImagePoolManager {
  * Orchestrates the full image generation pipeline using MCP patterns:
  * - Tool invocation: Onset detection calls this as a "tool"
  * - Context management: Maintains song context, pool state, and provider status
- * - Provider chain: Lexica API → Procedural fallback with graceful degradation
+ * - Provider chain: LoremFlickr → Procedural fallback with graceful degradation
  */
 class MCPImageOrchestrator {
   constructor() {
@@ -429,11 +456,11 @@ class MCPImageOrchestrator {
     this.poolManager = new ImagePoolManager();
     this.proceduralGenerator = new ProceduralGenerator();
 
-    // MCP context state
+    // MCP context state — per-song context map so thumbnails don't clobber the active song
     this.currentSongContext = null;
+    this._songContexts = new Map(); // songId → songContext
     this.providerStatus = {
-      lexica: { available: true, lastError: null, errorCount: 0 },
-      picsum: { available: true, lastError: null, errorCount: 0 },
+      loremflickr: { available: true, lastError: null, errorCount: 0 },
     };
 
     // Rate limiting
@@ -492,7 +519,8 @@ class MCPImageOrchestrator {
    */
   advanceImage(onsetData = {}) {
     const newImage = this.getNextImage(onsetData);
-    if (newImage && newImage !== this._currentOnsetImage) {
+    if (newImage) {
+      // Always advance — crossfadeTo in the UI already guards against same-image
       this._currentOnsetImage = newImage;
       this._onsetGeneration++;
       this._notifyListeners(newImage);
@@ -595,8 +623,14 @@ class MCPImageOrchestrator {
    * @param {Object} songContext - { id, title, genre, audioFeatures? }
    */
   async initializeSongContext(songContext) {
-    this.currentSongContext = songContext;
     const songId = songContext.id || songContext.title;
+
+    // Store context per-songId so thumbnails don't clobber the active song
+    this._songContexts.set(songId, songContext);
+    // Only set currentSongContext for the active song
+    if (this._activeSongId == null || this._activeSongId == songId) {
+      this.currentSongContext = songContext;
+    }
 
     // Check if we already have a pool for this song
     const pool = this.poolManager.getPool(songId);
@@ -618,7 +652,8 @@ class MCPImageOrchestrator {
     }
 
     // Store features in context for later use
-    this.currentSongContext.audioFeatures = audioFeatures;
+    songContext.audioFeatures = audioFeatures;
+    this._songContexts.set(songId, songContext);
 
     // Populate the pool with mood-aware images (does NOT touch shared image state)
     await this._fetchAndPopulatePool(songContext, audioFeatures);
@@ -643,21 +678,22 @@ class MCPImageOrchestrator {
    */
   activateForPlayback(songId) {
     this._activeSongId = songId;
+    // Update currentSongContext to point to the active song's stored context
+    const storedContext = this._songContexts.get(songId);
+    if (storedContext) {
+      this.currentSongContext = storedContext;
+    }
+    // Force-release onset primary so the new active card can claim it
+    this._onsetRegistered = false;
     const pool = this.poolManager.getPool(songId);
     if (pool.images.length > 0) {
-      // Use current shared image if it belongs to this pool, otherwise first image
-      if (this._currentOnsetImage && pool.images.includes(this._currentOnsetImage)) {
-        // Already showing an image from this pool — notify subscribers
-        this._notifyListeners(this._currentOnsetImage);
-      } else {
-        // Set to this song's first image
-        pool.index = 0;
-        const initialImage = pool.images[0];
-        if (initialImage) {
-          this._currentOnsetImage = initialImage;
-          this._onsetGeneration++;
-          this._notifyListeners(initialImage);
-        }
+      // Consume the first image from the queue so the next .shift()
+      // on onset returns a DIFFERENT image (no first-onset skip)
+      const initialImage = pool.images.shift();
+      if (initialImage) {
+        this._currentOnsetImage = initialImage;
+        this._onsetGeneration++;
+        this._notifyListeners(initialImage);
       }
     }
   }
@@ -669,18 +705,23 @@ class MCPImageOrchestrator {
    * @returns {string} Image URL or data URL
    */
   getNextImage(onsetData = {}) {
-    if (!this.currentSongContext) {
+    // CRITICAL: use _activeSongId, not currentSongContext.id!
+    // currentSongContext gets overwritten by every thumbnail card that mounts.
+    // _activeSongId is only set by activateForPlayback (the actually playing song).
+    const songId = this._activeSongId
+      || (this.currentSongContext?.id || this.currentSongContext?.title);
+
+    if (!songId) {
       return this.proceduralGenerator.generate(onsetData);
     }
-
-    const songId = this.currentSongContext.id || this.currentSongContext.title;
 
     // Try API-sourced image from pool
     const poolImage = this.poolManager.getNextImage(songId);
 
     // Check if pool needs refill (background fetch)
     if (this.poolManager.needsRefill(songId)) {
-      this._backgroundRefill(this.currentSongContext);
+      const ctx = this._songContexts.get(songId) || this.currentSongContext;
+      if (ctx) this._backgroundRefill(ctx);
     }
 
     if (poolImage) {
@@ -710,7 +751,7 @@ class MCPImageOrchestrator {
    * Fetch images from the backend proxy and populate the pool.
    * Passes audio features to backend for mood-aware prompt generation.
    */
-  async _fetchAndPopulatePool(songContext, audioFeatures = null) {
+  async _fetchAndPopulatePool(songContext, audioFeatures = null, isRefill = false) {
     const songId = songContext.id || songContext.title;
     const pool = this.poolManager.getPool(songId);
 
@@ -724,7 +765,15 @@ class MCPImageOrchestrator {
       const encodedTitle = encodeURIComponent(songContext.title || 'electronic music');
 
       // Build URL with audio feature params for mood-aware prompts
-      let url = `${apiBaseUrl}/api/images/pool?song_title=${encodedTitle}&song_id=${songContext.id || 0}&count=30`;
+      // Initial fetch: 50 images; Refill: 30 images with nocache for fresh URLs
+      // Smaller batches avoid saturating browser connections (6 per hostname)
+      const batchCount = isRefill ? 30 : 50;
+      let url = `${apiBaseUrl}/api/images/pool?song_title=${encodedTitle}&song_id=${songContext.id || 0}&count=${batchCount}`;
+
+      // Refills skip cache and get fresh unique URLs via nocache
+      if (isRefill) {
+        url += '&nocache=true';
+      }
 
       // Append audio features from the AudioFeatures DB table
       const af = audioFeatures || songContext.audioFeatures;
@@ -752,17 +801,23 @@ class MCPImageOrchestrator {
       const images = data.images || [];
 
       if (images.length > 0) {
-        // Prefer urlLarge (full resolution 1024px) for crisp fullscreen display
-        const imageUrls = images.map(img => img.urlLarge || img.url);
+        // Use url (640x480) — same resolution for thumbnails and fullscreen
+        const imageUrls = images.map(img => img.url || img.urlLarge);
+
+        // Priority preload: await first 12 images (640x480 loads fast) so onset has loaded images immediately
+        const priorityUrls = imageUrls.slice(0, 12);
+        await this.poolManager._preloadPriorityBatch(priorityUrls, 4000);
+
+        // Add all URLs to pool (remaining preload in background via addImages)
         this.poolManager.addImages(songId, imageUrls);
-        this._updateProviderStatus('lexica', true);
-        console.log(`[ImageGen] Fetched ${imageUrls.length} images for "${songContext.title}" (source: ${data.source}, mood: ${data.mood || 'N/A'})`);
+        this._updateProviderStatus('loremflickr', true);
+        console.log(`[ImageGen] Fetched ${imageUrls.length} images for "${songContext.title}" (${priorityUrls.length} priority-preloaded, source: ${data.source}, tags: ${(data.tags_used || []).join(',')})`);
       } else {
         console.warn(`[ImageGen] No images returned for "${songContext.title}"`);
       }
     } catch (error) {
       console.warn(`[ImageGen] API fetch failed for "${songContext.title}":`, error.message);
-      this._updateProviderStatus('lexica', false, error.message);
+      this._updateProviderStatus('loremflickr', false, error.message);
 
       // Generate procedural fallback images and add to pool
       const proceduralImages = [];
@@ -794,7 +849,7 @@ class MCPImageOrchestrator {
     if (Date.now() - this.lastFetchTime < this.minFetchInterval) return;
 
     // Don't refill if providers are down
-    if (!this.providerStatus.lexica.available && this.providerStatus.lexica.errorCount > 3) {
+    if (!this.providerStatus.loremflickr.available && this.providerStatus.loremflickr.errorCount > 3) {
       // Just add more procedural images
       const songId = songContext.id || songContext.title;
       const proceduralImages = [];
@@ -810,7 +865,7 @@ class MCPImageOrchestrator {
       return;
     }
 
-    await this._fetchAndPopulatePool(songContext, songContext.audioFeatures);
+    await this._fetchAndPopulatePool(songContext, songContext.audioFeatures, true);
   }
 
   /**
@@ -834,10 +889,12 @@ class MCPImageOrchestrator {
    */
   reset() {
     this.currentSongContext = null;
+    this._songContexts.clear();
     this.poolManager.clearAll();
     this._currentOnsetImage = null;
     this._onsetRegistered = false;
     this._onsetGeneration = 0;
+    this._activeSongId = null;
   }
 
   /**

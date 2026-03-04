@@ -119,6 +119,19 @@ const OnsetImageCard = ({
 
     const initPool = async () => {
       try {
+        // If this song is already the active song (e.g. fullscreen opening while
+        // thumbnail is playing), sync directly to the current shared image so both
+        // instances show the exact same picture.
+        if (isActive && imageGenerationService.getActiveSongId() == songId) {
+          const sharedImage = imageGenerationService.getCurrentImage();
+          if (sharedImage && isMountedRef.current) {
+            setCurrentImage(sharedImage);
+            currentImageRef.current = sharedImage;
+            setIsInitialized(true);
+            return;
+          }
+        }
+
         // Check if this song's pool already has images (cached from prior visit)
         const existingPoolImage = imageGenerationService.getFirstPoolImage(songId);
         if (existingPoolImage) {
@@ -180,8 +193,12 @@ const OnsetImageCard = ({
   useEffect(() => {
     if (!isActive) return;
 
-    // Activate this song's pool as the shared playback source
-    imageGenerationService.activateForPlayback(songId);
+    // Activate this song's pool as the shared playback source — but only if
+    // it isn't already active (avoids consuming an extra image from the pool
+    // when a second instance like fullscreen mounts for the same song).
+    if (imageGenerationService.getActiveSongId() != songId) {
+      imageGenerationService.activateForPlayback(songId);
+    }
 
     // On subscription, immediately sync to the current shared image
     const sharedImage = imageGenerationService.getCurrentImage();
@@ -333,7 +350,6 @@ const OnsetImageCard = ({
             filter: activeGlitch.filter,
           }}
           onError={handleImageError}
-          crossOrigin="anonymous"
         />
       )}
 
@@ -353,7 +369,6 @@ const OnsetImageCard = ({
             filter: activeGlitch.filter,
           }}
           onError={handleImageError}
-          crossOrigin="anonymous"
         />
       )}
 

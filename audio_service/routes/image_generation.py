@@ -1,13 +1,24 @@
 """
 Image Generation Proxy Route
-Proxies image search requests to free AI image APIs (server-side to avoid CORS).
-Uses Lexica.art for Stable Diffusion image search and fallbacks.
+Generates pools of real photographs via LoremFlickr, driven by audio features
+from the external Docker AudioFeatures database table.
+
+LoremFlickr serves real Flickr Creative Commons photos matching keyword tags.
+Uses ONLY verified single keywords per URL (no comma-separated multi-tags) to
+avoid HTTP 500 errors. Each unique lock value returns a different image.
+
+Audio features (mood, energy, valence, tempo, danceability, acousticness, genre)
+are mapped to verified Flickr-friendly single keywords so every song gets
+visually relevant, mood-matched real photographs.
+
+Content safety: NO people, nudity, red-dominant, text-heavy, concert, dance,
+stadium, beach, sculpture, street, fire, car, motorcycle, helicopter, train,
+guitar, piano, sailboat, volcano keywords.
+Only nature, landscape, architecture, and abstract imagery.
 """
 
 from fastapi import APIRouter, Query, HTTPException
 from typing import Optional
-import httpx
-import asyncio
 import time
 import hashlib
 import random
@@ -18,17 +29,15 @@ router = APIRouter(prefix="/api/images", tags=["Image Generation"])
 # IN-MEMORY CACHE (TTL-based)
 # ============================================
 _image_cache = {}  # {cache_key: {"urls": [...], "timestamp": float}}
-_CACHE_TTL = 3600  # 1 hour TTL for cached results
-_CACHE_MAX_SIZE = 200  # Max number of cache entries
+_CACHE_TTL = 300  # 5 min TTL — short so refills get fresh images
+_CACHE_MAX_SIZE = 200
 
 
 def _cache_key(prompt: str) -> str:
-    """Generate a cache key from a prompt."""
     return hashlib.md5(prompt.lower().strip().encode()).hexdigest()
 
 
 def _get_cached(prompt: str):
-    """Get cached image URLs for a prompt if still valid."""
     key = _cache_key(prompt)
     if key in _image_cache:
         entry = _image_cache[key]
@@ -40,8 +49,6 @@ def _get_cached(prompt: str):
 
 
 def _set_cached(prompt: str, urls: list):
-    """Cache image URLs for a prompt."""
-    # Evict oldest entries if cache is full
     if len(_image_cache) >= _CACHE_MAX_SIZE:
         oldest_key = min(_image_cache, key=lambda k: _image_cache[k]["timestamp"])
         del _image_cache[oldest_key]
@@ -50,70 +57,237 @@ def _set_cached(prompt: str, urls: list):
 
 
 # ============================================
-# LEXICA.ART PROVIDER (Primary - AI Image Search)
+# VERIFIED SAFE KEYWORDS
 # ============================================
-async def _fetch_lexica(prompt: str, count: int = 20) -> list:
-    """
-    Search Lexica.art for AI-generated Stable Diffusion images.
-    Lexica indexes millions of SD images with their prompts.
-    Free, no API key required, fast response.
-    """
-    try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            response = await client.get(
-                "https://lexica.art/api/v1/search",
-                params={"q": prompt},
-                headers={
-                    "User-Agent": "AudioVisualizerApp/1.0",
-                    "Accept": "application/json",
-                }
-            )
-            if response.status_code == 200:
-                data = response.json()
-                images = data.get("images", [])
-                urls = []
-                for img in images[:count]:
-                    # Use full resolution src (typically 1024x1024) for crisp fullscreen display
-                    url = img.get("src") or img.get("srcSmall")
-                    if url:
-                        urls.append({
-                            "url": url,
-                            "urlLarge": img.get("src", url),
-                            "prompt": img.get("prompt", ""),
-                            "width": img.get("width", 1024),
-                            "height": img.get("height", 1024),
-                        })
-                return urls
-            else:
-                print(f"Lexica API returned status {response.status_code}")
-                return []
-    except Exception as e:
-        print(f"Lexica API error: {e}")
-        return []
+# All keywords individually tested against LoremFlickr at 1920x1080
+# and confirmed to return HTTP 302 (valid image redirect).
+#
+# REMOVED (people risk — street photography, tourists, divers, visitors):
+#   fire, car, motorcycle, helicopter, train, guitar, piano, sailboat, volcano,
+#   city, temple, bridge, candle, night, building, tower, lighthouse, garden,
+#   reef, cave, meadow, skyscraper
+# KEPT (pure nature/landscape/abstract — virtually zero people):
+#   landscape, abstract, ocean, forest, mountain, rain, sky, water, flower,
+#   snow, cloud, tree, river, desert, fog, aurora, rainbow, waterfall,
+#   butterfly, sunset, canyon, cliff, glacier, coral, valley, marsh, dune,
+#   prairie, creek, cavern
+# ADDED (pure nature/geology — impossible to have people):
+#   iceberg, tundra, nebula, stalactite, sandstone, lagoon, fjord, moss,
+#   icicle, pebble, fern, seashell, driftwood, geode, crystal, cactus
+#
+# Each URL uses exactly ONE keyword — no comma-separated multi-tags.
+
+_VERIFIED_KEYWORDS = frozenset([
+    # Pure nature/landscape
+    "landscape", "abstract", "ocean", "forest", "mountain", "rain",
+    "sky", "water", "flower", "snow", "cloud", "tree", "river",
+    "desert", "fog", "aurora", "rainbow", "waterfall", "butterfly",
+    "sunset", "canyon", "cliff", "glacier", "coral", "valley",
+    "marsh", "dune", "prairie", "creek", "cavern",
+    # Pure nature/geology replacements
+    "iceberg", "tundra", "nebula", "stalactite", "sandstone", "lagoon",
+    "fjord", "moss", "icicle", "pebble", "fern", "seashell",
+    "driftwood", "geode", "crystal", "cactus",
+])
 
 
 # ============================================
-# LOREM PICSUM PROVIDER (Fallback - Real Photos)
+# LOREM FLICKR PROVIDER (Single Keyword Per URL)
 # ============================================
-def _generate_picsum_urls(count: int = 20, seed_prefix: str = "music") -> list:
+
+def _generate_loremflickr_urls(keywords: list, count: int = 30,
+                                width: int = 1980, height: int = 1280,
+                                nocache: bool = False) -> list:
     """
-    Generate Lorem Picsum URLs as a fallback.
-    These are real photos but reliably served, no API key needed.
-    Each URL with a unique seed returns a consistent image.
+    Generate LoremFlickr URLs using SINGLE verified keywords per URL.
+    Cycles through the keyword list so each URL gets a different keyword.
+    Each URL gets a unique ?lock=N value for a different image.
+
+    Uses 1980x1280 for fast loading — same resolution in thumbnails and fullscreen
+    so the image looks identical in both views.
+
+    When nocache=True, appends a random cache-buster to guarantee fresh
+    URLs that the browser/CDN won't have seen before.
     """
+    if not keywords:
+        keywords = ["abstract", "landscape", "sky"]
+
+    base_lock = random.randint(1, 900000)
     urls = []
     for i in range(count):
-        seed = f"{seed_prefix}-{i}-{random.randint(1000, 9999)}"
-        url = f"https://picsum.photos/seed/{seed}/1024/1024"
-        url_large = f"https://picsum.photos/seed/{seed}/1024/1024"
+        keyword = keywords[i % len(keywords)]
+        lock_id = base_lock + i
+        base_url = f"https://loremflickr.com/{width}/{height}/{keyword}?lock={lock_id}"
+        if nocache:
+            base_url += f"&nocache={random.randint(1, 99999999)}"
         urls.append({
-            "url": url,
-            "urlLarge": url_large,
-            "prompt": f"picsum-{seed}",
-            "width": 1024,
-            "height": 1024,
+            "url": base_url,
+            "urlLarge": base_url,
+            "tags": keyword,
+            "width": width,
+            "height": height,
         })
     return urls
+
+
+# ============================================
+# AUDIO-FEATURE → VERIFIED KEYWORD MAPPING
+# ============================================
+
+# Russell's Circumplex Model moods → verified safe keywords only
+_mood_keyword_map = {
+    "energetic": ["sunset", "canyon", "aurora", "cliff", "nebula", "sandstone", "glacier"],
+    "happy":     ["flower", "rainbow", "butterfly", "fern", "lagoon", "coral", "aurora", "sky"],
+    "calm":      ["ocean", "forest", "mountain", "river", "cloud", "waterfall", "fog", "snow", "fjord"],
+    "sad":       ["rain", "fog", "tundra", "snow", "cloud", "desert", "cavern"],
+}
+
+# Song-title keywords → verified safe keywords
+_title_keyword_map = {
+    "acid":     ["abstract", "aurora"],
+    "alien":    ["sky", "desert", "nebula"],
+    "bass":     ["water", "ocean", "river"],
+    "dream":    ["cloud", "sky", "fog"],
+    "ghost":    ["fog", "tundra", "snow"],
+    "glitch":   ["abstract", "geode", "crystal"],
+    "night":    ["tundra", "nebula", "sky"],
+    "space":    ["sky", "nebula", "aurora"],
+    "dark":     ["cavern", "fog", "rain"],
+    "light":    ["sky", "aurora", "rainbow"],
+    "fire":     ["sunset", "canyon", "sandstone"],
+    "water":    ["water", "ocean", "waterfall"],
+    "electric": ["aurora", "nebula", "glacier"],
+    "cyber":    ["abstract", "crystal", "geode"],
+    "pulse":    ["water", "river", "ocean"],
+    "wave":     ["ocean", "water", "river"],
+    "zen":      ["fern", "forest", "flower"],
+    "chaos":    ["canyon", "cliff", "rain"],
+    "crystal":  ["snow", "waterfall", "crystal"],
+    "shadow":   ["cavern", "fog", "cloud"],
+    "storm":    ["rain", "cloud", "mountain"],
+    "echo":     ["mountain", "river", "fog"],
+    "drift":    ["cloud", "river", "driftwood"],
+    "void":     ["nebula", "sky", "desert"],
+    "neon":     ["aurora", "abstract", "nebula"],
+    "sun":      ["sky", "desert", "flower"],
+    "moon":     ["tundra", "sky", "fog"],
+    "rain":     ["rain", "fog", "cloud"],
+    "ocean":    ["ocean", "water", "river"],
+    "forest":   ["forest", "tree", "fern"],
+    "mountain": ["mountain", "snow", "landscape"],
+    "flower":   ["flower", "fern", "butterfly"],
+    "sky":      ["sky", "cloud", "aurora"],
+    "city":     ["abstract", "sandstone", "crystal"],
+}
+
+# Genre → verified safe keywords
+_genre_keyword_map = {
+    "electronic": ["abstract", "nebula", "aurora"],
+    "techno":     ["geode", "crystal", "stalactite"],
+    "ambient":    ["fog", "cloud", "ocean"],
+    "rock":       ["canyon", "mountain", "cliff"],
+    "pop":        ["flower", "rainbow", "butterfly"],
+    "classical":  ["fern", "forest", "river"],
+    "jazz":       ["driftwood", "sunset", "fog"],
+    "hiphop":     ["sandstone", "abstract", "canyon"],
+    "metal":      ["cavern", "stalactite", "tundra"],
+}
+
+# Energy-level intensity keywords (all verified)
+_energy_keywords = {
+    "high":   ["sunset", "canyon", "cliff", "glacier", "nebula"],
+    "medium": ["sandstone", "lagoon", "valley", "river", "mountain"],
+    "low":    ["fog", "cloud", "snow", "moss", "pebble"],
+}
+
+
+def _derive_mood(energy: float, valence: float) -> str:
+    """Derive mood from energy and valence using Russell's Circumplex Model."""
+    if energy > 0.6 and valence > 0.5:
+        return "energetic"
+    elif valence > 0.5:
+        return "happy"
+    elif energy < 0.4 and valence < 0.5:
+        return "sad"
+    else:
+        return "calm"
+
+
+def _build_keywords_from_features(
+    mood: str = None,
+    energy: float = None,
+    valence: float = None,
+    tempo: float = None,
+    danceability: float = None,
+    acousticness: float = None,
+    genre: str = None,
+    title: str = None,
+) -> list:
+    """
+    Build a list of verified safe Flickr keywords from audio features.
+    Uses song title words as primary differentiator, mood for atmosphere,
+    genre for style, and energy/tempo for intensity.
+    All output keywords are from the verified safe set only.
+    """
+    keywords = []
+    used = set()
+
+    def _add(kw_list, max_n=3):
+        added = 0
+        for kw in kw_list:
+            if kw not in used and kw in _VERIFIED_KEYWORDS:
+                keywords.append(kw)
+                used.add(kw)
+                added += 1
+                if added >= max_n:
+                    break
+
+    # 1. Title keywords (primary differentiator — makes each song unique)
+    if title:
+        for word in title.lower().split():
+            for key, kws in _title_keyword_map.items():
+                if key in word or word in key:
+                    _add(kws, 2)
+                    break
+
+    # 2. Mood keywords (atmosphere)
+    mood_key = (mood or "").lower().strip()
+    if not mood_key or mood_key == "unknown":
+        e = energy if energy is not None else 0.5
+        v = valence if valence is not None else 0.5
+        mood_key = _derive_mood(e, v)
+    mood_kws = _mood_keyword_map.get(mood_key, _mood_keyword_map["calm"])
+    _add(mood_kws, 3)
+
+    # 3. Genre keywords
+    if genre:
+        genre_lower = genre.lower().strip()
+        for g_key, g_kws in _genre_keyword_map.items():
+            if g_key in genre_lower or genre_lower in g_key:
+                _add(g_kws, 2)
+                break
+
+    # 4. Energy/tempo intensity keywords
+    if energy is not None:
+        if energy > 0.7:
+            _add(_energy_keywords["high"], 2)
+        elif energy > 0.4:
+            _add(_energy_keywords["medium"], 2)
+        else:
+            _add(_energy_keywords["low"], 2)
+
+    # 5. Feature-specific modifiers
+    if acousticness is not None and acousticness > 0.7:
+        _add(["forest", "fern", "river"], 1)
+    if tempo is not None and tempo > 140:
+        _add(["sunset", "canyon", "glacier"], 1)
+
+    # Ensure at least 3 keywords
+    if len(keywords) < 3:
+        _add(["abstract", "landscape", "sky", "ocean", "mountain"], 3 - len(keywords))
+
+    random.shuffle(keywords)
+    return keywords
 
 
 # ============================================
@@ -122,123 +296,37 @@ def _generate_picsum_urls(count: int = 20, seed_prefix: str = "music") -> list:
 
 @router.get("/search")
 async def search_images(
-    prompt: str = Query(..., description="Search prompt for AI-generated images"),
-    count: int = Query(20, ge=1, le=50, description="Number of images to return"),
+    prompt: str = Query(..., description="Search keywords for image retrieval"),
+    count: int = Query(20, ge=1, le=1000, description="Number of images to return"),
+    nocache: bool = Query(False, description="Skip cache for fresh images"),
 ):
-    """
-    Search for AI-generated images matching a prompt.
-    
-    RAG Pipeline:
-    1. Check in-memory cache for existing results
-    2. Query Lexica.art API for Stable Diffusion images
-    3. Fall back to Picsum if Lexica unavailable
-    4. Cache results for future requests
-    
-    Returns array of image objects with url, urlLarge, prompt, width, height.
-    """
-    # Check cache first
-    cached = _get_cached(prompt)
-    if cached:
-        # Shuffle cached results for variety
-        shuffled = list(cached)
-        random.shuffle(shuffled)
-        return {"images": shuffled[:count], "source": "cache", "prompt": prompt}
+    """Search for real photographs matching keyword tags via LoremFlickr."""
+    if not nocache:
+        cached = _get_cached(prompt)
+        if cached:
+            shuffled = list(cached)
+            random.shuffle(shuffled)
+            return {"images": shuffled[:count], "source": "cache", "prompt": prompt}
 
-    # Try Lexica first (AI-generated Stable Diffusion images)
-    images = await _fetch_lexica(prompt, count)
+    # Filter to only verified keywords
+    raw_tags = [w.strip() for w in prompt.lower().split() if len(w.strip()) > 2]
+    keywords = [t for t in raw_tags if t in _VERIFIED_KEYWORDS]
+    if not keywords:
+        keywords = ["abstract", "landscape", "sky"]
 
-    if images:
+    images = _generate_loremflickr_urls(keywords, count, nocache=nocache)
+    if not nocache:
         _set_cached(prompt, images)
-        return {"images": images, "source": "lexica", "prompt": prompt}
-
-    # Fallback to Picsum (reliable photo source)
-    images = _generate_picsum_urls(count, seed_prefix=prompt[:20])
-    _set_cached(prompt, images)
-    return {"images": images, "source": "picsum", "prompt": prompt}
-
-
-# ============================================
-# MOOD-AWARE PROMPT GENERATION
-# ============================================
-
-# Russell's Circumplex Model: mood → visual style descriptors
-_mood_visual_map = {
-    "energetic": {
-        "style": "high energy explosive vibrant neon electric",
-        "colors": "bright neon red orange yellow electric blue",
-        "subjects": ["lightning storm neon explosion", "electric energy burst abstract", "rave lights laser cyberpunk",
-                     "volcanic eruption neon abstract", "supernova explosion vibrant", "fireworks neon abstract digital art"],
-    },
-    "happy": {
-        "style": "warm joyful uplifting colorful bright",
-        "colors": "warm golden sunshine yellow orange pink",
-        "subjects": ["sunrise golden warm abstract art", "colorful festival celebration abstract", "blooming flowers bright digital art",
-                     "rainbow prism light refraction", "golden hour warm landscape abstract", "carnival lights warm neon digital"],
-    },
-    "calm": {
-        "style": "serene peaceful ambient soft ethereal",
-        "colors": "soft blue teal lavender pastel cool",
-        "subjects": ["calm ocean waves moonlight abstract", "misty forest ethereal soft light", "zen garden peaceful abstract art",
-                     "aurora borealis soft ethereal", "floating clouds pastel dreamscape", "still water reflection abstract art"],
-    },
-    "sad": {
-        "style": "melancholic moody dark atmospheric deep",
-        "colors": "deep blue indigo dark purple grey",
-        "subjects": ["rain drops dark moody abstract", "dark ocean depth abstract art", "foggy city night melancholic",
-                     "withered dark abstract digital art", "deep space void dark abstract", "dark forest mist atmospheric art"],
-    },
-}
-
-
-def _build_mood_prompts(mood: str, energy: float, valence: float, tempo: float,
-                        danceability: float, acousticness: float, title: str) -> list:
-    """
-    Build mood-aware image search prompts from audio features.
-    Uses Russell's Circumplex Model mapping to create visually relevant prompts.
-    """
-    mood_lower = (mood or "unknown").lower().strip()
-    mood_info = _mood_visual_map.get(mood_lower)
-
-    # If mood not recognized, derive from features
-    if not mood_info:
-        if energy > 0.6 and valence > 0.5:
-            mood_info = _mood_visual_map["energetic"]
-        elif valence > 0.5:
-            mood_info = _mood_visual_map["happy"]
-        elif energy < 0.4 and valence < 0.5:
-            mood_info = _mood_visual_map["sad"]
-        else:
-            mood_info = _mood_visual_map["calm"]
-
-    prompts = []
-
-    # Compose prompts from mood subjects augmented with style/color context
-    for subject in mood_info["subjects"]:
-        prompts.append(f"{subject} {mood_info['style']}")
-
-    # Add title-augmented prompt
-    prompts.append(f"{title} abstract digital art {mood_info['style']} {mood_info['colors']}")
-
-    # Add energy/tempo modifiers
-    if tempo > 140:
-        prompts.append(f"fast rhythm energetic abstract neon {mood_info['colors']}")
-    elif tempo < 90:
-        prompts.append(f"slow ambient atmospheric abstract {mood_info['colors']}")
-
-    if acousticness > 0.7:
-        prompts.append(f"acoustic organic natural warm abstract art {mood_info['colors']}")
-    elif danceability > 0.7:
-        prompts.append(f"dance rhythm pulsating neon abstract art {mood_info['colors']}")
-
-    return prompts
+    return {"images": images, "source": "loremflickr", "prompt": prompt}
 
 
 @router.get("/pool")
 async def get_image_pool(
     song_title: str = Query(..., description="Song title for contextual image retrieval"),
     song_id: Optional[str] = Query(None, description="Song ID for cache keying"),
-    count: int = Query(30, ge=1, le=50, description="Number of images for the pool"),
-    mood: Optional[str] = Query(None, description="Song mood from AudioFeatures (energetic/happy/calm/sad)"),
+    count: int = Query(30, ge=1, le=1000, description="Number of images for the pool"),
+    nocache: bool = Query(False, description="Skip cache for fresh refill images"),
+    mood: Optional[str] = Query(None, description="Song mood (energetic/happy/calm/sad)"),
     energy: Optional[float] = Query(None, ge=0, le=1, description="Energy level 0-1"),
     valence: Optional[float] = Query(None, ge=0, le=1, description="Valence (positivity) 0-1"),
     tempo: Optional[float] = Query(None, description="Tempo in BPM"),
@@ -247,160 +335,58 @@ async def get_image_pool(
     genre: Optional[str] = Query(None, description="Genre from AudioFeatures"),
 ):
     """
-    RAG-Enhanced Mood-Aware Image Pool Generation.
-    
-    Uses song audio features (mood, energy, valence, tempo) from the AudioFeatures
-    DB table to construct mood-matched prompts via Russell's Circumplex Model,
-    then retrieves a pool of AI-generated images for onset-triggered display.
-    
-    MCP Pattern: Acts as a tool that the frontend onset detection calls,
-    with song context + audio features passed as parameters for retrieval augmentation.
+    LoremFlickr Mood-Aware Image Pool Generation.
+
+    Uses ALL cached audio features to build verified Flickr keywords.
+    Each URL uses a SINGLE keyword (no comma-separated tags) to avoid HTTP 500.
+    Returns unique real photographs — one for every onset detection.
+
+    When nocache=true, bypasses cache and appends cache-busters for fresh URLs.
+    Count can go up to 1000 for infinite onset generation.
     """
-    # Determine if we have audio features
-    has_features = mood is not None or energy is not None or valence is not None
-
-    # RAG Step 1: Extract keywords from song title
-    title_lower = song_title.lower().strip()
-    keywords = title_lower.split()
-
-    # RAG Step 2: If we have audio features, use mood-aware prompt generation
-    if has_features:
-        prompts = _build_mood_prompts(
-            mood=mood or "unknown",
-            energy=energy if energy is not None else 0.5,
-            valence=valence if valence is not None else 0.5,
-            tempo=tempo if tempo is not None else 120.0,
-            danceability=danceability if danceability is not None else 0.5,
-            acousticness=acousticness if acousticness is not None else 0.5,
-            title=title_lower,
-        )
-        # Use up to 3 prompts for variety
-        prompt_list = prompts[:3]
-        images_per_prompt = max(count // len(prompt_list), 10)
-
-        all_images = []
-        seen_urls = set()
-        tasks = [_fetch_lexica(p, images_per_prompt) for p in prompt_list]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-
-        for result in results:
-            if isinstance(result, list):
-                for img in result:
-                    if img["url"] not in seen_urls:
-                        seen_urls.add(img["url"])
-                        all_images.append(img)
-
-        if len(all_images) >= count // 2:
-            random.shuffle(all_images)
-            _set_cached(f"pool:{song_title}:{mood}:{energy}", all_images)
+    if not nocache:
+        cache_key_str = f"pool:{song_title}:{song_id}:{mood}:{energy}:{valence}"
+        cached = _get_cached(cache_key_str)
+        if cached:
+            shuffled = list(cached)
+            random.shuffle(shuffled)
             return {
-                "images": all_images[:count],
-                "source": "lexica",
+                "images": shuffled[:count],
+                "source": "cache",
                 "song_title": song_title,
-                "mood": mood,
-                "prompts_used": prompt_list,
+                "tags_used": [],
             }
 
-        # If mood-aware fetch didn't get enough, fall through to keyword-based
+    # Build keywords from ALL audio features
+    keywords = _build_keywords_from_features(
+        mood=mood,
+        energy=energy,
+        valence=valence,
+        tempo=tempo,
+        danceability=danceability,
+        acousticness=acousticness,
+        genre=genre,
+        title=song_title,
+    )
 
-    # RAG Step 3 (Fallback): Map keywords to visual themes (knowledge base)
-    theme_map = {
-        "acid": ["psychedelic neon abstract art", "acid trip colorful digital art", "alien acid landscape surreal"],
-        "alien": ["alien landscape sci-fi digital art", "alien world surreal neon", "extraterrestrial abstract colorful"],
-        "bass": ["deep bass underwater waves", "bass frequency visualization neon", "deep vibration abstract art"],
-        "dream": ["dreamscape surreal fantasy landscape", "ethereal dream clouds abstract", "lucid dream digital art colorful"],
-        "ghost": ["spectral ethereal glow abstract", "ghostly translucent digital art", "haunted ethereal mist neon"],
-        "glitch": ["glitch art digital corruption", "pixel glitch cyberpunk neon", "broken digital abstract art"],
-        "night": ["night sky neon abstract", "dark night cyberpunk cityscape", "nocturnal abstract digital art"],
-        "space": ["outer space nebula colorful", "cosmic galaxy abstract art", "space nebula stars digital"],
-        "dark": ["dark abstract art moody", "dark digital art shadows neon", "dark surreal landscape"],
-        "light": ["light rays abstract colorful", "luminous digital art ethereal", "bright light abstract neon"],
-        "fire": ["fire flames abstract digital art", "burning abstract neon colorful", "fire energy visualization"],
-        "water": ["underwater abstract digital art", "water waves colorful neon", "ocean abstract visualization"],
-        "electric": ["electric lightning abstract neon", "electric energy digital art", "electric pulse visualization"],
-        "cyber": ["cyberpunk neon cityscape abstract", "cyber digital art futuristic", "cybernetic abstract neon"],
-        "pulse": ["pulse wave abstract neon", "heartbeat pulse visualization", "rhythm pulse digital art"],
-        "wave": ["wave abstract digital art colorful", "sound wave visualization neon", "ocean wave abstract art"],
-        "zen": ["zen peaceful abstract digital art", "meditative calm abstract", "zen garden surreal art"],
-        "chaos": ["chaos abstract digital art colorful", "chaotic energy neon visualization", "entropy abstract art"],
-        "crystal": ["crystal abstract digital art", "crystalline structure neon", "crystal formation colorful art"],
-        "shadow": ["shadow abstract dark digital art", "shadow play neon contrast", "dark shadow surreal art"],
-        "storm": ["storm abstract digital art", "lightning storm neon colorful", "tempest abstract visualization"],
-        "echo": ["echo waves abstract digital art", "reverb echo visualization neon", "sound echo abstract art"],
-        "drift": ["drifting abstract digital art", "drift movement neon colorful", "flowing drift abstract art"],
-        "void": ["void abstract dark digital art", "void space neon minimal", "empty void surreal art"],
-        "neon": ["neon lights abstract digital art", "neon glow colorful cyberpunk", "neon abstract visualization"],
-        "ted": ["abstract electronic music visualization", "digital art electronic beats", "electronic music colorful abstract"],
-        "selected": ["curated electronic music abstract art", "selected works digital visualization", "electronic abstract art"],
-    }
+    if not keywords:
+        keywords = ["abstract", "landscape", "sky"]
 
-    # RAG Step 4: Build contextually augmented prompts
-    prompts = set()
-    matched_themes = []
+    print(f"[ImagePool] Song: '{song_title}' | Mood: {mood} | Energy: {energy} | "
+          f"Valence: {valence} | Tempo: {tempo} | Keywords: {keywords}")
 
-    for keyword in keywords:
-        for theme_key, theme_prompts in theme_map.items():
-            if theme_key in keyword or keyword in theme_key:
-                matched_themes.extend(theme_prompts)
+    images = _generate_loremflickr_urls(keywords, count, nocache=nocache)
 
-    # If no specific themes matched, use generic electronic music themes
-    if not matched_themes:
-        matched_themes = [
-            "abstract electronic music visualization colorful digital art",
-            "electronic beats abstract neon visualization",
-            "colorful abstract digital art music",
-            "vibrant abstract electronic art visualization",
-            "dynamic abstract art colorful energy",
-        ]
+    if not nocache:
+        cache_key_str = f"pool:{song_title}:{song_id}:{mood}:{energy}:{valence}"
+        _set_cached(cache_key_str, images)
 
-    # Add the song title itself as a prompt modifier
-    for theme in matched_themes:
-        prompts.add(f"{title_lower} {theme}")
-    prompts.add(f"{title_lower} abstract digital art electronic music")
-    prompts.add(f"abstract visualization {title_lower} colorful neon")
-
-    # RAG Step 5: Fetch images using augmented prompts (parallel requests)
-    all_images = []
-    seen_urls = set()
-
-    # Use up to 3 different prompts for variety
-    prompt_list = list(prompts)[:3]
-    images_per_prompt = max(count // len(prompt_list), 10)
-
-    # Fetch from all prompts in parallel
-    tasks = [_fetch_lexica(p, images_per_prompt) for p in prompt_list]
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-
-    for result in results:
-        if isinstance(result, list):
-            for img in result:
-                if img["url"] not in seen_urls:
-                    seen_urls.add(img["url"])
-                    all_images.append(img)
-
-    # If we got enough images, cache and return
-    if len(all_images) >= count // 2:
-        random.shuffle(all_images)
-        _set_cached(f"pool:{song_title}", all_images)
-        return {
-            "images": all_images[:count],
-            "source": "lexica",
-            "song_title": song_title,
-            "prompts_used": prompt_list,
-        }
-
-    # Fallback: supplement with Picsum
-    needed = count - len(all_images)
-    picsum_images = _generate_picsum_urls(needed, seed_prefix=title_lower[:15])
-    all_images.extend(picsum_images)
-    random.shuffle(all_images)
-
-    _set_cached(f"pool:{song_title}", all_images)
     return {
-        "images": all_images[:count],
-        "source": "mixed",
+        "images": images,
+        "source": "loremflickr",
         "song_title": song_title,
-        "prompts_used": prompt_list,
+        "tags_used": keywords,
+        "mood": mood,
     }
 
 
@@ -410,5 +396,6 @@ async def image_service_health():
     return {
         "status": "ok",
         "cache_size": len(_image_cache),
-        "providers": ["lexica", "picsum"],
+        "providers": ["loremflickr"],
+        "verified_keywords": len(_VERIFIED_KEYWORDS),
     }
