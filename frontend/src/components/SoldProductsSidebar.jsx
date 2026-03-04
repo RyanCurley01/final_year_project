@@ -4,6 +4,7 @@ import { soldProductsService } from "../redux/services/soldProductsService";
 import { productService } from "../redux/services/productService";
 import { orderItemService } from "../redux/services/orderItemService";
 import { FaBoxOpen } from "react-icons/fa";
+import OnsetImageCard from './OnsetImageCard';
 
 const SoldProductsSidebar = () => {
   const { currentUser } = useAuth();
@@ -130,12 +131,34 @@ const SoldProductsSidebar = () => {
                           </td>
                           <td className="px-4 py-2">
                             {product?.albumCoverImageUrl ? (
-                              <img
-                                src={product.albumCoverImageUrl.endsWith('.mp4') ? '/cloud-cover.webp' : product.albumCoverImageUrl}
-                                alt={product.albumTitle}
-                                className="w-10 h-10 rounded object-cover"
-                                onError={(e) => { e.target.onerror = null; e.target.src = '/cloud-cover.webp'; }}
-                              />
+                              (() => {
+                                const coverUrl = product.albumCoverImageUrl;
+                                const isVideo = coverUrl && coverUrl.toLowerCase().includes('.mp4');
+                                const isTeddyEmotion = product.albumTitle?.toLowerCase().includes('teddy emotion');
+                                const useOnsetImages = isVideo && !isTeddyEmotion;
+
+                                if (useOnsetImages) {
+                                  return (
+                                    <div className="w-10 h-10">
+                                      <OnsetImageCard
+                                        songTitle={product.albumTitle}
+                                        songId={item.productId}
+                                        className="w-full h-full rounded object-cover"
+                                        isPlaying={false}
+                                        isActive={false}
+                                      />
+                                    </div>
+                                  );
+                                }
+                                return (
+                                  <img
+                                    src={isVideo ? '/cloud-cover.webp' : coverUrl}
+                                    alt={product.albumTitle}
+                                    className="w-10 h-10 rounded object-cover"
+                                    onError={(e) => { e.target.onerror = null; e.target.src = '/cloud-cover.webp'; }}
+                                  />
+                                );
+                              })()
                             ) : (
                               "—"
                             )}

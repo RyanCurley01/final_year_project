@@ -23,6 +23,7 @@ const Cart = () => {
   const { items, totalAmount, totalItems } = useSelector((state) => state.cart);
   const [showPayPal, setShowPayPal] = useState(false);
   const [processingPayment, setProcessingPayment] = useState(false);
+  const [paypalError, setPaypalError] = useState(null);
   const { currentUser } = useAuth();
   
   // Use authenticated user
@@ -298,6 +299,17 @@ const Cart = () => {
             </button>
           ) : (
             <div className="space-y-3">
+              {paypalError && (
+                <div className="bg-red-500/20 border border-red-500/40 rounded-lg p-3 mb-3">
+                  <p className="text-red-300 text-sm">{paypalError}</p>
+                  <button
+                    onClick={() => { setPaypalError(null); setShowPayPal(false); setProcessingPayment(false); }}
+                    className="text-red-400 hover:text-red-300 text-xs underline mt-1"
+                  >
+                    Try Again
+                  </button>
+                </div>
+              )}
               <PayPalButtons
                 style={{ layout: "vertical" }}
                 createOrder={handleCreateOrder}
@@ -305,6 +317,12 @@ const Cart = () => {
                 onCancel={() => {
                   setShowPayPal(false);
                   setProcessingPayment(false);
+                  setPaypalError(null);
+                }}
+                onError={(err) => {
+                  console.error('PayPal error:', err);
+                  setProcessingPayment(false);
+                  setPaypalError('Payment could not be completed. Please try again.');
                 }}
                 disabled={processingPayment}
               />

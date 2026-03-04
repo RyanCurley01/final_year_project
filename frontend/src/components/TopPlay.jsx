@@ -17,7 +17,10 @@ const TopChartCard = ({ song, i, isPlaying, activeSong, handlePauseClick, handle
   const songTitle = song?.albumTitle || song?.title || '';
   const isTeddyEmotion = songTitle.toLowerCase().includes('teddy emotion');
   const useOnsetImages = isVideo && !isTeddyEmotion;
-  const isThisSongActive = activeSong?.productId === song?.productId;
+  const isThisSongActive = 
+    (activeSong?.productId != null && activeSong?.productId === song?.productId) ||
+    (activeSong?.id != null && song?.id != null && activeSong?.id === song?.id) ||
+    (activeSong?.albumTitle && song?.albumTitle && activeSong?.albumTitle === song?.albumTitle);
 
   return (
   <>

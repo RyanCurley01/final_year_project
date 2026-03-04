@@ -10,7 +10,7 @@ USE Game_Store_System;
 
     -- DROP existing tables to ensure idempotent initialization
     SET FOREIGN_KEY_CHECKS = 0;
-    DROP TABLE IF EXISTS RealTimeRecommendations, UserInteractions, AudioFeatures, UserRecommendations, Wishlist, Purchased_Products, Sold_Products, CustomerSummary, Payments, Order_Items, Orders, Stock, Products, Accounts;
+    DROP TABLE IF EXISTS RealTimeRecommendations, ImageCache, UserInteractions, AudioFeatures, UserRecommendations, Wishlist, Purchased_Products, Sold_Products, CustomerSummary, Payments, Order_Items, Orders, Stock, Products, Accounts;
     SET FOREIGN_KEY_CHECKS = 1;
 
     -- ============================================
@@ -151,6 +151,19 @@ USE Game_Store_System;
         INDEX idx_valence (Valence),
         INDEX idx_mood (Mood),
         INDEX idx_genre (Genre)
+    );
+
+    -- ImageCache: Persist AI-generated image URLs by mood for instant loading
+    CREATE TABLE IF NOT EXISTS ImageCache (
+        ImageID INT AUTO_INCREMENT PRIMARY KEY,
+        Mood VARCHAR(50) NOT NULL,
+        ImageUrl TEXT NOT NULL,
+        ImageUrlLarge TEXT,
+        Prompt TEXT,
+        Width INT DEFAULT 1024,
+        Height INT DEFAULT 1024,
+        CreatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_mood (Mood)
     );
 
     -- UserInteractions: Track all user interactions with products

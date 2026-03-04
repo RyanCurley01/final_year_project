@@ -148,6 +148,19 @@ USE Game_Store_System;
         INDEX idx_genre (Genre)
     );
 
+    -- ImageCache: Persist AI-generated image URLs by mood for instant loading
+    CREATE TABLE IF NOT EXISTS ImageCache (
+        ImageID INT AUTO_INCREMENT PRIMARY KEY,
+        Mood VARCHAR(50) NOT NULL,
+        ImageUrl TEXT NOT NULL,
+        ImageUrlLarge TEXT,
+        Prompt TEXT,
+        Width INT DEFAULT 1024,
+        Height INT DEFAULT 1024,
+        CreatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_mood (Mood)
+    );
+
     -- UserInteractions: Track all user interactions with products
     CREATE TABLE IF NOT EXISTS UserInteractions (
         InteractionID BIGINT AUTO_INCREMENT PRIMARY KEY,

@@ -73,15 +73,15 @@ async def _fetch_lexica(prompt: str, count: int = 20) -> list:
                 images = data.get("images", [])
                 urls = []
                 for img in images[:count]:
-                    # Prefer srcSmall for faster loading on cards
-                    url = img.get("srcSmall") or img.get("src")
+                    # Use full resolution src (typically 1024x1024) for crisp fullscreen display
+                    url = img.get("src") or img.get("srcSmall")
                     if url:
                         urls.append({
                             "url": url,
                             "urlLarge": img.get("src", url),
                             "prompt": img.get("prompt", ""),
-                            "width": img.get("width", 512),
-                            "height": img.get("height", 512),
+                            "width": img.get("width", 1024),
+                            "height": img.get("height", 1024),
                         })
                 return urls
             else:
@@ -104,14 +104,14 @@ def _generate_picsum_urls(count: int = 20, seed_prefix: str = "music") -> list:
     urls = []
     for i in range(count):
         seed = f"{seed_prefix}-{i}-{random.randint(1000, 9999)}"
-        url = f"https://picsum.photos/seed/{seed}/400/400"
-        url_large = f"https://picsum.photos/seed/{seed}/800/800"
+        url = f"https://picsum.photos/seed/{seed}/1024/1024"
+        url_large = f"https://picsum.photos/seed/{seed}/1024/1024"
         urls.append({
             "url": url,
             "urlLarge": url_large,
             "prompt": f"picsum-{seed}",
-            "width": 400,
-            "height": 400,
+            "width": 1024,
+            "height": 1024,
         })
     return urls
 
@@ -157,26 +157,153 @@ async def search_images(
     return {"images": images, "source": "picsum", "prompt": prompt}
 
 
+# ============================================
+# MOOD-AWARE PROMPT GENERATION
+# ============================================
+
+# Russell's Circumplex Model: mood → visual style descriptors
+_mood_visual_map = {
+    "energetic": {
+        "style": "high energy explosive vibrant neon electric",
+        "colors": "bright neon red orange yellow electric blue",
+        "subjects": ["lightning storm neon explosion", "electric energy burst abstract", "rave lights laser cyberpunk",
+                     "volcanic eruption neon abstract", "supernova explosion vibrant", "fireworks neon abstract digital art"],
+    },
+    "happy": {
+        "style": "warm joyful uplifting colorful bright",
+        "colors": "warm golden sunshine yellow orange pink",
+        "subjects": ["sunrise golden warm abstract art", "colorful festival celebration abstract", "blooming flowers bright digital art",
+                     "rainbow prism light refraction", "golden hour warm landscape abstract", "carnival lights warm neon digital"],
+    },
+    "calm": {
+        "style": "serene peaceful ambient soft ethereal",
+        "colors": "soft blue teal lavender pastel cool",
+        "subjects": ["calm ocean waves moonlight abstract", "misty forest ethereal soft light", "zen garden peaceful abstract art",
+                     "aurora borealis soft ethereal", "floating clouds pastel dreamscape", "still water reflection abstract art"],
+    },
+    "sad": {
+        "style": "melancholic moody dark atmospheric deep",
+        "colors": "deep blue indigo dark purple grey",
+        "subjects": ["rain drops dark moody abstract", "dark ocean depth abstract art", "foggy city night melancholic",
+                     "withered dark abstract digital art", "deep space void dark abstract", "dark forest mist atmospheric art"],
+    },
+}
+
+
+def _build_mood_prompts(mood: str, energy: float, valence: float, tempo: float,
+                        danceability: float, acousticness: float, title: str) -> list:
+    """
+    Build mood-aware image search prompts from audio features.
+    Uses Russell's Circumplex Model mapping to create visually relevant prompts.
+    """
+    mood_lower = (mood or "unknown").lower().strip()
+    mood_info = _mood_visual_map.get(mood_lower)
+
+    # If mood not recognized, derive from features
+    if not mood_info:
+        if energy > 0.6 and valence > 0.5:
+            mood_info = _mood_visual_map["energetic"]
+        elif valence > 0.5:
+            mood_info = _mood_visual_map["happy"]
+        elif energy < 0.4 and valence < 0.5:
+            mood_info = _mood_visual_map["sad"]
+        else:
+            mood_info = _mood_visual_map["calm"]
+
+    prompts = []
+
+    # Compose prompts from mood subjects augmented with style/color context
+    for subject in mood_info["subjects"]:
+        prompts.append(f"{subject} {mood_info['style']}")
+
+    # Add title-augmented prompt
+    prompts.append(f"{title} abstract digital art {mood_info['style']} {mood_info['colors']}")
+
+    # Add energy/tempo modifiers
+    if tempo > 140:
+        prompts.append(f"fast rhythm energetic abstract neon {mood_info['colors']}")
+    elif tempo < 90:
+        prompts.append(f"slow ambient atmospheric abstract {mood_info['colors']}")
+
+    if acousticness > 0.7:
+        prompts.append(f"acoustic organic natural warm abstract art {mood_info['colors']}")
+    elif danceability > 0.7:
+        prompts.append(f"dance rhythm pulsating neon abstract art {mood_info['colors']}")
+
+    return prompts
+
+
 @router.get("/pool")
 async def get_image_pool(
     song_title: str = Query(..., description="Song title for contextual image retrieval"),
     song_id: Optional[int] = Query(None, description="Song ID for cache keying"),
     count: int = Query(30, ge=1, le=50, description="Number of images for the pool"),
+    mood: Optional[str] = Query(None, description="Song mood from AudioFeatures (energetic/happy/calm/sad)"),
+    energy: Optional[float] = Query(None, ge=0, le=1, description="Energy level 0-1"),
+    valence: Optional[float] = Query(None, ge=0, le=1, description="Valence (positivity) 0-1"),
+    tempo: Optional[float] = Query(None, description="Tempo in BPM"),
+    danceability: Optional[float] = Query(None, ge=0, le=1, description="Danceability 0-1"),
+    acousticness: Optional[float] = Query(None, ge=0, le=1, description="Acousticness 0-1"),
+    genre: Optional[str] = Query(None, description="Genre from AudioFeatures"),
 ):
     """
-    RAG-Enhanced Image Pool Generation.
+    RAG-Enhanced Mood-Aware Image Pool Generation.
     
-    Uses song metadata to construct contextually relevant prompts,
+    Uses song audio features (mood, energy, valence, tempo) from the AudioFeatures
+    DB table to construct mood-matched prompts via Russell's Circumplex Model,
     then retrieves a pool of AI-generated images for onset-triggered display.
     
     MCP Pattern: Acts as a tool that the frontend onset detection calls,
-    with song context passed as parameters for retrieval augmentation.
+    with song context + audio features passed as parameters for retrieval augmentation.
     """
+    # Determine if we have audio features
+    has_features = mood is not None or energy is not None or valence is not None
+
     # RAG Step 1: Extract keywords from song title
     title_lower = song_title.lower().strip()
     keywords = title_lower.split()
 
-    # RAG Step 2: Map keywords to visual themes (knowledge base)
+    # RAG Step 2: If we have audio features, use mood-aware prompt generation
+    if has_features:
+        prompts = _build_mood_prompts(
+            mood=mood or "unknown",
+            energy=energy if energy is not None else 0.5,
+            valence=valence if valence is not None else 0.5,
+            tempo=tempo if tempo is not None else 120.0,
+            danceability=danceability if danceability is not None else 0.5,
+            acousticness=acousticness if acousticness is not None else 0.5,
+            title=title_lower,
+        )
+        # Use up to 3 prompts for variety
+        prompt_list = prompts[:3]
+        images_per_prompt = max(count // len(prompt_list), 10)
+
+        all_images = []
+        seen_urls = set()
+        tasks = [_fetch_lexica(p, images_per_prompt) for p in prompt_list]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        for result in results:
+            if isinstance(result, list):
+                for img in result:
+                    if img["url"] not in seen_urls:
+                        seen_urls.add(img["url"])
+                        all_images.append(img)
+
+        if len(all_images) >= count // 2:
+            random.shuffle(all_images)
+            _set_cached(f"pool:{song_title}:{mood}:{energy}", all_images)
+            return {
+                "images": all_images[:count],
+                "source": "lexica",
+                "song_title": song_title,
+                "mood": mood,
+                "prompts_used": prompt_list,
+            }
+
+        # If mood-aware fetch didn't get enough, fall through to keyword-based
+
+    # RAG Step 3 (Fallback): Map keywords to visual themes (knowledge base)
     theme_map = {
         "acid": ["psychedelic neon abstract art", "acid trip colorful digital art", "alien acid landscape surreal"],
         "alien": ["alien landscape sci-fi digital art", "alien world surreal neon", "extraterrestrial abstract colorful"],
@@ -207,7 +334,7 @@ async def get_image_pool(
         "selected": ["curated electronic music abstract art", "selected works digital visualization", "electronic abstract art"],
     }
 
-    # RAG Step 3: Build contextually augmented prompts
+    # RAG Step 4: Build contextually augmented prompts
     prompts = set()
     matched_themes = []
 
@@ -232,7 +359,7 @@ async def get_image_pool(
     prompts.add(f"{title_lower} abstract digital art electronic music")
     prompts.add(f"abstract visualization {title_lower} colorful neon")
 
-    # RAG Step 4: Fetch images using augmented prompts (parallel requests)
+    # RAG Step 5: Fetch images using augmented prompts (parallel requests)
     all_images = []
     seen_urls = set()
 

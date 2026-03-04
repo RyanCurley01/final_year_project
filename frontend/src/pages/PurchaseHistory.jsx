@@ -5,6 +5,7 @@ import { FaReceipt, FaCalendar, FaDollarSign, FaDownload } from 'react-icons/fa'
 import placeholders from '../utils/placeholderImage';
 import { downloadFile, generateFilename } from '../utils/downloadHelper';
 import { useAuth } from '../context/AuthContext';
+import OnsetImageCard from '../components/OnsetImageCard';
 import { orderService } from '../redux/services/orderService';
 import { orderItemService } from '../redux/services/orderItemService';
 import { productService } from '../redux/services/productService';
@@ -211,10 +212,22 @@ const PurchaseHistory = () => {
                 const price = item.albumPrice;
                 const coverMedia = item.albumCoverImageUrl;
                 const isVideo = coverMedia && coverMedia.toLowerCase().includes('.mp4');
+                const isTeddyEmotion = productName && productName.toLowerCase().includes('teddy emotion');
+                const useOnsetImages = isVideo && !isTeddyEmotion;
 
                 return (
                   <div key={index} className="flex gap-3 bg-white/5 rounded-lg p-3 items-center">
-                    {isVideo ? (
+                    {useOnsetImages ? (
+                      <div className="w-16 h-16 flex-shrink-0">
+                        <OnsetImageCard
+                          songTitle={productName}
+                          songId={item.productId}
+                          className="w-full h-full rounded-lg object-cover"
+                          isPlaying={false}
+                          isActive={false}
+                        />
+                      </div>
+                    ) : isVideo ? (
                       <video
                         src={coverMedia}
                         className="w-16 h-16 rounded-lg object-cover"
@@ -222,7 +235,6 @@ const PurchaseHistory = () => {
                         loop
                         autoPlay
                         onError={(e) => {
-                          // If video fails to load, replace with image fallback
                           const img = document.createElement('img');
                           img.src = placeholders.small;
                           img.alt = productName;

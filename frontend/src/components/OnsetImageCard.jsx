@@ -3,12 +3,13 @@
  * 
  * Replaces AudioReactiveVideo for non-"Teddy Emotion" songs.
  * Displays AI-generated images that swap on each onset (drum hit) detection.
+ * Images are mood-matched using actual AudioFeatures from the database.
  * 
  * Visual Pipeline:
- * 1. On mount/song change: Initialize image pool via MCPImageOrchestrator
- * 2. While pool loads: Show procedurally generated abstract art
- * 3. On each onset callback: Crossfade to next image from pool
- * 4. Continuous: Smooth CSS transitions between images
+ * 1. On mount/song change: Fetch audio features + initialize mood-aware image pool
+ * 2. While pool loads: Show procedurally generated abstract art (1024px)
+ * 3. On each onset callback: Crossfade to next image from shared pool
+ * 4. Track spinner + SongCard stay in sync via shared onImageChange subscription
  */
 
 import { useRef, useEffect, useState, useCallback } from 'react';
@@ -43,6 +44,8 @@ const OnsetImageCard = ({
   const isMountedRef = useRef(true);
   const swapTimeoutRef = useRef(null);
   const initPromiseRef = useRef(null);
+  // Track whether this instance is the "primary" onset driver (first active instance)
+  const isPrimaryRef = useRef(false);
 
   const { activeSong } = useSelector((state) => state.player);
 
@@ -63,13 +66,51 @@ const OnsetImageCard = ({
     };
   }, []);
 
+  // Crossfade helper - shared between onset handler and image change listener
+  const crossfadeTo = useCallback((newImage) => {
+    if (!isMountedRef.current) return;
+    if (!newImage || newImage === currentImageRef.current) return;
+
+    setNextImage(newImage);
+    setShowNext(true);
+
+    if (swapTimeoutRef.current) {
+      clearTimeout(swapTimeoutRef.current);
+    }
+
+    swapTimeoutRef.current = setTimeout(() => {
+      if (isMountedRef.current) {
+        setCurrentImage(newImage);
+        currentImageRef.current = newImage;
+        setShowNext(false);
+      }
+    }, CROSSFADE_MS);
+  }, []);
+
   // Initialize image pool when song changes or component mounts
   useEffect(() => {
     if (!songTitle) return;
 
     const initPool = async () => {
       try {
-        // Generate an immediate procedural image to show instantly
+        // Check if this song's pool already has images (cached from prior visit)
+        const existingPoolImage = imageGenerationService.getFirstPoolImage(songId);
+        if (existingPoolImage) {
+          if (isMountedRef.current) {
+            setCurrentImage(existingPoolImage);
+            currentImageRef.current = existingPoolImage;
+            setIsInitialized(true);
+          }
+          // Pool already loaded — no fetch needed, but still call init to set context
+          await imageGenerationService.initializeSongContext({
+            id: songId,
+            title: songTitle,
+            genre: 'electronic',
+          });
+          return;
+        }
+
+        // No pool yet — show procedural placeholder while API loads
         const proceduralImage = imageGenerationService.getProceduralImage({
           energy: 0.5,
           lfc: 0.5,
@@ -83,7 +124,7 @@ const OnsetImageCard = ({
           setIsInitialized(true);
         }
 
-        // Initialize the full pool (fetches from API in background)
+        // Fetch and populate the pool for THIS song
         const context = {
           id: songId,
           title: songTitle,
@@ -93,20 +134,11 @@ const OnsetImageCard = ({
         initPromiseRef.current = imageGenerationService.initializeSongContext(context);
         await initPromiseRef.current;
 
-        // Once pool is loaded, show first API image
+        // After pool loads, show THIS song's first pool image (not the global shared one)
         if (isMountedRef.current) {
-          const firstImage = imageGenerationService.getNextImage({});
-          if (firstImage) {
-            setNextImage(firstImage);
-            setShowNext(true);
-            // Complete the crossfade
-            setTimeout(() => {
-              if (isMountedRef.current) {
-                setCurrentImage(firstImage);
-                currentImageRef.current = firstImage;
-                setShowNext(false);
-              }
-            }, CROSSFADE_MS);
+          const myImage = imageGenerationService.getFirstPoolImage(songId);
+          if (myImage && myImage !== currentImageRef.current) {
+            crossfadeTo(myImage);
           }
         }
       } catch (error) {
@@ -115,28 +147,40 @@ const OnsetImageCard = ({
     };
 
     initPool();
-  }, [songTitle, songId]);
+  }, [songTitle, songId, crossfadeTo]);
 
-  // Reset when active song changes
+  // Subscribe to shared image changes — ONLY active song instances follow onset images
+  // Subscribe when isActive (regardless of playing state) so paused fullscreen stays in sync
   useEffect(() => {
-    if (activeSong?.id !== songId && activeSong?.albumTitle !== songTitle) {
-      // Not the active song - show a static procedural image
-      const staticImage = imageGenerationService.getProceduralImage({
-        energy: 0.3,
-        spectralCentroid: Math.random(),
-      });
-      setCurrentImage(staticImage);
-      currentImageRef.current = staticImage;
-    }
-  }, [activeSong?.id, activeSong?.albumTitle, songId, songTitle]);
+    if (!isActive) return;
 
-  // Handle onset (drum hit) - swap to next image
+    // Activate this song's pool as the shared playback source
+    imageGenerationService.activateForPlayback(songId);
+
+    // On subscription, immediately sync to the current shared image
+    const sharedImage = imageGenerationService.getCurrentImage();
+    if (sharedImage && sharedImage !== currentImageRef.current) {
+      setCurrentImage(sharedImage);
+      currentImageRef.current = sharedImage;
+    }
+
+    const handleImageChange = (newImage, _generation) => {
+      crossfadeTo(newImage);
+    };
+
+    imageGenerationService.onImageChange(handleImageChange);
+    return () => {
+      imageGenerationService.offImageChange(handleImageChange);
+    };
+  }, [isActive, songId, crossfadeTo]);
+
+  // Handle onset (drum hit) — only the primary instance advances the pool
   const handleOnset = useCallback((onset) => {
     if (!isMountedRef.current) return;
     if (!isActiveRef.current || !isPlayingRef.current) return;
 
-    // Get next image from the MCP orchestrator
-    const newImage = imageGenerationService.getNextImage({
+    // advanceImage notifies all subscribers (including this one via onImageChange)
+    imageGenerationService.advanceImage({
       energy: onset.energy || 0.5,
       lfc: onset.lfc || 0.5,
       hfc: onset.hfc || 0.5,
@@ -144,36 +188,31 @@ const OnsetImageCard = ({
       type: onset.type || 'unknown',
       strength: onset.strength || 0.5,
     });
-
-    if (!newImage || newImage === currentImageRef.current) return;
-
-    // Trigger crossfade
-    setNextImage(newImage);
-    setShowNext(true);
-
-    // Clear previous swap timeout
-    if (swapTimeoutRef.current) {
-      clearTimeout(swapTimeoutRef.current);
-    }
-
-    // Complete the swap after crossfade
-    swapTimeoutRef.current = setTimeout(() => {
-      if (isMountedRef.current) {
-        setCurrentImage(newImage);
-        currentImageRef.current = newImage;
-        setShowNext(false);
-      }
-    }, CROSSFADE_MS);
   }, []);
 
-  // Register/unregister onset callback
+  // Register/unregister onset callback — only ONE instance globally drives onsets
   useEffect(() => {
-    if (!isActive || !isPlaying) return;
+    if (!isActive || !isPlaying) {
+      if (isPrimaryRef.current) {
+        globalAudioContext.offOnset(handleOnset);
+        imageGenerationService.releaseOnsetPrimary();
+        isPrimaryRef.current = false;
+      }
+      return;
+    }
 
-    globalAudioContext.onOnset(handleOnset);
+    // Try to claim primary — only the first active instance wins
+    if (imageGenerationService.claimOnsetPrimary()) {
+      isPrimaryRef.current = true;
+      globalAudioContext.onOnset(handleOnset);
+    }
 
     return () => {
-      globalAudioContext.offOnset(handleOnset);
+      if (isPrimaryRef.current) {
+        globalAudioContext.offOnset(handleOnset);
+        imageGenerationService.releaseOnsetPrimary();
+        isPrimaryRef.current = false;
+      }
     };
   }, [isActive, isPlaying, handleOnset]);
 

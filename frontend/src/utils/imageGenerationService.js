@@ -143,8 +143,8 @@ class SongContextRAG {
 class ProceduralGenerator {
   constructor() {
     this.canvas = document.createElement('canvas');
-    this.canvas.width = 512;
-    this.canvas.height = 512;
+    this.canvas.width = 1024;
+    this.canvas.height = 1024;
     this.ctx = this.canvas.getContext('2d');
     this.colorIndex = 0;
 
@@ -439,12 +439,144 @@ class MCPImageOrchestrator {
     // Rate limiting
     this.lastFetchTime = 0;
     this.minFetchInterval = 2000; // 2 seconds between API calls
+
+    // Cached audio features from AudioFeatures DB table
+    this._audioFeaturesCache = null;
+    this._audioFeaturesFetchPromise = null;
+
+    // Shared image state: all subscribers see the same current image per onset
+    this._currentOnsetImage = null;
+    this._onsetImageListeners = new Set();
+    this._onsetGeneration = 0; // increments each onset
+
+    // Singleton onset registration: only one component drives onsets
+    this._onsetRegistered = false;
+  }
+
+  /**
+   * Try to become the primary onset driver. Returns true if successful.
+   * Only one component at a time should register the onset callback.
+   */
+  claimOnsetPrimary() {
+    if (this._onsetRegistered) return false;
+    this._onsetRegistered = true;
+    return true;
+  }
+
+  /**
+   * Release onset primary status.
+   */
+  releaseOnsetPrimary() {
+    this._onsetRegistered = false;
+  }
+
+  /**
+   * Subscribe to onset image changes. Listener receives (imageUrl, generation).
+   * Used to sync multiple OnsetImageCard instances (SongCard + Track spinner).
+   */
+  onImageChange(listener) {
+    this._onsetImageListeners.add(listener);
+  }
+
+  /**
+   * Unsubscribe from onset image changes.
+   */
+  offImageChange(listener) {
+    this._onsetImageListeners.delete(listener);
+  }
+
+  /**
+   * Advance to the next image and notify all listeners.
+   * Called once per onset; all subscribers receive the same image.
+   */
+  advanceImage(onsetData = {}) {
+    const newImage = this.getNextImage(onsetData);
+    if (newImage && newImage !== this._currentOnsetImage) {
+      this._currentOnsetImage = newImage;
+      this._onsetGeneration++;
+      this._notifyListeners(newImage);
+    }
+    return newImage;
+  }
+
+  /**
+   * Notify all image change listeners.
+   */
+  _notifyListeners(image) {
+    for (const listener of this._onsetImageListeners) {
+      try {
+        listener(image, this._onsetGeneration);
+      } catch (e) {
+        // Ignore callback errors
+      }
+    }
+  }
+
+  /**
+   * Get the current shared onset image without advancing.
+   */
+  getCurrentImage() {
+    return this._currentOnsetImage;
+  }
+
+  /**
+   * Fetch all cached audio features from the backend AudioFeatures table.
+   * Results are cached in memory for the session.
+   * @returns {Object} Map of productId string → feature object
+   */
+  async fetchAudioFeatures() {
+    if (this._audioFeaturesCache) return this._audioFeaturesCache;
+    if (this._audioFeaturesFetchPromise) return this._audioFeaturesFetchPromise;
+
+    this._audioFeaturesFetchPromise = (async () => {
+      try {
+        const apiBaseUrl = envConfig.getApiBaseUrl();
+        const response = await fetch(
+          `${apiBaseUrl}/api/audio/cached-features?artist_only=false`,
+          {
+            method: 'GET',
+            headers: { 'Accept': 'application/json' },
+            signal: AbortSignal.timeout(15000),
+          }
+        );
+        if (!response.ok) throw new Error(`Status ${response.status}`);
+        const data = await response.json();
+        if (data.status === 'success' && data.features) {
+          this._audioFeaturesCache = data.features;
+          console.log(`[ImageGen] Loaded audio features for ${data.count} songs`);
+          return this._audioFeaturesCache;
+        }
+        return {};
+      } catch (err) {
+        console.warn('[ImageGen] Failed to fetch audio features:', err.message);
+        return {};
+      } finally {
+        this._audioFeaturesFetchPromise = null;
+      }
+    })();
+
+    return this._audioFeaturesFetchPromise;
+  }
+
+  /**
+   * Get audio features for a specific song by ID.
+   * Tries both positive and negative productId keys.
+   * @param {number|string} songId
+   * @returns {Object|null} Audio features or null
+   */
+  async getAudioFeaturesForSong(songId) {
+    const features = await this.fetchAudioFeatures();
+    if (!features || !songId) return null;
+    // Try negative ID (database songs), positive ID, and string variants
+    const id = parseInt(songId, 10);
+    return features[String(id)] || features[String(-Math.abs(id))] || features[String(Math.abs(id))] || null;
   }
 
   /**
    * MCP Tool: Initialize context for a new song.
    * Called when a song starts playing.
-   * @param {Object} songContext - { id, title, genre }
+   * Fetches audio features and uses them for mood-aware image retrieval.
+   * @param {Object} songContext - { id, title, genre, audioFeatures? }
    */
   async initializeSongContext(songContext) {
     this.currentSongContext = songContext;
@@ -452,14 +584,65 @@ class MCPImageOrchestrator {
 
     // Check if we already have a pool for this song
     const pool = this.poolManager.getPool(songId);
+
+    // If pool is currently loading (another instance started the fetch), wait for it
+    if (pool.loading && pool._loadPromise) {
+      await pool._loadPromise;
+    }
+
+    // Pool already populated — nothing to fetch
     if (pool.images.length > 0) {
-      // Reset index for fresh playthrough
-      pool.index = 0;
       return;
     }
 
-    // Start pre-fetching images
-    await this._fetchAndPopulatePool(songContext);
+    // Fetch audio features for this song from the DB cache
+    let audioFeatures = songContext.audioFeatures || null;
+    if (!audioFeatures && songContext.id) {
+      audioFeatures = await this.getAudioFeaturesForSong(songContext.id);
+    }
+
+    // Store features in context for later use
+    this.currentSongContext.audioFeatures = audioFeatures;
+
+    // Populate the pool with mood-aware images (does NOT touch shared image state)
+    await this._fetchAndPopulatePool(songContext, audioFeatures);
+  }
+
+  /**
+   * Get the first image from a specific song's pool.
+   * Used by cards to show their OWN song's thumbnail (not the global shared image).
+   * @param {string|number} songId
+   * @returns {string|null} First pool image URL or null
+   */
+  getFirstPoolImage(songId) {
+    const pool = this.poolManager.getPool(songId);
+    return pool.images.length > 0 ? pool.images[0] : null;
+  }
+
+  /**
+   * Activate a song for onset-driven playback.
+   * Sets the shared image state and notifies all subscribers.
+   * Should ONLY be called by the active/playing song's component.
+   * @param {string|number} songId
+   */
+  activateForPlayback(songId) {
+    const pool = this.poolManager.getPool(songId);
+    if (pool.images.length > 0) {
+      // Use current shared image if it belongs to this pool, otherwise first image
+      if (this._currentOnsetImage && pool.images.includes(this._currentOnsetImage)) {
+        // Already showing an image from this pool — notify subscribers
+        this._notifyListeners(this._currentOnsetImage);
+      } else {
+        // Set to this song's first image
+        pool.index = 0;
+        const initialImage = pool.images[0];
+        if (initialImage) {
+          this._currentOnsetImage = initialImage;
+          this._onsetGeneration++;
+          this._notifyListeners(initialImage);
+        }
+      }
+    }
   }
 
   /**
@@ -508,26 +691,41 @@ class MCPImageOrchestrator {
 
   /**
    * Fetch images from the backend proxy and populate the pool.
+   * Passes audio features to backend for mood-aware prompt generation.
    */
-  async _fetchAndPopulatePool(songContext) {
+  async _fetchAndPopulatePool(songContext, audioFeatures = null) {
     const songId = songContext.id || songContext.title;
     const pool = this.poolManager.getPool(songId);
 
     if (pool.loading) return;
     pool.loading = true;
 
+    // Store the load promise so other instances can await it
+    pool._loadPromise = (async () => {
     try {
       const apiBaseUrl = envConfig.getApiBaseUrl();
       const encodedTitle = encodeURIComponent(songContext.title || 'electronic music');
 
-      const response = await fetch(
-        `${apiBaseUrl}/api/images/pool?song_title=${encodedTitle}&song_id=${songContext.id || 0}&count=30`,
-        {
-          method: 'GET',
-          headers: { 'Accept': 'application/json' },
-          signal: AbortSignal.timeout(20000), // 20 second timeout
-        }
-      );
+      // Build URL with audio feature params for mood-aware prompts
+      let url = `${apiBaseUrl}/api/images/pool?song_title=${encodedTitle}&song_id=${songContext.id || 0}&count=30`;
+
+      // Append audio features from the AudioFeatures DB table
+      const af = audioFeatures || songContext.audioFeatures;
+      if (af) {
+        if (af.mood) url += `&mood=${encodeURIComponent(af.mood)}`;
+        if (af.energy != null) url += `&energy=${af.energy}`;
+        if (af.valence != null) url += `&valence=${af.valence}`;
+        if (af.tempo != null) url += `&tempo=${af.tempo}`;
+        if (af.danceability != null) url += `&danceability=${af.danceability}`;
+        if (af.acousticness != null) url += `&acousticness=${af.acousticness}`;
+        if (af.genre) url += `&genre=${encodeURIComponent(af.genre)}`;
+      }
+
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: { 'Accept': 'application/json' },
+        signal: AbortSignal.timeout(20000), // 20 second timeout
+      });
 
       if (!response.ok) {
         throw new Error(`API returned ${response.status}`);
@@ -537,10 +735,11 @@ class MCPImageOrchestrator {
       const images = data.images || [];
 
       if (images.length > 0) {
-        const imageUrls = images.map(img => img.url || img.urlLarge);
+        // Prefer urlLarge (full resolution 1024px) for crisp fullscreen display
+        const imageUrls = images.map(img => img.urlLarge || img.url);
         this.poolManager.addImages(songId, imageUrls);
         this._updateProviderStatus('lexica', true);
-        console.log(`[ImageGen] Fetched ${imageUrls.length} images for "${songContext.title}" (source: ${data.source})`);
+        console.log(`[ImageGen] Fetched ${imageUrls.length} images for "${songContext.title}" (source: ${data.source}, mood: ${data.mood || 'N/A'})`);
       } else {
         console.warn(`[ImageGen] No images returned for "${songContext.title}"`);
       }
@@ -562,8 +761,12 @@ class MCPImageOrchestrator {
       this.poolManager.addImages(songId, proceduralImages);
     } finally {
       pool.loading = false;
+      pool._loadPromise = null;
       this.lastFetchTime = Date.now();
     }
+    })();
+
+    await pool._loadPromise;
   }
 
   /**
@@ -590,7 +793,7 @@ class MCPImageOrchestrator {
       return;
     }
 
-    await this._fetchAndPopulatePool(songContext);
+    await this._fetchAndPopulatePool(songContext, songContext.audioFeatures);
   }
 
   /**
@@ -615,6 +818,9 @@ class MCPImageOrchestrator {
   reset() {
     this.currentSongContext = null;
     this.poolManager.clearAll();
+    this._currentOnsetImage = null;
+    this._onsetRegistered = false;
+    this._onsetGeneration = 0;
   }
 
   /**
