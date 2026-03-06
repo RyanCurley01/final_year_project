@@ -28,6 +28,13 @@ const NUM_TIME_SLICES = 200;
 const DEFAULT_DURATION = 4; // seconds
 const MS_PER_LIVE_COLUMN = 40; // ~25 columns/sec for live capture
 
+// Format seconds as m:ss
+const formatTime = (s) => {
+  const mins = Math.floor(s / 60);
+  const secs = Math.floor(s % 60);
+  return `${mins}:${secs.toString().padStart(2, '0')}`;
+};
+
 const TOOLS = {
   BRUSH: 'brush',
   LINE: 'line',
@@ -312,9 +319,11 @@ const SpectrogramCreator = () => {
   const [intensity, setIntensity] = useState(0.8);
   const [duration, setDuration] = useState(DEFAULT_DURATION);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
   const [isLiveMode, setIsLiveMode] = useState(false);
   const [showFormula, setShowFormula] = useState(false);
   const [playheadPos, setPlayheadPos] = useState(-1);
+  const [playbackProgress, setPlaybackProgress] = useState(0); // 0-1 for seek slider
   const [hoveredFreq, setHoveredFreq] = useState(null);
 
   // Webcam & image upload
@@ -339,7 +348,7 @@ const SpectrogramCreator = () => {
   const [couplingStrength, setCouplingStrength] = useState(0.08);
   const [couplingRadius, setCouplingRadius] = useState(3);
   const [externalForceGain, setExternalForceGain] = useState(1.0);
-  const [simulationEnabled, setSimulationEnabled] = useState(true);
+  const [simulationEnabled, setSimulationEnabled] = useState(false);
   const [simulationSpeed, setSimulationSpeed] = useState(1); // steps per frame
 
   // Evolved grid — the physics simulation result displayed on canvas
@@ -370,8 +379,12 @@ const SpectrogramCreator = () => {
   const realtimePhasesRef = useRef(null);    // Persistent phase accumulators
   const realtimeSampleRef = useRef(0);       // Sample counter for playhead
   const durationRef = useRef(DEFAULT_DURATION); // Duration ref for audio thread
-  const simulationEnabledRef = useRef(true);
+  const simulationEnabledRef = useRef(false);
   const intensityRef = useRef(0.8);  // Live amplitude multiplier for audio + canvas
+  const externalForceGainRef = useRef(1.0);
+  const dampingFactorRef = useRef(0.15);
+  const couplingStrengthRef = useRef(0.08);
+  const couplingRadiusRef = useRef(3);
 
   // ── Redux — track whether a song is actively playing ──
   const { activeSong, isPlaying: isSongPlaying } = useSelector((state) => state.player);
@@ -395,6 +408,10 @@ const SpectrogramCreator = () => {
   useEffect(() => { durationRef.current = duration; }, [duration]);
   useEffect(() => { simulationEnabledRef.current = simulationEnabled; }, [simulationEnabled]);
   useEffect(() => { intensityRef.current = intensity; }, [intensity]);
+  useEffect(() => { externalForceGainRef.current = externalForceGain; }, [externalForceGain]);
+  useEffect(() => { dampingFactorRef.current = dampingFactor; }, [dampingFactor]);
+  useEffect(() => { couplingStrengthRef.current = couplingStrength; }, [couplingStrength]);
+  useEffect(() => { couplingRadiusRef.current = couplingRadius; }, [couplingRadius]);
 
   // ── Save live capture when recording stops ──
   useEffect(() => {
@@ -843,23 +860,88 @@ const SpectrogramCreator = () => {
   // Instead of pre-rendering a static AudioBuffer, we use a ScriptProcessorNode
   // that reads evolvedGridRef on every audio frame. This means slider/drawing
   // changes are heard instantly without any stop/restart.
+  // ── Pause — suspend audio but keep position ──
+  const handlePause = useCallback(() => {
+    if (!isPlaying) return;
+    const synth = synthRef.current;
+    if (synth?.audioContext?.state === 'running') {
+      synth.audioContext.suspend();
+    }
+    setIsPlaying(false);
+    setIsPaused(true);
+    // playheadPos and realtimeSampleRef stay where they are
+  }, [isPlaying]);
+
+  // ── Stop — full teardown ──
+  const handleStop = useCallback(() => {
+    if (realtimeProcessorRef.current) {
+      realtimeProcessorRef.current.disconnect();
+      realtimeProcessorRef.current.onaudioprocess = null;
+      realtimeProcessorRef.current = null;
+    }
+    if (playbackRef.current) {
+      playbackRef.current.disconnect();
+      playbackRef.current = null;
+    }
+    realtimePhasesRef.current = null;
+    realtimeSampleRef.current = 0;
+    playbackColumnRef.current = -1;
+    setIsPlaying(false);
+    setIsPaused(false);
+    setPlayheadPos(-1);
+    setPlaybackProgress(0);
+  }, []);
+
+  // ── Seek — jump to a position (0-1) ──
+  const handleSeek = useCallback((progress) => {
+    const synth = synthRef.current;
+    if (!synth) return;
+    const dur = durationRef.current;
+    const totalSamples = Math.ceil(dur * synth.audioContext.sampleRate);
+    realtimeSampleRef.current = Math.floor(progress * totalSamples);
+    setPlayheadPos(Math.floor(progress * NUM_TIME_SLICES));
+    setPlaybackProgress(progress);
+  }, []);
+
   const handlePlay = useCallback(async () => {
+    // If paused, just resume
+    if (isPaused && realtimeProcessorRef.current) {
+      const synth = synthRef.current;
+      if (synth?.audioContext?.state === 'suspended') {
+        await synth.audioContext.resume();
+      }
+      setIsPlaying(true);
+      setIsPaused(false);
+
+      // Re-start the playhead animation
+      const ctx = synth.audioContext;
+      const captured = capturedRecordingRef.current;
+      const hasCaptured = captured && captured.columns.length > 0;
+      const capturedNumSlices = hasCaptured ? captured.columns.length : 0;
+      const animatePlayhead = () => {
+        if (!realtimeProcessorRef.current) return;
+        const dur = durationRef.current;
+        const totalSamples = Math.ceil(dur * ctx.sampleRate);
+        const progress = realtimeSampleRef.current / totalSamples;
+        if (progress >= 1) {
+          handleStop();
+          return;
+        }
+        if (hasCaptured) {
+          playbackColumnRef.current = Math.floor(progress * capturedNumSlices);
+        } else {
+          playbackColumnRef.current = -1;
+        }
+        setPlayheadPos(Math.floor(progress * NUM_TIME_SLICES));
+        setPlaybackProgress(progress);
+        requestAnimationFrame(animatePlayhead);
+      };
+      requestAnimationFrame(animatePlayhead);
+      return;
+    }
+
     if (isPlaying) {
-      // Stop — tear down the processor
-      if (realtimeProcessorRef.current) {
-        realtimeProcessorRef.current.disconnect();
-        realtimeProcessorRef.current.onaudioprocess = null;
-        realtimeProcessorRef.current = null;
-      }
-      if (playbackRef.current) {
-        playbackRef.current.disconnect();
-        playbackRef.current = null;
-      }
-      realtimePhasesRef.current = null;
-      realtimeSampleRef.current = 0;
-      playbackColumnRef.current = -1;
-      setIsPlaying(false);
-      setPlayheadPos(-1);
+      handlePause();
       return;
     }
 
@@ -933,9 +1015,34 @@ const SpectrogramCreator = () => {
         // Additive synthesis — sum all active frequency bins
         let sample = 0;
         const liveIntensity = intensityRef.current;
+        const liveForceGain = externalForceGainRef.current;
+        const liveDamping = dampingFactorRef.current;
+        const liveCoupling = couplingStrengthRef.current;
+        const liveRadius = couplingRadiusRef.current;
+
+        // Read raw amplitudes and apply coupling (frequency-neighbour smoothing)
+        const amps = new Float64Array(NUM_FREQ_BINS);
         for (let i = 0; i < NUM_FREQ_BINS; i++) {
-          const rawAmp = sliceData?.[i] || 0;
-          const amp = rawAmp * liveIntensity;
+          amps[i] = (sliceData?.[i] || 0) * liveIntensity * liveForceGain;
+        }
+        // Coupling pass: blend each bin with its neighbours
+        if (liveCoupling > 0.001) {
+          const blended = new Float64Array(NUM_FREQ_BINS);
+          for (let i = 0; i < NUM_FREQ_BINS; i++) {
+            let sum = amps[i];
+            let weight = 1;
+            for (let r = 1; r <= liveRadius; r++) {
+              const w = liveCoupling / r;
+              if (i - r >= 0) { sum += amps[i - r] * w; weight += w; }
+              if (i + r < NUM_FREQ_BINS) { sum += amps[i + r] * w; weight += w; }
+            }
+            blended[i] = sum / weight;
+          }
+          for (let i = 0; i < NUM_FREQ_BINS; i++) amps[i] = blended[i];
+        }
+
+        for (let i = 0; i < NUM_FREQ_BINS; i++) {
+          const amp = amps[i] * (1 - liveDamping);
           if (amp < 0.001) {
             phases[i] += angularVelocities[i]; // keep phase moving
             continue;
@@ -962,6 +1069,8 @@ const SpectrogramCreator = () => {
     playbackRef.current = gainNode;
 
     setIsPlaying(true);
+    setIsPaused(false);
+    setPlaybackProgress(0);
     playbackStartTimeRef.current = ctx.currentTime;
 
     // Playhead animation driven by the sample counter
@@ -971,35 +1080,22 @@ const SpectrogramCreator = () => {
       const totalSamples = Math.ceil(dur * ctx.sampleRate);
       const progress = realtimeSampleRef.current / totalSamples;
       if (progress >= 1) {
-        // Playback finished — clean up
-        if (realtimeProcessorRef.current) {
-          realtimeProcessorRef.current.disconnect();
-          realtimeProcessorRef.current.onaudioprocess = null;
-          realtimeProcessorRef.current = null;
-        }
-        if (playbackRef.current) {
-          playbackRef.current.disconnect();
-          playbackRef.current = null;
-        }
-        playbackColumnRef.current = -1;
-        setIsPlaying(false);
-        setPlayheadPos(-1);
+        handleStop();
         return;
       }
       // For captured recordings, map progress to full columns range for canvas scrolling
       if (hasCaptured) {
         const currentCol = Math.floor(progress * capturedNumSlices);
-        // Encode as negative to signal captured mode to renderCanvas (avoids extra state)
-        // Store the actual column in a ref for the canvas to read
         playbackColumnRef.current = currentCol;
       } else {
         playbackColumnRef.current = -1;
       }
       setPlayheadPos(Math.floor(progress * NUM_TIME_SLICES));
+      setPlaybackProgress(progress);
       requestAnimationFrame(animatePlayhead);
     };
     requestAnimationFrame(animatePlayhead);
-  }, [isPlaying]);
+  }, [isPlaying, isPaused, handlePause, handleStop]);
 
   // ── Export WAV ──
   const handleExport = useCallback(async () => {
@@ -1276,6 +1372,7 @@ const SpectrogramCreator = () => {
     setGrid(SpectrogramSynth.createBlankGrid(NUM_TIME_SLICES, NUM_FREQ_BINS));
     liveColumnsRef.current = []; // Also clear live capture
     capturedRecordingRef.current = null; // Discard captured recording
+    setDuration(DEFAULT_DURATION); // Reset duration to default only on explicit clear
   }, []);
 
   // ─── Render ────────────────────────────────────────────────────────────────
@@ -1393,7 +1490,7 @@ const SpectrogramCreator = () => {
             max={Math.max(15, Math.ceil(duration))}
             step="0.5"
             value={duration}
-            onChange={(e) => { setDuration(parseFloat(e.target.value)); capturedRecordingRef.current = null; }}
+            onChange={(e) => setDuration(parseFloat(e.target.value))}
             className="w-16 accent-cyan-500"
           />
           <span className="text-xs text-white w-8">{duration}s</span>
@@ -1578,12 +1675,22 @@ const SpectrogramCreator = () => {
           onClick={handlePlay}
           className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-sm transition-all ${
             isPlaying
-              ? 'bg-red-600 hover:bg-red-700 text-white shadow-lg shadow-red-600/20'
+              ? 'bg-yellow-600 hover:bg-yellow-700 text-white shadow-lg shadow-yellow-600/20'
               : 'bg-linear-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white shadow-lg shadow-purple-600/20'
           }`}
         >
-          {isPlaying ? '⏹ Stop' : '▶ Play'}
+          {isPlaying ? '⏸ Pause' : isPaused ? '▶ Resume' : '▶ Play'}
         </button>
+
+        {(isPlaying || isPaused) && (
+          <button
+            onClick={handleStop}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl font-semibold text-sm transition-all
+                       bg-red-600 hover:bg-red-700 text-white shadow-lg shadow-red-600/20"
+          >
+            ⏹ Stop
+          </button>
+        )}
 
         <button
           onClick={handleExport}
@@ -1603,6 +1710,27 @@ const SpectrogramCreator = () => {
           🗑️ Clear
         </button>
       </div>
+
+      {/* Playback seek slider */}
+      {(isPlaying || isPaused) && (
+        <div className="flex items-center gap-3 mt-2 bg-[#1a1640]/60 rounded-lg px-3 py-2">
+          <span className="text-xs text-gray-400 w-10 text-right font-mono">
+            {formatTime(playbackProgress * duration)}
+          </span>
+          <input
+            type="range"
+            min="0"
+            max="1"
+            step="0.001"
+            value={playbackProgress}
+            onChange={(e) => handleSeek(parseFloat(e.target.value))}
+            className="flex-1 accent-green-400 h-1.5"
+          />
+          <span className="text-xs text-gray-400 w-10 font-mono">
+            {formatTime(duration)}
+          </span>
+        </div>
+      )}
 
       {/* Webcam capture modal */}
       {showWebcam && (
