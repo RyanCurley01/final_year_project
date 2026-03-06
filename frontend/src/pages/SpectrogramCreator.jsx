@@ -43,19 +43,26 @@ const PRESETS = [
   { name: 'Noise Burst', icon: '💥', description: 'Broadband noise texture' },
   { name: 'Spiral', icon: '🌀', description: 'Aphex Twin-style spiral' },
   { name: 'Text: AFX', icon: '🔤', description: 'Write "AFX" in spectrum' },
+  { name: 'Einstein B&W', icon: '🧠', description: 'Einstein tongue photo — grayscale spectral face', persistKey: 'spectrogram-preset-einstein-bw' },
+  { name: 'Einstein Color', icon: '🌈', description: 'Einstein tongue photo — color spectral face', persistKey: 'spectrogram-preset-einstein-color' },
+  { name: 'My Face', icon: '👤', description: 'Your saved face in the spectrum (ΔMi−1 style)', saved: true },
+  { name: 'Face', icon: '📸', description: 'Capture your face with webcam' },
+  { name: 'Upload Image', icon: '📁', description: 'Load any image into the spectrogram' },
 ];
 
-// Color palettes for painting intensity
+const SAVED_FACE_KEY = 'spectrogram-saved-face';
+
+// Color palette for painting intensity — matches ΔMi−1 inferno colormap
 const INTENSITY_COLORS = [
-  'rgba(0, 0, 0, 0)',          // 0 - transparent
-  'rgba(15, 10, 60, 0.8)',     // very low
-  'rgba(30, 10, 120, 0.85)',   // low
-  'rgba(80, 10, 180, 0.9)',    // med-low
-  'rgba(160, 20, 180, 0.9)',   // medium
-  'rgba(220, 50, 80, 0.95)',   // med-high
-  'rgba(250, 120, 20, 0.95)',  // high
-  'rgba(255, 200, 40, 1)',     // very high
-  'rgba(255, 255, 200, 1)',    // max
+  'rgba(0, 0, 0, 0)',            // 0 - transparent
+  'rgba(3, 3, 18, 0.9)',         // very low — near black
+  'rgba(23, 7, 80, 0.9)',        // low — deep indigo
+  'rgba(100, 12, 120, 0.9)',     // med-low — purple
+  'rgba(180, 20, 50, 0.95)',     // medium — dark red
+  'rgba(220, 70, 20, 0.95)',     // med-high — orange-red
+  'rgba(245, 140, 15, 0.95)',    // high — orange
+  'rgba(255, 220, 30, 1)',       // very high — yellow
+  'rgba(255, 255, 240, 1)',      // max — near white
 ];
 
 // Map an amplitude (0-1) to a color string
@@ -66,36 +73,47 @@ const amplitudeToColor = (amp) => {
 };
 
 // Map amplitude to RGB values for direct pixel manipulation
+// Colormap: dark navy → indigo → red → orange → yellow → white
 const amplitudeToRGB = (amp) => {
-  if (amp <= 0.001) return [10, 8, 30, 255]; // Dark background
-  // Black body radiation-style: dark blue → purple → magenta → red → orange → yellow → white
+  if (amp <= 0.001) return [3, 3, 18, 255]; // Near-black navy
   const t = Math.min(amp, 1);
   let r, g, b;
-  if (t < 0.2) {
-    const s = t / 0.2;
-    r = Math.round(15 + s * 15);
-    g = Math.round(10);
-    b = Math.round(30 + s * 90);
-  } else if (t < 0.4) {
-    const s = (t - 0.2) / 0.2;
-    r = Math.round(30 + s * 50);
-    g = Math.round(10);
-    b = Math.round(120 + s * 60);
-  } else if (t < 0.6) {
-    const s = (t - 0.4) / 0.2;
-    r = Math.round(80 + s * 80);
-    g = Math.round(10 + s * 10);
-    b = Math.round(180 - s * 0);
-  } else if (t < 0.8) {
-    const s = (t - 0.6) / 0.2;
-    r = Math.round(160 + s * 60);
-    g = Math.round(20 + s * 30);
-    b = Math.round(180 - s * 100);
+  if (t < 0.14) {
+    // Black → deep indigo
+    const s = t / 0.14;
+    r = Math.round(3 + s * 20);
+    g = Math.round(3 + s * 4);
+    b = Math.round(18 + s * 62);
+  } else if (t < 0.30) {
+    // Deep indigo → purple
+    const s = (t - 0.14) / 0.16;
+    r = Math.round(23 + s * 77);
+    g = Math.round(7 + s * 5);
+    b = Math.round(80 + s * 40);
+  } else if (t < 0.50) {
+    // Purple → dark red
+    const s = (t - 0.30) / 0.20;
+    r = Math.round(100 + s * 100);
+    g = Math.round(12 + s * 18);
+    b = Math.round(120 - s * 80);
+  } else if (t < 0.68) {
+    // Dark red → orange
+    const s = (t - 0.50) / 0.18;
+    r = Math.round(200 + s * 40);
+    g = Math.round(30 + s * 90);
+    b = Math.round(40 - s * 30);
+  } else if (t < 0.85) {
+    // Orange → yellow
+    const s = (t - 0.68) / 0.17;
+    r = Math.round(240 + s * 15);
+    g = Math.round(120 + s * 110);
+    b = Math.round(10 + s * 20);
   } else {
-    const s = (t - 0.8) / 0.2;
-    r = Math.round(220 + s * 35);
-    g = Math.round(50 + s * 150);
-    b = Math.round(80 - s * 60);
+    // Yellow → white
+    const s = (t - 0.85) / 0.15;
+    r = Math.round(255);
+    g = Math.round(230 + s * 25);
+    b = Math.round(30 + s * 225);
   }
   return [r, g, b, 255];
 };
@@ -299,6 +317,23 @@ const SpectrogramCreator = () => {
   const [playheadPos, setPlayheadPos] = useState(-1);
   const [hoveredFreq, setHoveredFreq] = useState(null);
 
+  // Webcam & image upload
+  const [showWebcam, setShowWebcam] = useState(false);
+  const [hasSavedFace, setHasSavedFace] = useState(() => !!localStorage.getItem(SAVED_FACE_KEY));
+  const [pendingPresetSave, setPendingPresetSave] = useState(null); // { key } when uploading for a named preset
+  const [savedImagePresets, setSavedImagePresets] = useState(() => {
+    // One-time migration: clear old Einstein images so user can re-upload fresh copies
+    const migrationKey = 'spectrogram-einstein-reset-v1';
+    if (!localStorage.getItem(migrationKey)) {
+      localStorage.removeItem('spectrogram-preset-einstein-bw');
+      localStorage.removeItem('spectrogram-preset-einstein-color');
+      localStorage.setItem(migrationKey, '1');
+    }
+    const found = {};
+    PRESETS.forEach((p) => { if (p.persistKey && localStorage.getItem(p.persistKey)) found[p.persistKey] = true; });
+    return found;
+  });
+
   // Physics parameters (ΔMi−1 formula)
   const [dampingFactor, setDampingFactor] = useState(0.15);
   const [couplingStrength, setCouplingStrength] = useState(0.08);
@@ -313,6 +348,9 @@ const SpectrogramCreator = () => {
   const simulationStateRef = useRef(null); // running amplitude state per time-slice
 
   // ── Refs ──
+  const videoRef = useRef(null);
+  const webcamStreamRef = useRef(null);
+  const fileInputRef = useRef(null);
   const canvasRef = useRef(null);
   const overlayCanvasRef = useRef(null);
   const synthRef = useRef(null);
@@ -984,12 +1022,254 @@ const SpectrogramCreator = () => {
     URL.revokeObjectURL(url);
   }, [grid, evolvedGrid, duration, simulationEnabled]);
 
+  // ── Image to spectrogram grid conversion (Aphex Twin ΔMi−1 / MetaSynth style) ──
+  const imageToGrid = useCallback((imageSource) => {
+    // Process at full image resolution first, then downscale.
+    const srcW = imageSource.naturalWidth || imageSource.videoWidth || imageSource.width;
+    const srcH = imageSource.naturalHeight || imageSource.videoHeight || imageSource.height;
+
+    // Step 1: Convert to grayscale at full resolution
+    const fullCanvas = document.createElement('canvas');
+    fullCanvas.width = srcW;
+    fullCanvas.height = srcH;
+    const fullCtx = fullCanvas.getContext('2d');
+    fullCtx.filter = 'grayscale(1)';
+    fullCtx.drawImage(imageSource, 0, 0, srcW, srcH);
+    fullCtx.filter = 'none';
+
+    // Step 2: Downscale to grid dimensions
+    const offscreen = document.createElement('canvas');
+    offscreen.width = NUM_TIME_SLICES;
+    offscreen.height = NUM_FREQ_BINS;
+    const ctx = offscreen.getContext('2d');
+    ctx.drawImage(fullCanvas, 0, 0, NUM_TIME_SLICES, NUM_FREQ_BINS);
+    const imgData = ctx.getImageData(0, 0, NUM_TIME_SLICES, NUM_FREQ_BINS);
+    const pixels = imgData.data;
+
+    const totalPixels = NUM_TIME_SLICES * NUM_FREQ_BINS;
+    const grayValues = new Float64Array(totalPixels);
+
+    for (let y = 0; y < NUM_FREQ_BINS; y++) {
+      for (let t = 0; t < NUM_TIME_SLICES; t++) {
+        const i = y * NUM_TIME_SLICES + t;
+        grayValues[i] = pixels[i * 4] / 255;
+      }
+    }
+
+    // Step 3: Sobel edge detection — extract only outlines (nose, eyes, jaw, lips).
+    // This is how the Aphex Twin ΔMi−1 face works: it's a contour map, not a photo.
+    const edges = new Float64Array(totalPixels);
+    let maxEdge = 0;
+
+    for (let y = 1; y < NUM_FREQ_BINS - 1; y++) {
+      for (let t = 1; t < NUM_TIME_SLICES - 1; t++) {
+        const idx = y * NUM_TIME_SLICES + t;
+        // 3×3 Sobel kernel neighbours
+        const tl = grayValues[(y - 1) * NUM_TIME_SLICES + (t - 1)];
+        const tc = grayValues[(y - 1) * NUM_TIME_SLICES + t];
+        const tr = grayValues[(y - 1) * NUM_TIME_SLICES + (t + 1)];
+        const ml = grayValues[y * NUM_TIME_SLICES + (t - 1)];
+        const mr = grayValues[y * NUM_TIME_SLICES + (t + 1)];
+        const bl = grayValues[(y + 1) * NUM_TIME_SLICES + (t - 1)];
+        const bc = grayValues[(y + 1) * NUM_TIME_SLICES + t];
+        const br = grayValues[(y + 1) * NUM_TIME_SLICES + (t + 1)];
+
+        const gx = -tl + tr - 2 * ml + 2 * mr - bl + br;
+        const gy = -tl - 2 * tc - tr + bl + 2 * bc + br;
+        edges[idx] = Math.sqrt(gx * gx + gy * gy);
+        if (edges[idx] > maxEdge) maxEdge = edges[idx];
+      }
+    }
+
+    // Step 4: Normalise edges to 0-1 and apply contrast boost
+    if (maxEdge > 0) {
+      for (let i = 0; i < totalPixels; i++) {
+        edges[i] = edges[i] / maxEdge;
+      }
+    }
+
+    // Threshold weak edges to silence — keep only prominent contours
+    const edgeThreshold = 0.06;
+    for (let i = 0; i < totalPixels; i++) {
+      if (edges[i] < edgeThreshold) {
+        edges[i] = 0;
+      } else {
+        // Re-scale surviving edges to 0-1 and boost brightness aggressively
+        edges[i] = Math.pow((edges[i] - edgeThreshold) / (1 - edgeThreshold), 0.35);
+      }
+    }
+
+    // Step 5: Build the grid
+    const newGrid = SpectrogramSynth.createBlankGrid(NUM_TIME_SLICES, NUM_FREQ_BINS);
+
+    for (let t = 0; t < NUM_TIME_SLICES; t++) {
+      for (let y = 0; y < NUM_FREQ_BINS; y++) {
+        const f = NUM_FREQ_BINS - 1 - y;
+        newGrid[t][f] = edges[y * NUM_TIME_SLICES + t];
+      }
+    }
+
+    return newGrid;
+  }, []);
+
+  // ── Webcam handling ──
+  const startWebcam = useCallback(async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
+      });
+      webcamStreamRef.current = stream;
+      setShowWebcam(true);
+      // Attach stream to video element after render
+      requestAnimationFrame(() => {
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+        }
+      });
+    } catch (err) {
+      console.error('Webcam access denied:', err);
+      alert('Could not access webcam. Please allow camera permissions.');
+    }
+  }, []);
+
+  const stopWebcam = useCallback(() => {
+    if (webcamStreamRef.current) {
+      webcamStreamRef.current.getTracks().forEach((track) => track.stop());
+      webcamStreamRef.current = null;
+    }
+    setShowWebcam(false);
+  }, []);
+
+  // Capture the mirrored video frame to an offscreen canvas
+  const captureVideoFrame = useCallback(() => {
+    const video = videoRef.current;
+    if (!video || !video.videoWidth) return null;
+    const offscreen = document.createElement('canvas');
+    offscreen.width = video.videoWidth;
+    offscreen.height = video.videoHeight;
+    const ctx = offscreen.getContext('2d');
+    ctx.translate(offscreen.width, 0);
+    ctx.scale(-1, 1);
+    ctx.drawImage(video, 0, 0);
+    return offscreen;
+  }, []);
+
+  const captureWebcam = useCallback(() => {
+    const frame = captureVideoFrame();
+    if (!frame) return;
+    const newGrid = imageToGrid(frame);
+    setGrid(newGrid);
+    capturedRecordingRef.current = null;
+    stopWebcam();
+  }, [captureVideoFrame, imageToGrid, stopWebcam]);
+
+  // Save the current webcam frame as a permanent "My Face" preset
+  const saveWebcamAsPreset = useCallback(() => {
+    const frame = captureVideoFrame();
+    if (!frame) return;
+    // Store as a compact data URL in localStorage
+    const saveCanvas = document.createElement('canvas');
+    saveCanvas.width = NUM_TIME_SLICES;
+    saveCanvas.height = NUM_FREQ_BINS;
+    const ctx = saveCanvas.getContext('2d');
+    ctx.drawImage(frame, 0, 0, NUM_TIME_SLICES, NUM_FREQ_BINS);
+    const dataUrl = saveCanvas.toDataURL('image/png');
+    localStorage.setItem(SAVED_FACE_KEY, dataUrl);
+    setHasSavedFace(true);
+    // Also apply it immediately
+    const newGrid = imageToGrid(frame);
+    setGrid(newGrid);
+    capturedRecordingRef.current = null;
+    stopWebcam();
+  }, [captureVideoFrame, imageToGrid, stopWebcam]);
+
+  // Load saved face from localStorage into the grid
+  const loadSavedFace = useCallback(() => {
+    const dataUrl = localStorage.getItem(SAVED_FACE_KEY);
+    if (!dataUrl) return;
+    const img = new Image();
+    img.onload = () => {
+      const newGrid = imageToGrid(img);
+      setGrid(newGrid);
+      capturedRecordingRef.current = null;
+    };
+    img.src = dataUrl;
+  }, [imageToGrid]);
+
+  // ── Upload image handler ──
+  const handleImageUpload = useCallback((e) => {
+    const file = e.target.files?.[0];
+    if (!file) { setPendingPresetSave(null); return; }
+    // Reset the input so the same file can be re-selected
+    e.target.value = '';
+    const pending = pendingPresetSave;
+    const img = new Image();
+    img.onload = () => {
+      if (pending) {
+        // Save thumbnail to localStorage for this named preset
+        const saveCanvas = document.createElement('canvas');
+        saveCanvas.width = NUM_TIME_SLICES;
+        saveCanvas.height = NUM_FREQ_BINS;
+        const sCtx = saveCanvas.getContext('2d');
+        sCtx.drawImage(img, 0, 0, NUM_TIME_SLICES, NUM_FREQ_BINS);
+        localStorage.setItem(pending.key, saveCanvas.toDataURL('image/png'));
+        setSavedImagePresets((prev) => ({ ...prev, [pending.key]: true }));
+        const newGrid = imageToGrid(img);
+        setGrid(newGrid);
+        setPendingPresetSave(null);
+      } else {
+        const newGrid = imageToGrid(img);
+        setGrid(newGrid);
+      }
+      capturedRecordingRef.current = null;
+      URL.revokeObjectURL(img.src);
+    };
+    img.src = URL.createObjectURL(file);
+  }, [imageToGrid, pendingPresetSave]);
+
+  // ── Load a persistent image preset from localStorage ──
+  const loadImagePreset = useCallback((preset) => {
+    const dataUrl = localStorage.getItem(preset.persistKey);
+    if (dataUrl) {
+      const img = new Image();
+      img.onload = () => {
+        const newGrid = imageToGrid(img);
+        setGrid(newGrid);
+        capturedRecordingRef.current = null;
+      };
+      img.src = dataUrl;
+    } else {
+      // First time — prompt user to upload the image, then auto-save
+      setPendingPresetSave({ key: preset.persistKey });
+      fileInputRef.current?.click();
+    }
+  }, [imageToGrid]);
+
   // ── Load preset ──
   const handlePreset = useCallback((presetName) => {
+    if (presetName === 'Face') {
+      startWebcam();
+      return;
+    }
+    if (presetName === 'My Face') {
+      loadSavedFace();
+      return;
+    }
+    if (presetName === 'Upload Image') {
+      setPendingPresetSave(null);
+      fileInputRef.current?.click();
+      return;
+    }
+    // Check for persistent image presets (Einstein B&W, Einstein Color, etc.)
+    const preset = PRESETS.find((p) => p.name === presetName);
+    if (preset?.persistKey) {
+      loadImagePreset(preset);
+      return;
+    }
     const newGrid = generatePreset(presetName, synthRef.current);
     setGrid(newGrid);
-    capturedRecordingRef.current = null; // Discard captured recording
-  }, []);
+    capturedRecordingRef.current = null;
+  }, [startWebcam, loadSavedFace, loadImagePreset]);
 
   // ── Clear canvas ──
   const handleClear = useCallback(() => {
@@ -1259,19 +1539,38 @@ const SpectrogramCreator = () => {
       {/* Presets */}
       <div className="flex flex-wrap gap-2 mb-4">
         <span className="text-xs text-gray-500 self-center mr-1">Presets:</span>
-        {PRESETS.map((preset) => (
-          <button
-            key={preset.name}
-            onClick={() => handlePreset(preset.name)}
-            title={preset.description}
-            className="px-2.5 py-1 rounded-md text-xs bg-[#1a1640]/60 text-gray-300 
-                       hover:bg-purple-600/40 hover:text-white transition-colors border border-transparent
-                       hover:border-purple-500/30"
-          >
-            {preset.icon} {preset.name}
-          </button>
-        ))}
+        {PRESETS.filter((p) => !p.saved || hasSavedFace).map((preset) => {
+          const needsSetup = preset.persistKey && !savedImagePresets[preset.persistKey];
+          return (
+            <button
+              key={preset.name}
+              onClick={() => handlePreset(preset.name)}
+              title={needsSetup ? `${preset.description} (click to upload image)` : preset.description}
+              className={`px-2.5 py-1 rounded-md text-xs transition-colors border ${
+                preset.saved
+                  ? 'bg-cyan-900/40 text-cyan-300 hover:bg-cyan-700/40 hover:text-white border-transparent hover:border-purple-500/30'
+                  : preset.persistKey
+                    ? needsSetup
+                      ? 'bg-amber-900/30 text-amber-300 hover:bg-amber-700/40 hover:text-white border-dashed border-amber-500/40 hover:border-amber-400/60'
+                      : 'bg-emerald-900/30 text-emerald-300 hover:bg-emerald-700/40 hover:text-white border-emerald-500/30 hover:border-emerald-400/50'
+                    : 'bg-[#1a1640]/60 text-gray-300 hover:bg-purple-600/40 hover:text-white border-transparent hover:border-purple-500/30'
+              }`}
+            >
+              {preset.icon} {preset.name}{needsSetup ? ' +' : ''}
+            </button>
+          );
+        })}
+
       </div>
+
+      {/* Hidden file input for image upload */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={handleImageUpload}
+      />
 
       {/* Action buttons */}
       <div className="flex flex-wrap gap-3">
@@ -1304,6 +1603,63 @@ const SpectrogramCreator = () => {
           🗑️ Clear
         </button>
       </div>
+
+      {/* Webcam capture modal */}
+      {showWebcam && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
+          <div className="bg-[#0f0d2e] border border-purple-500/30 rounded-2xl p-6 max-w-lg w-full mx-4 shadow-2xl">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-bold text-white">📸 Capture Your Face</h3>
+              <button
+                onClick={stopWebcam}
+                className="text-gray-400 hover:text-white text-xl leading-none"
+              >
+                ✕
+              </button>
+            </div>
+            <p className="text-xs text-gray-400 mb-3">
+              Position your face in the frame. High contrast + edge detection will give you 
+              the ghostly ΔMi−1 spectral face look — just like Aphex Twin's formula track.
+            </p>
+            <div className="relative rounded-lg overflow-hidden bg-black mb-4">
+              <video
+                ref={videoRef}
+                autoPlay
+                playsInline
+                muted
+                className="w-full rounded-lg"
+                style={{ transform: 'scaleX(-1)' }}
+              />
+            </div>
+            <div className="flex gap-3">
+              <button
+                onClick={captureWebcam}
+                className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl font-semibold text-sm
+                           bg-linear-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 
+                           text-white shadow-lg shadow-purple-600/20 transition-all"
+              >
+                📸 Capture
+              </button>
+              <button
+                onClick={saveWebcamAsPreset}
+                className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl font-semibold text-sm
+                           bg-linear-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 
+                           text-white shadow-lg shadow-cyan-600/20 transition-all"
+                title="Save as a permanent preset you can reload anytime"
+              >
+                👤 Save as Preset
+              </button>
+              <button
+                onClick={stopWebcam}
+                className="px-4 py-2.5 rounded-xl text-sm font-medium bg-[#1a1640] hover:bg-[#252060] 
+                           text-gray-300 border border-purple-500/20 hover:border-purple-500/40 transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Info footer */}
       <div className="mt-6 text-xs text-white max-w-2xl">
