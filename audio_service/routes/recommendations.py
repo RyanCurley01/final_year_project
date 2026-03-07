@@ -879,7 +879,7 @@ async def get_midi_recommendations(request: MidiTargetRequest):
 
         tf = request.target_features
 
-        # Build a synthetic target dict compatible with _build_similarity_vector
+        # Build a synthetic target dict from MIDI knob values
         target = {
             'tempo':             float(tf.get('tempo', 0.5)) * 200,   # de-normalise to BPM
             'energy':            float(tf.get('energy', 0.5)),
@@ -894,7 +894,27 @@ async def get_midi_recommendations(request: MidiTargetRequest):
             'speechiness':       float(tf.get('speechiness', 0.1)),
         }
 
-        target_vector = _build_similarity_vector(target)
+        # Use ONLY the 11 core features the MIDI knobs actually control.
+        # _build_similarity_vector adds 28 extra dimensions (duration, key, time_sig,
+        # 13 MFCC, 12 chroma) that are all zero/default for the MIDI target but have
+        # real values for cached songs — this noise drowns out the knob signal and
+        # causes every slider change to just re-order the same songs slightly.
+        def _midi_vector(f: dict) -> list:
+            return [
+                float(f.get('tempo') if f.get('tempo') is not None else 120) / 200.0,
+                float(f.get('energy') if f.get('energy') is not None else 0.5),
+                float(f.get('valence') if f.get('valence') is not None else 0.5),
+                float(f.get('danceability') if f.get('danceability') is not None else 0.5),
+                float(f.get('acousticness') if f.get('acousticness') is not None else 0.5),
+                float(f.get('spectral_centroid') if f.get('spectral_centroid') is not None else 1500.0) / 5000.0,
+                float(f.get('spectral_rolloff') if f.get('spectral_rolloff') is not None else 3000.0) / 10000.0,
+                float(f.get('zero_crossing_rate') if f.get('zero_crossing_rate') is not None else 0.05) * 10.0,
+                float(f.get('instrumentalness') if f.get('instrumentalness') is not None else 0.5),
+                float((f.get('loudness') if f.get('loudness') is not None else -60.0) + 60.0) / 60.0,
+                float(f.get('speechiness') if f.get('speechiness') is not None else 0.1),
+            ]
+
+        target_vector = _midi_vector(target)
 
         # Gather candidates: filter to allowed_ids if provided,
         # otherwise only library songs (positive IDs < 1000)
@@ -908,7 +928,7 @@ async def get_midi_recommendations(request: MidiTargetRequest):
                     continue
             elif not (pid < 0 or (0 < pid < 1000)):
                 continue  # skip ephemeral/live iTunes songs with large positive IDs
-            vec = _build_similarity_vector(data)
+            vec = _midi_vector(data)
             candidate_vectors.append(vec)
             candidate_objs.append((pid, data))
 
