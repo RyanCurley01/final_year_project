@@ -4,9 +4,12 @@ import json
 import numpy as np
 from collections import Counter
 from typing import Dict, List, Optional
+from sklearn.base import clone
+from sklearn.linear_model import LogisticRegression
+from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
-from sklearn.model_selection import train_test_split, cross_val_score, cross_validate, StratifiedKFold, LeaveOneOut
-from sklearn.metrics import silhouette_score, precision_score, recall_score, f1_score
+from sklearn.model_selection import GridSearchCV, train_test_split, cross_val_score, cross_validate, StratifiedKFold, LeaveOneOut
+from sklearn.metrics import classification_report, confusion_matrix, silhouette_score, precision_score, recall_score, f1_score
 from sklearn.decomposition import PCA
 from sklearn.cluster import KMeans
 from sklearn.neighbors import KNeighborsClassifier
@@ -210,518 +213,239 @@ async def startup_cache():
                                     feature_product_ids.append(pid)
                             
                             if len(feature_vectors) >= 10:
+                                # 2. Scale + PCA (for visualization) + KMeans clustering
                                 X = np.array(feature_vectors)
-                                y = np.array(feature_labels)
-                                n_samples = len(X)
                                 n_clusters = 3
                                 
-                                console.log(f"📊 ML Pipeline: {n_samples} tracks, {n_clusters} clusters")
+                                # Try both scalers, pick the one with better silhouette score
+                                best_sil = -1
+                                best_scaler_name = 'StandardScaler'
+                                X_pca = None
+                                X_scaled = None
                                 
-                                # 2. Model Selection: Compare scalers via full pipeline accuracy
-                                # Pipeline: Scale → PCA(2D) → KMeans(3) → KNN cross-val accuracy
+                                for scaler_name, scaler_obj in [('MinMaxScaler', MinMaxScaler()), ('StandardScaler', StandardScaler())]:
+                                    X_sc = scaler_obj.fit_transform(X)
+                                    pca_tmp = PCA(n_components=2)
+                                    X_pca_tmp = pca_tmp.fit_transform(X_sc)
+                                    km_tmp = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
+                                    labels_tmp = km_tmp.fit_predict(X_pca_tmp)
+                                    sil = silhouette_score(X_pca_tmp, labels_tmp)
+                                    model_performance_metrics[f"{scaler_name}_train"] = round(sil, 4)
+                                    console.log(f"   {scaler_name} silhouette: {sil:.4f}")
                                 
-                                def evaluate_pipeline(scaler_class, X_data, k=3):
-                                    """Evaluate scaler with PCA + KMeans + KNN pipeline.
-                                    
-                                    Train/val scores are computed on full 11D scaled features
-                                    (not 2D PCA) so different scalers produce meaningfully
-                                    different accuracy numbers. PCA and KMeans are still used
-                                    for clustering and visualization.
-                                    """
-                                    
-                                    # Fits the scaler to the raw audio features (X_data) to calculate stats 
-                                    # (like min/max or mean/std) and immediately transforms the data. 
-                                    # This normalizes the data so features with large numbers (like Tempo: 120) 
-                                    # don't overpower small ones (like Speechiness: 0.1)
-                                    scaler = scaler_class()
-                                    X_sc = scaler.fit_transform(X_data)
-                                    
-                                    # Compresses the scaled 11-dimensional audio features down to 2 dimensions 
-                                    # while keeping as much "information" (variance) as possible.
-                                    pca = PCA(n_components=2)
-                                    X_pca = pca.fit_transform(X_sc)
-                                    
-                                    # Runs the clustering on the 2D data. It assigns every song to a cluster 
-                                    # (e.g., 0, 1, or 2). These labels become the "Truth" for the next steps
-                                    km = KMeans(n_clusters=k, random_state=42, n_init=20)
-                                    labels = km.fit_predict(X_pca)
-                                    
-                                    # Calculates how well-separated the clusters are
-                                    sil = silhouette_score(X_pca, labels)
-                                    
-                                    # Evaluate KNN on FULL 11D scaled features (not 2D PCA).
-                                    # In 2D PCA, KMeans clusters are trivially separable so
-                                    # both scalers achieve ~0.99. In 11D, the scaler choice
-                                    # meaningfully affects how features distribute, creating
-                                    # genuine accuracy differences between MinMax and Standard.
-                                    n_nbrs = min(7, len(X_data) - 1)
-                                    knn = KNeighborsClassifier(n_neighbors=n_nbrs)
-                                    
-                                    # Checks the size of the smallest cluster. If one cluster has only 1 song, 
-                                    # standard cross-validation will crash because 
-                                    # it can't split that 1 song into training and test sets.
-                                    min_count = min(np.bincount(labels))
-                                    
-                                    # if all clusters have at least 2 songs
-                                    if min_count >= 2:
-                                        # Decides how many "folds" to split the data into (Between 2 and 5).
-                                        n_folds = max(2, min(5, min_count))
-                                        
-                                        # Ensures each "fold" has a proportional mix of cluster labels (stratified)
-                                        cv = StratifiedKFold(n_splits=n_folds, shuffle=True, random_state=42)
-                                        
-                                        # cross_validate returns per-fold train AND test scores.
-                                        # Using fold-level train scores (not full-data .score()) prevents
-                                        # trivial 1.0 training accuracy from KNN memorization.
-                                        cv_results = cross_validate(
-                                            knn, X_sc, labels, cv=cv,
-                                            scoring='accuracy', return_train_score=True
-                                        )
-                                        val_acc = cv_results['test_score'].mean()
-                                        train_acc = cv_results['train_score'].mean()
-                                    else:
-                                        # LOO doesn't support return_train_score meaningfully (N-1 train)
-                                        cv_scores = cross_val_score(knn, X_sc, labels, cv=LeaveOneOut())
-                                        val_acc = cv_scores.mean()
-                                        # Approximate train score from LOO (each fold trains on N-1 samples)
-                                        knn.fit(X_sc, labels)
-                                        train_acc = knn.score(X_sc, labels)
-                                    
-                                    # Trains the final KNN model on the entire dataset (for later use)
-                                    knn.fit(X_sc, labels)
-                                    
-                                    return {
-                                        'scaler': scaler, 'pca': pca, 'kmeans': km,
-                                        'labels': labels, 'X_pca': X_pca, 'X_scaled': X_sc,
-                                        'train': train_acc, 'val': val_acc, 'sil': sil
-                                    }
+                                    if sil > best_sil:
+                                        best_sil = sil
+                                        best_scaler_name = scaler_name
+                                        feature_scaler = scaler_obj
+                                        pca_reducer = pca_tmp
+                                        X_pca = X_pca_tmp
+                                        X_scaled = X_sc
                                 
-                                # Runs the entire pipeline (Scale -> PCA -> KMeans -> KNN) using MinMaxScaler and StandardScaler
-                                res_a = evaluate_pipeline(MinMaxScaler, X.copy(), n_clusters)
-                                res_b = evaluate_pipeline(StandardScaler, X.copy(), n_clusters)
-                                
-                                model_performance_metrics["MinMaxScaler_train"] = round(res_a['train'], 4)
-                                model_performance_metrics["MinMaxScaler_val"] = round(res_a['val'], 4)
-                                model_performance_metrics["StandardScaler_train"] = round(res_b['train'], 4)
-                                model_performance_metrics["StandardScaler_val"] = round(res_b['val'], 4)
-                                
-                                # Compares the validation accuracy (how well the clusters separate) of the two methods.
-                                if res_b['val'] > res_a['val']:
-                                    best = res_b
-                                    best_model_name = "StandardScaler"
-                                else:
-                                    best = res_a
-                                    best_model_name = "MinMaxScaler"
-                                
-                                console.log(f"   🏆 {best_model_name} (Train: {best['train']:.4f}, Val: {best['val']:.4f}, Sil: {best['sil']:.4f})")
-                                
-                                # Updates the global variables with the trained objects from the winning pipeline
-                                # to be used later when a user asks to classify a new song that wasn't in the database at startup.
-                                feature_scaler = best['scaler']
-                                pca_reducer = best['pca']
-                                X_pca = best['X_pca']
-                                cluster_labels = best['labels']
-                                
-                                # 3. Converts raw numbers (e.g., 0, 1, 2) into human-readable strings (e.g., "Cluster 0").
+                                # KMeans on the best PCA projection
+                                kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
+                                cluster_labels = kmeans.fit_predict(X_pca)
                                 cluster_names = np.array([f"Cluster {l}" for l in cluster_labels])
                                 
-                                # 3b. Sync stale Genre labels in cache and database.
-                                # Songs imported via import-top-songs had hardcoded "Pop - ArtistName"
-                                # genres. Now that KMeans has assigned proper cluster labels,
-                                # update any song whose DB genre doesn't match its cluster.
-                                stale_updates = []
+                                # Update genre in cache with cluster labels
                                 for i, pid in enumerate(feature_product_ids):
-                                    new_genre = cluster_names[i]
-                                    old_genre = audio_features_cache[pid].get('genre', '')
-                                    if old_genre != new_genre:
-                                        stale_updates.append((new_genre, pid))
-                                        audio_features_cache[pid]['genre'] = new_genre
+                                    if pid in audio_features_cache:
+                                        audio_features_cache[pid]['genre'] = cluster_names[i]
                                 
-                                if stale_updates:
-                                    try:
-                                        with get_db_connection() as conn2:
-                                            if conn2:
-                                                with conn2.cursor() as cur2:
-                                                    cur2.executemany(
-                                                        "UPDATE AudioFeatures SET Genre = %s WHERE ProductID = %s",
-                                                        stale_updates
-                                                    )
-                                                    conn2.commit()
-                                        console.log(f"   🔄 Synced {len(stale_updates)} stale Genre labels to DB (e.g. 'Pop - ...' → 'Cluster X')")
-                                    except Exception as sync_e:
-                                        console.log(f"   ⚠️ Genre sync failed (non-fatal): {sync_e}")
+                                console.log(f"   ✅ Best scaler: {best_scaler_name} (silhouette={best_sil:.4f})")
                                 
-                                # 4. Build Ensemble: KNN + Random Forest + SVM (Voting Classifier)
-                                # Each model learns the cluster boundaries differently:
-                                #   - KNN: Distance-based (nearest neighbors vote on cluster)
-                                #   - Random Forest: Tree-based (learns decision rules from features)
-                                #   - SVM: Margin-based (finds optimal hyperplanes between clusters)
-                                # Combining them via soft voting (averaged probabilities) produces
-                                # more robust predictions than any single model alone.
-                                
-                                n_nbrs = min(5, n_samples - 1)
-                                
-                                knn_model = KNeighborsClassifier(n_neighbors=n_nbrs)
-                                rf_model = RandomForestClassifier(
-                                    n_estimators=100, max_depth=10, min_samples_leaf=3,
-                                    random_state=42, n_jobs=-1
+                                # 3. Split FULL 39D scaled data for model training
+                                # Models train on full feature space so each algorithm
+                                # learns genuinely different boundaries. PCA is only for visualization.
+                                y = cluster_names
+                                X_train, X_test, y_train, y_test, idx_train, idx_test = train_test_split(
+                                    X_scaled, y, np.arange(len(X_scaled)),
+                                    stratify=y, test_size=0.4, random_state=1138
                                 )
-                                svm_model = SVC(
-                                    kernel='rbf', probability=True, random_state=42
+                                X_valid, X_test, y_valid, y_test, idx_valid, idx_test = train_test_split(
+                                    X_test, y_test, idx_test,
+                                    stratify=y_test, test_size=0.5, random_state=1138
                                 )
                                 
-                                # Also train a standalone KNN for backward compatibility
-                                # (used as a fallback if ensemble fails at runtime)
-                                knn_classifier = KNeighborsClassifier(n_neighbors=n_nbrs)
-                                knn_classifier.fit(X_pca, cluster_names)
+                                # 4. Train and tune 4 models with GridSearchCV on 39D features
                                 
-                                # 5. Cross-validate ALL 4 models to get train/val scores,
-                                # then pick the best model by validation accuracy.
-                                # Also train standalone models on FULL data for decision boundary visualization.
-                                individual_full_models = {
-                                    'KNN': KNeighborsClassifier(n_neighbors=n_nbrs),
-                                    'RandomForest': RandomForestClassifier(
-                                        n_estimators=100, max_depth=10, min_samples_leaf=3,
-                                        random_state=42, n_jobs=-1
-                                    ),
-                                    'SVM': SVC(kernel='rbf', probability=True, random_state=42)
-                                }
-                                for m in individual_full_models.values():
-                                    m.fit(X_pca, cluster_names)
-                                
-                                # Cross-validate each model using MODEL-SPECIFIC validation strategies
-                                # so that each model produces genuinely different metrics.
-                                min_count = min(np.bincount(cluster_labels))
-                                
-                                # Full-capacity models matching the training pipeline.
-                                # With 3 KMeans clusters the classification task is well-
-                                # defined; giving each model its full capacity produces
-                                # accurate, representative test scores.
-                                knn_cv_k = min(5, n_samples - 1)
-                                
-                                cv_models = {
-                                    'KNN': KNeighborsClassifier(
-                                        n_neighbors=knn_cv_k
-                                    ),
-                                    'RandomForest': RandomForestClassifier(
-                                        n_estimators=100, max_depth=10, min_samples_leaf=3,
-                                        random_state=42, n_jobs=-1
-                                    ),
-                                    'SVM': SVC(
-                                        kernel='rbf', probability=True,
-                                        random_state=42
-                                    ),
-                                }
-                                
-                                # Use a SINGLE consistent CV strategy for fair model comparison.
-                                # Same folds for every model ensures we compare architectures,
-                                # not evaluation methods (LOO vs OOB vs KFold).
-                                n_cv_folds = max(2, min(5, min_count))
-                                shared_cv = StratifiedKFold(
-                                    n_splits=n_cv_folds, shuffle=True, random_state=42
+                                # Support Vector Machine (RBF kernel for non-linear boundaries)
+                                grid_svm = GridSearchCV(
+                                    SVC(kernel='rbf'),
+                                    {'C': [0.01, 0.1, 1, 10, 100], 'gamma': ['scale', 'auto', 0.1, 1]},
+                                    cv=5, scoring='accuracy'
                                 )
+                                grid_svm.fit(X_train, y_train)
+                                best_model_svm = grid_svm.best_estimator_
+                                console.log(f"   SVM best params: {grid_svm.best_params_}")
                                 
+                                # Random Forest Classifier
+                                grid_rf = GridSearchCV(
+                                    RandomForestClassifier(random_state=42),
+                                    {'n_estimators': [50, 100, 200], 'max_depth': [None, 10, 20]},
+                                    cv=5, scoring='accuracy'
+                                )
+                                grid_rf.fit(X_train, y_train)
+                                best_model_rf = grid_rf.best_estimator_
+                                console.log(f"   RF best params: {grid_rf.best_params_}")
+                                
+                                # K-Nearest Neighbors
+                                grid_knn = GridSearchCV(
+                                    KNeighborsClassifier(),
+                                    {'n_neighbors': [3, 5, 7, 9, 11]},
+                                    cv=5
+                                )
+                                grid_knn.fit(X_train, y_train)
+                                best_model_knn = grid_knn.best_estimator_
+                                console.log(f"   KNN best params: {grid_knn.best_params_}")
+                                
+                                # Logistic Regression
+                                grid_lr = GridSearchCV(
+                                    LogisticRegression(max_iter=1000),
+                                    {'C': [0.001, 0.01, 0.1, 1, 10, 100]},
+                                    cv=5
+                                )
+                                grid_lr.fit(X_train, y_train)
+                                best_model_lr = grid_lr.best_estimator_
+                                console.log(f"   LR best params: {grid_lr.best_params_}")
+                                
+                                # 5. Combine training + validation sets for final models
+                                X_train_final = np.concatenate((X_train, X_valid), axis=0)
+                                y_train_final = np.concatenate((y_train, y_valid), axis=0)
+                                
+                                # 6. Per-model metrics (score on original splits, then retrain on full data)
                                 per_model_metrics = {}
-                                best_model_key = None
-                                best_val_score = -1.0
-                                individual_val_scores = {}  # track val scores for dynamic weighting
+                                individual_full_models = {}
                                 
-                                # Evaluate on FULL scaled features.
-                                # In 2D PCA, clusters are trivially separable (all models → ~1.0).
-                                # In higher-D, the classification task is harder: KNN suffers from
-                                # curse of dimensionality, shallow RF can't perfectly partition
-                                # the space, and soft-margin SVM allows misclassifications.
-                                X_metrics = best['X_scaled']
-                                
-                                # Phase 1: Cross-validate individual models first
-                                for model_name, cv_model in cv_models.items():
-                                    # cross_validate with return_train_score=True gives
-                                    # per-fold train AND test scores (not full-data accuracy
-                                    # which is trivially 1.0 for most models).
-                                    cv_results = cross_validate(
-                                        cv_model, X_metrics, cluster_names, cv=shared_cv,
-                                        scoring='accuracy', return_train_score=True
-                                    )
-                                    train_acc = cv_results['train_score'].mean()
-                                    val_acc = cv_results['test_score'].mean()
-                                    individual_val_scores[model_name] = val_acc
-                                    
-                                    # Fit on full data for silhouette/prediction after CV
-                                    cv_model.fit(X_metrics, cluster_names)
-                                    
-                                    per_model_metrics[model_name] = {
-                                        "train_score": round(train_acc, 4),
-                                        "val_score": round(val_acc, 4),
-                                    }
-                                    
-                                    # Per-model silhouette & effective K:
-                                    # Each model's predictions differ due to capacity constraints,
-                                    # producing unique silhouette scores and potentially different
-                                    # numbers of clusters actually used by that model.
-                                    model_preds = cv_model.predict(X_metrics)
-                                    unique_pred_labels = np.unique(model_preds)
-                                    effective_k = len(unique_pred_labels)
-                                    
-                                    if effective_k >= 2:
-                                        from sklearn.preprocessing import LabelEncoder
-                                        le = LabelEncoder()
-                                        pred_ints = le.fit_transform(model_preds)
-                                        model_sil = silhouette_score(X_metrics, pred_ints)
-                                    else:
-                                        model_sil = 0.0
-                                    
-                                    per_model_metrics[model_name]["silhouette_score"] = round(model_sil, 4)
-                                    per_model_metrics[model_name]["optimal_k"] = effective_k
-                                    
-                                    if val_acc > best_val_score:
-                                        best_val_score = val_acc
-                                        best_model_key = model_name
-                                    
-                                    console.log(f"   📊 {model_name}: Train={train_acc:.4f}, Val={val_acc:.4f}")
-                                
-                                # Phase 2: Build Ensemble with DYNAMIC weights proportional
-                                # to individual validation scores. This ensures the strongest
-                                # model dominates the vote, so the ensemble is always >= the
-                                # best individual model instead of being dragged down by weaker ones.
-                                # Exponential scaling amplifies small score differences into large
-                                # weight differences. Raw scores (e.g. 0.91, 0.91, 0.95) give
-                                # near-equal weights (~33% each). exp(score * 20) transforms them
-                                # so the best model gets ~50-70% of the vote, ensuring the
-                                # ensemble always meets or exceeds the best individual model.
-                                knn_w = individual_val_scores.get('KNN', 0.5)
-                                rf_w = individual_val_scores.get('RandomForest', 0.5)
-                                svm_w = individual_val_scores.get('SVM', 0.5)
-                                temperature = 20  # higher = more weight on best model
-                                raw_weights = np.array([knn_w, rf_w, svm_w])
-                                exp_weights = np.exp(raw_weights * temperature)
-                                ensemble_weights = (exp_weights / exp_weights.sum()).tolist()  # normalize to sum=1
-                                console.log(f"   ⚖️ Ensemble weights: KNN={ensemble_weights[0]:.3f}, RF={ensemble_weights[1]:.3f}, SVM={ensemble_weights[2]:.3f} (from val: {knn_w:.4f}, {rf_w:.4f}, {svm_w:.4f})")
-                                
-                                ensemble_cv_model = VotingClassifier(
-                                    estimators=[
-                                        ('knn', KNeighborsClassifier(n_neighbors=knn_cv_k)),
-                                        ('rf', RandomForestClassifier(
-                                            n_estimators=100, max_depth=10, min_samples_leaf=3,
-                                            random_state=42, n_jobs=-1
-                                        )),
-                                        ('svm', SVC(kernel='rbf', probability=True, random_state=42))
-                                    ],
-                                    voting='soft',
-                                    weights=ensemble_weights
-                                )
-                                
-                                # Cross-validate the weighted ensemble
-                                ens_cv_results = cross_validate(
-                                    ensemble_cv_model, X_metrics, cluster_names, cv=shared_cv,
-                                    scoring='accuracy', return_train_score=True
-                                )
-                                ens_train = ens_cv_results['train_score'].mean()
-                                ens_val = ens_cv_results['test_score'].mean()
-                                
-                                ensemble_cv_model.fit(X_metrics, cluster_names)
-                                
-                                per_model_metrics['Ensemble'] = {
-                                    "train_score": round(ens_train, 4),
-                                    "val_score": round(ens_val, 4),
+                                tuned_models = {
+                                    'SVM': best_model_svm,
+                                    'RandomForest': best_model_rf,
+                                    'KNN': best_model_knn,
+                                    'LogisticRegression': best_model_lr
                                 }
                                 
-                                ens_preds = ensemble_cv_model.predict(X_metrics)
-                                ens_unique = np.unique(ens_preds)
-                                ens_k = len(ens_unique)
-                                if ens_k >= 2:
-                                    from sklearn.preprocessing import LabelEncoder
-                                    le = LabelEncoder()
-                                    ens_ints = le.fit_transform(ens_preds)
-                                    ens_sil = silhouette_score(X_metrics, ens_ints)
-                                else:
-                                    ens_sil = 0.0
-                                per_model_metrics['Ensemble']['silhouette_score'] = round(ens_sil, 4)
-                                per_model_metrics['Ensemble']['optimal_k'] = ens_k
+                                for mname, mdl in tuned_models.items():
+                                    # Score on original train/valid splits (before refitting)
+                                    train_sc = round(float(mdl.score(X_train, y_train)), 4)
+                                    val_sc = round(float(mdl.score(X_valid, y_valid)), 4)
                                 
-                                if ens_val > best_val_score:
-                                    best_val_score = ens_val
-                                    best_model_key = 'Ensemble'
+                                    # Clone and retrain on train+valid for final evaluation
+                                    mdl_full = clone(mdl)
+                                    mdl_full.fit(X_train_final, y_train_final)
+                                    individual_full_models[mname] = mdl_full
                                 
-                                console.log(f"   📊 Ensemble: Train={ens_train:.4f}, Val={ens_val:.4f}")
+                                    y_pred_m = mdl_full.predict(X_test)
+                                    per_model_metrics[mname] = {
+                                        'train_score': train_sc,
+                                        'val_score': val_sc,
+                                        'test_acc': round(float(mdl_full.score(X_test, y_test)), 4),
+                                        'silhouette_score': round(float(best_sil), 4),
+                                        'optimal_k': n_clusters,
+                                        'precision': round(float(precision_score(y_test, y_pred_m, average='weighted', zero_division=0)), 4),
+                                        'recall': round(float(recall_score(y_test, y_pred_m, average='weighted', zero_division=0)), 4),
+                                        'f1_score': round(float(f1_score(y_test, y_pred_m, average='weighted', zero_division=0)), 4),
+                                    }
+                                    console.log(f"   {mname}: val={val_sc}, test={per_model_metrics[mname]['test_acc']}")
                                 
-                                console.log(f"   🏆 Best model: {best_model_key} (Val: {best_val_score:.4f})")
+                                # 7. Ensemble classifier (all 4 models)
+                                # Fit a version on X_train only, to get unbiased val score
+                                ens_val_model = VotingClassifier(
+                                    estimators=[
+                                        ('knn', best_model_knn),
+                                        ('rf', best_model_rf),
+                                        ('svm', best_model_svm),
+                                        ('lr', best_model_lr),
+                                    ],
+                                    voting='hard'
+                                )
+                                ens_val_model.fit(X_train, y_train)
+                                ens_train_sc = round(float(ens_val_model.score(X_train, y_train)), 4)
+                                ens_val_sc = round(float(ens_val_model.score(X_valid, y_valid)), 4)
                                 
-                                # Build the runtime ensemble with dynamic weights
-                                # (uses val scores computed above to weight each model)
+                                # Final ensemble on train+valid
                                 ensemble_classifier = VotingClassifier(
                                     estimators=[
-                                        ('knn', knn_model),
-                                        ('rf', rf_model),
-                                        ('svm', svm_model)
+                                        ('knn', clone(best_model_knn)),
+                                        ('rf', clone(best_model_rf)),
+                                        ('svm', clone(best_model_svm)),
+                                        ('lr', clone(best_model_lr)),
                                     ],
-                                    voting='soft',
-                                    weights=ensemble_weights
+                                    voting='hard'
                                 )
-                                ensemble_classifier.fit(X_pca, cluster_names)
-                                console.log(f"   🤖 Ensemble trained: KNN + RandomForest + SVM (weighted soft voting)")
+                                ensemble_classifier.fit(X_train_final, y_train_final)
+                                individual_full_models['Ensemble'] = ensemble_classifier
                                 
-                                # Store the best-performing model as the primary classifier
-                                # for runtime genre predictions (recommendations, iTunes, etc.)
-                                best_cv_models = {
-                                    'KNN': individual_full_models['KNN'],
-                                    'RandomForest': individual_full_models['RandomForest'],
-                                    'SVM': individual_full_models['SVM'],
-                                    'Ensemble': ensemble_classifier
+                                y_pred_ens = ensemble_classifier.predict(X_test)
+                                per_model_metrics['Ensemble'] = {
+                                    'train_score': ens_train_sc,
+                                    'val_score': ens_val_sc,
+                                    'test_acc': round(float(ensemble_classifier.score(X_test, y_test)), 4),
+                                    'silhouette_score': round(float(best_sil), 4),
+                                    'optimal_k': n_clusters,
+                                    'precision': round(float(precision_score(y_test, y_pred_ens, average='weighted', zero_division=0)), 4),
+                                    'recall': round(float(recall_score(y_test, y_pred_ens, average='weighted', zero_division=0)), 4),
+                                    'f1_score': round(float(f1_score(y_test, y_pred_ens, average='weighted', zero_division=0)), 4),
                                 }
-                                best_classifier = best_cv_models[best_model_key]
-                                console.log(f"   🎯 Runtime classifier set to: {best_model_key}")
+                                console.log(f"   Ensemble: val={ens_val_sc}, test={per_model_metrics['Ensemble']['test_acc']}")
                                 
-                                # 6. Test set evaluation — single consistent 70/30 split
-                                # for fair comparison across all models with 3 clusters.
+                                # 8. Select best model by validation score
+                                # On ties, prefer Ensemble > individual models (it combines all models' knowledge)
+                                best_val = -1
+                                best_model_name = 'Ensemble'
+                                for mname, m in per_model_metrics.items():
+                                    val = m['val_score']
+                                    if val > best_val or (val == best_val and mname == 'Ensemble'):
+                                        best_val = val
+                                        best_model_name = mname
                                 
-                                try:
-                                    n_metric_samples = len(X_metrics)
-                                    knn_test_k = min(5, n_metric_samples - 1)
-                                    
-                                    # Full-capacity test models matching training configs.
-                                    # With 3 well-separated KMeans clusters, full-capacity
-                                    # models produce accurate, representative test scores.
-                                    test_models = {
-                                        'KNN': KNeighborsClassifier(
-                                            n_neighbors=knn_test_k
-                                        ),
-                                        'RandomForest': RandomForestClassifier(
-                                            n_estimators=100, max_depth=10, min_samples_leaf=3,
-                                            random_state=42, n_jobs=-1
-                                        ),
-                                        'SVM': SVC(
-                                            kernel='rbf', probability=True,
-                                            random_state=42
-                                        ),
-                                        'Ensemble': VotingClassifier(
-                                            estimators=[
-                                                ('knn', KNeighborsClassifier(
-                                                    n_neighbors=knn_test_k
-                                                )),
-                                                ('rf', RandomForestClassifier(
-                                                    n_estimators=100, max_depth=10, min_samples_leaf=3,
-                                                    random_state=42, n_jobs=-1
-                                                )),
-                                                ('svm', SVC(
-                                                    kernel='rbf', probability=True,
-                                                    random_state=42
-                                                ))
-                                            ],
-                                            voting='soft',
-                                            weights=ensemble_weights
-                                        )
-                                    }
-                                    
-                                    # Single consistent split so all models are evaluated
-                                    # on the exact same test data for fair comparison.
-                                    X_tr, X_te, y_tr, y_te = train_test_split(
-                                        X_metrics, cluster_names, test_size=0.3,
-                                        random_state=42, stratify=cluster_names
-                                    )
-                                    
-                                    for model_name, model in test_models.items():
-                                        model.fit(X_tr, y_tr)
-                                        ind_acc = model.score(X_te, y_te)
-                                        ind_pred = model.predict(X_te)
-                                        ind_precision = precision_score(y_te, ind_pred, average='weighted', zero_division=0)
-                                        ind_recall = recall_score(y_te, ind_pred, average='weighted', zero_division=0)
-                                        ind_f1 = f1_score(y_te, ind_pred, average='weighted', zero_division=0)
-                                        
-                                        per_model_metrics[model_name].update({
-                                            "test_acc": round(ind_acc, 4),
-                                            "precision": round(ind_precision, 4),
-                                            "recall": round(ind_recall, 4),
-                                            "f1_score": round(ind_f1, 4)
-                                        })
-                                        model_performance_metrics[f"{model_name}_test_acc"] = round(ind_acc, 4)
-                                        model_performance_metrics[f"{model_name}_test_f1"] = round(ind_f1, 4)
-                                        console.log(f"   📊 {model_name} Test: Acc={ind_acc:.4f}, P={ind_precision:.4f}, R={ind_recall:.4f}, F1={ind_f1:.4f}")
-                                    
-                                    # Use best model's test metrics as the global defaults
-                                    best_m = per_model_metrics[best_model_key]
-                                    precision = best_m['precision']
-                                    recall = best_m['recall']
-                                    f1 = best_m['f1_score']
-                                    test_acc = best_m['test_acc']
-                                except Exception:
-                                    precision = best['val']
-                                    recall = best['val']
-                                    f1 = best['val']
-                                    test_acc = best['val']
+                                best_classifier = individual_full_models[best_model_name]
+                                knn_classifier = individual_full_models.get('KNN')
+                                model_performance_metrics['best_model'] = best_model_name
+                                console.log(f"   ★ Best model: {best_model_name} (val={best_val:.4f})")
                                 
-                                model_performance_metrics["precision"] = round(precision, 4)
-                                model_performance_metrics["recall"] = round(recall, 4)
-                                model_performance_metrics["f1_score"] = round(f1, 4)
-                                model_performance_metrics["test_score"] = round(test_acc, 4)
-                                model_performance_metrics["silhouette_score"] = round(best['sil'], 4)
-                                model_performance_metrics["optimal_k"] = n_clusters
-                                model_performance_metrics["ensemble_method"] = "soft_voting"
-                                model_performance_metrics["ensemble_models"] = "KNN+RandomForest+SVM"
-                                model_performance_metrics["best_model"] = best_model_key
-                                
-                                console.log(f"   📊 Best ({best_model_key}) Test: Acc={test_acc:.4f}, P={precision:.4f}, R={recall:.4f}, F1={f1:.4f}")
-                                console.log(f"   📊 Silhouette: {best['sil']:.4f}")
-                                
-                                
-                                # 7. Generate decision boundary grids for EACH model + ensemble
-                                
-                                # 80x80 grid for smooth boundaries
-                                grid_res = 80  
-                                
-                                # Creates a virtual "grid" covering the entire 2D chart area.
-                                x_min_g, x_max_g = X_pca[:, 0].min() - 0.5, X_pca[:, 0].max() + 0.5
-                                y_min_g, y_max_g = X_pca[:, 1].min() - 0.5, X_pca[:, 1].max() + 0.5
+                                # 9. Decision boundary grids for each model
+                                # Map 2D grid back to 39D via PCA inverse_transform, then predict
+                                grid_res = 80
+                                x_min_g = float(X_pca[:, 0].min() - 0.5)
+                                x_max_g = float(X_pca[:, 0].max() + 0.5)
+                                y_min_g = float(X_pca[:, 1].min() - 0.5)
+                                y_max_g = float(X_pca[:, 1].max() + 0.5)
                                 xx, yy = np.meshgrid(
                                     np.linspace(x_min_g, x_max_g, grid_res),
                                     np.linspace(y_min_g, y_max_g, grid_res)
                                 )
-                                grid_points = np.c_[xx.ravel(), yy.ravel()]
+                                grid_2d = np.c_[xx.ravel(), yy.ravel()]
+                                # Project 2D grid points back to 39D scaled space
+                                grid_39d = pca_reducer.inverse_transform(grid_2d)
                                 
-                                # Build decision boundary data for each individual model and the ensemble.
-                                # Each model produces its own grid of cluster labels so the frontend
-                                # can render separate decision boundary maps side by side.
                                 boundary_base = {
-                                    "x_min": float(x_min_g),
-                                    "x_max": float(x_max_g),
-                                    "y_min": float(y_min_g),
-                                    "y_max": float(y_max_g),
+                                    "x_min": x_min_g, "x_max": x_max_g,
+                                    "y_min": y_min_g, "y_max": y_max_g,
                                     "grid_res": grid_res
                                 }
                                 
                                 all_model_boundaries = {}
-                                models_to_viz = {
-                                    'KNN': individual_full_models['KNN'],
-                                    'RandomForest': individual_full_models['RandomForest'],
-                                    'SVM': individual_full_models['SVM'],
-                                    'Ensemble': ensemble_classifier
-                                }
-                                
-                                for model_name, model in models_to_viz.items():
-                                    preds = model.predict(grid_points)
+                                for mname, mdl in individual_full_models.items():
+                                    preds = mdl.predict(grid_39d)
                                     labels_list = [int(p.split()[-1]) for p in preds]
-                                    all_model_boundaries[model_name] = {
+                                    all_model_boundaries[mname] = {
                                         **boundary_base,
                                         "labels": labels_list
                                     }
                                 
                                 console.log(f"   🗺️ Decision boundaries generated for: {', '.join(all_model_boundaries.keys())}")
                                 
-                                # Use the ensemble boundary as the main/default decision_boundary
-                                # for backward compatibility
-                                
-                                # 8. Stores the X/Y coordinates of every song, their cluster labels, and the grid data. 
-                                # This dictionary is saved in memory so it can be sent to the frontend later for plotting.
+                                # 10. Build visualization data for frontend
                                 visualization_data = {
                                     "x": X_pca[:, 0].tolist(),
                                     "y": X_pca[:, 1].tolist(),
                                     "genres": cluster_names.tolist(),
-                                    "scaler": best_model_name,
-                                    "metrics": model_performance_metrics,
+                                    "scaler": best_scaler_name,
+                                    "metrics": {**model_performance_metrics, "best_model": best_model_name},
                                     "per_model_metrics": per_model_metrics,
                                     "decision_boundary": all_model_boundaries.get('Ensemble', all_model_boundaries.get('KNN')),
                                     "model_boundaries": all_model_boundaries
                                 }
-                                console.log("   ✅ Visualization data ready")                       
+                                console.log("   ✅ Visualization data ready")
                             else:
                                 # If there are fewer than 10 songs, it skips ML training to avoids errors.
                                 console.log(f"⚠️ Not enough data ({len(feature_vectors)} tracks, need >= 10)")
@@ -771,13 +495,13 @@ def classify_genre_from_features(
     """
     Takes raw audio features from a new song and predicts its Genre/Cluster
     using the global ML models (Scaler, PCA, KNN/Ensemble) trained at startup.
-    Pipeline: Raw 39D features → Scaler → PCA → Best classifier predict.
+    Pipeline: Raw 39D features → Scaler → Best classifier predict.
     """
     global feature_scaler, pca_reducer, knn_classifier, ensemble_classifier, best_classifier
             
     try:
         # Check if model is initialized
-        if feature_scaler is None or pca_reducer is None:
+        if feature_scaler is None:
             return "Unknown"
         
         # Need at least one classifier available
@@ -815,25 +539,19 @@ def classify_genre_from_features(
         # 2. Reshape for Scikit-Learn (1 sample, 39 features)
         features_array = np.array([input_vector])
         
-        # 3. Apply Scaler → PCA → Ensemble predict
-        # "Normalizes" the data. For example, it might convert a Tempo of 120 
-        # into 0.5 if the training data range was 60–180.
+        # 3. Apply Scaler then predict (models trained on 39D scaled features)
         features_scaled = feature_scaler.transform(features_array)
         
-        # Compresses those 11 normalized numbers down to just 2 coordinates (X and Y), 
-        # placing this song on the internal 2D "map" the AI created.
-        features_pca = pca_reducer.transform(features_scaled)
-        
         # 4. Use the BEST MODEL from cross-validation for prediction.
-        # During startup, all 4 models (KNN, RF, SVM, Ensemble) are cross-validated
+        # During startup, all 4 models (KNN, RF, SVM, LR) are cross-validated
         # and the one with the highest validation score is stored as best_classifier.
         # Falls back to ensemble, then to standalone KNN if best isn't available.
         if best_classifier is not None:
-            predicted = best_classifier.predict(features_pca)[0]
+            predicted = best_classifier.predict(features_scaled)[0]
         elif ensemble_classifier is not None:
-            predicted = ensemble_classifier.predict(features_pca)[0]
+            predicted = ensemble_classifier.predict(features_scaled)[0]
         else:
-            predicted = knn_classifier.predict(features_pca)[0]
+            predicted = knn_classifier.predict(features_scaled)[0]
         
         return str(predicted)
         

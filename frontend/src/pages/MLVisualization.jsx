@@ -282,7 +282,8 @@ const MLVisualization = () => {
     { key: 'KNN', title: 'KNN', subtitle: 'K-Nearest Neighbors — Distance-based cluster assignment', color: '#60A5FA', badge: 'Distance-Based' },
     { key: 'RandomForest', title: 'Random Forest', subtitle: '100 decision trees — Tree-based nonlinear rule learning', color: '#4ADE80', badge: 'Tree-Based' },
     { key: 'SVM', title: 'SVM', subtitle: 'Support Vector Machine (RBF) — Margin-based hyperplane separation', color: '#FB923C', badge: 'Margin-Based' },
-    { key: 'Ensemble', title: 'Ensemble (KNN + RF + SVM)', subtitle: 'Soft voting — Averaged probability predictions from all three models', color: '#34D399', badge: 'Soft Voting' },
+    { key: 'LogisticRegression', title: 'Logistic Regression', subtitle: 'Logistic Regression — Probability-based linear classification', color: '#A78BFA', badge: 'Probability-Based' },
+    { key: 'Ensemble', title: 'Ensemble (KNN + RF + SVM + LR)', subtitle: 'Hard voting — Majority vote from all four models', color: '#34D399', badge: 'Hard Voting' },
   ];
 
   return (
