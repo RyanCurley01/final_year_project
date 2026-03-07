@@ -169,6 +169,15 @@ class UnifiedRecommendationRequest(BaseModel):
     audio_features: Optional[AudioFeatures] = None
     candidates: Optional[List[SearchSong]] = None
 
+class MidiTargetRequest(BaseModel):
+    """Request for MIDI-driven target-feature recommendations.
+    The frontend sends the desired audio feature profile (set by physical knobs)
+    and the backend returns the closest songs from the cache."""
+    target_features: dict  # e.g. {"energy": 0.8, "valence": 0.3, "tempo": 0.6, ...}
+    limit: int = 10
+    source: str = 'midi_explorer'  # allows candidate filtering
+    allowed_ids: Optional[List[int]] = None  # restrict candidates to these ProductIDs
+
 class LibraryMatchRequest(BaseModel):
     """Request to match external songs against the internal library (cached products)"""
     candidates: List[SearchSong]

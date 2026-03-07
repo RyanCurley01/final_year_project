@@ -21,7 +21,8 @@ from models import (
     SearchSong,
     UnifiedRecommendationRequest,
     LibraryMatchRequest,
-    LibraryMatchResult
+    LibraryMatchResult,
+    MidiTargetRequest
 )
 from feature_extraction import (
     extract_audio_features_from_preview,
@@ -857,5 +858,150 @@ async def match_library_songs(request: LibraryMatchRequest):
 
     except Exception as e:
         console.log(f"Error in match library: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================
+# MIDI-DRIVEN TARGET RECOMMENDATIONS ENDPOINT
+# ============================================
+
+@router.post("/api/audio/midi-recommendations")
+async def get_midi_recommendations(request: MidiTargetRequest):
+    """
+    Accept an arbitrary target feature profile (e.g. from MIDI knobs)
+    and return the closest songs from the audio features cache.
+    Unlike unified-recommendations this does NOT require a current song —
+    the target is entirely user-defined.
+    """
+    try:
+        if not ml_service.cache_loaded or not ml_service.audio_features_cache:
+            raise HTTPException(status_code=503, detail="Audio features cache not loaded yet")
+
+        tf = request.target_features
+
+        # Build a synthetic target dict compatible with _build_similarity_vector
+        target = {
+            'tempo':             float(tf.get('tempo', 0.5)) * 200,   # de-normalise to BPM
+            'energy':            float(tf.get('energy', 0.5)),
+            'valence':           float(tf.get('valence', 0.5)),
+            'danceability':      float(tf.get('danceability', 0.5)),
+            'acousticness':      float(tf.get('acousticness', 0.5)),
+            'spectral_centroid': float(tf.get('spectral_centroid', 0.3)) * 5000,
+            'spectral_rolloff':  float(tf.get('spectral_centroid', 0.3)) * 10000,
+            'zero_crossing_rate':float(tf.get('zero_crossing_rate', 0.05)),
+            'instrumentalness':  float(tf.get('instrumentalness', 0.5)),
+            'loudness':          float(tf.get('loudness', 0.5)) * 60 - 60,
+            'speechiness':       float(tf.get('speechiness', 0.1)),
+        }
+
+        target_vector = _build_similarity_vector(target)
+
+        # Gather candidates: filter to allowed_ids if provided,
+        # otherwise only library songs (positive IDs < 1000)
+        # and TopCharts/artist songs (negative IDs)
+        allowed_set = set(request.allowed_ids) if request.allowed_ids else None
+        candidate_vectors = []
+        candidate_objs = []
+        for pid, data in ml_service.audio_features_cache.items():
+            if allowed_set is not None:
+                if pid not in allowed_set:
+                    continue
+            elif not (pid < 0 or (0 < pid < 1000)):
+                continue  # skip ephemeral/live iTunes songs with large positive IDs
+            vec = _build_similarity_vector(data)
+            candidate_vectors.append(vec)
+            candidate_objs.append((pid, data))
+
+        if not candidate_vectors:
+            return {"status": "success", "recommendations": [], "target_features": tf}
+
+        target_arr = np.array(target_vector).reshape(1, -1)
+        cand_arr = np.array(candidate_vectors)
+        sims = cosine_similarity(target_arr, cand_arr)[0]
+
+        scored = []
+        for idx, score in enumerate(sims):
+            pid, data = candidate_objs[idx]
+            tempo_match = 1.0 - min(abs(target.get('tempo', 120) - (data.get('tempo') or 120)), 100) / 100
+            energy_match = 1.0 - abs(target.get('energy', 0.5)  - (data.get('energy') or 0.5))
+            mood_match   = 1.0 - abs(target.get('valence', 0.5) - (data.get('valence') or 0.5))
+            dance_match  = 1.0 - abs(target.get('danceability', 0.5) - (data.get('danceability') or 0.5))
+
+            matches = [
+                ('tempo', tempo_match,  f"Matching rhythm ({data.get('tempo', 0):.0f} BPM)"),
+                ('energy', energy_match, f"Similar intensity ({data.get('energy', 0):.0%})"),
+                ('mood', mood_match,     "Similar mood"),
+                ('dance', dance_match,   "Comparable groove")
+            ]
+            best_match = max(matches, key=lambda x: x[1])
+
+            scored.append({
+                'product_id': pid,
+                'similarity_score': round(float(score), 3),
+                'tempo_match': round(tempo_match, 3),
+                'energy_match': round(energy_match, 3),
+                'mood_match': round(mood_match, 3),
+                'danceability_match': round(dance_match, 3),
+                'reason': best_match[2],
+                'tempo': data.get('tempo'),
+                'energy': data.get('energy'),
+                'valence': data.get('valence'),
+                'danceability': data.get('danceability'),
+                'acousticness': data.get('acousticness'),
+                'genre': data.get('genre', 'Unknown'),
+                'mood': data.get('mood', 'Unknown'),
+            })
+
+        scored = [s for s in scored if s['similarity_score'] > 0]
+        scored.sort(key=lambda x: x['similarity_score'], reverse=True)
+        top = scored[:request.limit]
+
+        # Hydrate metadata from DB / cache
+        if top:
+            db_ids = [s['product_id'] for s in top if isinstance(s['product_id'], int) and s['product_id'] > 0]
+            itunes_ids = [s['product_id'] for s in top if isinstance(s['product_id'], int) and s['product_id'] < 0]
+
+            name_map = {}
+            if db_ids:
+                placeholders_str = ",".join(["%s"] * len(db_ids))
+                with get_db_connection() as conn:
+                    if conn:
+                        with conn.cursor() as cursor:
+                            cursor.execute(f"SELECT ProductID, AlbumTitle, albumCoverImageUrl, preview_url, file_url FROM Products WHERE ProductID IN ({placeholders_str})", db_ids)
+                            for row in cursor.fetchall():
+                                name_map[row['ProductID']] = row
+
+            if itunes_ids:
+                placeholders_str = ",".join(["%s"] * len(itunes_ids))
+                with get_db_connection() as conn:
+                    if conn:
+                        with conn.cursor() as cursor:
+                            cursor.execute(f"SELECT ProductID, AlbumTitle, albumCoverImageUrl, preview_url FROM Products WHERE ProductID IN ({placeholders_str})", itunes_ids)
+                            for row in cursor.fetchall():
+                                name_map[row['ProductID']] = row
+
+            for s in top:
+                meta = name_map.get(s['product_id'])
+                if meta:
+                    s['trackName'] = meta.get('AlbumTitle')
+                    s['artworkUrl100'] = meta.get('albumCoverImageUrl')
+                    s['previewUrl'] = meta.get('preview_url')
+                    if meta.get('file_url'):
+                        s['fileUrl'] = meta.get('file_url')
+                    s['isLibrary'] = s['product_id'] > 0
+
+        console.log(f"🎛️ MIDI recs: {len(top)} results for target {tf}")
+
+        return {
+            "status": "success",
+            "count": len(top),
+            "target_features": tf,
+            "recommendations": top
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        console.log(f"Error in midi-recommendations: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 

@@ -3,7 +3,7 @@ import { Route, Routes, useLocation, Navigate } from 'react-router-dom';
 import { useState, useEffect, useRef } from 'react';
 
 import { Searchbar, Sidebar, MusicPlayer, TopPlay } from './components';
-import { ArtistDetails, CustomerScreen, Search, SongDetails, TopCharts, SimilarSongs, MLVisualization, SpectrogramCreator, Login, Register, WishlistPage } from './pages';
+import { ArtistDetails, CustomerScreen, Search, SongDetails, TopCharts, SimilarSongs, MLVisualization, SpectrogramCreator, Login, Register, WishlistPage, MidiExplorer } from './pages';
 import AlbumDetails from './pages/AlbumDetails';
 import Cart from './pages/Cart';
 import PurchaseHistory from './pages/PurchaseHistory';
@@ -110,6 +110,7 @@ const AuthenticatedApp = () => {
               <Route path="/similar-songs" element={<SimilarSongs />} />
               <Route path="/ml-visualization" element={<MLVisualization />} />
               <Route path="/spectrogram-creator" element={<SpectrogramCreator />} />
+              <Route path="/midi-explorer" element={<MidiExplorer />} />
               <Route path="/songs/:songid" element={<SongDetails />} />
               <Route path="/search/:searchTerm" element={<Search />} />
               <Route path="/cart" element={<Cart />} />

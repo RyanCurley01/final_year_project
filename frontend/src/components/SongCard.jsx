@@ -172,7 +172,7 @@ const SongCard = ({ product, payment, i, data }) => {
     /**
      * Shows the cover image with song and game details
      */
-    <div className="flex flex-col p-4 bg-white/5 backdrop-blur-sm animate-slideup rounded-lg cursor-pointer hover:bg-white/10 transition-all">
+    <div className="flex flex-col h-full p-4 bg-white/5 backdrop-blur-sm animate-slideup rounded-lg cursor-pointer hover:bg-white/10 transition-all">
       <div 
         className="relative w-full aspect-square rounded-lg overflow-hidden outline-none border-none"
         onMouseEnter={() => setIsHovered(true)}
@@ -388,9 +388,14 @@ const SongCard = ({ product, payment, i, data }) => {
               </div>
             </div>
           ) : (
-            <p className="text-sm font-bold text-white">
-              ${price?.toFixed(2) || '0.00'}
-            </p>
+            <div className="flex flex-col items-start gap-1.5">
+              <span className="px-1.5 py-0.5 rounded text-[10px] font-bold invisible">
+                &nbsp;
+              </span>
+              <p className="text-sm font-bold text-white">
+                ${price?.toFixed(2) || '0.00'}
+              </p>
+            </div>
           )}
         </div>
         <button 

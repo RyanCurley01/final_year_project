@@ -3,7 +3,7 @@ import { Link, NavLink, useNavigate } from 'react-router-dom';
 import { useDispatch } from 'react-redux';
 import { HiOutlineMenu, HiOutlineLogout } from 'react-icons/hi';
 import { RiCloseLine } from 'react-icons/ri';
-import { FaReceipt, FaChartLine, FaWaveSquare } from 'react-icons/fa';
+import { FaReceipt, FaChartLine, FaWaveSquare, FaSlidersH } from 'react-icons/fa';
 
 import { useAuth } from '../context/AuthContext';
 import { useSpectrogramLive } from '../context/SpectrogramLiveContext';
@@ -121,6 +121,18 @@ const NavLinks = ({ handleClick, onResetPlayer, onClearWishlist }) => {
       Spectrogram Creator
     </NavLink>
 
+    {/* MIDI Explorer Link */}
+    <NavLink
+      to="/midi-explorer"
+      className="flex flex-row justify-start items-center my-8 text-sm font-medium text-gray-300 hover:text-primary-light"
+      onClick={() => {
+        handleClick && handleClick();
+      }}
+    >
+      <FaSlidersH className="w-6 h-6 mr-2" />
+      MIDI Explorer
+    </NavLink>
+
     {/* ML Visualization Link - visible to Managers only */}
     {isManager && (
       <NavLink
@@ -180,7 +192,7 @@ const Sidebar = () => {
     <>
       {/* Desktop Sidebar */}
       <div className="hidden md:flex flex-col w-[200px] min-w-[200px] bg-gradient-to-br
-      py-10 px-4 bg-[#252246] relative z-20">
+      py-10 px-4 bg-[#252246] relative z-20 overflow-y-auto">
         <img src={logo} alt="logo" className="rounded w-full h-[100px] 
         object-contain" />
         <NavLinks onResetPlayer={handleResetPlayer} onClearWishlist={handleClearWishlist} />

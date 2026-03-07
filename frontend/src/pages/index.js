@@ -11,6 +11,7 @@ import SpectrogramCreator from './SpectrogramCreator';
 import Login from './Login';
 import Register from './Register';
 import WishlistPage from './WishlistPage';
+import MidiExplorer from './MidiExplorer';
 
 export {
   CustomerScreen,
@@ -18,6 +19,7 @@ export {
   ArtistDetails,
   SongDetails,
   TopCharts,
+  MidiExplorer,
   Cart,
   PurchaseHistory,
   SimilarSongs,
