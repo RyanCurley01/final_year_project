@@ -11,14 +11,20 @@ import { AUDIO_FEATURES } from '../config/midiMappings';
  *  - lastCC: { channel, cc, value } from useMidi
  */
 export default function MidiMappingPanel({ ccMap, onMapChange, lastCC }) {
-  const [learning, setLearning] = useState(null);  // featureKey being learned
+
+  // Stores the ID of the feature currently waiting for a physical knob twist.
+  const [learning, setLearning] = useState(null); 
   const learningRef = useRef(null);
   learningRef.current = learning;
 
   // When a CC arrives and we're in learn mode, assign it
   useEffect(() => {
     if (!lastCC || !learningRef.current) return;
+
+    // Gets the target featureKey
     const featureKey = learningRef.current;
+
+    // Gets the physical knob ID
     const ccNum = String(lastCC.cc);
 
     // Remove any previous mapping for this CC
@@ -26,7 +32,10 @@ export default function MidiMappingPanel({ ccMap, onMapChange, lastCC }) {
     for (const [k, v] of Object.entries(newMap)) {
       if (v === featureKey) delete newMap[k];
     }
+
+    // Assigns the new knob ID to the feature
     newMap[ccNum] = featureKey;
+
     onMapChange(newMap);
     setLearning(null);
   }, [lastCC]);

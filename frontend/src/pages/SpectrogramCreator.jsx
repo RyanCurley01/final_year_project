@@ -43,18 +43,17 @@ const TOOLS = {
 };
 
 const PRESETS = [
-  { name: 'Blank', icon: '⬜', description: 'Empty canvas' },
-  { name: 'Rising Tone', icon: '📈', description: 'Frequency sweep upward' },
-  { name: 'Falling Tone', icon: '📉', description: 'Frequency sweep downward' },
-  { name: 'Chord', icon: '🎵', description: 'Major chord with harmonics' },
-  { name: 'Noise Burst', icon: '💥', description: 'Broadband noise texture' },
-  { name: 'Spiral', icon: '🌀', description: 'Aphex Twin-style spiral' },
-  { name: 'Text: AFX', icon: '🔤', description: 'Write "AFX" in spectrum' },
-  { name: 'Einstein B&W', icon: '🧠', description: 'Einstein tongue photo — grayscale spectral face', persistKey: 'spectrogram-preset-einstein-bw' },
-  { name: 'Einstein Color', icon: '🌈', description: 'Einstein tongue photo — color spectral face', persistKey: 'spectrogram-preset-einstein-color' },
-  { name: 'My Face', icon: '👤', description: 'Your saved face in the spectrum (ΔMi−1 style)', saved: true },
-  { name: 'Face', icon: '📸', description: 'Capture your face with webcam' },
-  { name: 'Upload Image', icon: '📁', description: 'Load any image into the spectrogram' },
+  { name: 'Blank', description: 'Empty canvas' },
+  { name: 'Rising Tone',description: 'Frequency sweep upward' },
+  { name: 'Falling Tone', description: 'Frequency sweep downward' },
+  { name: 'Chord', description: 'Major chord with harmonics' },
+  { name: 'Noise Burst', description: 'Broadband noise texture' },
+  { name: 'Spiral', description: 'Aphex Twin-style spiral' },
+  { name: 'Text: AFX', description: 'Write "AFX" in spectrum' },
+  { name: 'Einstein Face', description: 'Einstein tongue photo — spectral face', persistKey: 'spectrogram-preset-einstein-bw' },
+  { name: 'Male Face', description: 'Your saved face in the spectrum (ΔMi−1 style)', saved: true },
+  { name: 'Face Capture', description: 'Capture your face with webcam' },
+  { name: 'Upload Image', description: 'Load any image into the spectrogram' },
 ];
 
 const SAVED_FACE_KEY = 'spectrogram-saved-face';
@@ -462,6 +461,10 @@ const SpectrogramCreator = () => {
   }, []); // Only on mount — params are patched in-place below
 
   // ── Patch synth parameters in-place so AudioContext stays alive ──
+  // IMPORTANT: This block grabs values immediately from the sliders (dampingFactor, couplingStrength, etc.)
+  // and injects them directly into the live synthesizer instance `synthRef.current`. 
+  // Because it happens "in-place", we don't have to restart the audio or rebuild the AudioContext.
+  // This is what allows users to drag sliders and hear the synthesizer's output warp in real-time.
   useEffect(() => {
     const synth = synthRef.current;
     if (!synth) return;
@@ -472,9 +475,10 @@ const SpectrogramCreator = () => {
   }, [dampingFactor, couplingStrength, couplingRadius, externalForceGain]);
 
   // ── Physics simulation — runs the ΔMi−1 formula to evolve the grid ──
-  // Recompute from scratch whenever the raw grid or physics parameters change.
-  // This is what makes sliders/presets/drawing dynamically change the visual energy.
-  // Intensity feeds into the external force so dragging it re-shapes the spectrum.
+  // This block makes the Visual representation on the Canvas respond to the sliders.
+  // It completely recalculates the grid of colors ("energy") based on the math formula `ΔMi−1 = −∂Σ...`.
+  // It uses `couplingStrength` to smear energy to neighboring frequencies, and `dampingFactor` to let energy decay over time.
+  // Whenever the sliders move, this re-runs across all time slices to produce `evolvedGrid`, which is then drawn to the screen.
   useEffect(() => {
     if (!simulationEnabled) {
       // When simulation is off, display the raw drawn grid
@@ -544,7 +548,12 @@ const SpectrogramCreator = () => {
     // Live intensity multiplier for real-time visual feedback
     const liveIntensity = intensityRef.current;
 
-    // ── Capture new live FFT data first (before rendering) ──
+    // ── How audio is recorded to create the energy ──
+    // This captures the live playing song's frequencies (FFT) and stores them in memory.
+    // If the user has "Live Capture" toggled on, it runs roughly every 40ms (`MS_PER_LIVE_COLUMN`).
+    // `getFrequencyData()` returns a 0-255 byte array from the Web Audio AnalyserNode.
+    // It scales those bytes to 0.0 - 1.0 (float) representing "energy" at that frequency,
+    // and pushes the entire vertical slice (column) into `liveColumnsRef.current` to form the grid over time.
     const isRecording = isLiveMode && isLiveConnected && isSongPlaying;
     if (isRecording) {
       // Mark start time on the very first capture frame
@@ -579,7 +588,11 @@ const SpectrogramCreator = () => {
       ? Math.max(0, Math.min(pbCol - Math.floor(NUM_TIME_SLICES * 0.8), captured.columns.length - NUM_TIME_SLICES))
       : 0;
 
-    // ── Draw spectrogram pixels ──
+    // ── How the energy is drawn (Render spectrogram pixels) ──
+    // This loop iterates over every mathematical point of the calculated grid (Time slices X Frequency Bins).
+    // It examines the "amplitude" (0 to 1 energy value).
+    // It calls `amplitudeToRGB` to map that 0-1 brightness into a Colormap (Navy -> Red -> Yellow -> White).
+    // The canvas is painted pixel by pixel. `y is inverted` so high frequencies (top of image) are at `y=0`.
     for (let t = 0; t < NUM_TIME_SLICES; t++) {
       for (let f = 0; f < NUM_FREQ_BINS; f++) {
         let amp;
@@ -1119,6 +1132,14 @@ const SpectrogramCreator = () => {
   }, [grid, evolvedGrid, duration, simulationEnabled]);
 
   // ── Image to spectrogram grid conversion (Aphex Twin ΔMi−1 / MetaSynth style) ──
+  // ── How the faces use edge detection to represent the energy ──
+  // This takes an image (Webcam or file) and translates its pixels to frequency energy.
+  // 1. It converts the image to grayscale to focus purely on brightness/luminance.
+  // 2. It applies a mathematical Convolution Matrix (Sobel Operator / Edge Detection).
+  //    This specifically highlights the sudden changes in brightness (edges of a face, eyes, nose).
+  //    Why edges? Solid blocks of image create muddy, noisy audio. Only extracting the sharp edges
+  //    produces clean, ringing, distinct tones that sound musical when synthesized.
+  // 3. The edge brightness is normalized to 0.0-1.0 and mapped to our grid [Time][Frequency].
   const imageToGrid = useCallback((imageSource) => {
     // Process at full image resolution first, then downscale.
     const srcW = imageSource.naturalWidth || imageSource.videoWidth || imageSource.width;
@@ -1343,11 +1364,11 @@ const SpectrogramCreator = () => {
 
   // ── Load preset ──
   const handlePreset = useCallback((presetName) => {
-    if (presetName === 'Face') {
+    if (presetName === 'Face Capture') {
       startWebcam();
       return;
     }
-    if (presetName === 'My Face') {
+    if (presetName === 'Male Face') {
       loadSavedFace();
       return;
     }
@@ -1452,6 +1473,9 @@ const SpectrogramCreator = () => {
           ))}
         </div>
 
+        {/* Toolbar - Formula Sliders for basic painting mechanics
+            Changing Intensity scales `externalForceGain` which makes the drawn pixels brighter or dimmer
+            in the main `useEffect` physics loop at the top of the file! */}
         {/* Brush size */}
         <div className="flex items-center gap-2 bg-[#1a1640]/60 rounded-lg px-3 py-1">
           <span className="text-xs text-gray-400">Size</span>
@@ -1559,6 +1583,11 @@ const SpectrogramCreator = () => {
           >
             {simulationEnabled ? '⚡ Simulation ON' : '⏸ Simulation OFF'}
           </button>
+          
+          {/* ── Formula Sliders ── 
+              Moving these sliders instantly fires the onChange events (setDampingFactor, etc.).
+              This updates the React state, which triggers the massive `useEffect` at the top of the file 
+              that recalculates the ΔMi−1 math physics across all time slices. */}
           <div className="flex items-center gap-2">
             <span className="text-xs text-purple-400 font-mono">D<sub>i</sub> (damping)</span>
             <input

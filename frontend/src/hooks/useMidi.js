@@ -18,7 +18,9 @@ import { useState, useEffect, useCallback, useRef } from 'react';
  *  - retryAccess: () => void — manually re-request MIDI access
  */
 export default function useMidi() {
+  // to connect the browser to the physical MIDI hardware like a piano keyboard or knob controller
   const [midiSupported] = useState(() => !!navigator.requestMIDIAccess);
+  
   const [midiAccess, setMidiAccess] = useState(null);
   const [devices, setDevices] = useState([]);
   const [activeDeviceId, setActiveDeviceId] = useState(null);

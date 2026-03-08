@@ -302,13 +302,21 @@ class SpectrogramSynth {
    * Paint a diagonal line (frequency sweep / glissando)
    */
   static paintSweep(grid, startBin, endBin, startSlice, endSlice, amplitude = 1.0) {
+    // It calculates the total distance to travel in time (timeSteps) and frequency (freqSteps).
     const timeSteps = endSlice - startSlice;
     const freqSteps = endBin - startBin;
+
+    // Loops through time to calculate the exact proportional vertical step using linear interpolation: 
+    // startBin + (freqSteps * t) / timeSteps
     for (let t = 0; t <= timeSteps && (startSlice + t) < grid.length; t++) {
       const bin = Math.round(startBin + (freqSteps * t) / timeSteps);
+
       if (bin >= 0 && bin < grid[0].length) {
         grid[startSlice + t][bin] = Math.min(1, amplitude);
-        // Add width for visibility
+        
+        // To make the line thick enough to be heard clearly and seen smoothly on the canvas, 
+        // it draws the main pixel at full amplitude, and then paints the pixels immediately 
+        // above and below it (bin - 1 and bin + 1) at half (0.5) amplitude
         if (bin > 0) grid[startSlice + t][bin - 1] = Math.min(1, amplitude * 0.5);
         if (bin < grid[0].length - 1) grid[startSlice + t][bin + 1] = Math.min(1, amplitude * 0.5);
       }

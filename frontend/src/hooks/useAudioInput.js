@@ -4,11 +4,15 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { analyseAudioFrame } from '../config/audioAnalysis';
 
+// How finely the audio frequencies are sliced for feature extraction. Higher = more CPU.
 const FFT_SIZE = 2048;
 const ANALYSIS_INTERVAL_MS = 150; // how often we compute features
 
 export default function useAudioInput() {
+  // Checks if the browser allows microphone access (navigator.mediaDevices), then sets up state variables to track available microphones
+  // then sets up state variables to track available microphones, the current volume (level), and the math outputs (features)
   const [supported] = useState(() => !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia));
+
   const [audioDevices, setAudioDevices] = useState([]);
   const [activeDeviceId, setActiveDeviceId] = useState(null);
   const [listening, setListening] = useState(false);
@@ -25,6 +29,7 @@ export default function useAudioInput() {
   // ── Enumerate audio input devices ──────────────────────────────
   const refreshDevices = useCallback(async () => {
     try {
+      // Maps available devices to a clean array so the user can select their specific audio interface.
       const devices = await navigator.mediaDevices.enumerateDevices();
       const inputs = devices
         .filter((d) => d.kind === 'audioinput')
