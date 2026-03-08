@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { useAuth } from "../context/AuthContext";
 import { purchasedProductsService } from "../redux/services/purchasedProductsService";
 import { productService } from "../redux/services/productService";
@@ -82,7 +83,7 @@ const PurchasedProductsSidebar = () => {
         </span>
       </button>
 
-      {isOpen && (
+      {isOpen && createPortal(
         <div className="fixed inset-0 z-[100] bg-black bg-opacity-70 flex justify-center items-center p-4">
           <div className="bg-[#2a2a2a] p-6 rounded-lg max-w-6xl w-full max-h-[80vh] overflow-hidden flex flex-col relative">
             <button
@@ -181,7 +182,7 @@ const PurchasedProductsSidebar = () => {
             </div>
           </div>
         </div>
-      )}
+      , document.body)}
     </div>
   );
 };

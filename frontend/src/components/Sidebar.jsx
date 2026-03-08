@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, NavLink, useNavigate } from 'react-router-dom'; 
-import { useDispatch } from 'react-redux';
+import { useDispatch, useSelector } from 'react-redux';
 import { HiOutlineMenu, HiOutlineLogout } from 'react-icons/hi';
 import { RiCloseLine } from 'react-icons/ri';
 import { FaReceipt, FaChartLine, FaWaveSquare, FaSlidersH } from 'react-icons/fa';
@@ -19,7 +19,7 @@ import CustomerSummarySidebar from './CustomerSummarySidebar';
 import PurchasedProductsSidebar from './PurchasedProductsSidebar';
 import StockSidebar from './StockSidebar';
 
-const NavLinks = ({ handleClick, onResetPlayer, onClearWishlist }) => {
+const NavLinks = ({ handleClick, onResetPlayer, onClearWishlist, isMobile = false }) => {
   const { logout, currentUser } = useAuth();
   const { isLiveRecording, activeSongTitle } = useSpectrogramLive();
   const navigate = useNavigate();
@@ -188,11 +188,13 @@ const Sidebar = () => {
     dispatch(clearWishlist());
   };
 
+  const { activeSong } = useSelector((state) => state.player);
+
   return (
     <>
       {/* Desktop Sidebar */}
-      <div className="hidden md:flex flex-col w-[200px] min-w-[200px] bg-gradient-to-br
-      py-10 px-4 bg-[#252246] relative z-20 overflow-y-auto">
+      <div className={`hidden md:flex flex-col w-[200px] min-w-[200px] bg-gradient-to-br
+      py-10 px-4 bg-[#252246] relative z-20 overflow-y-auto ${activeSong?.albumTitle ? 'pb-32' : ''}`}>
         <img src={logo} alt="logo" className="rounded w-full h-[100px] 
         object-contain" />
         <NavLinks onResetPlayer={handleResetPlayer} onClearWishlist={handleClearWishlist} />
@@ -216,7 +218,7 @@ const Sidebar = () => {
             onClick={() => setMobileMenuOpen(false)} 
           />
           <img src={logo} alt="logo" className="rounded w-full h-[80px] object-contain mb-4" />
-          <NavLinks handleClick={() => setMobileMenuOpen(false)} onResetPlayer={handleResetPlayer} onClearWishlist={handleClearWishlist} />
+          <NavLinks handleClick={() => setMobileMenuOpen(false)} onResetPlayer={handleResetPlayer} onClearWishlist={handleClearWishlist} isMobile />
         </div>
       </div>
 
