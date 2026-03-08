@@ -52,7 +52,10 @@ async def extract_all_product_features(limit: int = 197, save_to_db: bool = True
                         AND p.AlbumTitle != 'Selected Electronic Works'
                         AND p.file_url IS NOT NULL
                         AND (af.ProductID IS NULL OR af.MfccMean IS NULL OR af.Mood IS NULL 
-                             OR af.Key_Signature IS NULL OR af.TimeSignature IS NULL OR af.Duration IS NULL)
+                             OR af.Key_Signature IS NULL OR af.TimeSignature IS NULL OR af.Duration IS NULL
+                             OR af.GenreCluster IS NULL OR af.GenreCluster = 'Unknown'
+                             OR af.Genre IS NULL OR af.Genre = 'Unknown'
+                             OR af.SpectralBandwidth IS NULL OR af.SpectralContrast IS NULL)
                         LIMIT %s
                     """, (limit,))
                 else:
@@ -100,8 +103,8 @@ async def extract_all_product_features(limit: int = 197, save_to_db: bool = True
                         features = await extract_features_for_product_async(product_id, file_url)
 
                     if features:
-                        # Classify genre
-                        genre = ml_service.classify_genre_from_features(
+                        # Classify genre cluster using ML model
+                        genre_cluster = ml_service.classify_genre_from_features(
                             features['tempo'],
                             features['energy'],
                             features['valence'],
@@ -113,16 +116,23 @@ async def extract_all_product_features(limit: int = 197, save_to_db: bool = True
                             instrumentalness=features.get('instrumentalness', 0.5),
                             loudness=features.get('loudness', -60.0),
                             speechiness=features.get('speechiness', 0.1),
+                            spectral_bandwidth=features.get('spectral_bandwidth', 1500.0),
+                            rms_energy=features.get('rms_energy', 0.02),
+                            onset_rate=features.get('onset_rate', 2.0),
+                            harmonic_ratio=features.get('harmonic_ratio', 0.5),
+                            percussive_ratio=features.get('percussive_ratio', 0.5),
                             duration=features.get('duration', 0),
                             key_signature=features.get('key_signature', 'C'),
                             time_signature=features.get('time_signature', '4/4'),
                             mfcc_mean=features.get('mfcc_mean'),
                             chroma_mean=features.get('chroma_mean'),
+                            spectral_contrast_mean=features.get('spectral_contrast_mean'),
                             current_cache_size=len(current_cache),
                             current_cache_items=current_cache
                         )
 
                         # Update cache (via module)
+                        # Genre is preserved as actual genre; genre_cluster stores ML cluster
                         ml_service.audio_features_cache[product_id] = {
                             'id': product_id,
                             'tempo': features['tempo'],
@@ -130,7 +140,8 @@ async def extract_all_product_features(limit: int = 197, save_to_db: bool = True
                             'valence': features['valence'],
                             'danceability': features['danceability'],
                             'acousticness': features['acousticness'],
-                            'genre': genre,
+                            'genre': ml_service.audio_features_cache.get(product_id, {}).get('genre', 'Unknown'),
+                            'genre_cluster': genre_cluster,
                             'mood': features.get('mood', derive_mood(features['valence'], features['energy'], features['danceability'], features['acousticness'])),
                             'spectral_centroid': features.get('spectral_centroid', 1500.0),
                             'spectral_rolloff': features.get('spectral_rolloff', 3000.0),
@@ -141,6 +152,12 @@ async def extract_all_product_features(limit: int = 197, save_to_db: bool = True
                             'key_signature': features.get('key_signature'),
                             'time_signature': features.get('time_signature'),
                             'duration': features.get('duration'),
+                            'spectral_bandwidth': features.get('spectral_bandwidth', 1500.0),
+                            'spectral_contrast_mean': features.get('spectral_contrast_mean', []),
+                            'rms_energy': features.get('rms_energy', 0.02),
+                            'onset_rate': features.get('onset_rate', 2.0),
+                            'harmonic_ratio': features.get('harmonic_ratio', 0.5),
+                            'percussive_ratio': features.get('percussive_ratio', 0.5),
                             'mfcc_mean': features.get('mfcc_mean', []),
                             'chroma_mean': features.get('chroma_mean', [])
                         }
@@ -152,6 +169,7 @@ async def extract_all_product_features(limit: int = 197, save_to_db: bool = True
                                 import json
                                 mfcc_json = json.dumps(features.get('mfcc_mean', [])) if features.get('mfcc_mean') else None
                                 chroma_json = json.dumps(features.get('chroma_mean', [])) if features.get('chroma_mean') else None
+                                spectral_contrast_json = json.dumps(features.get('spectral_contrast_mean', [])) if features.get('spectral_contrast_mean') else None
 
                                 with get_db_connection() as conn:
                                     if conn:
@@ -161,10 +179,14 @@ async def extract_all_product_features(limit: int = 197, save_to_db: bool = True
                                                 INSERT INTO AudioFeatures (
                                                     ProductID, Tempo, Energy, Danceability, Valence,
                                                     Acousticness, Instrumentalness, Loudness, Speechiness,
-                                                    SpectralCentroid, SpectralRolloff, ZeroCrossingRate, Genre,
-                                                    Mood, MfccMean, ChromaMean, Key_Signature, TimeSignature, Duration
+                                                    SpectralCentroid, SpectralRolloff, ZeroCrossingRate,
+                                                    Genre, SpectralBandwidth, SpectralContrast, RmsEnergy,
+                                                    OnsetRate, HarmonicRatio, PercussiveRatio,
+                                                    GenreCluster, Mood, MfccMean, ChromaMean,
+                                                    Key_Signature, TimeSignature, Duration
                                                 ) VALUES (
-                                                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                                                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                                                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                                                 )
                                                 ON DUPLICATE KEY UPDATE
                                                     Tempo = VALUES(Tempo),
@@ -178,7 +200,14 @@ async def extract_all_product_features(limit: int = 197, save_to_db: bool = True
                                                     SpectralCentroid = VALUES(SpectralCentroid),
                                                     SpectralRolloff = VALUES(SpectralRolloff),
                                                     ZeroCrossingRate = VALUES(ZeroCrossingRate),
-                                                    Genre = VALUES(Genre),
+                                                    Genre = COALESCE(Genre, VALUES(Genre)),
+                                                    SpectralBandwidth = VALUES(SpectralBandwidth),
+                                                    SpectralContrast = VALUES(SpectralContrast),
+                                                    RmsEnergy = VALUES(RmsEnergy),
+                                                    OnsetRate = VALUES(OnsetRate),
+                                                    HarmonicRatio = VALUES(HarmonicRatio),
+                                                    PercussiveRatio = VALUES(PercussiveRatio),
+                                                    GenreCluster = VALUES(GenreCluster),
                                                     Mood = VALUES(Mood),
                                                     MfccMean = VALUES(MfccMean),
                                                     ChromaMean = VALUES(ChromaMean),
@@ -199,7 +228,14 @@ async def extract_all_product_features(limit: int = 197, save_to_db: bool = True
                                                 features.get('spectral_centroid', 1500.0),
                                                 features.get('spectral_rolloff', 3000.0),
                                                 features.get('zero_crossing_rate', 0.05),
-                                                genre,
+                                                ml_service.audio_features_cache.get(product_id, {}).get('genre', 'Unknown'),
+                                                features.get('spectral_bandwidth', 1500.0),
+                                                spectral_contrast_json,
+                                                features.get('rms_energy', 0.02),
+                                                features.get('onset_rate', 2.0),
+                                                features.get('harmonic_ratio', 0.5),
+                                                features.get('percussive_ratio', 0.5),
+                                                genre_cluster,
                                                 mood,
                                                 mfcc_json,
                                                 chroma_json,
@@ -209,7 +245,7 @@ async def extract_all_product_features(limit: int = 197, save_to_db: bool = True
                                             ))
                                             conn.commit()
                                             saved = True
-                                            console.log(f"   ✅ Saved to database with genre: {genre}")
+                                            console.log(f"   ✅ Saved to database with genre_cluster: {genre_cluster}")
                             except Exception as db_e:
                                 console.log(f"   ⚠️ DB Save failed for {product_id}: {db_e}")
 
@@ -247,6 +283,12 @@ async def extract_all_product_features(limit: int = 197, save_to_db: bool = True
         db_insert_count = len([r for r in results_list if r.get('saved_to_db', False)])
 
         console.log(f"🎉 Extraction complete: {success_count} success, {error_count} errors")
+
+        # Retrain ML model on the newly saved data and update GenreCluster in DB
+        if db_insert_count > 0:
+            console.log("   🔄 Retraining ML model and updating GenreCluster...")
+            await ml_service.startup_cache()
+            console.log("   ✅ ML model retrained and GenreCluster updated")
 
         return {
             "status": "success",
@@ -310,4 +352,216 @@ async def backfill_mood():
         return {"status": "success", "updated": updated}
     except Exception as e:
         console.log(f"❌ Error in backfill_mood: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/api/audio/backfill-genre")
+async def backfill_genre():
+    """
+    Backfill NULL/Unknown Genre values in AudioFeatures by looking up the
+    actual genre from the iTunes Lookup API.  Works for iTunes-imported songs
+    (negative ProductIDs) whose absolute value is the iTunes trackId.
+    """
+    import httpx
+
+    try:
+        # 1. Find rows that need genre
+        with get_db_connection() as conn:
+            if not conn:
+                raise HTTPException(status_code=503, detail="Database connection unavailable")
+            with conn.cursor() as cursor:
+                cursor.execute("""
+                    SELECT ProductID FROM AudioFeatures
+                    WHERE (Genre IS NULL OR Genre = '' OR Genre = 'Unknown')
+                    AND ProductID < 0
+                """)
+                rows = cursor.fetchall()
+
+        if not rows:
+            return {"status": "success", "updated": 0, "message": "No rows need genre backfill"}
+
+        product_ids = [r['ProductID'] for r in rows]
+        console.log(f"🎵 Backfilling genre for {len(product_ids)} songs via iTunes Lookup...")
+
+        # 2. iTunes Lookup API accepts up to ~200 comma-separated IDs per request
+        updated = 0
+        batch_size = 150
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            for i in range(0, len(product_ids), batch_size):
+                batch = product_ids[i:i + batch_size]
+                track_ids = [str(abs(pid)) for pid in batch]
+                lookup_url = f"https://itunes.apple.com/lookup?id={','.join(track_ids)}"
+
+                try:
+                    resp = await client.get(lookup_url)
+                    if resp.status_code != 200:
+                        console.log(f"   ⚠️ iTunes lookup returned {resp.status_code}")
+                        continue
+
+                    data = resp.json()
+                    # Build trackId → genre map
+                    genre_map = {}
+                    for result in data.get('results', []):
+                        tid = result.get('trackId')
+                        genre_name = result.get('primaryGenreName')
+                        if tid and genre_name:
+                            genre_map[-tid] = genre_name  # negative ProductID
+
+                    # 3. Update DB
+                    if genre_map:
+                        with get_db_connection() as conn:
+                            if conn:
+                                with conn.cursor() as cursor:
+                                    for pid, genre in genre_map.items():
+                                        cursor.execute(
+                                            "UPDATE AudioFeatures SET Genre = %s WHERE ProductID = %s",
+                                            (genre, pid)
+                                        )
+                                        # Update cache too
+                                        if pid in ml_service.audio_features_cache:
+                                            ml_service.audio_features_cache[pid]['genre'] = genre
+                                        updated += 1
+                                    conn.commit()
+
+                    console.log(f"   Batch {i // batch_size + 1}: looked up {len(track_ids)}, updated {len(genre_map)}")
+                except Exception as batch_e:
+                    console.log(f"   ⚠️ Batch error: {batch_e}")
+
+        console.log(f"✅ Backfilled Genre for {updated} rows")
+        return {"status": "success", "updated": updated}
+    except Exception as e:
+        console.log(f"❌ Error in backfill_genre: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/api/audio/backfill-genre-library")
+async def backfill_genre_library():
+    """
+    Predict Genre for library songs (positive ProductIDs) using a KNN
+    classifier trained on iTunes songs that already have known genres.
+    Requires /api/audio/backfill-genre to have run first so that iTunes
+    songs provide labelled training data.
+    """
+    import json
+    import numpy as np
+    from sklearn.neighbors import KNeighborsClassifier
+
+    def _build_vector(data: dict) -> list:
+        """Build a 51D feature vector from a cache entry."""
+        vec = [
+            float(data.get('tempo', 120)),
+            float(data.get('energy', 0.5)),
+            float(data.get('valence', 0.5)),
+            float(data.get('danceability', 0.5)),
+            float(data.get('acousticness', 0.5)),
+            float(data.get('spectral_centroid', 1500.0)),
+            float(data.get('spectral_rolloff', 3000.0)),
+            float(data.get('zero_crossing_rate', 0.05)),
+            float(data.get('instrumentalness', 0.5)),
+            float(data.get('loudness', -60.0)),
+            float(data.get('speechiness', 0.1)),
+            float(data.get('spectral_bandwidth', 1500.0)),
+            float(data.get('rms_energy', 0.02)),
+            float(data.get('onset_rate', 2.0)),
+            float(data.get('harmonic_ratio', 0.5)),
+            float(data.get('percussive_ratio', 0.5)),
+            float(data.get('duration', 30.0)),
+        ]
+        # key_signature → numeric index (0-11)
+        vec.append(float(ml_service.KEY_NAME_TO_INDEX.get(
+            data.get('key_signature', 'C'), 0)))
+        # time_signature → beats-per-measure
+        vec.append(float(ml_service.TIME_SIG_TO_BEATS.get(
+            data.get('time_signature', '4/4'), 4)))
+        # MFCC (13)
+        mfcc = data.get('mfcc_mean', [0.0] * 13)
+        if isinstance(mfcc, str):
+            mfcc = json.loads(mfcc)
+        vec.extend([float(x) for x in mfcc[:13]])
+        vec.extend([0.0] * max(0, 13 - len(mfcc)))
+        # Chroma (12)
+        chroma = data.get('chroma_mean', [0.0] * 12)
+        if isinstance(chroma, str):
+            chroma = json.loads(chroma)
+        vec.extend([float(x) for x in chroma[:12]])
+        vec.extend([0.0] * max(0, 12 - len(chroma)))
+        # Spectral Contrast (7)
+        sc = data.get('spectral_contrast_mean', [0.0] * 7)
+        if isinstance(sc, str):
+            sc = json.loads(sc)
+        vec.extend([float(x) for x in sc[:7]])
+        vec.extend([0.0] * max(0, 7 - len(sc)))
+        return vec
+
+    try:
+        # 1. Split cache: songs with known genre → training, library songs without → prediction
+        train_vectors, train_labels = [], []
+        predict_pids, predict_vectors = [], []
+
+        for pid, data in ml_service.audio_features_cache.items():
+            genre = data.get('genre') or 'Unknown'
+            vec = _build_vector(data)
+            if len(vec) != 51:
+                continue
+            if genre not in ('Unknown', ''):
+                train_vectors.append(vec)
+                train_labels.append(genre)
+            elif pid > 0:  # library song needing genre
+                predict_pids.append(pid)
+                predict_vectors.append(vec)
+
+        if not train_vectors:
+            return {
+                "status": "error",
+                "message": "No songs with known genres to train from. "
+                           "Run /api/audio/backfill-genre first to populate iTunes genres."
+            }
+
+        if not predict_pids:
+            return {"status": "success", "updated": 0,
+                    "message": "All library songs already have genres assigned"}
+
+        console.log(f"🎵 Training genre classifier on {len(train_vectors)} songs "
+                     f"({len(set(train_labels))} genres) to predict {len(predict_pids)} library songs")
+
+        # 2. Scale with the existing scaler from the ML pipeline
+        X_train = np.array(train_vectors)
+        X_pred  = np.array(predict_vectors)
+        if ml_service.feature_scaler is not None:
+            X_train = ml_service.feature_scaler.transform(X_train)
+            X_pred  = ml_service.feature_scaler.transform(X_pred)
+
+        # 3. Train a KNN genre classifier
+        k = min(5, len(train_vectors))
+        clf = KNeighborsClassifier(n_neighbors=k)
+        clf.fit(X_train, train_labels)
+
+        predictions = clf.predict(X_pred)
+
+        # 4. Update DB and cache
+        updated = 0
+        with get_db_connection() as conn:
+            if not conn:
+                raise HTTPException(status_code=503, detail="Database connection unavailable")
+            with conn.cursor() as cursor:
+                for pid, genre in zip(predict_pids, predictions):
+                    cursor.execute(
+                        "UPDATE AudioFeatures SET Genre = %s WHERE ProductID = %s",
+                        (genre, pid)
+                    )
+                    if pid in ml_service.audio_features_cache:
+                        ml_service.audio_features_cache[pid]['genre'] = genre
+                    updated += 1
+                conn.commit()
+
+        console.log(f"✅ Predicted Genre for {updated} library songs via audio-feature KNN")
+        return {
+            "status": "success",
+            "updated": updated,
+            "training_samples": len(train_vectors),
+            "unique_genres": len(set(train_labels)),
+            "predictions": {str(pid): genre for pid, genre in zip(predict_pids, predictions)}
+        }
+    except Exception as e:
+        console.log(f"❌ Error in backfill_genre_library: {e}")
         raise HTTPException(status_code=500, detail=str(e))

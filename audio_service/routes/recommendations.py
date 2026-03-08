@@ -39,7 +39,7 @@ def _build_similarity_vector(f: dict) -> list:
     """
     Build a normalized similarity vector from audio features dict.
     Uses ALL AudioFeatures columns for comprehensive similarity matching:
-    11 core + 1 duration + 1 key_index + 1 time_sig_beats + 13 MFCC + 12 Chroma = 39D
+    11 core + 5 new + 1 duration + 1 key_index + 1 time_sig_beats + 13 MFCC + 12 Chroma + 7 SpectralContrast = 51D
     """
     vec = [
         float(f.get('tempo') if f.get('tempo') is not None else 120) / 200.0,
@@ -53,6 +53,12 @@ def _build_similarity_vector(f: dict) -> list:
         float(f.get('instrumentalness') if f.get('instrumentalness') is not None else 0.5),
         float((f.get('loudness') if f.get('loudness') is not None else -60.0) + 60.0) / 60.0,
         float(f.get('speechiness') if f.get('speechiness') is not None else 0.1),
+        # New features for genre separation
+        float(f.get('spectral_bandwidth') if f.get('spectral_bandwidth') is not None else 1500.0) / 5000.0,
+        float(f.get('rms_energy') if f.get('rms_energy') is not None else 0.02) * 10.0,
+        float(f.get('onset_rate') if f.get('onset_rate') is not None else 2.0) / 10.0,
+        float(f.get('harmonic_ratio') if f.get('harmonic_ratio') is not None else 0.5),
+        float(f.get('percussive_ratio') if f.get('percussive_ratio') is not None else 0.5),
         # Duration normalized (0-300s typical range)
         float(f.get('duration') if f.get('duration') is not None else 0) / 300.0,
         # Key signature as index (0-11) normalized
@@ -78,6 +84,15 @@ def _build_similarity_vector(f: dict) -> list:
         vec.extend([float(x) for x in parsed])
     else:
         vec.extend([0.0] * 12)
+    # Spectral contrast means (7 bands) - normalize by dividing by 50
+    sc = f.get('spectral_contrast_mean')
+    if sc and isinstance(sc, list) and len(sc) == 7:
+        vec.extend([float(x) / 50.0 for x in sc])
+    elif isinstance(sc, str):
+        parsed = _parse_json_list(sc, 7)
+        vec.extend([float(x) / 50.0 for x in parsed])
+    else:
+        vec.extend([0.0] * 7)
     return vec
 
 # ============================================
@@ -121,10 +136,15 @@ async def get_cached_audio_features(artist_only: bool = True):
                     "speechiness": data.get('speechiness', 0.1),
                     "loudness": data.get('loudness', -60),
                     "genre": data.get('genre', 'Unknown'),
+                    "genreCluster": data.get('genre_cluster', 'Unknown'),
                     "mood": data.get('mood', 'Unknown'),
                     "spectralCentroid": data.get('spectral_centroid', 1500),
                     "spectralRolloff": data.get('spectral_rolloff', 3000),
                     "zeroCrossingRate": data.get('zero_crossing_rate', 0.05),
+                    "spectralBandwidth": data.get('spectral_bandwidth', 1500),
+                    "onsetRate": data.get('onset_rate', 2.0),
+                    "harmonicRatio": data.get('harmonic_ratio', 0.5),
+                    "percussiveRatio": data.get('percussive_ratio', 0.5),
                     "keySignature": data.get('key_signature'),
                     "timeSignature": data.get('time_signature'),
                     "duration": data.get('duration', 0)
@@ -146,10 +166,15 @@ async def get_cached_audio_features(artist_only: bool = True):
                     "speechiness": data.get('speechiness', 0.1),
                     "loudness": data.get('loudness', -60),
                     "genre": data.get('genre', 'Unknown'),
+                    "genreCluster": data.get('genre_cluster', 'Unknown'),
                     "mood": data.get('mood', 'Unknown'),
                     "spectralCentroid": data.get('spectral_centroid', 1500),
                     "spectralRolloff": data.get('spectral_rolloff', 3000),
                     "zeroCrossingRate": data.get('zero_crossing_rate', 0.05),
+                    "spectralBandwidth": data.get('spectral_bandwidth', 1500),
+                    "onsetRate": data.get('onset_rate', 2.0),
+                    "harmonicRatio": data.get('harmonic_ratio', 0.5),
+                    "percussiveRatio": data.get('percussive_ratio', 0.5),
                     "keySignature": data.get('key_signature'),
                     "timeSignature": data.get('time_signature'),
                     "duration": data.get('duration', 0)
@@ -352,6 +377,13 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
                            'spectral_rolloff': features.get('spectral_rolloff', 3000),
                            'zero_crossing_rate': features.get('zero_crossing_rate', 0.05),
                            'instrumentalness': features.get('instrumentalness', 0.5),
+                           'spectral_bandwidth': features.get('spectral_bandwidth', 1500.0),
+                           'spectral_contrast_mean': features.get('spectral_contrast_mean', [0.0] * 7),
+                           'rms_energy': features.get('rms_energy', 0.02),
+                           'onset_rate': features.get('onset_rate', 2.0),
+                           'harmonic_ratio': features.get('harmonic_ratio', 0.5),
+                           'percussive_ratio': features.get('percussive_ratio', 0.5),
+                           'genre_cluster': features.get('genre_cluster', ''),
                            '_meta': song 
                       })
             
@@ -514,6 +546,11 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
             
             meta = p.get('_meta') 
             
+            # Check genre cluster match to prevent cross-genre recommendations
+            target_cluster = target_features.get('genre_cluster', '')
+            candidate_cluster = p.get('genre_cluster', '')
+            genre_cluster_match = bool(target_cluster and candidate_cluster and target_cluster == candidate_cluster)
+            
             result = AudioSimilarityResult(
                 product_id=p['id'],
                 similarity_score=round(float(score), 3),
@@ -522,7 +559,7 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
                 mood_match=round(mood_match, 3),
                 danceability_match=round(dance_match, 3),
                 dance_match=round(dance_match, 3), 
-                genre_match=False, 
+                genre_match=genre_cluster_match, 
                 reason=best_match[2],
                 
                 # Populate raw features
@@ -969,6 +1006,7 @@ async def get_midi_recommendations(request: MidiTargetRequest):
                 'danceability': data.get('danceability'),
                 'acousticness': data.get('acousticness'),
                 'genre': data.get('genre', 'Unknown'),
+                'genreCluster': data.get('genre_cluster', 'Unknown'),
                 'mood': data.get('mood', 'Unknown'),
             })
 

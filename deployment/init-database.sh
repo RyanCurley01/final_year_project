@@ -132,7 +132,8 @@ USE Game_Store_System;
         Instrumentalness FLOAT,         -- Predicts no vocals 0-1
         Loudness FLOAT,                 -- Overall loudness in dB
         Speechiness FLOAT,              -- Presence of spoken words 0-1
-        Genre VARCHAR(100),             -- Detected genre
+        Genre VARCHAR(100),             -- Actual genre of the song (e.g. Pop, Country, IDM, Electronic)
+        GenreCluster VARCHAR(100),      -- ML cluster assignment (e.g. Cluster 0, Cluster 1)
         Mood VARCHAR(100),              -- Detected mood (happy, sad, energetic, calm)
         Key_Signature VARCHAR(10),      -- Musical key (C, D, E, etc.)
         TimeSignature VARCHAR(10),      -- Time signature (4/4, 3/4, etc.)
@@ -140,8 +141,14 @@ USE Game_Store_System;
         SpectralCentroid FLOAT,         -- Brightness of sound
         SpectralRolloff FLOAT,          -- Shape of signal
         ZeroCrossingRate FLOAT,         -- Noisiness indicator
-        MfccMean TEXT,                  -- JSON array of MFCC means
-        ChromaMean TEXT,                -- JSON array of chroma features
+        SpectralBandwidth FLOAT,        -- Width of spectral content
+        SpectralContrast TEXT,          -- JSON array of 7 spectral contrast band means
+        RmsEnergy FLOAT,               -- Raw RMS energy value
+        OnsetRate FLOAT,               -- Onsets per second (rhythm complexity)
+        HarmonicRatio FLOAT,           -- Harmonic to total energy ratio 0-1
+        PercussiveRatio FLOAT,         -- Percussive to total energy ratio 0-1
+        MfccMean TEXT,                  -- JSON array of 13 MFCC means
+        ChromaMean TEXT,                -- JSON array of 12 chroma features
         CreatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         UpdatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         FOREIGN KEY(ProductID) REFERENCES Products(ProductID),
@@ -150,7 +157,8 @@ USE Game_Store_System;
         INDEX idx_energy (Energy),
         INDEX idx_valence (Valence),
         INDEX idx_mood (Mood),
-        INDEX idx_genre (Genre)
+        INDEX idx_genre (Genre),
+        INDEX idx_genre_cluster (GenreCluster)
     );
 
     -- ImageCache: Persist AI-generated image URLs by mood for instant loading

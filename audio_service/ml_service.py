@@ -93,6 +93,7 @@ async def startup_cache():
                                 Danceability,
                                 Acousticness,
                                 Genre,
+                                GenreCluster,
                                 Mood,
                                 SpectralCentroid,
                                 SpectralRolloff,
@@ -103,6 +104,12 @@ async def startup_cache():
                                 Key_Signature,
                                 TimeSignature,
                                 Duration,
+                                SpectralBandwidth,
+                                SpectralContrast,
+                                RmsEnergy,
+                                OnsetRate,
+                                HarmonicRatio,
+                                PercussiveRatio,
                                 MfccMean,
                                 ChromaMean
                             FROM AudioFeatures
@@ -140,6 +147,7 @@ async def startup_cache():
                                 'danceability': row['Danceability'],
                                 'acousticness': row['Acousticness'],
                                 'genre': row['Genre'],
+                                'genre_cluster': row.get('GenreCluster'),
                                 'mood': mood_val,
                                 'spectral_centroid': row.get('SpectralCentroid', 1500.0),
                                 'spectral_rolloff': row.get('SpectralRolloff', 3000.0),
@@ -150,6 +158,12 @@ async def startup_cache():
                                 'key_signature': row.get('Key_Signature'),
                                 'time_signature': row.get('TimeSignature'),
                                 'duration': row.get('Duration', 0),
+                                'spectral_bandwidth': row.get('SpectralBandwidth', 1500.0),
+                                'spectral_contrast_mean': _parse_json_list(row.get('SpectralContrast'), 7),
+                                'rms_energy': row.get('RmsEnergy', 0.02),
+                                'onset_rate': row.get('OnsetRate', 2.0),
+                                'harmonic_ratio': row.get('HarmonicRatio', 0.5),
+                                'percussive_ratio': row.get('PercussiveRatio', 0.5),
                                 'mfcc_mean': mfcc_list,
                                 'chroma_mean': chroma_list
                             }
@@ -158,11 +172,11 @@ async def startup_cache():
                         console.log(f"✅ Cached {len(audio_features_cache)} audio features for fast recommendations")
                         
                         # Initialize ML datasets and scale features
-                        # ML Pipeline: Scale → PCA(2D) → KMeans(3) → KNN accuracy
+                        # ML Pipeline: Scale → PCA(2D) → KMeans(3) → classifier accuracy
                         try:
                             # 1. Feature Extraction - RAW values (scaler handles normalization)
                             # Uses ALL AudioFeatures columns as the feature vector:
-                            # 11 core + 1 duration + 1 key_index + 1 time_sig_beats + 13 MFCC + 12 Chroma = 39D
+                            # 11 core + 5 new + 1 duration + 1 key_index + 1 time_sig_beats + 13 MFCC + 12 Chroma + 7 SpectralContrast = 51D
                             feature_vectors = []
                             feature_labels = []
                             feature_product_ids = []  # Track ProductIDs for DB genre sync
@@ -189,6 +203,12 @@ async def startup_cache():
                                         float(data['loudness']),
                                         float(data['speechiness'])
                                     ]
+                                    # New 5 scalar features for better genre separation
+                                    vec.append(float(data.get('spectral_bandwidth', 1500.0) or 1500.0))
+                                    vec.append(float(data.get('rms_energy', 0.02) or 0.02))
+                                    vec.append(float(data.get('onset_rate', 2.0) or 2.0))
+                                    vec.append(float(data.get('harmonic_ratio', 0.5) or 0.5))
+                                    vec.append(float(data.get('percussive_ratio', 0.5) or 0.5))
                                     # Duration (seconds)
                                     vec.append(float(data.get('duration', 0) or 0))
                                     # Key signature as numeric index (0-11)
@@ -207,6 +227,11 @@ async def startup_cache():
                                     if not isinstance(chroma, list) or len(chroma) != 12:
                                         chroma = _parse_json_list(chroma, 12)
                                     vec.extend(chroma)
+                                    # Spectral contrast means (7 bands)
+                                    sc = data.get('spectral_contrast_mean', [0.0] * 7)
+                                    if not isinstance(sc, list) or len(sc) != 7:
+                                        sc = _parse_json_list(sc, 7)
+                                    vec.extend(sc)
                                     
                                     feature_vectors.append(vec)
                                     feature_labels.append(data.get('genre', 'Unknown'))
@@ -246,10 +271,26 @@ async def startup_cache():
                                 cluster_labels = kmeans.fit_predict(X_pca)
                                 cluster_names = np.array([f"Cluster {l}" for l in cluster_labels])
                                 
-                                # Update genre in cache with cluster labels
+                                # Update genre_cluster in cache with cluster labels
+                                # Genre is preserved as the actual genre; GenreCluster stores the ML cluster
                                 for i, pid in enumerate(feature_product_ids):
                                     if pid in audio_features_cache:
-                                        audio_features_cache[pid]['genre'] = cluster_names[i]
+                                        audio_features_cache[pid]['genre_cluster'] = cluster_names[i]
+                                
+                                # Write GenreCluster back to the database so it persists
+                                try:
+                                    with get_db_connection() as conn2:
+                                        if conn2:
+                                            with conn2.cursor() as cur2:
+                                                for i, pid in enumerate(feature_product_ids):
+                                                    cur2.execute(
+                                                        "UPDATE AudioFeatures SET GenreCluster = %s WHERE ProductID = %s",
+                                                        (cluster_names[i], pid)
+                                                    )
+                                                conn2.commit()
+                                    console.log(f"   ✅ Updated GenreCluster in DB for {len(feature_product_ids)} songs")
+                                except Exception as db_e:
+                                    console.log(f"   ⚠️ Failed to write GenreCluster to DB: {db_e}")
                                 
                                 console.log(f"   ✅ Best scaler: {best_scaler_name} (silhouette={best_sil:.4f})")
                                 
@@ -484,18 +525,24 @@ def classify_genre_from_features(
     instrumentalness: float = 0.5,
     loudness: float = -60.0,
     speechiness: float = 0.1,
+    spectral_bandwidth: float = 1500.0,
+    rms_energy: float = 0.02,
+    onset_rate: float = 2.0,
+    harmonic_ratio: float = 0.5,
+    percussive_ratio: float = 0.5,
     duration: float = 0.0,
     key_signature: str = 'C',
     time_signature: str = '4/4',
     mfcc_mean: List[float] = None,
     chroma_mean: List[float] = None,
+    spectral_contrast_mean: List[float] = None,
     current_cache_size: int = 0, 
     current_cache_items: Dict = {}
 ) -> str:
     """
-    Takes raw audio features from a new song and predicts its Genre/Cluster
+    Takes raw audio features from a new song and predicts its GenreCluster
     using the global ML models (Scaler, PCA, KNN/Ensemble) trained at startup.
-    Pipeline: Raw 39D features → Scaler → Best classifier predict.
+    Pipeline: Raw 51D features → Scaler → Best classifier predict.
     """
     global feature_scaler, pca_reducer, knn_classifier, ensemble_classifier, best_classifier
             
@@ -508,7 +555,7 @@ def classify_genre_from_features(
         if best_classifier is None and ensemble_classifier is None and knn_classifier is None:
             return "Unknown"
 
-        # 1. Build 39D input vector matching training pipeline
+        # 1. Build 51D input vector matching training pipeline
         input_vector = [
             float(tempo if tempo != 0 else 0),
             float(energy or 0),
@@ -521,6 +568,11 @@ def classify_genre_from_features(
             float(instrumentalness),
             float(loudness),
             float(speechiness),
+            float(spectral_bandwidth),
+            float(rms_energy),
+            float(onset_rate),
+            float(harmonic_ratio),
+            float(percussive_ratio),
             float(duration or 0),
             float(KEY_NAME_TO_INDEX.get(key_signature, 0)),
             float(TIME_SIG_TO_BEATS.get(time_signature, 4.0))
@@ -535,11 +587,16 @@ def classify_genre_from_features(
             input_vector.extend([float(x) for x in chroma_mean])
         else:
             input_vector.extend([0.0] * 12)
+        # Spectral contrast means (7 bands)
+        if spectral_contrast_mean and isinstance(spectral_contrast_mean, list) and len(spectral_contrast_mean) == 7:
+            input_vector.extend([float(x) for x in spectral_contrast_mean])
+        else:
+            input_vector.extend([0.0] * 7)
         
-        # 2. Reshape for Scikit-Learn (1 sample, 39 features)
+        # 2. Reshape for Scikit-Learn (1 sample, 51 features)
         features_array = np.array([input_vector])
         
-        # 3. Apply Scaler then predict (models trained on 39D scaled features)
+        # 3. Apply Scaler then predict (models trained on 51D scaled features)
         features_scaled = feature_scaler.transform(features_array)
         
         # 4. Use the BEST MODEL from cross-validation for prediction.

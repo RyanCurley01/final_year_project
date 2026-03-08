@@ -131,6 +131,7 @@ CREATE TABLE IF NOT EXISTS AudioFeatures (
     Loudness FLOAT,
     Speechiness FLOAT,
     Genre VARCHAR(100),
+    GenreCluster VARCHAR(100),
     Mood VARCHAR(100),
     Key_Signature VARCHAR(10),
     TimeSignature VARCHAR(10),
@@ -138,6 +139,12 @@ CREATE TABLE IF NOT EXISTS AudioFeatures (
     SpectralCentroid FLOAT,
     SpectralRolloff FLOAT,
     ZeroCrossingRate FLOAT,
+    SpectralBandwidth FLOAT,
+    SpectralContrast TEXT,
+    RmsEnergy FLOAT,
+    OnsetRate FLOAT,
+    HarmonicRatio FLOAT,
+    PercussiveRatio FLOAT,
     MfccMean TEXT,
     ChromaMean TEXT,
     CreatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -148,7 +155,8 @@ CREATE TABLE IF NOT EXISTS AudioFeatures (
     INDEX idx_energy (Energy),
     INDEX idx_valence (Valence),
     INDEX idx_mood (Mood),
-    INDEX idx_genre (Genre)
+    INDEX idx_genre (Genre),
+    INDEX idx_genre_cluster (GenreCluster)
 );
 
 -- ImageCache: Persist AI-generated image URLs by mood for instant loading

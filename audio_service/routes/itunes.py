@@ -198,7 +198,7 @@ async def import_top_songs(limit: int = 150):
                     error_count += 1
                     continue
 
-                # Classify genre using ML pipeline (same as import-to-database)
+                # Classify genre cluster using ML pipeline (same as import-to-database)
                 genre_label = ml_service.classify_genre_from_features(
                     features['tempo'],
                     features['energy'],
@@ -211,12 +211,20 @@ async def import_top_songs(limit: int = 150):
                     instrumentalness=features.get('instrumentalness', 0.5),
                     loudness=features.get('loudness', -60.0),
                     speechiness=features.get('speechiness', 0.1),
+                    spectral_bandwidth=features.get('spectral_bandwidth', 1500.0),
+                    rms_energy=features.get('rms_energy', 0.02),
+                    onset_rate=features.get('onset_rate', 2.0),
+                    harmonic_ratio=features.get('harmonic_ratio', 0.5),
+                    percussive_ratio=features.get('percussive_ratio', 0.5),
                     duration=features.get('duration', 0),
                     key_signature=features.get('key_signature', 'C'),
                     time_signature=features.get('time_signature', '4/4'),
                     mfcc_mean=features.get('mfcc_mean'),
-                    chroma_mean=features.get('chroma_mean')
+                    chroma_mean=features.get('chroma_mean'),
+                    spectral_contrast_mean=features.get('spectral_contrast_mean')
                 )
+                # Extract actual genre from RSS category
+                actual_genre = entry.get('category', {}).get('attributes', {}).get('label', 'Unknown')
 
                 # Insert into DB
                 with get_db_connection() as conn:
@@ -243,14 +251,17 @@ async def import_top_songs(limit: int = 150):
                             import json
                             mfcc_json = json.dumps(features.get('mfcc_mean', [])) if features.get('mfcc_mean') else None
                             chroma_json = json.dumps(features.get('chroma_mean', [])) if features.get('chroma_mean') else None
+                            spectral_contrast_json = json.dumps(features.get('spectral_contrast_mean', [])) if features.get('spectral_contrast_mean') else None
 
                             cursor.execute("""
                                 INSERT INTO AudioFeatures (
                                     ProductID, Tempo, Energy, Danceability, Valence,
                                     Acousticness, Instrumentalness, Loudness, Speechiness,
                                     SpectralCentroid, SpectralRolloff, ZeroCrossingRate, Genre,
+                                    GenreCluster, SpectralBandwidth, SpectralContrast,
+                                    RmsEnergy, OnsetRate, HarmonicRatio, PercussiveRatio,
                                     MfccMean, ChromaMean, Key_Signature, TimeSignature, Duration
-                                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                             """, (
                                 product_id,
                                 features['tempo'],
@@ -264,7 +275,14 @@ async def import_top_songs(limit: int = 150):
                                 features.get('spectral_centroid', 1500.0),
                                 features.get('spectral_rolloff', 3000.0),
                                 features.get('zero_crossing_rate', 0.05),
+                                actual_genre,
                                 genre_label,
+                                features.get('spectral_bandwidth', 1500.0),
+                                spectral_contrast_json,
+                                features.get('rms_energy', 0.02),
+                                features.get('onset_rate', 2.0),
+                                features.get('harmonic_ratio', 0.5),
+                                features.get('percussive_ratio', 0.5),
                                 mfcc_json,
                                 chroma_json,
                                 features.get('key_signature', None),
@@ -274,7 +292,7 @@ async def import_top_songs(limit: int = 150):
                             conn.commit()
                 
                 imported_count += 1
-                console.log(f"   ✅ Imported: {track_name} by {artist_name} (Genre: {genre_label})")
+                console.log(f"   ✅ Imported: {track_name} by {artist_name} (Genre: {actual_genre}, Cluster: {genre_label})")
 
             except Exception as e:
                 error_count += 1
@@ -372,7 +390,7 @@ async def import_itunes_songs_to_database(limit: int = 100, genre: str = "electr
                     error_count += 1
                     continue
                 
-                # Classify genre using K-Means
+                # Classify genre cluster using ML pipeline
                 genre_label = ml_service.classify_genre_from_features(
                     features['tempo'],
                     features['energy'],
@@ -385,12 +403,19 @@ async def import_itunes_songs_to_database(limit: int = 100, genre: str = "electr
                     instrumentalness=features.get('instrumentalness', 0.5),
                     loudness=features.get('loudness', -60.0),
                     speechiness=features.get('speechiness', 0.1),
+                    spectral_bandwidth=features.get('spectral_bandwidth', 1500.0),
+                    rms_energy=features.get('rms_energy', 0.02),
+                    onset_rate=features.get('onset_rate', 2.0),
+                    harmonic_ratio=features.get('harmonic_ratio', 0.5),
+                    percussive_ratio=features.get('percussive_ratio', 0.5),
                     duration=features.get('duration', 0),
                     key_signature=features.get('key_signature', 'C'),
                     time_signature=features.get('time_signature', '4/4'),
                     mfcc_mean=features.get('mfcc_mean'),
-                    chroma_mean=features.get('chroma_mean')
+                    chroma_mean=features.get('chroma_mean'),
+                    spectral_contrast_mean=features.get('spectral_contrast_mean')
                 )
+                actual_genre = track.get('primaryGenreName', 'Unknown')
                 
                 # Insert into Products table
                 with get_db_connection() as conn:
@@ -416,14 +441,17 @@ async def import_itunes_songs_to_database(limit: int = 100, genre: str = "electr
                             import json
                             mfcc_json = json.dumps(features.get('mfcc_mean', [])) if features.get('mfcc_mean') else None
                             chroma_json = json.dumps(features.get('chroma_mean', [])) if features.get('chroma_mean') else None
+                            spectral_contrast_json = json.dumps(features.get('spectral_contrast_mean', [])) if features.get('spectral_contrast_mean') else None
                             
                             cursor.execute("""
                                 INSERT INTO AudioFeatures (
                                     ProductID, Tempo, Energy, Danceability, Valence,
                                     Acousticness, Instrumentalness, Loudness, Speechiness,
                                     SpectralCentroid, SpectralRolloff, ZeroCrossingRate, Genre,
+                                    GenreCluster, SpectralBandwidth, SpectralContrast,
+                                    RmsEnergy, OnsetRate, HarmonicRatio, PercussiveRatio,
                                     Mood, MfccMean, ChromaMean, Key_Signature, TimeSignature, Duration
-                                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                             """, (
                                 product_id,
                                 features['tempo'],
@@ -437,7 +465,14 @@ async def import_itunes_songs_to_database(limit: int = 100, genre: str = "electr
                                 features.get('spectral_centroid', 1500.0),
                                 features.get('spectral_rolloff', 3000.0),
                                 features.get('zero_crossing_rate', 0.05),
+                                actual_genre,
                                 genre_label,
+                                features.get('spectral_bandwidth', 1500.0),
+                                spectral_contrast_json,
+                                features.get('rms_energy', 0.02),
+                                features.get('onset_rate', 2.0),
+                                features.get('harmonic_ratio', 0.5),
+                                features.get('percussive_ratio', 0.5),
                                 features.get('mood', derive_mood(features['valence'], features['energy'], features['danceability'], features['acousticness'])),
                                 mfcc_json,
                                 chroma_json,
@@ -453,12 +488,13 @@ async def import_itunes_songs_to_database(limit: int = 100, genre: str = "electr
                     "product_id": product_id,
                     "track_name": track.get('trackName'),
                     "artist": track.get('artistName'),
-                    "genre": genre_label,
+                    "genre": actual_genre,
+                    "genre_cluster": genre_label,
                     "tempo": features['tempo'],
                     "energy": features['energy']
                 })
                 
-                console.log(f"   ✅ Imported: {track.get('trackName')} by {track.get('artistName')} (Genre: {genre_label})")
+                console.log(f"   ✅ Imported: {track.get('trackName')} by {track.get('artistName')} (Genre: {actual_genre}, Cluster: {genre_label})")
                 
             except Exception as e:
                 error_count += 1
@@ -644,15 +680,23 @@ async def _import_single_song_rss(entry, loop) -> dict | None:
         instrumentalness=features.get('instrumentalness', 0.5),
         loudness=features.get('loudness', -60.0),
         speechiness=features.get('speechiness', 0.1),
+        spectral_bandwidth=features.get('spectral_bandwidth', 1500.0),
+        rms_energy=features.get('rms_energy', 0.02),
+        onset_rate=features.get('onset_rate', 2.0),
+        harmonic_ratio=features.get('harmonic_ratio', 0.5),
+        percussive_ratio=features.get('percussive_ratio', 0.5),
         duration=features.get('duration', 0),
         key_signature=features.get('key_signature', 'C'),
         time_signature=features.get('time_signature', '4/4'),
         mfcc_mean=features.get('mfcc_mean'),
-        chroma_mean=features.get('chroma_mean')
+        chroma_mean=features.get('chroma_mean'),
+        spectral_contrast_mean=features.get('spectral_contrast_mean')
     )
+    actual_genre = entry.get('category', {}).get('attributes', {}).get('label', 'Unknown')
 
     mfcc_json = json.dumps(features.get('mfcc_mean', [])) if features.get('mfcc_mean') else None
     chroma_json = json.dumps(features.get('chroma_mean', [])) if features.get('chroma_mean') else None
+    spectral_contrast_json = json.dumps(features.get('spectral_contrast_mean', [])) if features.get('spectral_contrast_mean') else None
 
     return {
         "product_id": product_id,
@@ -663,8 +707,10 @@ async def _import_single_song_rss(entry, loop) -> dict | None:
         "preview_url": preview_url,
         "features": features,
         "genre_label": genre_label,
+        "actual_genre": actual_genre,
         "mfcc_json": mfcc_json,
         "chroma_json": chroma_json,
+        "spectral_contrast_json": spectral_contrast_json,
     }
 
 
@@ -695,15 +741,23 @@ async def _import_single_song_search(track, loop) -> dict | None:
         instrumentalness=features.get('instrumentalness', 0.5),
         loudness=features.get('loudness', -60.0),
         speechiness=features.get('speechiness', 0.1),
+        spectral_bandwidth=features.get('spectral_bandwidth', 1500.0),
+        rms_energy=features.get('rms_energy', 0.02),
+        onset_rate=features.get('onset_rate', 2.0),
+        harmonic_ratio=features.get('harmonic_ratio', 0.5),
+        percussive_ratio=features.get('percussive_ratio', 0.5),
         duration=features.get('duration', 0),
         key_signature=features.get('key_signature', 'C'),
         time_signature=features.get('time_signature', '4/4'),
         mfcc_mean=features.get('mfcc_mean'),
-        chroma_mean=features.get('chroma_mean')
+        chroma_mean=features.get('chroma_mean'),
+        spectral_contrast_mean=features.get('spectral_contrast_mean')
     )
+    actual_genre = track.get('primaryGenreName', 'Unknown')
 
     mfcc_json = json.dumps(features.get('mfcc_mean', [])) if features.get('mfcc_mean') else None
     chroma_json = json.dumps(features.get('chroma_mean', [])) if features.get('chroma_mean') else None
+    spectral_contrast_json = json.dumps(features.get('spectral_contrast_mean', [])) if features.get('spectral_contrast_mean') else None
 
     return {
         "product_id": product_id,
@@ -714,8 +768,10 @@ async def _import_single_song_search(track, loop) -> dict | None:
         "preview_url": preview_url,
         "features": features,
         "genre_label": genre_label,
+        "actual_genre": actual_genre,
         "mfcc_json": mfcc_json,
         "chroma_json": chroma_json,
+        "spectral_contrast_json": spectral_contrast_json,
     }
 
 
@@ -735,8 +791,10 @@ def _insert_song_row(cursor, song: dict):
             ProductID, Tempo, Energy, Danceability, Valence,
             Acousticness, Instrumentalness, Loudness, Speechiness,
             SpectralCentroid, SpectralRolloff, ZeroCrossingRate, Genre,
+            GenreCluster, SpectralBandwidth, SpectralContrast,
+            RmsEnergy, OnsetRate, HarmonicRatio, PercussiveRatio,
             Mood, MfccMean, ChromaMean, Key_Signature, TimeSignature, Duration
-        ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
     """, (
         song["product_id"],
         f['tempo'], f['energy'], f['danceability'], f['valence'],
@@ -744,7 +802,12 @@ def _insert_song_row(cursor, song: dict):
         f.get('instrumentalness', 0.5), f.get('loudness', -60.0),
         f.get('speechiness', 0.1), f.get('spectral_centroid', 1500.0),
         f.get('spectral_rolloff', 3000.0), f.get('zero_crossing_rate', 0.05),
+        song.get("actual_genre", "Unknown"),
         song["genre_label"],
+        f.get('spectral_bandwidth', 1500.0),
+        song.get("spectral_contrast_json"),
+        f.get('rms_energy', 0.02), f.get('onset_rate', 2.0),
+        f.get('harmonic_ratio', 0.5), f.get('percussive_ratio', 0.5),
         f.get('mood', derive_mood(f['valence'], f['energy'], f['danceability'], f['acousticness'])),
         song["mfcc_json"], song["chroma_json"],
         f.get('key_signature'), f.get('time_signature'), f.get('duration')

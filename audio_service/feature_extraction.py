@@ -167,6 +167,32 @@ def extract_audio_features_librosa(audio_url: str, product_id: int) -> Optional[
             # ===== SPEECHINESS =====
             speechiness = float(1 - instrumentalness)
             
+            # ===== SPECTRAL BANDWIDTH =====
+            # Width of spectral content - separates dense sounds (IDM) from narrow (pop vocals)
+            spectral_bw = librosa.feature.spectral_bandwidth(y=y, sr=sr)[0]
+            spectral_bandwidth = float(np.mean(spectral_bw))
+            
+            # ===== SPECTRAL CONTRAST =====
+            # 7-band spectral contrast - captures texture differences between genres
+            spec_contrast = librosa.feature.spectral_contrast(y=y, sr=sr)
+            spectral_contrast_mean = [float(np.mean(spec_contrast[i])) for i in range(spec_contrast.shape[0])]
+            
+            # ===== RAW RMS ENERGY =====
+            rms_energy = float(np.mean(rms))
+            
+            # ===== ONSET RATE =====
+            # Onsets per second - IDM has complex rhythms vs simple pop patterns
+            onsets = librosa.onset.onset_detect(y=y, sr=sr)
+            onset_rate = float(len(onsets) / max(1, len(y) / sr))
+            
+            # ===== HARMONIC / PERCUSSIVE SEPARATION =====
+            y_harmonic, y_percussive = librosa.effects.hpss(y)
+            harmonic_energy = float(np.mean(y_harmonic ** 2))
+            percussive_energy = float(np.mean(y_percussive ** 2))
+            total_hp_energy = harmonic_energy + percussive_energy
+            harmonic_ratio = float(harmonic_energy / total_hp_energy) if total_hp_energy > 0 else 0.5
+            percussive_ratio = float(percussive_energy / total_hp_energy) if total_hp_energy > 0 else 0.5
+            
             # ===== MFCC (Mel-Frequency Cepstral Coefficients) =====
             # Extract timbre/texture features - critical for similarity matching
             mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13)
@@ -205,6 +231,12 @@ def extract_audio_features_librosa(audio_url: str, product_id: int) -> Optional[
                 'spectral_centroid': round(float(np.mean(spectral_centroid)), 2),
                 'spectral_rolloff': round(float(np.mean(spectral_rolloff)), 2),
                 'zero_crossing_rate': round(zero_crossing_rate, 4),
+                'spectral_bandwidth': round(spectral_bandwidth, 2),
+                'spectral_contrast_mean': spectral_contrast_mean,
+                'rms_energy': round(rms_energy, 6),
+                'onset_rate': round(onset_rate, 3),
+                'harmonic_ratio': round(harmonic_ratio, 4),
+                'percussive_ratio': round(percussive_ratio, 4),
                 'mfcc_mean': mfcc_mean,
                 'chroma_mean': chroma_mean,
                 'key_signature': key_signature,
@@ -213,7 +245,7 @@ def extract_audio_features_librosa(audio_url: str, product_id: int) -> Optional[
                 'mood': mood
             }
             
-            console.log(f"✅ Librosa extracted FULL features for product {product_id}: tempo={tempo:.1f}, energy={energy:.2f}, key={key_signature}, mood={mood}")
+            console.log(f"✅ Librosa extracted FULL features for product {product_id}: tempo={tempo:.1f}, energy={energy:.2f}, key={key_signature}, mood={mood}, onset_rate={onset_rate:.2f}")
             return features
             
         finally:
@@ -315,6 +347,29 @@ def extract_audio_features_from_preview(audio_url: str, track_id: int) -> Option
             # ===== SPEECHINESS =====
             speechiness = float(1 - instrumentalness)
             
+            # ===== SPECTRAL BANDWIDTH =====
+            spectral_bw = librosa.feature.spectral_bandwidth(y=y, sr=sr)[0]
+            spectral_bandwidth = float(np.mean(spectral_bw))
+            
+            # ===== SPECTRAL CONTRAST =====
+            spec_contrast = librosa.feature.spectral_contrast(y=y, sr=sr)
+            spectral_contrast_mean = [float(np.mean(spec_contrast[i])) for i in range(spec_contrast.shape[0])]
+            
+            # ===== RAW RMS ENERGY =====
+            rms_energy = float(np.mean(rms))
+            
+            # ===== ONSET RATE =====
+            onsets = librosa.onset.onset_detect(y=y, sr=sr)
+            onset_rate = float(len(onsets) / max(1, len(y) / sr))
+            
+            # ===== HARMONIC / PERCUSSIVE SEPARATION =====
+            y_harmonic, y_percussive = librosa.effects.hpss(y)
+            harmonic_energy = float(np.mean(y_harmonic ** 2))
+            percussive_energy = float(np.mean(y_percussive ** 2))
+            total_hp_energy = harmonic_energy + percussive_energy
+            harmonic_ratio = float(harmonic_energy / total_hp_energy) if total_hp_energy > 0 else 0.5
+            percussive_ratio = float(percussive_energy / total_hp_energy) if total_hp_energy > 0 else 0.5
+            
             # ===== MFCC (Mel-Frequency Cepstral Coefficients) =====
             # Extract timbre/texture features - critical for similarity matching
             mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13)
@@ -353,6 +408,12 @@ def extract_audio_features_from_preview(audio_url: str, track_id: int) -> Option
                 'spectral_centroid': round(float(np.mean(spectral_centroid)), 2),
                 'spectral_rolloff': round(float(np.mean(spectral_rolloff)), 2),
                 'zero_crossing_rate': round(zero_crossing_rate, 4),
+                'spectral_bandwidth': round(spectral_bandwidth, 2),
+                'spectral_contrast_mean': spectral_contrast_mean,
+                'rms_energy': round(rms_energy, 6),
+                'onset_rate': round(onset_rate, 3),
+                'harmonic_ratio': round(harmonic_ratio, 4),
+                'percussive_ratio': round(percussive_ratio, 4),
                 'mfcc_mean': mfcc_mean,
                 'chroma_mean': chroma_mean,
                 'key_signature': key_signature,
@@ -361,7 +422,7 @@ def extract_audio_features_from_preview(audio_url: str, track_id: int) -> Option
                 'mood': mood
             }
             
-            console.log(f"✅ Extracted FULL features for track {track_id}: tempo={tempo:.1f}, energy={energy:.2f}, key={key_signature}, mood={mood}")
+            console.log(f"✅ Extracted FULL features for track {track_id}: tempo={tempo:.1f}, energy={energy:.2f}, key={key_signature}, mood={mood}, onset_rate={onset_rate:.2f}")
             return features
             
         finally:
