@@ -459,6 +459,15 @@ class OnsetDetector {
     this.isRunning = false;
     return this;
   }
+
+  /**
+   * Restart onset detection (stop then start)
+   */
+  restart() {
+    this.stop();
+    this.start();
+    return this;
+  }
   
   /**
    * Set detection threshold

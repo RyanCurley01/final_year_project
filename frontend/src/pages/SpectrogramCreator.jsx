@@ -589,10 +589,7 @@ const SpectrogramCreator = () => {
       : 0;
 
     // ── How the energy is drawn (Render spectrogram pixels) ──
-    // This loop iterates over every mathematical point of the calculated grid (Time slices X Frequency Bins).
-    // It examines the "amplitude" (0 to 1 energy value).
-    // It calls `amplitudeToRGB` to map that 0-1 brightness into a Colormap (Navy -> Red -> Yellow -> White).
-    // The canvas is painted pixel by pixel. `y is inverted` so high frequencies (top of image) are at `y=0`.
+    // This loop iterates over every "cell" of the logical matrix grid
     for (let t = 0; t < NUM_TIME_SLICES; t++) {
       for (let f = 0; f < NUM_FREQ_BINS; f++) {
         let amp;

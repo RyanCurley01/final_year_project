@@ -27,18 +27,20 @@ class GlobalAudioContext {
    * Initialize audio context and connect to audio element using captureStream
    */
   async initialize(audioElement) {
-    // If already initialized with this exact element, just ensure detector is running
+    // If already initialized with this exact element, just ensure context is resumed and detector is running
     if (this.isInitialized && this.audioElement === audioElement) {
+      this.resume();
       if (this.onsetDetector) {
         this.onsetDetector.restart();
       }
       return;
     }
 
-    // If initialized with a different element, we must cleanup first
-    // because createMediaElementSource can only be called once per element
+    // If initialized with a different element, we must cleanup audio nodes first
+    // because createMediaElementSource can only be called once per element.
+    // Preserve callbacks so components that registered before re-init still receive events.
     if (this.isInitialized && this.audioElement !== audioElement) {
-      this.cleanup();
+      this._cleanupAudioNodes();
     }
 
     try {
@@ -270,9 +272,11 @@ class GlobalAudioContext {
   }
 
   /**
-   * Cleanup resources
+   * Cleanup audio nodes only (preserves callbacks for re-initialization).
+   * Called when switching to a new audio element so existing onset/glitch
+   * listeners survive the transition.
    */
-  cleanup() {
+  _cleanupAudioNodes() {
     if (this.onsetDetector) {
       this.onsetDetector.stop();
       this.onsetDetector.disconnect();
@@ -296,6 +300,13 @@ class GlobalAudioContext {
 
     this.audioElement = null;
     this.isInitialized = false;
+  }
+
+  /**
+   * Full cleanup — tears down everything including callbacks.
+   */
+  cleanup() {
+    this._cleanupAudioNodes();
     this.onsetCallbacks = [];
     this.glitchCallbacks = [];
     this.quantumCallbacks = [];

@@ -4,7 +4,6 @@ import globalAudioContext from '../../utils/globalAudioContext';
 
 const Player = ({ activeSong, isPlaying, volume, seekTime, onEnded, onTimeUpdate, onLoadedData, repeat, playbackRate = 1 }) => {
   const ref = useRef(null);
-  const audioContextInitialized = useRef(false);
   
   // Apply playback rate to audio element AND onset detector
   useEffect(() => {
@@ -22,15 +21,12 @@ const Player = ({ activeSong, isPlaying, volume, seekTime, onEnded, onTimeUpdate
         if (playPromise !== undefined) {
           playPromise
             .then(() => {
-              // Initialize audio context ONLY on very first play ever
-              if (!audioContextInitialized.current) {
-                globalAudioContext.initialize(ref.current).catch(() => {
-                  // Could not initialize onset detection
-                });
-                audioContextInitialized.current = true;
-              } else {
-                globalAudioContext.resume();
-              }
+              // Initialize or re-initialize audio context.
+              // globalAudioContext.initialize() is idempotent for the same element
+              // and handles switching to a new element while preserving callbacks.
+              globalAudioContext.initialize(ref.current).catch(() => {
+                // Could not initialize onset detection
+              });
             })
             .catch(() => {
               // Error playing audio
