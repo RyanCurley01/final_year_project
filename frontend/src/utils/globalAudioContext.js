@@ -126,6 +126,12 @@ class GlobalAudioContext {
 
       this.onsetDetector.start();
       this.isInitialized = true;
+
+      // Ensure the context is running — browsers may create it in 'suspended' state
+      // if we're outside the direct user gesture scope (e.g. in a .then() callback).
+      if (this.audioContext.state === 'suspended') {
+        this.audioContext.resume();
+      }
     } catch (error) {
       this.cleanup();
       throw error;

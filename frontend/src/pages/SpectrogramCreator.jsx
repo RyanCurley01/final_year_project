@@ -317,9 +317,11 @@ const SpectrogramCreator = () => {
   const [brushSize, setBrushSize] = useState(3);
   const [intensity, setIntensity] = useState(0.8);
   const [duration, setDuration] = useState(DEFAULT_DURATION);
+  const [maxDuration, setMaxDuration] = useState(15); // Max for duration slider; updated to match recorded song length
   const [isPlaying, setIsPlaying] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const [isLiveMode, setIsLiveMode] = useState(false);
+  const [reversed, setReversed] = useState(false);
   const [showFormula, setShowFormula] = useState(false);
   const [playheadPos, setPlayheadPos] = useState(-1);
   const [playbackProgress, setPlaybackProgress] = useState(0); // 0-1 for seek slider
@@ -378,6 +380,7 @@ const SpectrogramCreator = () => {
   const realtimePhasesRef = useRef(null);    // Persistent phase accumulators
   const realtimeSampleRef = useRef(0);       // Sample counter for playhead
   const durationRef = useRef(DEFAULT_DURATION); // Duration ref for audio thread
+  const reversedRef = useRef(false);
   const simulationEnabledRef = useRef(false);
   const intensityRef = useRef(0.8);  // Live amplitude multiplier for audio + canvas
   const externalForceGainRef = useRef(1.0);
@@ -405,6 +408,7 @@ const SpectrogramCreator = () => {
   useEffect(() => { gridRef.current = grid; }, [grid]);
   useEffect(() => { evolvedGridRef.current = evolvedGrid; }, [evolvedGrid]);
   useEffect(() => { durationRef.current = duration; }, [duration]);
+  useEffect(() => { reversedRef.current = reversed; }, [reversed]);
   useEffect(() => { simulationEnabledRef.current = simulationEnabled; }, [simulationEnabled]);
   useEffect(() => { intensityRef.current = intensity; }, [intensity]);
   useEffect(() => { externalForceGainRef.current = externalForceGain; }, [externalForceGain]);
@@ -429,6 +433,7 @@ const SpectrogramCreator = () => {
       // Auto-set duration to match recording length
       const roundedDur = Math.min(300, Math.max(1, parseFloat(captureDuration.toFixed(1))));
       setDuration(roundedDur);
+      setMaxDuration(Math.ceil(roundedDur)); // Expand slider max to song length
 
       // Save last NUM_TIME_SLICES to grid for static canvas display
       const startIdx = Math.max(0, totalCols - NUM_TIME_SLICES);
@@ -487,44 +492,44 @@ const SpectrogramCreator = () => {
       return;
     }
 
-    // Run the full interaction simulation across all time slices
+    // Run the full interaction simulation across all time slices.
+    // Uses multi-pass spatial coupling per column (same approach as the per-frame
+    // renderer) so recorded audio data doesn't get the warmup dimming that
+    // inter-column accumulation causes on dense spectra.
     const evolved = grid.map((slice) => Float64Array.from(slice));
-    let amplitudeState = new Float64Array(NUM_FREQ_BINS);
+    const passes = Math.max(1, Math.round(couplingRadius));
 
     for (let t = 0; t < NUM_TIME_SLICES; t++) {
-      // External force = drawn pixel values * gain * intensity
-      const externalForce = new Float64Array(NUM_FREQ_BINS);
+      // Scale source data by gain and intensity
+      let state = new Float64Array(NUM_FREQ_BINS);
       for (let i = 0; i < NUM_FREQ_BINS; i++) {
-        externalForce[i] = (grid[t]?.[i] || 0) * externalForceGain * intensity;
+        state[i] = (grid[t]?.[i] || 0) * externalForceGain * intensity;
       }
 
-      // Apply the ΔMi−1 interaction step
-      const newState = new Float64Array(NUM_FREQ_BINS);
-      for (let i = 0; i < NUM_FREQ_BINS; i++) {
-        // Coupling force: Σ(j∈C{i}) Fji * (Mj − Mi)
-        let couplingForce = 0;
-        for (let r = -couplingRadius; r <= couplingRadius; r++) {
-          if (r === 0) continue;
-          const j = i + r;
-          if (j < 0 || j >= NUM_FREQ_BINS) continue;
-          const Fji = couplingStrength / Math.abs(r);
-          couplingForce += Fji * (amplitudeState[j] - amplitudeState[i]);
+      // Multi-pass spatial coupling (frequency-domain smoothing)
+      for (let p = 0; p < passes; p++) {
+        const next = new Float64Array(NUM_FREQ_BINS);
+        for (let i = 0; i < NUM_FREQ_BINS; i++) {
+          let couplingForce = 0;
+          for (let r = -couplingRadius; r <= couplingRadius; r++) {
+            if (r === 0) continue;
+            const j = i + r;
+            if (j < 0 || j >= NUM_FREQ_BINS) continue;
+            const Fji = couplingStrength / Math.abs(r);
+            couplingForce += Fji * (state[j] - state[i]);
+          }
+          next[i] = Math.max(0, Math.min(1, state[i] + (1 - dampingFactor) * couplingForce));
         }
-
-        // ΔMi = −Di * coupling + Fext
-        const delta = -dampingFactor * couplingForce + externalForce[i];
-        newState[i] = Math.max(0, Math.min(1, amplitudeState[i] + delta));
+        state = next;
       }
-
-      amplitudeState = newState;
 
       // Write evolved amplitudes back
       for (let i = 0; i < NUM_FREQ_BINS; i++) {
-        evolved[t][i] = newState[i];
+        evolved[t][i] = state[i];
       }
     }
 
-    simulationStateRef.current = amplitudeState;
+    simulationStateRef.current = null;
     setEvolvedGrid(evolved);
   }, [grid, dampingFactor, couplingStrength, couplingRadius, externalForceGain, simulationEnabled, intensity]);
 
@@ -565,9 +570,22 @@ const SpectrogramCreator = () => {
         const now = performance.now();
         if (now - lastLiveWriteTimeRef.current >= MS_PER_LIVE_COLUMN) {
           const column = new Float64Array(NUM_FREQ_BINS);
-          const binCount = Math.min(freqData.length, NUM_FREQ_BINS);
-          for (let i = 0; i < binCount; i++) {
-            column[i] = freqData[i] / 255;
+          const totalBins = freqData.length; // e.g. 1024 for fftSize=2048
+          if (totalBins <= NUM_FREQ_BINS) {
+            // 1:1 or fewer bins — copy directly
+            for (let i = 0; i < totalBins; i++) column[i] = freqData[i] / 255;
+          } else {
+            // Downsample: map full FFT range to NUM_FREQ_BINS using peak (max) binning
+            const binsPerCell = totalBins / NUM_FREQ_BINS;
+            for (let i = 0; i < NUM_FREQ_BINS; i++) {
+              const lo = Math.floor(i * binsPerCell);
+              const hi = Math.floor((i + 1) * binsPerCell);
+              let peak = 0;
+              for (let j = lo; j < hi; j++) {
+                if (freqData[j] > peak) peak = freqData[j];
+              }
+              column[i] = peak / 255;
+            }
           }
           liveColumnsRef.current.push(column);
           lastLiveWriteTimeRef.current = now;
@@ -577,16 +595,77 @@ const SpectrogramCreator = () => {
 
     // ── Determine data source (live scrolling buffer, captured playback, or static grid) ──
     const liveColumns = liveColumnsRef.current;
-    const hasLiveData = liveColumns.length > 0 && (isRecording || isLiveMode);
-    const liveStartIdx = hasLiveData ? Math.max(0, liveColumns.length - NUM_TIME_SLICES) : 0;
 
-    // Captured recording playback — scroll through ALL captured columns as audio plays
+    // Captured recording playback — scroll through ALL captured columns as audio plays.
+    // Check this FIRST: when the spectrum is being played back, the captured recording
+    // takes priority so the user sees (and can simulate) the recording they just made,
+    // even if new live data is also arriving from an ongoing song.
     const captured = capturedRecordingRef.current;
     const pbCol = playbackColumnRef.current;
     const isCapturedPlayback = captured && captured.columns.length > NUM_TIME_SLICES && pbCol >= 0;
     const capturedViewStart = isCapturedPlayback
       ? Math.max(0, Math.min(pbCol - Math.floor(NUM_TIME_SLICES * 0.8), captured.columns.length - NUM_TIME_SLICES))
       : 0;
+
+    // Live scrolling waterfall — only when NOT doing captured playback.
+    // This keeps the waterfall visible during brief pauses or audio glitches.
+    const hasLiveData = !isCapturedPlayback && liveColumns.length > 0 && (isRecording || isLiveMode);
+    const liveStartIdx = hasLiveData ? Math.max(0, liveColumns.length - NUM_TIME_SLICES) : 0;
+
+    // ── Apply ΔMi−1 physics simulation to live/captured columns ──
+    // Uses multi-pass spatial coupling: each column is processed independently
+    // (no inter-column accumulation) so there is no warmup dimming on dense
+    // audio data. Multiple passes of neighbour-coupling are applied to spread
+    // energy between frequency bins — the more passes, the wider the spread.
+    let simulatedColumns = null;
+    if (simulationEnabledRef.current && (hasLiveData || isCapturedPlayback)) {
+      const sourceColumns = hasLiveData ? liveColumns : captured.columns;
+      const viewStart = hasLiveData ? liveStartIdx : capturedViewStart;
+      const viewCount = NUM_TIME_SLICES;
+      const isReversed = reversedRef.current;
+      simulatedColumns = new Array(viewCount);
+      const damp = dampingFactorRef.current;
+      const coupling = couplingStrengthRef.current;
+      const radius = couplingRadiusRef.current;
+      const extGain = externalForceGainRef.current;
+      const liveInt = intensityRef.current;
+      // Number of spatial smoothing passes — more passes = wider spread
+      const passes = Math.max(1, Math.round(radius));
+
+      for (let col = 0; col < viewCount; col++) {
+        const outIdx = isReversed ? (viewCount - 1 - col) : col;
+        const srcIdx = viewStart + outIdx;
+        const srcCol = sourceColumns[srcIdx];
+        if (!srcCol) {
+          simulatedColumns[outIdx] = new Float64Array(NUM_FREQ_BINS);
+          continue;
+        }
+
+        // Start with scaled source data
+        let state = new Float64Array(NUM_FREQ_BINS);
+        for (let i = 0; i < NUM_FREQ_BINS; i++) {
+          state[i] = (srcCol[i] || 0) * extGain * liveInt;
+        }
+
+        // Apply spatial coupling passes (frequency-domain smoothing)
+        for (let p = 0; p < passes; p++) {
+          const next = new Float64Array(NUM_FREQ_BINS);
+          for (let i = 0; i < NUM_FREQ_BINS; i++) {
+            let coupForce = 0;
+            for (let r = -radius; r <= radius; r++) {
+              if (r === 0) continue;
+              const j = i + r;
+              if (j < 0 || j >= NUM_FREQ_BINS) continue;
+              coupForce += (coupling / Math.abs(r)) * (state[j] - state[i]);
+            }
+            // Damping controls how strongly the coupling modifies amplitudes
+            next[i] = Math.max(0, Math.min(1, state[i] + (1 - damp) * coupForce));
+          }
+          state = next;
+        }
+        simulatedColumns[outIdx] = state;
+      }
+    }
 
     // ── How the energy is drawn (Render spectrogram pixels) ──
     // This loop iterates over every "cell" of the logical matrix grid
@@ -595,13 +674,21 @@ const SpectrogramCreator = () => {
         let amp;
 
         if (hasLiveData) {
-          // Render from continuously accumulated live columns (scrolling waterfall)
-          const dataIdx = liveStartIdx + t;
-          amp = dataIdx < liveColumns.length ? liveColumns[dataIdx][f] : 0;
+          if (simulatedColumns) {
+            amp = t < simulatedColumns.length ? simulatedColumns[t][f] : 0;
+          } else {
+            // Render from continuously accumulated live columns (scrolling waterfall)
+            const dataIdx = liveStartIdx + t;
+            amp = dataIdx < liveColumns.length ? liveColumns[dataIdx][f] : 0;
+          }
         } else if (isCapturedPlayback) {
-          // Scroll through full captured recording during playback
-          const dataIdx = capturedViewStart + t;
-          amp = dataIdx < captured.columns.length ? captured.columns[dataIdx][f] : 0;
+          if (simulatedColumns) {
+            amp = t < simulatedColumns.length ? simulatedColumns[t][f] : 0;
+          } else {
+            // Scroll through full captured recording during playback
+            const dataIdx = capturedViewStart + t;
+            amp = dataIdx < captured.columns.length ? captured.columns[dataIdx][f] : 0;
+          }
         } else {
           // Normal grid render
           const rawAmp = displayGrid[t]?.[f] || 0;
@@ -698,8 +785,13 @@ const SpectrogramCreator = () => {
     const h = canvas.height;
     const cellH = h / NUM_FREQ_BINS;
 
-    // Draw playhead
-    if (playheadPos >= 0 && playheadPos < NUM_TIME_SLICES) {
+    // Draw playhead — only for static grid playback.
+    // During captured playback the canvas layer already draws its own scrolling
+    // playhead, so we skip the overlay one to avoid a duplicate cursor.
+    const hasCapturedPlayback = capturedRecordingRef.current
+      && capturedRecordingRef.current.columns.length > NUM_TIME_SLICES
+      && playbackColumnRef.current >= 0;
+    if (!hasCapturedPlayback && playheadPos >= 0 && playheadPos < NUM_TIME_SLICES) {
       const x = (playheadPos / NUM_TIME_SLICES) * w;
       ctx.strokeStyle = 'rgba(0, 255, 150, 0.9)';
       ctx.lineWidth = 2;
@@ -778,8 +870,6 @@ const SpectrogramCreator = () => {
 
   // ── Paint on grid ──
   const paintOnGrid = useCallback((t, f) => {
-    // User is drawing manually — discard any captured recording so playback uses the grid
-    capturedRecordingRef.current = null;
     setGrid((prev) => {
       const next = prev.map((slice) => Float64Array.from(slice));
       const halfBrush = Math.floor(brushSize / 2);
@@ -955,6 +1045,9 @@ const SpectrogramCreator = () => {
       return;
     }
 
+    // Auto-enable physics simulation whenever spectrum playback starts
+    setSimulationEnabled(true);
+
     const synth = synthRef.current;
     if (!synth) return;
     const ctx = synth.audioContext;
@@ -1019,8 +1112,9 @@ const SpectrogramCreator = () => {
         if (posInSlice < fadeSamples) envelope = posInSlice / fadeSamples;
         else if (posInSlice > sliceLen - fadeSamples) envelope = (sliceLen - posInSlice) / fadeSamples;
 
-        // Read the frequency data for this time slice
-        const sliceData = useCaptured ? capturedColumns[t] : (currentGrid?.[t] || null);
+        // Read the frequency data for this time slice (reverse index when reversed)
+        const sliceIdx = (useCaptured && reversedRef.current) ? (numSlices - 1 - t) : t;
+        const sliceData = useCaptured ? capturedColumns[sliceIdx] : (currentGrid?.[t] || null);
 
         // Additive synthesis — sum all active frequency bins
         let sample = 0;
@@ -1028,31 +1122,41 @@ const SpectrogramCreator = () => {
         const liveForceGain = externalForceGainRef.current;
         const liveDamping = dampingFactorRef.current;
         const liveCoupling = couplingStrengthRef.current;
-        const liveRadius = couplingRadiusRef.current;
+        const liveRadius = Math.round(couplingRadiusRef.current);
+        const simOn = simulationEnabledRef.current;
 
-        // Read raw amplitudes and apply coupling (frequency-neighbour smoothing)
+        // Read raw amplitudes scaled by intensity and gain
         const amps = new Float64Array(NUM_FREQ_BINS);
         for (let i = 0; i < NUM_FREQ_BINS; i++) {
           amps[i] = (sliceData?.[i] || 0) * liveIntensity * liveForceGain;
         }
-        // Coupling pass: blend each bin with its neighbours
-        if (liveCoupling > 0.001) {
-          const blended = new Float64Array(NUM_FREQ_BINS);
-          for (let i = 0; i < NUM_FREQ_BINS; i++) {
-            let sum = amps[i];
-            let weight = 1;
-            for (let r = 1; r <= liveRadius; r++) {
-              const w = liveCoupling / r;
-              if (i - r >= 0) { sum += amps[i - r] * w; weight += w; }
-              if (i + r < NUM_FREQ_BINS) { sum += amps[i + r] * w; weight += w; }
+
+        // When simulation is ON, apply multi-pass spatial coupling (same
+        // algorithm as the visual renderer) so the audio is audibly different.
+        // When OFF, skip coupling entirely — raw amplitudes go straight to
+        // synthesis so the user hears a clear before/after distinction.
+        if (simOn && liveCoupling > 0.001) {
+          const passes = Math.max(1, liveRadius);
+          let state = amps;
+          for (let p = 0; p < passes; p++) {
+            const next = new Float64Array(NUM_FREQ_BINS);
+            for (let i = 0; i < NUM_FREQ_BINS; i++) {
+              let coupForce = 0;
+              for (let r = -liveRadius; r <= liveRadius; r++) {
+                if (r === 0) continue;
+                const j = i + r;
+                if (j < 0 || j >= NUM_FREQ_BINS) continue;
+                coupForce += (liveCoupling / Math.abs(r)) * (state[j] - state[i]);
+              }
+              next[i] = Math.max(0, Math.min(1, state[i] + (1 - liveDamping) * coupForce));
             }
-            blended[i] = sum / weight;
+            state = next;
           }
-          for (let i = 0; i < NUM_FREQ_BINS; i++) amps[i] = blended[i];
+          for (let i = 0; i < NUM_FREQ_BINS; i++) amps[i] = state[i];
         }
 
         for (let i = 0; i < NUM_FREQ_BINS; i++) {
-          const amp = amps[i] * (1 - liveDamping);
+          const amp = simOn ? amps[i] : amps[i] * (1 - liveDamping);
           if (amp < 0.001) {
             phases[i] += angularVelocities[i]; // keep phase moving
             continue;
@@ -1361,6 +1465,11 @@ const SpectrogramCreator = () => {
 
   // ── Load preset ──
   const handlePreset = useCallback((presetName) => {
+    // Stop any in-progress spectrum playback and reset captured recording
+    handleStop();
+    capturedRecordingRef.current = null;
+    liveColumnsRef.current = [];
+
     if (presetName === 'Face Capture') {
       startWebcam();
       return;
@@ -1382,16 +1491,17 @@ const SpectrogramCreator = () => {
     }
     const newGrid = generatePreset(presetName, synthRef.current);
     setGrid(newGrid);
-    capturedRecordingRef.current = null;
-  }, [startWebcam, loadSavedFace, loadImagePreset]);
+  }, [handleStop, startWebcam, loadSavedFace, loadImagePreset]);
 
   // ── Clear canvas ──
   const handleClear = useCallback(() => {
+    handleStop();
     setGrid(SpectrogramSynth.createBlankGrid(NUM_TIME_SLICES, NUM_FREQ_BINS));
     liveColumnsRef.current = []; // Also clear live capture
     capturedRecordingRef.current = null; // Discard captured recording
     setDuration(DEFAULT_DURATION); // Reset duration to default only on explicit clear
-  }, []);
+    setMaxDuration(15); // Reset slider max on clear
+  }, [handleStop]);
 
   // ─── Render ────────────────────────────────────────────────────────────────
 
@@ -1502,19 +1612,19 @@ const SpectrogramCreator = () => {
           <span className="text-xs text-white w-6">{Math.round(intensity * 100)}%</span>
         </div>
 
-        {/* Duration */}
+        {/* Duration slider */}
         <div className="flex items-center gap-2 bg-[#1a1640]/60 rounded-lg px-3 py-1">
           <span className="text-xs text-gray-400">Duration</span>
           <input
             type="range"
             min="1"
-            max={Math.max(15, Math.ceil(duration))}
+            max={maxDuration}
             step="0.5"
             value={duration}
             onChange={(e) => setDuration(parseFloat(e.target.value))}
-            className="w-16 accent-cyan-500"
+            className="w-20 accent-cyan-500"
           />
-          <span className="text-xs text-white w-8">{duration}s</span>
+          <span className="text-xs text-white w-10">{duration.toFixed(1)}s</span>
         </div>
 
         {/* Live mode toggle */}
