@@ -2,7 +2,7 @@
  * Onset Detection for Music Signals
  * Based on "A Tutorial on Onset Detection in Music Signals" 
  * Implements High-Frequency Content (HFC) method for percussive onset detection
- * Also includes tracker-style glitch detection (tape stop, stutters, gates)
+ * Also includes spectral anomaly detection for glitch effects
  */
 
 class OnsetDetector {
@@ -11,10 +11,7 @@ class OnsetDetector {
 
     // 1. Number of audio samples to analyze at once - MUST be set before creating analyser
     this.fftSize = options.fftSize || 512;
-    this.hopSize = options.hopSize || 128;
     this.threshold = options.threshold || 0.5;  // For general onset (normalized values ~0-1)
-    this.glitchThreshold = options.glitchThreshold || 0.9; // Threshold for glitch detection
-    this.sampleRate = audioContext.sampleRate;
     this.playbackRate = options.playbackRate || 1.0; // Playback speed multiplier
 
     // 2. Create analyzer to break down audio into different frequencies
@@ -29,14 +26,15 @@ class OnsetDetector {
     this.frequencyData = new Uint8Array(this.analyser.frequencyBinCount);
     this.previousSpectrum = new Uint8Array(this.analyser.frequencyBinCount);
     this.previousOnsetFunction = 0;
-    this.sampleRate = audioContext.sampleRate;
 
-    // To store glitch effect detection patterns
-    this.spectralCentroidHistory = []; // Track pitch/centroid changes for tape stop
-    this.energyHistory = []; // Track energy for gates/stutters
-    this.spectralFlatnessHistory = []; // Track tonality — low = melody, high = noise/percussion
-    this.historySize = 20 // Longer history for more accurate detection
-
+    // Spectral anomaly detection — replaces pattern-matching with statistical outlier detection.
+    // Tracks running statistics of spectral flux and centroid. When the current frame
+    // deviates significantly from the recent mean (measured in standard deviations),
+    // it's flagged as a glitch. This catches any type of glitch effect.
+    this.fluxHistory = [];           // Recent spectral flux values
+    this.centroidHistory = [];       // Recent spectral centroid values
+    this.anomalyHistorySize = 60;    // ~1 second at 60fps — long enough to build stable statistics
+    this.anomalyThreshold = options.anomalyThreshold || 2.5; // Standard deviations above mean to trigger
     this.lastGlitchTime = 0;
     
     // Onset detection state
@@ -46,7 +44,7 @@ class OnsetDetector {
     this.lastOnsetTime = 0;
     this.baseMinTimeBetweenOnsets = options.minTimeBetweenOnsets || 100; // Base time between detections (ms)
     this.minTimeBetweenOnsets = this.baseMinTimeBetweenOnsets; // Adjusted by playback rate
-    this.minTimeBetweenGlitches = options.minTimeBetweenGlitches || 1000; // Much longer gap - glitches are rare events
+    this.minTimeBetweenGlitches = options.minTimeBetweenGlitches || 3500; // Much longer gap - glitches are rare events
     
     // Previous values for peak detection
     this.previousKickScore = 0;
@@ -59,14 +57,12 @@ class OnsetDetector {
   
   /**
    * Set playback rate - adjusts detection timing
-   * Slower playback = slower detection, faster playback = faster detection
+   * The audio element's time-stretching already spaces transients proportionally,
+   * so onset detection naturally slows down with slower playback. We keep the
+   * debounce interval at the base value — no additional scaling needed.
    */
   setPlaybackRate(rate) {
     this.playbackRate = rate || 1.0;
-    // Adjust minTimeBetweenOnsets based on playback rate
-    // At 0.5x speed, wait 2x longer between detections
-    // At 2.0x speed, wait 0.5x as long
-    this.minTimeBetweenOnsets = this.baseMinTimeBetweenOnsets / this.playbackRate;
     return this;
   }
   
@@ -220,138 +216,56 @@ class OnsetDetector {
   }
   
   /**
-   * Detect tape stop effect - rapid decrease in spectral centroid (pitch dropping)
-   * Like when a record/tape is slowing down - VERY strict detection
+   * Detect spectral anomaly — any abnormal departure from the signal's own recent behaviour.
+   * Instead of pattern-matching specific glitch types, this uses statistical outlier detection:
+   *  1. Track running mean and standard deviation of spectral flux and centroid
+   *  2. When either metric exceeds mean + N×stdDev, flag as anomaly
+   * This catches tape stops, stutters, gates, bitcrushing, ring mod, granular glitches,
+   * and any other effect that disrupts the spectrum — without needing a specific detector for each.
+   *
+   * @param {number} flux - Current frame's spectral flux
+   * @param {number} centroid - Current frame's spectral centroid
+   * @returns {{ detected: boolean, strength: number }}
    */
-  detectTapeStop() {
-    if (this.spectralCentroidHistory.length < this.historySize) return false;
-    
-    // Get recent centroid values
-    const recent = this.spectralCentroidHistory.slice(-this.historySize);
-    
-    // Tape stop requires CONTINUOUS pitch drop over many frames
-    // Normal melodies go up and down, tape stop only goes down
-    let consecutiveDrops = 0;
-    let totalDrop = 0;
-    let maxConsecutiveDrops = 0;
-    
-    for (let i = 1; i < recent.length; i++) {
-      const drop = recent[i - 1] - recent[i];
-      if (drop > 0.3) { // Pitch is dropping
-        consecutiveDrops++;
-        totalDrop += drop;
-        maxConsecutiveDrops = Math.max(maxConsecutiveDrops, consecutiveDrops);
-      } else {
-        consecutiveDrops = 0; // Reset if pitch goes up or stays same
-      }
-    }
-    
-    return maxConsecutiveDrops >= 6 && totalDrop > 8;
-  }
-  
-  /**
-   * Detect stutter/retrigger effect - extremely rapid repeated transients
-   * Only triggers on abnormally fast retriggering (faster than any normal rhythm)
-   */
-  detectStutter() {
-    if (this.energyHistory.length < this.historySize) return false;
-    
-    const recent = this.energyHistory.slice(-this.historySize);
-    
-    // Look for EXTREME oscillation - energy must swing dramatically every single frame
-    // This is faster than any normal kick pattern
-    let extremeOscillations = 0;
-    let previousDirection = 0;
-    
-    for (let i = 1; i < recent.length; i++) {
-      const diff = recent[i] - recent[i - 1];
-      // Require meaningful energy swings (not just noise)
-      const currentDirection = diff > 0.15 ? 1 : (diff < -0.15 ? -1 : 0);
-      
-      // Count rapid direction changes with significant magnitude
-      if (currentDirection !== 0 && currentDirection !== previousDirection && previousDirection !== 0) {
-        extremeOscillations++;
-      }
-      if (currentDirection !== 0) {
-        previousDirection = currentDirection;
-      }
-    }
-    
-    return extremeOscillations >= 6;
-  }
-  
-  /**
-   * Detect gate/chop effect - multiple rapid silence gaps in quick succession
-   * Only triggers on clearly artificial gating patterns
-   */
-  detectGate() {
-    if (this.energyHistory.length < this.historySize) return false;
-    
-    const recent = this.energyHistory.slice(-this.historySize);
-    
-    // Look for multiple short silence gaps (near-zero energy)
-    // This pattern is clearly artificial, not natural rhythm
-    let gateCount = 0;
-    let nearSilenceCount = 0;
-    
-    for (let i = 2; i < recent.length; i++) {
-      const beforeGate = recent[i - 2] > 0.1;
-      const gatePoint = recent[i - 1] < 0.05; // Near silence
-      const afterGate = recent[i] > 0.1;
-      
-      if (beforeGate && gatePoint && afterGate) {
-        gateCount++;
-      }
-      
-      // Count near-silence frames
-      if (recent[i] < 0.05) {
-        nearSilenceCount++;
-      }
-    }
-    
-    return gateCount >= 3 && nearSilenceCount >= 3;
-  }
-  
-  /**
-   * Detect tracker-style glitch effects (Aphex Twin style)
-   * Looks for tape stop, stutters, and gates
-   */
-  detectTrackerGlitch() {
+  detectSpectralAnomaly(flux, centroid) {
     const now = Date.now();
     
-    // Check if enough time has passed since last glitch
+    // Rate-limit glitch events
     if (now - this.lastGlitchTime < this.minTimeBetweenGlitches) {
-      return { detected: false, type: null };
+      return { detected: false, strength: 0 };
     }
     
-    // Reject if recent audio is predominantly tonal (acid melodies, basslines).
-    // Glitch effects operate on broadband/mixed signals — not isolated melodic content.
-    if (this.spectralFlatnessHistory.length >= 5) {
-      const recentFlatness = this.spectralFlatnessHistory.slice(-5);
-      const avgFlatness = recentFlatness.reduce((a, b) => a + b, 0) / recentFlatness.length;
-      // Flatness < 0.25 means strongly harmonic/tonal → skip glitch detection
-      if (avgFlatness < 0.25) {
-        return { detected: false, type: null };
-      }
+    // Need enough history to compute meaningful statistics
+    if (this.fluxHistory.length < 30) {
+      return { detected: false, strength: 0 };
     }
     
-    // Check for each glitch type
-    if (this.detectTapeStop()) {
+    // ---- Compute running mean and standard deviation for flux ----
+    const fluxMean = this.fluxHistory.reduce((a, b) => a + b, 0) / this.fluxHistory.length;
+    const fluxVariance = this.fluxHistory.reduce((sum, v) => sum + (v - fluxMean) ** 2, 0) / this.fluxHistory.length;
+    const fluxStdDev = Math.sqrt(fluxVariance);
+    
+    // ---- Compute running mean and standard deviation for centroid ----
+    const centroidMean = this.centroidHistory.reduce((a, b) => a + b, 0) / this.centroidHistory.length;
+    const centroidVariance = this.centroidHistory.reduce((sum, v) => sum + (v - centroidMean) ** 2, 0) / this.centroidHistory.length;
+    const centroidStdDev = Math.sqrt(centroidVariance);
+    
+    // ---- Calculate how many standard deviations the current frame is from the mean ----
+    // Flux anomaly: sudden spectral change (bitcrush, stutter, gate, granular, etc.)
+    const fluxZScore = fluxStdDev > 0.001 ? (flux - fluxMean) / fluxStdDev : 0;
+    // Centroid anomaly: sudden brightness shift (tape stop, pitch shift, ring mod, etc.)
+    // Use absolute difference — centroid can jump up OR down during a glitch
+    const centroidZScore = centroidStdDev > 0.001 ? Math.abs(centroid - centroidMean) / centroidStdDev : 0;
+    
+    // Combined anomaly: either metric spiking is enough, take the stronger signal
+    const anomalyScore = Math.max(fluxZScore, centroidZScore);
+    
+    if (anomalyScore > this.anomalyThreshold) {
       this.lastGlitchTime = now;
-      return { detected: true, type: 'tapestop' };
+      return { detected: true, strength: anomalyScore };
     }
     
-    if (this.detectStutter()) {
-      this.lastGlitchTime = now;
-      return { detected: true, type: 'stutter' };
-    }
-    
-    if (this.detectGate()) {
-      this.lastGlitchTime = now;
-      return { detected: true, type: 'gate' };
-    }
-    
-    return { detected: false, type: null };
+    return { detected: false, strength: anomalyScore };
   }
   
   /**
@@ -386,41 +300,14 @@ class OnsetDetector {
     // Get frequency data as bytes (0-255)
     this.analyser.getByteFrequencyData(this.frequencyData);
     
-    // Always compute spectral centroid, energy, and flatness so silent/tonal frames
-    // are recorded in the history — glitch detection relies on the full picture.
+    // Compute spectral features for this frame
     const spectralCentroid = this.calculateSpectralCentroid(this.frequencyData);
     const energy = this.calculateEnergy(this.frequencyData);
     const spectralFlatness = this.calculateSpectralFlatness(this.frequencyData);
     
-    // ============ UPDATE HISTORY FOR GLITCH DETECTION ============
-    this.spectralCentroidHistory.push(spectralCentroid);
-    this.energyHistory.push(energy);
-    this.spectralFlatnessHistory.push(spectralFlatness);
-    
-    // Sliding window - keep only recent frames
-    if (this.spectralCentroidHistory.length > this.historySize) {
-      this.spectralCentroidHistory.shift();
-    }
-    if (this.energyHistory.length > this.historySize) {
-      this.energyHistory.shift();
-    }
-    if (this.spectralFlatnessHistory.length > this.historySize) {
-      this.spectralFlatnessHistory.shift();
-    }
-    
     // Skip onset detection if we have no audio data (all zeros)
     const hasAudio = this.frequencyData.some(v => v > 0);
     if (!hasAudio) {
-      // Still check for glitches (gate detection needs silent frames)
-      const glitchResult = this.detectTrackerGlitch();
-      if (glitchResult.detected) {
-        this.glitchCallbacks.forEach(cb => cb({
-          time: this.audioContext.currentTime,
-          type: glitchResult.type,
-          spectralCentroid,
-          energy
-        }));
-      }
       this.previousSpectrum.set(this.frequencyData);
       requestAnimationFrame(() => this.processFrame());
       return;
@@ -437,28 +324,46 @@ class OnsetDetector {
     // 3. Spectral Flux - measures CHANGE in spectrum (good for any transient)
     const flux = this.calculateSpectralFlux(this.frequencyData, this.previousSpectrum);
     
+    // ============ UPDATE ANOMALY HISTORY ============
+    this.fluxHistory.push(flux);
+    this.centroidHistory.push(spectralCentroid);
+    if (this.fluxHistory.length > this.anomalyHistorySize) {
+      this.fluxHistory.shift();
+    }
+    if (this.centroidHistory.length > this.anomalyHistorySize) {
+      this.centroidHistory.shift();
+    }
+    
     // ============ NORMALIZE VALUES ============
     const normalizedLFC = lfc / 200;   // Narrower band → lower max, adjust divisor
     const normalizedHFC = hfc / 10000;
     const normalizedFlux = flux / 10;
-    const now = Date.now();
     
     // ============ PERCUSSIVENESS DETECTION ============
-    // spectralFlatness already computed above for history tracking
     
     // Energy ratio: how sharply energy spikes above recent average
     // Drums produce sharp transients (ratio >> 1), sustained notes stay near 1
-    const recentHistory = this.energyHistory.slice(-4, -1); // Previous 3 frames (exclude current)
-    const avgEnergy = recentHistory.length > 0
-      ? recentHistory.reduce((a, b) => a + b, 0) / recentHistory.length
-      : energy;
-    const energyRatio = avgEnergy > 0.001 ? energy / avgEnergy : 1.0;
+    const recentEnergy = this.fluxHistory.slice(-4, -1); // Approximate from recent flux
+    const avgEnergy = recentEnergy.length > 0
+      ? recentEnergy.reduce((a, b) => a + b, 0) / recentEnergy.length
+      : flux;
+    const energyRatio = avgEnergy > 0.001 ? flux / avgEnergy : 1.0;
     
     // Percussiveness: combines flatness (is it noise-like?) with transient sharpness (is it a spike?)
     // Both must be high for the sound to be classified as percussive
-    const flatnessFactor = Math.min(spectralFlatness * 2.5, 1.0);  // 0.4+ flatness → full score
-    const transientFactor = Math.min(energyRatio / 2.5, 1.0);     // 2.5x+ spike → full score
+    const flatnessFactor = Math.min(spectralFlatness * 2.0, 1.0);  // 0.5+ flatness → full score
+    const transientFactor = Math.min(energyRatio / 3.0, 1.0);     // 3.0x+ spike → full score
     const percussiveness = flatnessFactor * transientFactor;
+    
+    // ============ TONAL SUPPRESSION GATE ============
+    // Bass lines and acid patterns are highly tonal (spectral flatness < 0.15).
+    // Drums are broadband/noise-like (flatness > 0.25).
+    // Smoothly suppress onsets based on tonality so bass/acid never triggers,
+    // but a drum hit on top of a sustaining bass note still can.
+    //   flatness 0.00-0.10 → full suppression (pure bass/acid)
+    //   flatness 0.10-0.25 → partial suppression (mixed or borderline)
+    //   flatness 0.25+     → no suppression (percussive/noise)
+    const tonalGate = Math.min(Math.max((spectralFlatness - 0.10) / 0.15, 0), 1);
     
     // ============ CLASSIFY DRUM TYPE ============
     // Percussiveness gates the classification — tonal sounds get suppressed
@@ -469,15 +374,18 @@ class OnsetDetector {
     const isKick = kickScore > this.previousKickScore && kickScore > this.kickThreshold;
     const isSnare = snareScore > this.previousSnareScore && snareScore > this.snareThreshold;
     
-    // ============ GENERAL ONSET (ALL FUNCTIONS COMBINED) ============
-    // Flux and percussiveness weighted heavily — they best distinguish drums from melodies
-    const onsetFunction = (0.2 * normalizedLFC) + (0.15 * normalizedHFC) + (0.35 * normalizedFlux) + (0.3 * percussiveness);
+    // ============ GENERAL ONSET (DRUMS ONLY) ============
+    // Only fire onset callback when a drum hit (kick or snare) is positively identified.
+    // Raw onset strength gated by tonal suppression AND drum classification —
+    // unclassified transients ('unknown') are silently discarded.
+    const rawOnset = (0.2 * normalizedLFC) + (0.15 * normalizedHFC) + (0.35 * normalizedFlux) + (0.3 * percussiveness);
+    const onsetFunction = rawOnset * tonalGate;
     
-    if (this.detectOnset(onsetFunction)) {
+    if (this.detectOnset(onsetFunction) && (isKick || isSnare)) {
       this.onsetCallbacks.forEach(cb => cb({
         time: this.audioContext.currentTime,
         strength: onsetFunction,
-        type: isKick ? 'kick' : (isSnare ? 'snare' : 'unknown'),
+        type: isKick ? 'kick' : 'snare',
         lfc: normalizedLFC,
         hfc: normalizedHFC,
         flux: normalizedFlux,
@@ -486,18 +394,13 @@ class OnsetDetector {
       }));
     }
     
-    // Detect tracker-style glitch effects (tape stop, stutter, gate)
-    const glitchResult = this.detectTrackerGlitch();
-    if (glitchResult.detected) {
-      /* Loop through all glitch callback functions
-         cb(...) - Call each callback with:
-         time: Exact moment the glitch occurred (in seconds)
-         type: Type of glitch detected (tapestop, stutter, gate)
-         spectralCentroid: Current spectral centroid value
-         energy: Current energy value */
+    // ============ SPECTRAL ANOMALY DETECTION (GLITCH) ============
+    const anomalyResult = this.detectSpectralAnomaly(flux, spectralCentroid);
+    if (anomalyResult.detected) {
       this.glitchCallbacks.forEach(cb => cb({
         time: this.audioContext.currentTime,
-        type: glitchResult.type,
+        type: 'anomaly',
+        strength: anomalyResult.strength,
         spectralCentroid,
         energy
       }));
@@ -551,14 +454,6 @@ class OnsetDetector {
   }
   
   /**
-   * Set glitch detection threshold
-   */
-  setGlitchThreshold(threshold) {
-    this.glitchThreshold = threshold;
-    return this;
-  }
-  
-  /**
    * Disconnect and cleanup
    */
   disconnect() {
@@ -566,9 +461,8 @@ class OnsetDetector {
     this.analyser.disconnect();
     this.onsetCallbacks = [];
     this.glitchCallbacks = [];
-    this.spectralCentroidHistory = [];
-    this.energyHistory = [];
-    this.spectralFlatnessHistory = [];
+    this.fluxHistory = [];
+    this.centroidHistory = [];
   }
 }
 

@@ -8,6 +8,9 @@ const Player = ({ activeSong, isPlaying, volume, seekTime, onEnded, onTimeUpdate
   // Apply playback rate to audio element AND onset detector
   useEffect(() => {
     if (ref.current) {
+      // Preserve pitch when changing speed — time-stretch without altering tonality
+      ref.current.preservesPitch = true;
+      ref.current.webkitPreservesPitch = true; // Safari fallback
       ref.current.playbackRate = playbackRate;
     }
     // Sync playback rate with onset detector so detection timing matches audio speed

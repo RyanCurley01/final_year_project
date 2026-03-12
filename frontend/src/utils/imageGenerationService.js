@@ -671,6 +671,19 @@ class MCPImageOrchestrator {
   }
 
   /**
+   * Get pool loading status for a song (used by UI loading indicators).
+   * @param {string|number} songId
+   * @returns {{ loading: boolean, imageCount: number }}
+   */
+  getPoolStatus(songId) {
+    const pool = this.poolManager.getPool(songId);
+    return {
+      loading: pool.loading,
+      imageCount: pool.images.length,
+    };
+  }
+
+  /**
    * Activate a song for onset-driven playback.
    * Sets the shared image state and notifies all subscribers.
    * Should ONLY be called by the active/playing song's component.
@@ -712,7 +725,7 @@ class MCPImageOrchestrator {
       || (this.currentSongContext?.id || this.currentSongContext?.title);
 
     if (!songId) {
-      return this.proceduralGenerator.generate(onsetData);
+      return null;
     }
 
     // Try API-sourced image from pool
@@ -724,12 +737,7 @@ class MCPImageOrchestrator {
       if (ctx) this._backgroundRefill(ctx);
     }
 
-    if (poolImage) {
-      return poolImage;
-    }
-
-    // Fallback: procedural generation
-    return this.proceduralGenerator.generate(onsetData);
+    return poolImage || null;
   }
 
   /**
@@ -818,19 +826,7 @@ class MCPImageOrchestrator {
     } catch (error) {
       console.warn(`[ImageGen] API fetch failed for "${songContext.title}":`, error.message);
       this._updateProviderStatus('loremflickr', false, error.message);
-
-      // Generate procedural fallback images and add to pool
-      const proceduralImages = [];
-      for (let i = 0; i < 15; i++) {
-        proceduralImages.push(this.proceduralGenerator.generate({
-          energy: Math.random(),
-          lfc: Math.random(),
-          hfc: Math.random(),
-          spectralCentroid: Math.random(),
-          type: ['kick', 'snare', 'unknown'][Math.floor(Math.random() * 3)],
-        }));
-      }
-      this.poolManager.addImages(songId, proceduralImages);
+      // Pool stays empty — UI will show loading overlay
     } finally {
       pool.loading = false;
       pool._loadPromise = null;
@@ -848,20 +844,8 @@ class MCPImageOrchestrator {
     // Rate limit background refills
     if (Date.now() - this.lastFetchTime < this.minFetchInterval) return;
 
-    // Don't refill if providers are down
+    // Don't refill if providers are down — pool stays empty, UI shows loading overlay
     if (!this.providerStatus.loremflickr.available && this.providerStatus.loremflickr.errorCount > 3) {
-      // Just add more procedural images
-      const songId = songContext.id || songContext.title;
-      const proceduralImages = [];
-      for (let i = 0; i < 10; i++) {
-        proceduralImages.push(this.proceduralGenerator.generate({
-          energy: Math.random(),
-          lfc: Math.random(),
-          hfc: Math.random(),
-          spectralCentroid: Math.random(),
-        }));
-      }
-      this.poolManager.addImages(songId, proceduralImages);
       return;
     }
 

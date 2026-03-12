@@ -103,6 +103,28 @@ export function glitchBlurFilter() {
 }
 
 /**
+ * Generate a posterization/low-bit-depth CSS filter that makes the image
+ * look pixelated and crunchy — like a low-resolution retro display.
+ * Extreme contrast collapses smooth gradients into hard colour bands,
+ * and crushed saturation gives a reduced-palette / 8-bit feel.
+ *
+ * @returns {{ filter: string, imageRendering: string }}
+ */
+export function glitchDistortFilter() {
+  // Extreme contrast → posterization (smooth gradients collapse into flat bands)
+  const contrast = 300 + Math.random() * 200; // 300-500%
+  // Crushed saturation → reduced colour palette (retro / low-bit feel)
+  const saturate = 15 + Math.random() * 35;   // 15-50%
+  // Slight brightness jitter
+  const brightness = 80 + Math.random() * 40; // 80-120%
+
+  return {
+    filter: `contrast(${contrast}%) saturate(${saturate}%) brightness(${brightness}%)`,
+    imageRendering: 'pixelated',
+  };
+}
+
+/**
  * Build inline style object for a glitching element (img or canvas).
  * Combines shake transform + CSS filter + hard transition.
  *
@@ -114,13 +136,51 @@ export function glitchStyle(isGlitching) {
     return {
       transform: 'none',
       filter: 'none',
+      imageRendering: 'auto',
       transition: 'transform 0.1s ease-out, filter 0.1s ease-out',
     };
   }
 
-  return {
-    transform: glitchShakeTransform(),
-    filter: glitchCSSFilter(),
-    transition: 'none', // Instantaneous snap — matches AudioReactiveVideo
-  };
+  // Randomly pick a glitch effect — individual or all combined
+  const roll = Math.random();
+  if (roll < 0.25) {
+    // Full CSS glitch only (hue-rotate + saturate + brightness + contrast + blur)
+    return {
+      transform: glitchShakeTransform(),
+      filter: glitchCSSFilter(),
+      imageRendering: 'auto',
+      transition: 'none',
+    };
+  } else if (roll < 0.45) {
+    // Pixelated / low-bit distortion only
+    const distort = glitchDistortFilter();
+    return {
+      transform: glitchShakeTransform(),
+      filter: distort.filter,
+      imageRendering: distort.imageRendering,
+      transition: 'none',
+    };
+  } else if (roll < 0.6) {
+    // Blur only
+    return {
+      transform: glitchShakeTransform(),
+      filter: glitchBlurFilter(),
+      imageRendering: 'auto',
+      transition: 'none',
+    };
+  } else {
+    // Ensemble — all effects layered together
+    const distort = glitchDistortFilter();
+    const blur = 1 + Math.random() * 2;
+    const hueRotate = 90 + Math.random() * 60;
+    const saturate = 15 + Math.random() * 35;
+    const brightness = 80 + Math.random() * 40;
+    const contrast = 300 + Math.random() * 200;
+    return {
+      transform: glitchShakeTransform(),
+      filter: `hue-rotate(${hueRotate}deg) saturate(${saturate}%) brightness(${brightness}%) contrast(${contrast}%) blur(${blur}px)`,
+      imageRendering: distort.imageRendering,
+      transition: 'none',
+    };
+  }
 }

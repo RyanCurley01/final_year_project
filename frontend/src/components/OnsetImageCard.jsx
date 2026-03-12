@@ -7,9 +7,10 @@
  * 
  * Visual Pipeline:
  * 1. On mount/song change: Fetch audio features + initialize mood-aware image pool
- * 2. While pool loads: Show procedurally generated abstract art (1024px)
- * 3. On each onset callback: Crossfade to next image from shared pool
+ * 2. While pool loads: Show "Loading images" overlay
+ * 3. On each onset callback: Swap to next image from shared pool
  * 4. Track spinner + SongCard stay in sync via shared onImageChange subscription
+ * 5. If pool drains mid-playback, re-show loading overlay until refill completes
  */
 
 import { useRef, useEffect, useState, useCallback } from 'react';
@@ -17,9 +18,6 @@ import { useSelector } from 'react-redux';
 import globalAudioContext from '../utils/globalAudioContext';
 import imageGenerationService from '../utils/imageGenerationService';
 import { GLITCH_DURATION_MS, glitchStyle } from '../utils/glitchEffects';
-
-// Transition duration for image crossfade (ms)
-const CROSSFADE_MS = 250;
 
 /**
  * Normalize songId to ensure consistent pool keys across all components.
@@ -52,17 +50,17 @@ const OnsetImageCard = ({
   // Two-layer crossfade refs
   const containerRef = useRef(null);
   const [currentImage, setCurrentImage] = useState(null);
-  const [nextImage, setNextImage] = useState(null);
-  const [showNext, setShowNext] = useState(false);
   const [isInitialized, setIsInitialized] = useState(false);
   const [imageError, setImageError] = useState(false);
+  // Pool loading progress — tracks how many AI images have loaded
+  const [poolReady, setPoolReady] = useState(false);
+  const poolPollRef = useRef(null);
 
   // Refs for avoiding stale closures in callbacks
   const isActiveRef = useRef(isActive);
   const isPlayingRef = useRef(isPlaying);
   const currentImageRef = useRef(null);
   const isMountedRef = useRef(true);
-  const swapTimeoutRef = useRef(null);
   const initPromiseRef = useRef(null);
   // Track whether this instance is the "primary" onset driver (first active instance)
   const isPrimaryRef = useRef(false);
@@ -83,34 +81,44 @@ const OnsetImageCard = ({
     isMountedRef.current = true;
     return () => {
       isMountedRef.current = false;
-      if (swapTimeoutRef.current) {
-        clearTimeout(swapTimeoutRef.current);
-      }
       if (glitchTimeoutRef.current) {
         clearTimeout(glitchTimeoutRef.current);
+      }
+      if (poolPollRef.current) {
+        clearInterval(poolPollRef.current);
       }
     };
   }, []);
 
-  // Crossfade helper - shared between onset handler and image change listener
-  const crossfadeTo = useCallback((newImage) => {
+  // Continuously poll pool status — show loading overlay whenever pool has no images
+  useEffect(() => {
+    if (!songId) return;
+
+    const checkStatus = () => {
+      const status = imageGenerationService.getPoolStatus(songId);
+      if (isMountedRef.current) {
+        // Pool is ready only when it has images AND is not in initial load
+        setPoolReady(!status.loading && status.imageCount > 0);
+      }
+    };
+
+    checkStatus();
+    poolPollRef.current = setInterval(checkStatus, 500);
+
+    return () => {
+      if (poolPollRef.current) {
+        clearInterval(poolPollRef.current);
+        poolPollRef.current = null;
+      }
+    };
+  }, [songId]);
+
+  // Instant swap helper - shared between onset handler and image change listener
+  const swapTo = useCallback((newImage) => {
     if (!isMountedRef.current) return;
     if (!newImage || newImage === currentImageRef.current) return;
-
-    setNextImage(newImage);
-    setShowNext(true);
-
-    if (swapTimeoutRef.current) {
-      clearTimeout(swapTimeoutRef.current);
-    }
-
-    swapTimeoutRef.current = setTimeout(() => {
-      if (isMountedRef.current) {
-        setCurrentImage(newImage);
-        currentImageRef.current = newImage;
-        setShowNext(false);
-      }
-    }, CROSSFADE_MS);
+    setCurrentImage(newImage);
+    currentImageRef.current = newImage;
   }, []);
 
   // Initialize image pool when song changes or component mounts
@@ -149,20 +157,7 @@ const OnsetImageCard = ({
           return;
         }
 
-        // No pool yet — show procedural placeholder while API loads
-        const proceduralImage = imageGenerationService.getProceduralImage({
-          energy: 0.5,
-          lfc: 0.5,
-          hfc: 0.5,
-          spectralCentroid: Math.random(),
-        });
-
-        if (isMountedRef.current) {
-          setCurrentImage(proceduralImage);
-          currentImageRef.current = proceduralImage;
-          setIsInitialized(true);
-        }
-
+        // No pool yet — show loading overlay (no procedural placeholder)
         // Fetch and populate the pool for THIS song
         const context = {
           id: songId,
@@ -173,11 +168,13 @@ const OnsetImageCard = ({
         initPromiseRef.current = imageGenerationService.initializeSongContext(context);
         await initPromiseRef.current;
 
-        // After pool loads, show THIS song's first pool image (not the global shared one)
+        // After pool loads, show THIS song's first real pool image
         if (isMountedRef.current) {
           const myImage = imageGenerationService.getFirstPoolImage(songId);
-          if (myImage && myImage !== currentImageRef.current) {
-            crossfadeTo(myImage);
+          if (myImage) {
+            setCurrentImage(myImage);
+            currentImageRef.current = myImage;
+            setIsInitialized(true);
           }
         }
       } catch (error) {
@@ -186,7 +183,7 @@ const OnsetImageCard = ({
     };
 
     initPool();
-  }, [songTitle, songId, crossfadeTo]);
+  }, [songTitle, songId, swapTo]);
 
   // Subscribe to shared image changes — ONLY active song instances follow onset images
   // Subscribe when isActive (regardless of playing state) so paused fullscreen stays in sync
@@ -208,14 +205,14 @@ const OnsetImageCard = ({
     }
 
     const handleImageChange = (newImage, _generation) => {
-      crossfadeTo(newImage);
+      swapTo(newImage);
     };
 
     imageGenerationService.onImageChange(handleImageChange);
     return () => {
       imageGenerationService.offImageChange(handleImageChange);
     };
-  }, [isActive, songId, crossfadeTo]);
+  }, [isActive, songId, swapTo]);
 
   // Passive sync: non-active instances of the same song follow onset image changes
   // This keeps wishlist, stock, purchased products etc. in sync with the playing song
@@ -226,7 +223,7 @@ const OnsetImageCard = ({
     const handlePassiveSync = (newImage, _generation, activeSongId) => {
       // Only sync if the image change is for THIS song
       if (activeSongId == songId) {
-        crossfadeTo(newImage);
+        swapTo(newImage);
       }
     };
 
@@ -244,7 +241,7 @@ const OnsetImageCard = ({
     return () => {
       imageGenerationService.offImageChange(handlePassiveSync);
     };
-  }, [isActive, songId, crossfadeTo]);
+  }, [isActive, songId, swapTo]);
 
   // Handle onset (drum hit) — only the primary instance advances the pool
   const handleOnset = useCallback((onset) => {
@@ -311,17 +308,13 @@ const OnsetImageCard = ({
     };
   }, [isActive, isPlaying]);
 
-  // Handle image load errors
-  const handleImageError = useCallback((e) => {
-    // Replace with procedural fallback
-    const fallback = imageGenerationService.getProceduralImage({
-      energy: Math.random(),
-      spectralCentroid: Math.random(),
-    });
-    if (e.target) {
-      e.target.src = fallback;
+  // Handle image load errors — hide the broken image so loading overlay shows
+  const handleImageError = useCallback(() => {
+    if (isMountedRef.current) {
+      setCurrentImage(null);
+      currentImageRef.current = null;
+      setImageError(true);
     }
-    setImageError(true);
   }, []);
 
   // Compute glitch styles once per render (random values refresh each render while glitching)
@@ -333,40 +326,18 @@ const OnsetImageCard = ({
       className={`relative overflow-hidden ${className || ''}`}
       style={{ width: '100%', height: '100%' }}
     >
-      {/* Current image layer */}
+      {/* Image layer — instant swap, no crossfade */}
       {currentImage && (
         <img
           src={currentImage}
           alt={songTitle || 'AI Generated Art'}
           className="absolute inset-0 w-full h-full object-cover"
           style={{
-            opacity: showNext ? 0 : 1,
-            transition: isGlitching
-              ? 'none'
-              : `opacity ${CROSSFADE_MS}ms ease-in-out, transform 0.1s ease-out, filter 0.1s ease-out`,
-            borderRadius: 'inherit',
-            // Apply exact same glitch effects as AudioReactiveVideo
-            transform: activeGlitch.transform,
-            filter: activeGlitch.filter,
-          }}
-          onError={handleImageError}
-        />
-      )}
-
-      {/* Next image layer (crossfade target) */}
-      {nextImage && (
-        <img
-          src={nextImage}
-          alt={songTitle || 'AI Generated Art'}
-          className="absolute inset-0 w-full h-full object-cover"
-          style={{
-            opacity: showNext ? 1 : 0,
-            transition: isGlitching
-              ? 'none'
-              : `opacity ${CROSSFADE_MS}ms ease-in-out, transform 0.1s ease-out, filter 0.1s ease-out`,
             borderRadius: 'inherit',
             transform: activeGlitch.transform,
             filter: activeGlitch.filter,
+            imageRendering: activeGlitch.imageRendering,
+            transition: activeGlitch.transition,
           }}
           onError={handleImageError}
         />
@@ -390,23 +361,14 @@ const OnsetImageCard = ({
         />
       )}
 
-      {/* Loading indicator overlay (shown briefly while pool initializes) */}
-      {!isInitialized && (
-        <div className="absolute inset-0 flex items-center justify-center bg-black/30 rounded-lg">
-          <div className="w-8 h-8 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+      {/* Loading overlay — shown whenever pool has no real images ready */}
+      {!poolReady && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/50 rounded-lg z-10">
+          <div className="w-8 h-8 border-2 border-white/30 border-t-white rounded-full animate-spin mb-2" />
+          <span className="text-white/70 text-xs font-medium">
+            Loading images…
+          </span>
         </div>
-      )}
-
-      {/* Pulse effect on onset (subtle border flash) */}
-      {isActive && isPlaying && (
-        <div
-          className="absolute inset-0 pointer-events-none rounded-lg"
-          style={{
-            borderRadius: 'inherit',
-            boxShadow: showNext ? 'inset 0 0 30px rgba(255,255,255,0.15)' : 'none',
-            transition: `box-shadow ${CROSSFADE_MS}ms ease-out`,
-          }}
-        />
       )}
     </div>
   );
