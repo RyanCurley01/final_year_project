@@ -8,7 +8,7 @@ import { useSelector } from 'react-redux';
 import SkySegmentation from '../utils/skySegmentation';
 import globalAudioContext from '../utils/globalAudioContext';
 import { useVideoModal } from '../context/VideoModalContext';
-import { GLITCH_DURATION_MS, glitchShakeTransform } from '../utils/glitchEffects';
+import { GLITCH_DURATION_MS, glitchShakeTransform, glitchBlurFilter } from '../utils/glitchEffects';
 
 // Vibrant color palette for sky changes (defined outside to avoid re-creation)
 const SKY_COLORS = [
@@ -308,9 +308,10 @@ const AudioReactiveVideo = ({
           height: '100%', 
           objectFit: 'cover',
           borderRadius: 'inherit',
-          // Only shake the canvas - sky distortion is applied in processFrame
+          // Shake + blur the canvas during glitch — sky pixel distortion is applied in processFrame
           transform: isGlitching ? glitchShakeTransform() : 'none',
-          transition: isGlitching ? 'none' : 'transform 0.1s ease-out'
+          filter: isGlitching ? glitchBlurFilter() : 'none',
+          transition: isGlitching ? 'none' : 'transform 0.1s ease-out, filter 0.1s ease-out'
         }}
       />
     </div>

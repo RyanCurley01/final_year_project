@@ -85,7 +85,21 @@ export function glitchCSSFilter() {
   // Contrast — per-pixel noise is perceptually similar to a contrast spike
   const contrast = 120 + Math.random() * 40; // 120-160%
 
-  return `hue-rotate(${hueRotate}deg) saturate(${saturate}%) brightness(${brightness}%) contrast(${contrast}%)`;
+  // Blur — simulates motion blur / defocus during glitch
+  const blur = 1 + Math.random() * 2; // 1-3px
+
+  return `hue-rotate(${hueRotate}deg) saturate(${saturate}%) brightness(${brightness}%) contrast(${contrast}%) blur(${blur}px)`;
+}
+
+/**
+ * Generate a blur-only CSS filter for canvas elements that already have
+ * per-pixel distortion (e.g. sky segmentation glitchPixel).
+ *
+ * @returns {string} CSS filter value containing only blur
+ */
+export function glitchBlurFilter() {
+  const blur = 1 + Math.random() * 2; // 1-3px
+  return `blur(${blur}px)`;
 }
 
 /**

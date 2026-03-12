@@ -34,6 +34,7 @@ class OnsetDetector {
     // To store glitch effect detection patterns
     this.spectralCentroidHistory = []; // Track pitch/centroid changes for tape stop
     this.energyHistory = []; // Track energy for gates/stutters
+    this.spectralFlatnessHistory = []; // Track tonality — low = melody, high = noise/percussion
     this.historySize = 20 // Longer history for more accurate detection
 
     this.lastGlitchTime = 0;
@@ -45,7 +46,7 @@ class OnsetDetector {
     this.lastOnsetTime = 0;
     this.baseMinTimeBetweenOnsets = options.minTimeBetweenOnsets || 100; // Base time between detections (ms)
     this.minTimeBetweenOnsets = this.baseMinTimeBetweenOnsets; // Adjusted by playback rate
-    this.minTimeBetweenGlitches = options.minTimeBetweenGlitches || 500; // Much longer gap - glitches are rare events
+    this.minTimeBetweenGlitches = options.minTimeBetweenGlitches || 1000; // Much longer gap - glitches are rare events
     
     // Previous values for peak detection
     this.previousKickScore = 0;
@@ -112,17 +113,17 @@ class OnsetDetector {
   /**
    * Low-Frequency Content (LFC) - Modified HFC for KICK detection
    * Weights LOW frequencies more heavily (kicks are in 40-150Hz range)
-   * Bins 0-20 contain most kick drum energy
+   * Bins 0-10 contain most kick drum energy (~0-860Hz at 44.1kHz/512 FFT)
    * O(n) = sum((maxBin - k) * |X(k)|^2) - inverted weighting
    */
   calculateLFC(spectrum) {
     let lfc = 0;
-    const kickBinEnd = 25; // Focus on bins 0-25 (~0-2000Hz at 44.1kHz)
+    const kickBinEnd = 10; // Focus on bins 0-10 (~0-860Hz) — sub-bass through kick body
     
     for (let k = 0; k < kickBinEnd; k++) {
       const magnitude = spectrum[k] / 255.0; // Normalize 0-255 to 0-1
       // Weight low frequencies MORE (inverse of HFC)
-      // Bin 0 gets weight 25, bin 24 gets weight 1
+      // Bin 0 gets weight 10, bin 9 gets weight 1
       const weight = kickBinEnd - k;
       lfc += weight * magnitude * magnitude;
     }
@@ -190,14 +191,43 @@ class OnsetDetector {
   }
   
   /**
+   * Spectral Flatness — distinguishes tonal sounds from percussive/noise sounds.
+   * Ratio of geometric mean to arithmetic mean of the power spectrum.
+   *   Near 0 = tonal (bass lines, melodies — energy at specific harmonics)
+   *   Near 1 = noise-like (drums, percussion — energy spread across frequencies)
+   * This is the key metric for filtering out bass/melody false positives.
+   */
+  calculateSpectralFlatness(spectrum) {
+    let logSum = 0;
+    let sum = 0;
+    let count = 0;
+    
+    for (let k = 0; k < spectrum.length; k++) {
+      const magnitude = spectrum[k] / 255.0;
+      if (magnitude > 0.001) { // Skip near-zero to avoid log(0)
+        logSum += Math.log(magnitude);
+        count++;
+      }
+      sum += magnitude;
+    }
+    
+    if (count === 0 || sum === 0) return 0;
+    
+    const geometricMean = Math.exp(logSum / count);
+    const arithmeticMean = sum / spectrum.length;
+    
+    return arithmeticMean > 0 ? geometricMean / arithmeticMean : 0;
+  }
+  
+  /**
    * Detect tape stop effect - rapid decrease in spectral centroid (pitch dropping)
    * Like when a record/tape is slowing down - VERY strict detection
    */
   detectTapeStop() {
-    if (this.spectralCentroidHistory.length < 10) return false;
+    if (this.spectralCentroidHistory.length < this.historySize) return false;
     
     // Get recent centroid values
-    const recent = this.spectralCentroidHistory.slice(-10);
+    const recent = this.spectralCentroidHistory.slice(-this.historySize);
     
     // Tape stop requires CONTINUOUS pitch drop over many frames
     // Normal melodies go up and down, tape stop only goes down
@@ -207,7 +237,7 @@ class OnsetDetector {
     
     for (let i = 1; i < recent.length; i++) {
       const drop = recent[i - 1] - recent[i];
-      if (drop > 0.5) { // Pitch is dropping
+      if (drop > 0.3) { // Pitch is dropping
         consecutiveDrops++;
         totalDrop += drop;
         maxConsecutiveDrops = Math.max(maxConsecutiveDrops, consecutiveDrops);
@@ -216,7 +246,7 @@ class OnsetDetector {
       }
     }
     
-    return maxConsecutiveDrops >= 12 && totalDrop > 30;
+    return maxConsecutiveDrops >= 6 && totalDrop > 8;
   }
   
   /**
@@ -235,8 +265,8 @@ class OnsetDetector {
     
     for (let i = 1; i < recent.length; i++) {
       const diff = recent[i] - recent[i - 1];
-      // Require LARGE energy swings (not just small variations)
-      const currentDirection = diff > 0.25 ? 1 : (diff < -0.25 ? -1 : 0);
+      // Require meaningful energy swings (not just noise)
+      const currentDirection = diff > 0.15 ? 1 : (diff < -0.15 ? -1 : 0);
       
       // Count rapid direction changes with significant magnitude
       if (currentDirection !== 0 && currentDirection !== previousDirection && previousDirection !== 0) {
@@ -247,7 +277,7 @@ class OnsetDetector {
       }
     }
     
-    return extremeOscillations >= 12;
+    return extremeOscillations >= 6;
   }
   
   /**
@@ -255,31 +285,31 @@ class OnsetDetector {
    * Only triggers on clearly artificial gating patterns
    */
   detectGate() {
-    if (this.energyHistory.length < 10) return false;
+    if (this.energyHistory.length < this.historySize) return false;
     
-    const recent = this.energyHistory.slice(-10);
+    const recent = this.energyHistory.slice(-this.historySize);
     
-    // Look for multiple VERY short silence gaps (near-zero energy)
+    // Look for multiple short silence gaps (near-zero energy)
     // This pattern is clearly artificial, not natural rhythm
     let gateCount = 0;
     let nearSilenceCount = 0;
     
     for (let i = 2; i < recent.length; i++) {
-      const beforeGate = recent[i - 2] > 0.2;
-      const gatePoint = recent[i - 1] < 0.02; // Almost complete silence
-      const afterGate = recent[i] > 0.2;
+      const beforeGate = recent[i - 2] > 0.1;
+      const gatePoint = recent[i - 1] < 0.05; // Near silence
+      const afterGate = recent[i] > 0.1;
       
       if (beforeGate && gatePoint && afterGate) {
         gateCount++;
       }
       
       // Count near-silence frames
-      if (recent[i] < 0.02) {
+      if (recent[i] < 0.05) {
         nearSilenceCount++;
       }
     }
     
-    return gateCount >= 9 && nearSilenceCount >= 9;
+    return gateCount >= 3 && nearSilenceCount >= 3;
   }
   
   /**
@@ -292,6 +322,17 @@ class OnsetDetector {
     // Check if enough time has passed since last glitch
     if (now - this.lastGlitchTime < this.minTimeBetweenGlitches) {
       return { detected: false, type: null };
+    }
+    
+    // Reject if recent audio is predominantly tonal (acid melodies, basslines).
+    // Glitch effects operate on broadband/mixed signals — not isolated melodic content.
+    if (this.spectralFlatnessHistory.length >= 5) {
+      const recentFlatness = this.spectralFlatnessHistory.slice(-5);
+      const avgFlatness = recentFlatness.reduce((a, b) => a + b, 0) / recentFlatness.length;
+      // Flatness < 0.25 means strongly harmonic/tonal → skip glitch detection
+      if (avgFlatness < 0.25) {
+        return { detected: false, type: null };
+      }
     }
     
     // Check for each glitch type
@@ -345,14 +386,47 @@ class OnsetDetector {
     // Get frequency data as bytes (0-255)
     this.analyser.getByteFrequencyData(this.frequencyData);
     
-    // Skip processing if we have no audio data (all zeros)
+    // Always compute spectral centroid, energy, and flatness so silent/tonal frames
+    // are recorded in the history — glitch detection relies on the full picture.
+    const spectralCentroid = this.calculateSpectralCentroid(this.frequencyData);
+    const energy = this.calculateEnergy(this.frequencyData);
+    const spectralFlatness = this.calculateSpectralFlatness(this.frequencyData);
+    
+    // ============ UPDATE HISTORY FOR GLITCH DETECTION ============
+    this.spectralCentroidHistory.push(spectralCentroid);
+    this.energyHistory.push(energy);
+    this.spectralFlatnessHistory.push(spectralFlatness);
+    
+    // Sliding window - keep only recent frames
+    if (this.spectralCentroidHistory.length > this.historySize) {
+      this.spectralCentroidHistory.shift();
+    }
+    if (this.energyHistory.length > this.historySize) {
+      this.energyHistory.shift();
+    }
+    if (this.spectralFlatnessHistory.length > this.historySize) {
+      this.spectralFlatnessHistory.shift();
+    }
+    
+    // Skip onset detection if we have no audio data (all zeros)
     const hasAudio = this.frequencyData.some(v => v > 0);
     if (!hasAudio) {
+      // Still check for glitches (gate detection needs silent frames)
+      const glitchResult = this.detectTrackerGlitch();
+      if (glitchResult.detected) {
+        this.glitchCallbacks.forEach(cb => cb({
+          time: this.audioContext.currentTime,
+          type: glitchResult.type,
+          spectralCentroid,
+          energy
+        }));
+      }
+      this.previousSpectrum.set(this.frequencyData);
       requestAnimationFrame(() => this.processFrame());
       return;
     }
     
-    // ============ CALCULATE ALL DETECTION FUNCTIONS ============
+    // ============ CALCULATE ONSET DETECTION FUNCTIONS ============
     
     // 1. LFC (Low-Frequency Content) - for KICK detection
     const lfc = this.calculateLFC(this.frequencyData);
@@ -363,42 +437,41 @@ class OnsetDetector {
     // 3. Spectral Flux - measures CHANGE in spectrum (good for any transient)
     const flux = this.calculateSpectralFlux(this.frequencyData, this.previousSpectrum);
     
-    // 4. Spectral Centroid - "brightness" of sound (used for glitch detection)
-    const spectralCentroid = this.calculateSpectralCentroid(this.frequencyData);
-    
-    // 5. Energy - total signal power (used for glitch detection)
-    const energy = this.calculateEnergy(this.frequencyData);
-    
-    // ============ UPDATE HISTORY FOR GLITCH DETECTION ============
-    this.spectralCentroidHistory.push(spectralCentroid);
-    this.energyHistory.push(energy);
-    
-    // Sliding window - keep only recent frames
-    if (this.spectralCentroidHistory.length > this.historySize) {
-      this.spectralCentroidHistory.shift();
-    }
-    if (this.energyHistory.length > this.historySize) {
-      this.energyHistory.shift();
-    }
-    
     // ============ NORMALIZE VALUES ============
-    const normalizedLFC = lfc / 500;
+    const normalizedLFC = lfc / 200;   // Narrower band → lower max, adjust divisor
     const normalizedHFC = hfc / 10000;
     const normalizedFlux = flux / 10;
     const now = Date.now();
     
+    // ============ PERCUSSIVENESS DETECTION ============
+    // spectralFlatness already computed above for history tracking
+    
+    // Energy ratio: how sharply energy spikes above recent average
+    // Drums produce sharp transients (ratio >> 1), sustained notes stay near 1
+    const recentHistory = this.energyHistory.slice(-4, -1); // Previous 3 frames (exclude current)
+    const avgEnergy = recentHistory.length > 0
+      ? recentHistory.reduce((a, b) => a + b, 0) / recentHistory.length
+      : energy;
+    const energyRatio = avgEnergy > 0.001 ? energy / avgEnergy : 1.0;
+    
+    // Percussiveness: combines flatness (is it noise-like?) with transient sharpness (is it a spike?)
+    // Both must be high for the sound to be classified as percussive
+    const flatnessFactor = Math.min(spectralFlatness * 2.5, 1.0);  // 0.4+ flatness → full score
+    const transientFactor = Math.min(energyRatio / 2.5, 1.0);     // 2.5x+ spike → full score
+    const percussiveness = flatnessFactor * transientFactor;
+    
     // ============ CLASSIFY DRUM TYPE ============
-    // Calculate scores to determine if this is a kick or snare
-    const kickScore = (0.7 * normalizedLFC) + (0.3 * normalizedFlux);
-    const snareScore = (0.6 * normalizedHFC) + (0.4 * normalizedFlux);
+    // Percussiveness gates the classification — tonal sounds get suppressed
+    const kickScore = (0.4 * normalizedLFC) + (0.2 * normalizedFlux) + (0.4 * percussiveness);
+    const snareScore = (0.3 * normalizedHFC) + (0.3 * normalizedFlux) + (0.4 * percussiveness);
     
     // Determine drum type based on which score is higher and above threshold
     const isKick = kickScore > this.previousKickScore && kickScore > this.kickThreshold;
     const isSnare = snareScore > this.previousSnareScore && snareScore > this.snareThreshold;
     
     // ============ GENERAL ONSET (ALL FUNCTIONS COMBINED) ============
-    // Weighted combination of all detection methods
-    const onsetFunction = (0.4 * normalizedLFC) + (0.3 * normalizedHFC) + (0.3 * normalizedFlux);
+    // Flux and percussiveness weighted heavily — they best distinguish drums from melodies
+    const onsetFunction = (0.2 * normalizedLFC) + (0.15 * normalizedHFC) + (0.35 * normalizedFlux) + (0.3 * percussiveness);
     
     if (this.detectOnset(onsetFunction)) {
       this.onsetCallbacks.forEach(cb => cb({
@@ -495,6 +568,7 @@ class OnsetDetector {
     this.glitchCallbacks = [];
     this.spectralCentroidHistory = [];
     this.energyHistory = [];
+    this.spectralFlatnessHistory = [];
   }
 }
 
