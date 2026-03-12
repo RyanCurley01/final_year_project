@@ -53,6 +53,9 @@ class OnsetDetector {
     // Thresholds for drum type classification
     this.kickThreshold = options.kickThreshold || 0.5;
     this.snareThreshold = options.snareThreshold || 0.9;
+    
+    // Animation frame ID for cancellation
+    this.animationFrameId = null;
   }
   
   /**
@@ -309,7 +312,13 @@ class OnsetDetector {
     const hasAudio = this.frequencyData.some(v => v > 0);
     if (!hasAudio) {
       this.previousSpectrum.set(this.frequencyData);
-      requestAnimationFrame(() => this.processFrame());
+      
+      // Reset previous values to prevent false positives when audio returns
+      this.previousOnsetFunction = 0;
+      this.previousKickScore = 0;
+      this.previousSnareScore = 0;
+      
+      this.animationFrameId = requestAnimationFrame(() => this.processFrame());
       return;
     }
     
@@ -432,7 +441,7 @@ class OnsetDetector {
     this.previousSnareScore = snareScore; // Store snareScore, not just HFC
     
     // To call processFrame again on the next animation frame
-    requestAnimationFrame(() => this.processFrame());
+    this.animationFrameId = requestAnimationFrame(() => this.processFrame());
   }
   
   /**
@@ -451,6 +460,10 @@ class OnsetDetector {
    */
   stop() {
     this.isRunning = false;
+    if (this.animationFrameId) {
+      cancelAnimationFrame(this.animationFrameId);
+      this.animationFrameId = null;
+    }
     return this;
   }
 

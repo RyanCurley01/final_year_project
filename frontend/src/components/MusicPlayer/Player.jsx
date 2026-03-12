@@ -71,6 +71,10 @@ const Player = ({ activeSong, isPlaying, volume, seekTime, onEnded, onTimeUpdate
       onLoadedData={(e) => {
         onLoadedData(e);
       }}
+      onSeeked={() => {
+        // Ensure audio context is running after seek so onset detection continues
+        globalAudioContext.resume();
+      }}
       onError={(e) => {
         // Audio loading error
       }}

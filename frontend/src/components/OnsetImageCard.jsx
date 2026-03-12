@@ -127,75 +127,99 @@ const OnsetImageCard = ({
 
     const initPool = async () => {
       try {
-        // If this song is already the active song (e.g. fullscreen opening while
-        // thumbnail is playing), sync directly to the current shared image so both
-        // instances show the exact same picture.
+        let imageSet = false;
+
+        // 1. Try syncing with shared state first (highest priority if active)
         if (isActive && imageGenerationService.getActiveSongId() == songId) {
           const sharedImage = imageGenerationService.getCurrentImage();
           if (sharedImage && isMountedRef.current) {
             setCurrentImage(sharedImage);
             currentImageRef.current = sharedImage;
             setIsInitialized(true);
-            return;
+            setPoolReady(true);
+            imageSet = true;
           }
         }
 
-        // Check if this song's pool already has images (cached from prior visit)
-        const existingPoolImage = imageGenerationService.getFirstPoolImage(songId);
-        if (existingPoolImage) {
-          if (isMountedRef.current) {
+        // 2. If no shared image, try getting best available from pool
+        if (!imageSet) {
+          const existingPoolImage = imageGenerationService.getFirstPoolImage(songId);
+          if (existingPoolImage && isMountedRef.current) {
             setCurrentImage(existingPoolImage);
             currentImageRef.current = existingPoolImage;
             setIsInitialized(true);
+            setPoolReady(true);
+            imageSet = true;
           }
-          // Pool already loaded — no fetch needed, but still call init to set context
-          await imageGenerationService.initializeSongContext({
-            id: songId,
-            title: songTitle,
-            genre: 'electronic',
-          });
-          return;
         }
 
-        // No pool yet — show loading overlay (no procedural placeholder)
-        // Fetch and populate the pool for THIS song
+        // 3. Fallback: No pool yet — generate procedural placeholder IMMEDIATELY so card isn't blank
+        if (!imageSet && isMountedRef.current && !currentImageRef.current) {
+          const proceduralImage = imageGenerationService.getProceduralImage({
+            id: songId,
+            title: songTitle,
+            genre: 'electronic'
+          });
+          setCurrentImage(proceduralImage);
+          currentImageRef.current = proceduralImage;
+        }
+
+        // 4. Always ensure context is initialized and pool is healthy
+        //    (This handles refilling if we successfully synced but the pool is running low)
         const context = {
           id: songId,
           title: songTitle,
           genre: 'electronic',
         };
 
-        initPromiseRef.current = imageGenerationService.initializeSongContext(context);
-        await initPromiseRef.current;
-
-        // After pool loads, show THIS song's first real pool image
-        if (isMountedRef.current) {
-          const myImage = imageGenerationService.getFirstPoolImage(songId);
-          if (myImage) {
-            setCurrentImage(myImage);
-            currentImageRef.current = myImage;
-            setIsInitialized(true);
+        const initPromise = imageGenerationService.initializeSongContext(context, isActive ? 'full' : 'thumbnail');
+        initPromiseRef.current = initPromise;
+        
+        // If we didn't have a real image yet, update when the fetch completes
+        if (!imageSet) {
+          await initPromise;
+          if (isMountedRef.current) {
+            // Force a re-check of the pool. Sometimes the promise resolves but the pool isn't updated
+            // immediately in logic above if we didn't check
+            const myImage = imageGenerationService.getFirstPoolImage(songId);
+            if (myImage) {
+              setCurrentImage(myImage);
+              currentImageRef.current = myImage;
+              setIsInitialized(true);
+              setPoolReady(true);
+              
+              // If we're active, force update the shared state too so other components see it
+              if (isActive) {
+                imageGenerationService.activateForPlayback(songId);
+              }
+            } else if (isActive) {
+               // If after fetch we STILL have no image and we are active, try forcing a refill
+               // This is the "kickstart" for returning to a song with an empty pool
+               imageGenerationService.initializeSongContext(context, 'full');
+            }
           }
+        } else {
+          // Even if we had an image, we still await the fetch secretly to ensure pool is filled
+          await initPromise; 
         }
+
       } catch (error) {
         console.warn('[OnsetImageCard] Pool initialization error:', error);
       }
     };
 
     initPool();
-  }, [songTitle, songId, swapTo]);
+  }, [songTitle, songId, swapTo, isActive]);
 
   // Subscribe to shared image changes — ONLY active song instances follow onset images
   // Subscribe when isActive (regardless of playing state) so paused fullscreen stays in sync
   useEffect(() => {
     if (!isActive) return;
 
-    // Activate this song's pool as the shared playback source — but only if
-    // it isn't already active (avoids consuming an extra image from the pool
-    // when a second instance like fullscreen mounts for the same song).
-    if (imageGenerationService.getActiveSongId() != songId) {
-      imageGenerationService.activateForPlayback(songId);
-    }
+    // Force activation: Ensures that when this component becomes active,
+    // the service knows this IS the active song and prepares the state.
+    // This MUST happen before we try to claim onset primary status.
+    imageGenerationService.activateForPlayback(songId);
 
     // On subscription, immediately sync to the current shared image
     const sharedImage = imageGenerationService.getCurrentImage();
@@ -259,19 +283,24 @@ const OnsetImageCard = ({
     });
   }, []);
 
-  // Register/unregister onset callback — only ONE instance globally drives onsets
-  useEffect(() => {
+    // Register/unregister onset callback — only ONE instance globally drives onsets
+    useEffect(() => {
     if (!isActive || !isPlaying) {
       if (isPrimaryRef.current) {
         globalAudioContext.offOnset(handleOnset);
-        imageGenerationService.releaseOnsetPrimary();
+        imageGenerationService.releaseOnsetPrimary(songId);
         isPrimaryRef.current = false;
       }
       return;
     }
 
+    // CRITICAL: Force activation here to ensure sequential execution
+    // 1. Set this song as active in service
+    imageGenerationService.activateForPlayback(songId);
+
+    // 2. Now allow claiming (since we just set ourselves as active, this will match)
     // Try to claim primary — only the first active instance wins
-    if (imageGenerationService.claimOnsetPrimary()) {
+    if (imageGenerationService.claimOnsetPrimary(songId)) {
       isPrimaryRef.current = true;
       globalAudioContext.onOnset(handleOnset);
     }
@@ -279,11 +308,11 @@ const OnsetImageCard = ({
     return () => {
       if (isPrimaryRef.current) {
         globalAudioContext.offOnset(handleOnset);
-        imageGenerationService.releaseOnsetPrimary();
+        imageGenerationService.releaseOnsetPrimary(songId);
         isPrimaryRef.current = false;
       }
     };
-  }, [isActive, isPlaying, handleOnset]);
+  }, [isActive, isPlaying, handleOnset, songId]);
 
   // Listen for glitch events (high-frequency transients) — same logic as AudioReactiveVideo
   useEffect(() => {
@@ -308,11 +337,12 @@ const OnsetImageCard = ({
     };
   }, [isActive, isPlaying]);
 
-  // Handle image load errors — hide the broken image so loading overlay shows
+  // Handle image load errors — revert to procedural so no blank cards
   const handleImageError = useCallback(() => {
     if (isMountedRef.current) {
-      setCurrentImage(null);
-      currentImageRef.current = null;
+      const fallback = imageGenerationService.getProceduralImage();
+      setCurrentImage(fallback);
+      currentImageRef.current = fallback;
       setImageError(true);
     }
   }, []);
@@ -362,7 +392,7 @@ const OnsetImageCard = ({
       )}
 
       {/* Loading overlay — shown whenever pool has no real images ready */}
-      {!poolReady && (
+      {(!currentImage && !poolReady) && (
         <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/50 rounded-lg z-10">
           <div className="w-8 h-8 border-2 border-white/30 border-t-white rounded-full animate-spin mb-2" />
           <span className="text-white/70 text-xs font-medium">
