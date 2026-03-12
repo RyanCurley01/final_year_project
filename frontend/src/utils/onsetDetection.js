@@ -349,43 +349,61 @@ class OnsetDetector {
       : flux;
     const energyRatio = avgEnergy > 0.001 ? flux / avgEnergy : 1.0;
     
-    // Percussiveness: combines flatness (is it noise-like?) with transient sharpness (is it a spike?)
-    // Both must be high for the sound to be classified as percussive
-    const flatnessFactor = Math.min(spectralFlatness * 2.0, 1.0);  // 0.5+ flatness → full score
-    const transientFactor = Math.min(energyRatio / 3.0, 1.0);     // 3.0x+ spike → full score
-    const percussiveness = flatnessFactor * transientFactor;
+    // ---- Onset bandwidth: how SPREAD OUT the spectral change is ----
+    // Drums cause broadband change (many bins increase) → high onset bandwidth
+    // Melodic notes cause narrowband change (few bins increase) → low onset bandwidth
+    // This looks at the CHANGE, not the static mix, so background drums/cymbals don't
+    // inflate the score when a melodic note is the actual transient.
+    let diffSum = 0;
+    let diffSqSum = 0;
+    let diffCount = 0;
+    for (let k = 0; k < this.frequencyData.length; k++) {
+      const diff = Math.max(0, (this.frequencyData[k] - this.previousSpectrum[k]) / 255.0);
+      if (diff > 0.02) { // Only count bins with meaningful increase
+        diffSum += diff;
+        diffSqSum += diff * diff;
+        diffCount++;
+      }
+    }
+    // onsetBandwidth: fraction of bins that changed (0 = silence, 1 = every bin changed)
+    const totalBins = this.frequencyData.length;
+    const onsetBandwidth = diffCount / totalBins;
+    
+    // Percussiveness: combines onset bandwidth with transient sharpness
+    //   Drums: many bins change at once (bandwidth > 0.15) AND energy spikes sharply
+    //   Melodies: few bins change (bandwidth < 0.08) even if energy spikes
+    const bandwidthFactor = Math.min(Math.max((onsetBandwidth - 0.05) / 0.15, 0), 1); // 0.05-0.20 range
+    const transientFactor = Math.min(energyRatio / 2.5, 1.0);     // 2.5x+ spike → full score
+    const percussiveness = bandwidthFactor * transientFactor;
     
     // ============ TONAL SUPPRESSION GATE ============
-    // Bass lines and acid patterns are highly tonal (spectral flatness < 0.15).
-    // Drums are broadband/noise-like (flatness > 0.25).
-    // Smoothly suppress onsets based on tonality so bass/acid never triggers,
-    // but a drum hit on top of a sustaining bass note still can.
-    //   flatness 0.00-0.10 → full suppression (pure bass/acid)
-    //   flatness 0.10-0.25 → partial suppression (mixed or borderline)
-    //   flatness 0.25+     → no suppression (percussive/noise)
-    const tonalGate = Math.min(Math.max((spectralFlatness - 0.10) / 0.15, 0), 1);
+    // Use onset bandwidth instead of full-mix flatness for the gate,
+    // so broadband drums pass and narrowband tonal onsets are suppressed.
+    //   bandwidth 0.00-0.06 → full suppression (pure tonal onset)
+    //   bandwidth 0.06-0.15 → partial suppression (mixed)
+    //   bandwidth 0.15+     → no suppression (percussive)
+    const tonalGate = Math.min(Math.max((onsetBandwidth - 0.06) / 0.09, 0), 1);
     
-    // ============ CLASSIFY DRUM TYPE ============
-    // Percussiveness gates the classification — tonal sounds get suppressed
+    // ============ CLASSIFY DRUM TYPE (labelling only) ============
     const kickScore = (0.4 * normalizedLFC) + (0.2 * normalizedFlux) + (0.4 * percussiveness);
     const snareScore = (0.3 * normalizedHFC) + (0.3 * normalizedFlux) + (0.4 * percussiveness);
-    
-    // Determine drum type based on which score is higher and above threshold
     const isKick = kickScore > this.previousKickScore && kickScore > this.kickThreshold;
     const isSnare = snareScore > this.previousSnareScore && snareScore > this.snareThreshold;
     
-    // ============ GENERAL ONSET (DRUMS ONLY) ============
-    // Only fire onset callback when a drum hit (kick or snare) is positively identified.
-    // Raw onset strength gated by tonal suppression AND drum classification —
-    // unclassified transients ('unknown') are silently discarded.
+    // ============ GENERAL ONSET (ANY PERCUSSIVE HIT) ============
+    // Fire onset callback for any drum sound — kicks, snares, hi-hats, toms, claps, etc.
+    // The onset must have broadband spectral change (percussiveness from bandwidth)
+    // AND pass the tonal gate (onset bandwidth wide enough to be noise-like).
     const rawOnset = (0.2 * normalizedLFC) + (0.15 * normalizedHFC) + (0.35 * normalizedFlux) + (0.3 * percussiveness);
     const onsetFunction = rawOnset * tonalGate;
+    const isDrum = percussiveness > 0.60;
     
-    if (this.detectOnset(onsetFunction) && (isKick || isSnare)) {
+    if (this.detectOnset(onsetFunction) && isDrum) {
+      const drumType = isKick ? 'kick' : (isSnare ? 'snare' : 'percussion');
       this.onsetCallbacks.forEach(cb => cb({
         time: this.audioContext.currentTime,
         strength: onsetFunction,
-        type: isKick ? 'kick' : 'snare',
+        type: drumType,
         lfc: normalizedLFC,
         hfc: normalizedHFC,
         flux: normalizedFlux,
