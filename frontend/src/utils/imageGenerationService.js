@@ -527,6 +527,65 @@ class MCPImageOrchestrator {
 
     // Singleton onset registration: only one component drives onsets
     this._onsetRegistered = false;
+
+    // If an onset happens while the next pool image is still downloading,
+    // we queue a "pending" onset and swap to the next real image as soon as it loads.
+    this._pendingOnsetCount = new Map(); // songId -> number
+    this._pendingSwapScheduled = new Set(); // songId
+  }
+
+  _resolveActiveSongId() {
+    return this._activeSongId || (this.currentSongContext?.id || this.currentSongContext?.title);
+  }
+
+  _incrementPendingOnset(songId) {
+    const key = String(songId);
+    // Clamp to 1: if multiple onsets happen while downloading, we collapse them
+    // into a single pending visual update (prevents rapid catch-up cycling).
+    this._pendingOnsetCount.set(key, 1);
+  }
+
+  _decrementPendingOnset(songId) {
+    const key = String(songId);
+    const current = this._pendingOnsetCount.get(key) || 0;
+    const next = Math.max(0, current - 1);
+    if (next === 0) this._pendingOnsetCount.delete(key);
+    else this._pendingOnsetCount.set(key, next);
+    return next;
+  }
+
+  _scheduleSwapWhenReady(songId) {
+    const key = String(songId);
+    if (this._pendingSwapScheduled.has(key)) return;
+
+    const peekUrl = this.poolManager.peekNextImage(songId);
+    if (!peekUrl) return;
+
+    this._pendingSwapScheduled.add(key);
+
+    this.poolManager._preloadImage(peekUrl).then(() => {
+      this._pendingSwapScheduled.delete(key);
+
+      // Only fulfill pending onsets for the currently active song.
+      if (String(this._activeSongId || '') !== key) return;
+
+      const pending = this._pendingOnsetCount.get(key) || 0;
+      if (pending <= 0) return;
+
+      const readyUrl = this.poolManager.peekNextImage(songId);
+      if (readyUrl && this.poolManager.isUrlReady(readyUrl)) {
+        const realImage = this.poolManager.consumeNextImage(songId);
+        if (realImage) {
+          // Clear pending (clamped to 1 anyway)
+          this._pendingOnsetCount.delete(key);
+          this._currentOnsetImage = realImage;
+          this._onsetGeneration++;
+          this._notifyListeners(realImage);
+        }
+      }
+    }).catch(() => {
+      this._pendingSwapScheduled.delete(key);
+    });
   }
 
   /**
@@ -590,14 +649,23 @@ class MCPImageOrchestrator {
    * Called once per onset; all subscribers receive the same image.
    */
   advanceImage(onsetData = {}) {
-    const newImage = this.getNextImage(onsetData);
+    const songId = this._resolveActiveSongId();
+    const newImage = this.getNextImage(onsetData, songId);
     if (newImage) {
       // Always advance — crossfadeTo in the UI already guards against same-image
       this._currentOnsetImage = newImage;
       this._onsetGeneration++;
       this._notifyListeners(newImage);
+      return newImage;
     }
-    return newImage;
+
+    // No real image ready at the onset moment. Queue it and fulfill as soon as
+    // the next pool image finishes downloading.
+    if (songId) {
+      this._incrementPendingOnset(songId);
+      this._scheduleSwapWhenReady(songId);
+    }
+    return null;
   }
 
   /**
@@ -830,12 +898,11 @@ class MCPImageOrchestrator {
    * @param {Object} onsetData - { time, strength, type, lfc, hfc, flux, energy, spectralCentroid }
    * @returns {string} Image URL or data URL
    */
-  getNextImage(onsetData = {}) {
+  getNextImage(onsetData = {}, resolvedSongId = null) {
     // CRITICAL: use _activeSongId, not currentSongContext.id!
     // currentSongContext gets overwritten by every thumbnail card that mounts.
     // _activeSongId is only set by activateForPlayback (the actually playing song).
-    const songId = this._activeSongId
-      || (this.currentSongContext?.id || this.currentSongContext?.title);
+    const songId = resolvedSongId || this._resolveActiveSongId();
 
     if (!songId) {
       return null;
@@ -858,7 +925,11 @@ class MCPImageOrchestrator {
     if (poolImage) return poolImage;
 
     // No real image ready yet.
-    // Return null so the UI keeps its current image (or shows the loading overlay).
+    // Start a preload and return null so the UI keeps its current image
+    // (or shows the loading overlay).
+    if (peekUrl) {
+      this._scheduleSwapWhenReady(songId);
+    }
     return null;
   }
 
