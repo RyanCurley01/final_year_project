@@ -46,6 +46,7 @@ router = APIRouter(prefix="/api/images", tags=["Image Generation"])
 _pool_refill_lock = threading.Lock()
 _pool_refill_last_scheduled: dict[int, float] = {}
 _POOL_REFILL_MIN_INTERVAL_SECS = 60.0
+_EXTERNAL_IMAGE_GENERATION_ENABLED = False
 
 
 def _schedule_pool_refill(
@@ -62,6 +63,9 @@ def _schedule_pool_refill(
     genre: Optional[str],
 ):
     """Schedule a background refill so /pool stays fast."""
+    if not _EXTERNAL_IMAGE_GENERATION_ENABLED:
+        return
+
     if product_id <= 0:
         return
 
@@ -517,6 +521,9 @@ def _quick_warmup_s3_images(
     max_images: int = 1,
 ) -> int:
     """Try a tiny synchronous warmup quickly to avoid request timeouts."""
+    if not _EXTERNAL_IMAGE_GENERATION_ENABLED:
+        return 0
+
     if max_images <= 0:
         return 0
 
@@ -566,6 +573,9 @@ def ensure_song_image_pool(
     genre: Optional[str] = None,
 ) -> int:
     """Ensure there are at least desired_size S3-hosted images stored for a song."""
+    if not _EXTERNAL_IMAGE_GENERATION_ENABLED:
+        return 0
+
     with get_db_connection() as conn:
         if not conn:
             return 0
@@ -603,6 +613,16 @@ def ensure_song_image_pool(
 
 def precompute_all_song_image_pools(pool_size: int = _DEFAULT_POOL_SIZE) -> dict:
     """Precompute per-song image pools so the frontend never needs placeholders."""
+    if not _EXTERNAL_IMAGE_GENERATION_ENABLED:
+        return {
+            "songs": 0,
+            "inserted": 0,
+            "skipped": 0,
+            "pool_size": int(pool_size),
+            "status": "external_generation_disabled",
+            "elapsed_seconds": 0.0,
+        }
+
     started = time.time()
     summary = {"songs": 0, "inserted": 0, "skipped": 0, "pool_size": int(pool_size)}
 
@@ -840,6 +860,13 @@ async def search_images(
     nocache: bool = Query(False, description="Skip cache for fresh images"),
 ):
     """Search for real photographs matching keyword tags via LoremFlickr."""
+    if not _EXTERNAL_IMAGE_GENERATION_ENABLED:
+        return {
+            "images": [],
+            "source": "external_generation_disabled",
+            "prompt": prompt,
+        }
+
     if not nocache:
         cached = _get_cached(prompt)
         if cached:
@@ -887,78 +914,46 @@ def get_image_pool(
     """
     product_id = _safe_int(song_id)
 
-    # If there's no DB-backed ProductID (e.g., transient client-only song),
-    # fall back to the old behavior so we don't break the UI.
+    # If there's no DB-backed ProductID, we only serve persisted hosted images.
     if not product_id or product_id == 0:
-        keywords = _build_keywords_from_features(
-            mood=mood,
-            energy=energy,
-            valence=valence,
-            tempo=tempo,
-            danceability=danceability,
-            acousticness=acousticness,
-            genre=genre,
-            title=song_title,
-        )
-        images = _generate_loremflickr_urls(keywords, count, nocache=bool(nocache))
         return {
-            "images": images,
-            "source": "loremflickr_fallback",
+            "images": [],
+            "source": "invalid_song_id",
             "song_title": song_title,
-            "tags_used": keywords,
+            "tags_used": [],
             "mood": mood,
         }
 
-    # nocache=true means: generate fresh URLs, persist them, and return them.
+    # External URL generation is disabled. nocache only affects clients; server still serves DB/S3 pool.
     if nocache:
-        keywords = _build_keywords_from_features(
-            mood=mood,
-            energy=energy,
-            valence=valence,
-            tempo=tempo,
-            danceability=danceability,
-            acousticness=acousticness,
-            genre=genre,
-            title=song_title,
-        )
-        images = _generate_loremflickr_urls(keywords, count, nocache=True)
         try:
             with get_db_connection() as conn:
-                if conn:
-                    with conn.cursor() as cursor:
-                        # Keep this path fast: persist URLs only (no S3 download/upload here).
-                        _db_insert_images(cursor, product_id, images, provider="loremflickr")
-                        conn.commit()
+                if not conn:
+                    raise HTTPException(status_code=503, detail="Database connection unavailable")
+                with conn.cursor() as cursor:
+                    images = _db_fetch_images(cursor, product_id, count)
+            images = [
+                {**img, "url": _absolute_url(request, img.get("url")), "urlLarge": _absolute_url(request, img.get("urlLarge") or img.get("url"))}
+                for img in (images or [])
+            ]
+            return {
+                "images": images,
+                "source": "db_pool_nocache_ignored",
+                "song_title": song_title,
+                "tags_used": [],
+                "mood": mood,
+            }
+        except HTTPException:
+            raise
         except Exception as e:
-            console.log(f"⚠️ ImageGeneration insert failed for {product_id}: {e}")
-
-        # Also schedule a hosted backfill so subsequent calls return stable /file URLs.
-        desired_size = max(_DEFAULT_POOL_SIZE, int(count))
-        _schedule_pool_refill(
-            product_id=int(product_id),
-            song_title=song_title,
-            desired_size=int(desired_size),
-            mood=mood,
-            energy=energy,
-            valence=valence,
-            tempo=tempo,
-            danceability=danceability,
-            acousticness=acousticness,
-            genre=genre,
-        )
-
-        returned = [
-            {**img, "url": _absolute_url(request, img.get("url")), "urlLarge": _absolute_url(request, img.get("urlLarge") or img.get("url"))}
-            for img in (images or [])
-        ]
-
-        return {
-            "images": returned,
-            "source": "generated_and_persisted",
-            "song_title": song_title,
-            "tags_used": keywords,
-            "mood": mood,
-        }
+            console.log(f"❌ Image pool DB error for ProductID={product_id}: {e}")
+            return {
+                "images": [],
+                "source": "db_error",
+                "song_title": song_title,
+                "tags_used": [],
+                "mood": mood,
+            }
 
     # Normal path: serve from DB pool (no blocking backfill in-request).
     try:
@@ -1011,20 +1006,7 @@ def get_image_pool(
                 except Exception as warm_err:
                     console.log(f"⚠️ S3 warmup failed for ProductID={product_id}: {warm_err}")
 
-            # Optional legacy/dev behavior: pad the response with external URLs.
-            if pad_external:
-                keywords = _build_keywords_from_features(
-                    mood=mood,
-                    energy=energy,
-                    valence=valence,
-                    tempo=tempo,
-                    danceability=danceability,
-                    acousticness=acousticness,
-                    genre=genre,
-                    title=song_title,
-                )
-                generated = _generate_loremflickr_urls(keywords, missing, nocache=True)
-                images = (images or []) + (generated or [])
+            # External padding disabled by design; keep this endpoint S3/DB-only.
 
         # Absolutize any relative URLs (e.g. /api/images/file/..)
         images = [
@@ -1037,7 +1019,7 @@ def get_image_pool(
             "source": (
                 "db_pool"
                 if missing == 0
-                else ("db_pool_padded" if pad_external else "db_pool_short_refill_scheduled")
+                else "db_pool_short_refill_scheduled"
             ),
             "song_title": song_title,
             "tags_used": [],
@@ -1047,30 +1029,13 @@ def get_image_pool(
         raise
     except Exception as e:
         # IMPORTANT: Don't 500 the UI when MySQL is slow/unavailable.
-        # Fall back to on-the-fly generation so thumbnails load.
+        # External URL generation is disabled; return an empty set.
         console.log(f"❌ Image pool DB error for ProductID={product_id}: {e}")
-
-        keywords = _build_keywords_from_features(
-            mood=mood,
-            energy=energy,
-            valence=valence,
-            tempo=tempo,
-            danceability=danceability,
-            acousticness=acousticness,
-            genre=genre,
-            title=song_title,
-        )
-        generated = _generate_loremflickr_urls(keywords, count, nocache=bool(nocache))
-
-        returned = [
-            {**img, "url": _absolute_url(request, img.get("url")), "urlLarge": _absolute_url(request, img.get("urlLarge") or img.get("url"))}
-            for img in (generated or [])
-        ]
         return {
-            "images": returned,
-            "source": "loremflickr_db_fallback",
+            "images": [],
+            "source": "db_error",
             "song_title": song_title,
-            "tags_used": keywords,
+            "tags_used": [],
             "mood": mood,
         }
 

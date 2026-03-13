@@ -119,12 +119,14 @@ const SmartRecommendationVisualizer = ({
 
       const recs = response.data.recommendations || [];
       
-      // Update displayed features to match exactly what the backend used (Source of Truth)
-      if (response.data.source_features) {
+        // Update displayed features to match exactly what the backend used (Source of Truth)
+        // Backend currently returns `target_features`; keep `source_features` for backward compatibility.
+        const backendFeatures = response.data.target_features || response.data.source_features;
+        if (backendFeatures) {
          setDisplayedFeatures(prev => ({
-             ...response.data.source_features,
+           ...backendFeatures,
              // Map backend names to frontend expected names
-             using_cached: response.data.source_features.using_cached_features
+           using_cached: backendFeatures.using_cached_features
          }));
       }
 

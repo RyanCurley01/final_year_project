@@ -35,6 +35,43 @@ from ml_service import KEY_NAME_TO_INDEX, TIME_SIG_TO_BEATS, _parse_json_list
 router = APIRouter()
 
 
+def _resolve_discover_product_id(current_id_raw: str, preview_url: Optional[str]) -> int:
+    """Resolve ProductID for discover/library songs.
+
+    Handles numeric IDs directly, and falls back to Products.preview_url lookup
+    when the incoming ID is missing/non-numeric.
+    """
+    try:
+        pid = int(str(current_id_raw).strip())
+        if pid > 0:
+            return pid
+    except Exception:
+        pass
+
+    if not preview_url:
+        return 0
+
+    try:
+        with get_db_connection() as conn:
+            if not conn:
+                return 0
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT ProductID
+                    FROM Products
+                    WHERE preview_url = %s
+                    LIMIT 1
+                    """,
+                    (preview_url,),
+                )
+                row = cursor.fetchone() or {}
+                return int(row.get("ProductID") or 0)
+    except Exception as e:
+        console.log(f"⚠️ Discover ProductID resolution failed: {e}")
+        return 0
+
+
 def _build_similarity_vector(f: dict) -> list:
     """
     Build a normalized similarity vector from audio features dict.
@@ -203,12 +240,29 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
     Handles feature extraction from S3 or iTunes depending on the source.
     """
     try:
+        # Startup warms this in the background; if it isn't ready yet (or failed),
+        # recover on-demand so visualizer requests don't end up with empty pools.
+        if not ml_service.cache_loaded or not ml_service.audio_features_cache:
+            try:
+                await ml_service.startup_cache()
+            except Exception as cache_err:
+                console.log(f"⚠️ Lazy cache warmup failed in unified recommendations: {cache_err}")
+
         current_id_str = str(request.current_product_id)
         current_id_int = 0
         try:
              current_id_int = int(current_id_str)
         except:
              pass
+
+        # Discover/library songs must resolve to positive ProductID for proper matching.
+        source_lower = (request.source or "").lower()
+        if "discover" in source_lower and current_id_int <= 0:
+            resolved_pid = _resolve_discover_product_id(current_id_str, request.preview_url)
+            if resolved_pid > 0:
+                current_id_int = resolved_pid
+                current_id_str = str(resolved_pid)
+                console.log(f"✅ Resolved discover ProductID from preview_url: {resolved_pid}")
              
         clean_current_id = clean_id_str(current_id_str)
 
@@ -431,6 +485,11 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
                              if int(pid) == int(clean_current_id): continue
                          except: pass
                          candidates.append(p)
+
+                # Keep discover matching strict to library songs only.
+                # Returning artist/iTunes candidates here causes repeated unrelated top results.
+                if not candidates:
+                    console.log("⚠️ Discover candidate pool is empty (positive ProductIDs only)")
                          
             else:
                  candidates = [p for pid, p in all_cached if str(pid) != clean_current_id]
@@ -476,7 +535,7 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
             # We treat any request that isn't explicitly 'discover_page' or 'library' as potentially needing filtering if it behaves like an artist view
             
             # Robust source checking (substring match)
-            source_lower = request.source.lower()
+            source_lower = (request.source or '').lower()
             artist_context_keywords = ['chart', 'similar', 'visual', 'side', 'search']
             is_artist_context = any(kw in source_lower for kw in artist_context_keywords)
             
@@ -504,6 +563,16 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
         
         candidates = filtered_candidates
         console.log(f"🔎 Final Filtered Candidates: {len(candidates)} (Artist Only Filter: {is_artist_context})")
+
+        # Final safety net for non-discover contexts only.
+        if not candidates and request.source != 'discover_page':
+            relaxed_candidates = []
+            for pid, p in ml_service.audio_features_cache.items():
+                if str(pid).strip() == clean_current_id:
+                    continue
+                relaxed_candidates.append(p)
+            candidates = relaxed_candidates
+            console.log(f"⚠️ Relaxed fallback candidate pool: {len(candidates)}")
         
         if not candidates:
              return {"status": "success", "recommendations": []}
@@ -535,6 +604,16 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
             energy_match=1.0 - abs(target_features.get('energy',0.5) - (p.get('energy') or 0.5))
             mood_match=1.0 - abs(target_features.get('valence',0.5) - (p.get('valence') or 0.5))
             dance_match=1.0 - abs(target_features.get('danceability',0.5) - (p.get('danceability') or 0.5))
+
+            # Normalize cosine [-1, 1] -> [0, 1], then blend with core musical matches.
+            # This avoids "same top 5" artifacts when high-dimensional defaults dominate cosine.
+            cosine_norm = max(0.0, min(1.0, (float(score) + 1.0) / 2.0))
+            core_match = (
+                tempo_match * 0.25
+                + energy_match * 0.30
+                + mood_match * 0.20
+                + dance_match * 0.25
+            )
             
             matches = [
                 ('tempo', tempo_match, f"Matching rhythm ({p.get('tempo', 0):.0f} BPM)"),
@@ -550,10 +629,22 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
             target_cluster = target_features.get('genre_cluster', '')
             candidate_cluster = p.get('genre_cluster', '')
             genre_cluster_match = bool(target_cluster and candidate_cluster and target_cluster == candidate_cluster)
+
+            genre_adjust = 0.0
+            if target_cluster and candidate_cluster:
+                genre_adjust = 0.05 if genre_cluster_match else -0.03
+
+            blended_score = (cosine_norm * 0.45) + (core_match * 0.55) + genre_adjust
+            blended_score = max(0.0, min(0.999, blended_score))
+
+            # Tiny deterministic jitter for near-ties prevents static repeated top-5 ordering.
+            seed_str = f"{clean_current_id}:{p.get('id', '')}"
+            tie_jitter = (abs(hash(seed_str)) % 1000) / 1_000_000.0
+            blended_score = max(0.0, min(0.999, blended_score + tie_jitter))
             
             result = AudioSimilarityResult(
                 product_id=p['id'],
-                similarity_score=round(float(score), 3),
+                similarity_score=round(float(blended_score), 3),
                 tempo_match=round(tempo_match, 3),
                 energy_match=round(energy_match, 3),
                 mood_match=round(mood_match, 3),
