@@ -37,6 +37,12 @@ S3_CONFIG = {
     'url_expiration': 3600  # URLs valid for 1 hour
 }
 
+# Generated image hosting (S3-backed)
+IMAGE_POOL_S3_BUCKET = os.getenv("IMAGE_POOL_S3_BUCKET", S3_CONFIG['bucket_name'])
+IMAGE_POOL_S3_PREFIX = os.getenv("IMAGE_POOL_S3_PREFIX", "generated-images")
+IMAGE_POOL_MAX_DOWNLOAD_BYTES = int(os.getenv("IMAGE_POOL_MAX_DOWNLOAD_BYTES", "8000000"))  # 8MB
+IMAGE_POOL_DOWNLOAD_TIMEOUT_SECS = float(os.getenv("IMAGE_POOL_DOWNLOAD_TIMEOUT_SECS", "6"))
+
 # iTunes API configuration from environment
 # EXECUTION ORDER: Run on module import.
 ITUNES_API_BASE_URL = os.getenv('ITUNES_API_BASE_URL', 'https://itunes.apple.com')

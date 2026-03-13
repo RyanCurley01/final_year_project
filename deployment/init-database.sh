@@ -181,6 +181,10 @@ USE Game_Store_System;
         ProductID INT NOT NULL,
         Provider VARCHAR(32) NOT NULL DEFAULT 'loremflickr',
         KeywordTag VARCHAR(64),
+        SourceUrl TEXT,
+        StorageKey VARCHAR(512),
+        ContentType VARCHAR(64),
+        ByteSize INT,
         ImageUrl TEXT NOT NULL,
         UrlHash CHAR(32) NOT NULL,
         Width INT DEFAULT 1980,
@@ -190,6 +194,7 @@ USE Game_Store_System;
         FOREIGN KEY(ProductID) REFERENCES Products(ProductID) ON DELETE CASCADE,
         UNIQUE KEY uniq_product_hash (ProductID, UrlHash),
         INDEX idx_product (ProductID),
+        INDEX idx_provider (Provider),
         INDEX idx_created (CreatedAt)
     );
 

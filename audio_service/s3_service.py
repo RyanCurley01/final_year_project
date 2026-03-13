@@ -1,5 +1,6 @@
 # audio_service/s3_service.py
 import boto3
+from botocore.exceptions import ClientError
 from urllib.parse import urlparse, unquote
 from botocore.config import Config
 from config import S3_CONFIG
@@ -69,3 +70,51 @@ def generate_presigned_url(s3_url: str) -> str:
     except Exception as e:
         console.log(f"Error generating presigned URL for {s3_url}: {e}")
         return s3_url  # Return original URL as fallback
+
+
+def upload_bytes(
+    bucket_name: str,
+    object_key: str,
+    data: bytes,
+    *,
+    content_type: str | None = None,
+    cache_control: str | None = None,
+    metadata: dict | None = None,
+):
+    """Upload bytes to S3.
+
+    Note: Whether objects are publicly readable depends on your bucket policy.
+    We intentionally do not set ACLs here.
+    """
+    if s3_client is None:
+        return False
+
+    extra_args: dict = {}
+    if content_type:
+        extra_args["ContentType"] = content_type
+    if cache_control:
+        extra_args["CacheControl"] = cache_control
+    if metadata:
+        extra_args["Metadata"] = metadata
+
+    try:
+        s3_client.put_object(Bucket=bucket_name, Key=object_key, Body=data, **extra_args)
+        return True
+    except ClientError as e:
+        console.log(f"Error uploading to S3 ({bucket_name}/{object_key}): {e}")
+        return False
+
+
+def get_object_stream(bucket_name: str, object_key: str):
+    """Fetch an object from S3 and return (stream, content_type, content_length)."""
+    if s3_client is None:
+        return None
+    try:
+        obj = s3_client.get_object(Bucket=bucket_name, Key=object_key)
+        body = obj.get("Body")
+        content_type = obj.get("ContentType")
+        content_length = obj.get("ContentLength")
+        return body, content_type, content_length
+    except ClientError as e:
+        console.log(f"Error fetching S3 object ({bucket_name}/{object_key}): {e}")
+        return None

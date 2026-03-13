@@ -278,8 +278,8 @@ services:
       # Database configuration - connects to db service on Docker network
       MYSQL_HOST: db
       MYSQL_PORT: 3306
-      MYSQL_USER: gamestore_user
-      MYSQL_PASSWORD: gamestore_pass
+      MYSQL_USER: ${MYSQL_USER:-gamestore_user}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-gamestore_pass}
       MYSQL_DATABASE: Game_Store_System
       BACKEND_API_URL: http://products-service:8081
     depends_on:

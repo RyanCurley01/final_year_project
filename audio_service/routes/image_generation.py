@@ -17,16 +17,83 @@ guitar, piano, sailboat, volcano keywords.
 Only nature, landscape, architecture, and abstract imagery.
 """
 
-from fastapi import APIRouter, Query, HTTPException
+from fastapi import APIRouter, Query, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from typing import Optional
 import time
 import hashlib
 import random
+import requests
+import threading
+from urllib.parse import urlparse
 
 from database import get_db_connection
 from utils import console
+from config import (
+    IMAGE_POOL_S3_BUCKET,
+    IMAGE_POOL_S3_PREFIX,
+    IMAGE_POOL_MAX_DOWNLOAD_BYTES,
+    IMAGE_POOL_DOWNLOAD_TIMEOUT_SECS,
+)
+from s3_service import upload_bytes, get_object_stream
+from config import executor
 
 router = APIRouter(prefix="/api/images", tags=["Image Generation"])
+
+# ============================================
+# BACKFILL SCHEDULING (avoid request blocking)
+# ============================================
+_pool_refill_lock = threading.Lock()
+_pool_refill_last_scheduled: dict[int, float] = {}
+_POOL_REFILL_MIN_INTERVAL_SECS = 60.0
+
+
+def _schedule_pool_refill(
+    *,
+    product_id: int,
+    song_title: str,
+    desired_size: int,
+    mood: Optional[str],
+    energy: Optional[float],
+    valence: Optional[float],
+    tempo: Optional[float],
+    danceability: Optional[float],
+    acousticness: Optional[float],
+    genre: Optional[str],
+):
+    """Schedule a background refill so /pool stays fast."""
+    if product_id <= 0:
+        return
+
+    now = time.time()
+    with _pool_refill_lock:
+        last = _pool_refill_last_scheduled.get(product_id)
+        if last and (now - last) < _POOL_REFILL_MIN_INTERVAL_SECS:
+            return
+        _pool_refill_last_scheduled[product_id] = now
+
+    def _task():
+        try:
+            inserted = ensure_song_image_pool(
+                product_id,
+                song_title,
+                desired_size=int(desired_size),
+                mood=mood,
+                energy=energy,
+                valence=valence,
+                tempo=tempo,
+                danceability=danceability,
+                acousticness=acousticness,
+                genre=genre,
+            )
+            console.log(f"🖼️ Pool refill complete ProductID={product_id} inserted={inserted}")
+        except Exception as e:
+            console.log(f"⚠️ Pool refill failed ProductID={product_id}: {e}")
+
+    try:
+        executor.submit(_task)
+    except Exception as e:
+        console.log(f"⚠️ Pool refill scheduling failed ProductID={product_id}: {e}")
 
 # ============================================
 # IN-MEMORY CACHE (TTL-based)
@@ -155,29 +222,112 @@ def _hash_url(url: str) -> str:
     return hashlib.md5(url.encode("utf-8")).hexdigest()
 
 
+def _hash_bytes(data: bytes) -> str:
+    return hashlib.md5(data).hexdigest()
+
+
+def _is_absolute_url(url: str) -> bool:
+    try:
+        parsed = urlparse(url)
+        return bool(parsed.scheme) and bool(parsed.netloc)
+    except Exception:
+        return False
+
+
+def _absolute_url(request: Request, maybe_relative_url: str) -> str:
+    if not maybe_relative_url:
+        return maybe_relative_url
+    if _is_absolute_url(maybe_relative_url):
+        return maybe_relative_url
+    # Ensure we generate a fully-qualified URL that matches the API host.
+    base = str(request.base_url).rstrip("/")
+    if not maybe_relative_url.startswith("/"):
+        maybe_relative_url = "/" + maybe_relative_url
+    return base + maybe_relative_url
+
+
+def _download_image_bytes(source_url: str):
+    """Download an image and return (bytes, content_type).
+
+    Enforces a max download size and short timeouts to avoid tying up workers.
+    """
+    timeout = (IMAGE_POOL_DOWNLOAD_TIMEOUT_SECS, IMAGE_POOL_DOWNLOAD_TIMEOUT_SECS)
+    with requests.get(source_url, stream=True, timeout=timeout, allow_redirects=True) as resp:
+        resp.raise_for_status()
+        content_type = (resp.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+        if not content_type.startswith("image/"):
+            raise ValueError(f"Non-image content-type: {content_type or 'unknown'}")
+
+        chunks = []
+        size = 0
+        for chunk in resp.iter_content(chunk_size=64 * 1024):
+            if not chunk:
+                continue
+            size += len(chunk)
+            if size > IMAGE_POOL_MAX_DOWNLOAD_BYTES:
+                raise ValueError("Image too large")
+            chunks.append(chunk)
+        data = b"".join(chunks)
+        if not data:
+            raise ValueError("Empty image response")
+        return data, content_type
+
+
+def _ext_from_content_type(content_type: str) -> str:
+    if content_type == "image/jpeg":
+        return ".jpg"
+    if content_type == "image/png":
+        return ".png"
+    if content_type == "image/webp":
+        return ".webp"
+    if content_type == "image/gif":
+        return ".gif"
+    return ".img"
+
+
 def _db_count_images(cursor, product_id: int) -> int:
     cursor.execute("SELECT COUNT(*) AS cnt FROM ImageGeneration WHERE ProductID = %s", (product_id,))
     row = cursor.fetchone() or {}
     return int(row.get("cnt") or 0)
 
 
+def _db_count_images_by_provider(cursor, product_id: int, provider: str) -> int:
+    cursor.execute(
+        "SELECT COUNT(*) AS cnt FROM ImageGeneration WHERE ProductID = %s AND Provider = %s",
+        (product_id, provider),
+    )
+    row = cursor.fetchone() or {}
+    return int(row.get("cnt") or 0)
+
+
 def _db_fetch_images(cursor, product_id: int, count: int) -> list:
     """Fetch a slice of images without ORDER BY RAND() to avoid heavy scans."""
+    # Prefer hosted images first so we get stable cached URLs.
     total = _db_count_images(cursor, product_id)
     if total <= 0:
         return []
 
-    limit_n = min(count, total)
-    if total <= limit_n:
+    # Count the number of S3 images to avoid offset issues
+    cursor.execute("SELECT COUNT(*) as s3_count FROM ImageGeneration WHERE ProductID = %s AND Provider = 's3'", (product_id,))
+    s3_count = cursor.fetchone().get("s3_count", 0)
+
+    # Only pick from S3 images to ensure they are hosted
+    pool_size = s3_count
+    if pool_size <= 0:
+        return []
+
+    limit_n = min(count, pool_size)
+    
+    if pool_size <= limit_n:
         offset = 0
     else:
-        offset = random.randint(0, total - limit_n)
+        offset = random.randint(0, pool_size - limit_n)
 
     cursor.execute(
         """
         SELECT ImageUrl AS url, Width AS width, Height AS height, KeywordTag AS tags
         FROM ImageGeneration
-        WHERE ProductID = %s
+        WHERE ProductID = %s AND Provider = 's3'
         ORDER BY ImageGenID ASC
         LIMIT %s OFFSET %s
         """,
@@ -234,6 +384,116 @@ def _db_insert_images(cursor, product_id: int, images: list, provider: str = "lo
     return cursor.rowcount
 
 
+def _db_insert_hosted_images(cursor, product_id: int, images: list):
+    """Insert hosted images with S3 storage metadata."""
+    if not images:
+        return 0
+
+    payload = []
+    for img in images:
+        url = (img.get("url") or "").strip()
+        if not url:
+            continue
+        payload.append(
+            (
+                product_id,
+                "s3",
+                (img.get("tags") or None),
+                (img.get("sourceUrl") or None),
+                (img.get("storageKey") or None),
+                (img.get("contentType") or None),
+                int(img.get("byteSize") or 0) or None,
+                url,
+                (img.get("urlHash") or _hash_url(url)),
+                int(img.get("width") or 1980),
+                int(img.get("height") or 1280),
+                int(img.get("lock_id") or 0) or None,
+            )
+        )
+
+    if not payload:
+        return 0
+
+    cursor.executemany(
+        """
+        INSERT IGNORE INTO ImageGeneration
+            (ProductID, Provider, KeywordTag, SourceUrl, StorageKey, ContentType, ByteSize,
+             ImageUrl, UrlHash, Width, Height, LockId)
+        VALUES
+            (%s, %s, %s, %s, %s, %s, %s,
+             %s, %s, %s, %s, %s)
+        """,
+        payload,
+    )
+    return cursor.rowcount
+
+
+def _host_loremflickr_images_to_s3(product_id: int, images: list):
+    """Download LoremFlickr images and upload to S3, returning hosted image dicts.
+
+    If S3 isn't configured, returns an empty list.
+    """
+    if not IMAGE_POOL_S3_BUCKET:
+        return [], list(images or [])
+
+    hosted = []
+    failed = []
+    for img in images:
+        source_url = (img.get("url") or "").strip()
+        if not source_url:
+            continue
+            
+        success = False
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                data, content_type = _download_image_bytes(source_url)
+                url_hash = _hash_bytes(data)
+                ext = _ext_from_content_type(content_type)
+                storage_key = f"{IMAGE_POOL_S3_PREFIX}/{product_id}/{url_hash}{ext}"
+
+                ok = upload_bytes(
+                    IMAGE_POOL_S3_BUCKET,
+                    storage_key,
+                    data,
+                    content_type=content_type,
+                    cache_control="public, max-age=31536000, immutable",
+                    metadata={"product_id": str(product_id), "source": "loremflickr"},
+                )
+                if not ok:
+                    raise Exception("S3 upload_bytes returned False")
+
+                # Store relative URL; we'll absolutize per-request in the endpoint.
+                hosted_url = f"/api/images/file/{product_id}/{url_hash}"
+                hosted.append(
+                    {
+                        "url": hosted_url,
+                        "urlLarge": hosted_url,
+                        "tags": img.get("tags"),
+                        "width": img.get("width") or 1980,
+                        "height": img.get("height") or 1280,
+                        "lock_id": img.get("lock_id"),
+                        "sourceUrl": source_url,
+                        "storageKey": storage_key,
+                        "contentType": content_type,
+                        "byteSize": len(data),
+                        "urlHash": url_hash,
+                    }
+                )
+                success = True
+                time.sleep(0.5)  # Add a polite delay to respect rate limits
+                break
+            except Exception as e:
+                console.log(f"⚠️ Failed to host image for ProductID={product_id} (attempt {attempt + 1}/{max_retries}): {e}")
+                if attempt < max_retries - 1:
+                    time.sleep(1.0 * (attempt + 1))  # Simple exponential backoff
+        
+        if not success:
+            failed.append(img)
+
+    return hosted, failed
+
+
 def ensure_song_image_pool(
     product_id: int,
     song_title: str,
@@ -247,12 +507,12 @@ def ensure_song_image_pool(
     acousticness: Optional[float] = None,
     genre: Optional[str] = None,
 ) -> int:
-    """Ensure there are at least desired_size images stored for a song."""
+    """Ensure there are at least desired_size S3-hosted images stored for a song."""
     with get_db_connection() as conn:
         if not conn:
             return 0
         with conn.cursor() as cursor:
-            existing = _db_count_images(cursor, product_id)
+            existing = _db_count_images_by_provider(cursor, product_id, "s3")
             missing = max(0, int(desired_size) - existing)
             if missing <= 0:
                 return 0
@@ -268,7 +528,17 @@ def ensure_song_image_pool(
                 title=song_title,
             )
             images = _generate_loremflickr_urls(keywords, missing, nocache=True)
-            inserted = _db_insert_images(cursor, product_id, images)
+
+            # Prefer hosting to S3 for stable URLs + browser caching.
+            hosted_images, failed_images = _host_loremflickr_images_to_s3(product_id, images)
+            inserted = 0
+            if hosted_images:
+                inserted += _db_insert_hosted_images(cursor, product_id, hosted_images)
+
+            # Fallback: persist original URLs for images that failed hosting.
+            if failed_images:
+                inserted += _db_insert_images(cursor, product_id, failed_images, provider="loremflickr")
+
             conn.commit()
             return inserted
 
@@ -298,8 +568,8 @@ def precompute_all_song_image_pools(pool_size: int = _DEFAULT_POOL_SIZE) -> dict
             )
             rows = cursor.fetchall() or []
 
-            # Existing counts in one query
-            cursor.execute("SELECT ProductID, COUNT(*) AS cnt FROM ImageGeneration GROUP BY ProductID")
+            # Existing S3 counts in one query (frontend now requests hosted-only pools)
+            cursor.execute("SELECT ProductID, COUNT(*) AS cnt FROM ImageGeneration WHERE Provider = 's3' GROUP BY ProductID")
             existing_counts = {int(r["ProductID"]): int(r["cnt"]) for r in (cursor.fetchall() or [])}
 
             for row in rows:
@@ -322,7 +592,15 @@ def precompute_all_song_image_pools(pool_size: int = _DEFAULT_POOL_SIZE) -> dict
                     title=title,
                 )
                 images = _generate_loremflickr_urls(keywords, missing, nocache=True)
-                inserted = _db_insert_images(cursor, pid, images)
+                hosted_images, failed_images = _host_loremflickr_images_to_s3(pid, images)
+
+                inserted = 0
+                if hosted_images:
+                    inserted += _db_insert_hosted_images(cursor, pid, hosted_images)
+
+                if failed_images:
+                    inserted += _db_insert_images(cursor, pid, failed_images, provider="loremflickr")
+
                 summary["songs"] += 1
                 summary["inserted"] += int(inserted or 0)
 
@@ -524,11 +802,13 @@ async def search_images(
 
 
 @router.get("/pool")
-async def get_image_pool(
+def get_image_pool(
+    request: Request,
     song_title: str = Query(..., description="Song title for contextual image retrieval"),
     song_id: Optional[str] = Query(None, description="Song ID for cache keying"),
     count: int = Query(30, ge=1, le=1000, description="Number of images for the pool"),
     nocache: bool = Query(False, description="Skip cache for fresh refill images"),
+    pad_external: bool = Query(False, description="Pad DB pools with external LoremFlickr URLs to prevent empty responses"),
     mood: Optional[str] = Query(None, description="Song mood (energetic/happy/calm/sad)"),
     energy: Optional[float] = Query(None, ge=0, le=1, description="Energy level 0-1"),
     valence: Optional[float] = Query(None, ge=0, le=1, description="Valence (positivity) 0-1"),
@@ -562,7 +842,7 @@ async def get_image_pool(
             genre=genre,
             title=song_title,
         )
-        images = _generate_loremflickr_urls(keywords, count, nocache=True)
+        images = _generate_loremflickr_urls(keywords, count, nocache=bool(nocache))
         return {
             "images": images,
             "source": "loremflickr_fallback",
@@ -588,26 +868,18 @@ async def get_image_pool(
             with get_db_connection() as conn:
                 if conn:
                     with conn.cursor() as cursor:
-                        _db_insert_images(cursor, product_id, images)
+                        # Keep this path fast: persist URLs only (no S3 download/upload here).
+                        _db_insert_images(cursor, product_id, images, provider="loremflickr")
                         conn.commit()
         except Exception as e:
             console.log(f"⚠️ ImageGeneration insert failed for {product_id}: {e}")
 
-        return {
-            "images": images,
-            "source": "generated_and_persisted",
-            "song_title": song_title,
-            "tags_used": keywords,
-            "mood": mood,
-        }
-
-    # Normal path: serve from DB pool (and backfill if missing).
-    try:
-        # Backfill up to the default pool size, then serve the requested slice.
-        ensure_song_image_pool(
-            product_id,
-            song_title,
-            _DEFAULT_POOL_SIZE,
+        # Also schedule a hosted backfill so subsequent calls return stable /file URLs.
+        desired_size = max(_DEFAULT_POOL_SIZE, int(count))
+        _schedule_pool_refill(
+            product_id=int(product_id),
+            song_title=song_title,
+            desired_size=int(desired_size),
             mood=mood,
             energy=energy,
             valence=valence,
@@ -617,15 +889,97 @@ async def get_image_pool(
             genre=genre,
         )
 
+        returned = [
+            {**img, "url": _absolute_url(request, img.get("url")), "urlLarge": _absolute_url(request, img.get("urlLarge") or img.get("url"))}
+            for img in (images or [])
+        ]
+
+        return {
+            "images": returned,
+            "source": "generated_and_persisted",
+            "song_title": song_title,
+            "tags_used": keywords,
+            "mood": mood,
+        }
+
+    # Normal path: serve from DB pool (no blocking backfill in-request).
+    try:
+        images = []
         with get_db_connection() as conn:
             if not conn:
                 raise HTTPException(status_code=503, detail="Database connection unavailable")
             with conn.cursor() as cursor:
                 images = _db_fetch_images(cursor, product_id, count)
 
+        missing = max(0, int(count) - len(images or []))
+        if missing > 0:
+            # Schedule a background refill so future calls return stable hosted URLs.
+            desired_size = max(_DEFAULT_POOL_SIZE, int(count))
+            _schedule_pool_refill(
+                product_id=int(product_id),
+                song_title=song_title,
+                desired_size=int(desired_size),
+                mood=mood,
+                energy=energy,
+                valence=valence,
+                tempo=tempo,
+                danceability=danceability,
+                acousticness=acousticness,
+                genre=genre,
+            )
+
+            # For tiny requests (thumbnail mode) with no hosted images yet,
+            # do a small synchronous warmup so first paint can still render.
+            if len(images or []) == 0 and int(count) <= 3:
+                try:
+                    ensure_song_image_pool(
+                        int(product_id),
+                        song_title,
+                        desired_size=max(3, int(count)),
+                        mood=mood,
+                        energy=energy,
+                        valence=valence,
+                        tempo=tempo,
+                        danceability=danceability,
+                        acousticness=acousticness,
+                        genre=genre,
+                    )
+                    with get_db_connection() as retry_conn:
+                        if retry_conn:
+                            with retry_conn.cursor() as retry_cursor:
+                                images = _db_fetch_images(retry_cursor, product_id, count)
+                    missing = max(0, int(count) - len(images or []))
+                except Exception as warm_err:
+                    console.log(f"⚠️ S3 warmup failed for ProductID={product_id}: {warm_err}")
+
+            # Optional legacy/dev behavior: pad the response with external URLs.
+            if pad_external:
+                keywords = _build_keywords_from_features(
+                    mood=mood,
+                    energy=energy,
+                    valence=valence,
+                    tempo=tempo,
+                    danceability=danceability,
+                    acousticness=acousticness,
+                    genre=genre,
+                    title=song_title,
+                )
+                generated = _generate_loremflickr_urls(keywords, missing, nocache=True)
+                images = (images or []) + (generated or [])
+
+        # Absolutize any relative URLs (e.g. /api/images/file/..)
+        images = [
+            {**img, "url": _absolute_url(request, img.get("url")), "urlLarge": _absolute_url(request, img.get("urlLarge") or img.get("url"))}
+            for img in (images or [])
+        ]
+
         return {
             "images": images,
-            "source": "db_pool",
+            "source": (
+                "db_pool"
+                if missing == 0
+                else ("db_pool_padded" if pad_external else "db_pool_short_refill_scheduled")
+            ),
             "song_title": song_title,
             "tags_used": [],
             "mood": mood,
@@ -633,8 +987,85 @@ async def get_image_pool(
     except HTTPException:
         raise
     except Exception as e:
+        # IMPORTANT: Don't 500 the UI when MySQL is slow/unavailable.
+        # Fall back to on-the-fly generation so thumbnails load.
         console.log(f"❌ Image pool DB error for ProductID={product_id}: {e}")
-        raise HTTPException(status_code=500, detail="Failed to load image pool")
+
+        keywords = _build_keywords_from_features(
+            mood=mood,
+            energy=energy,
+            valence=valence,
+            tempo=tempo,
+            danceability=danceability,
+            acousticness=acousticness,
+            genre=genre,
+            title=song_title,
+        )
+        generated = _generate_loremflickr_urls(keywords, count, nocache=bool(nocache))
+
+        returned = [
+            {**img, "url": _absolute_url(request, img.get("url")), "urlLarge": _absolute_url(request, img.get("urlLarge") or img.get("url"))}
+            for img in (generated or [])
+        ]
+        return {
+            "images": returned,
+            "source": "loremflickr_db_fallback",
+            "song_title": song_title,
+            "tags_used": keywords,
+            "mood": mood,
+        }
+
+
+@router.get("/file/{product_id}/{url_hash}")
+def get_hosted_image_file(product_id: int, url_hash: str):
+    """Serve a hosted image by stable URL (browser-cacheable)."""
+    if not IMAGE_POOL_S3_BUCKET:
+        raise HTTPException(status_code=503, detail="S3 bucket not configured")
+
+    # Look up the object key from the DB when available.
+    row = {}
+    try:
+        with get_db_connection() as conn:
+            if conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(
+                        """
+                        SELECT StorageKey, ContentType
+                        FROM ImageGeneration
+                        WHERE ProductID = %s AND UrlHash = %s
+                        LIMIT 1
+                        """,
+                        (int(product_id), str(url_hash)),
+                    )
+                    row = cursor.fetchone() or {}
+    except Exception as e:
+        console.log(f"⚠️ Hosted image DB lookup failed for ProductID={product_id}, UrlHash={url_hash}: {e}")
+
+    storage_key = (row or {}).get("StorageKey")
+
+    # DB-less fallback: infer the object key pattern used by hosting.
+    candidate_keys: list[str] = []
+    if storage_key:
+        candidate_keys.append(storage_key)
+    else:
+        for ext in (".jpg", ".jpeg", ".png", ".webp", ".gif", ".img"):
+            candidate_keys.append(f"{IMAGE_POOL_S3_PREFIX}/{int(product_id)}/{str(url_hash)}{ext}")
+
+    obj = None
+    for key in candidate_keys:
+        obj = get_object_stream(IMAGE_POOL_S3_BUCKET, key)
+        if obj:
+            break
+
+    if not obj:
+        raise HTTPException(status_code=404, detail="Image object missing")
+
+    body, content_type, _content_length = obj
+    headers = {
+        "Cache-Control": "public, max-age=31536000, immutable",
+        "ETag": f'"{url_hash}"',
+    }
+    return StreamingResponse(body, media_type=(content_type or row.get("ContentType") or "image/jpeg"), headers=headers)
 
 
 @router.get("/health")
@@ -643,6 +1074,6 @@ async def image_service_health():
     return {
         "status": "ok",
         "cache_size": len(_image_cache),
-        "providers": ["loremflickr"],
+        "providers": ["loremflickr", "s3"],
         "verified_keywords": len(_VERIFIED_KEYWORDS),
     }

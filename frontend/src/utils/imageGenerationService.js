@@ -318,9 +318,26 @@ class ProceduralGenerator {
 class ImagePoolManager {
   constructor() {
     this.pools = new Map(); // songId → { images: string[], index: number, loading: boolean }
-    this.preloadedImages = new Map(); // url → { img: HTMLImageElement, promise: Promise<boolean>, loaded: boolean }
+    // url → { img: HTMLImageElement, promise: Promise<boolean>, loaded: boolean, failed: boolean }
+    // Map iteration order is used as an approximate LRU.
+    this.preloadedImages = new Map();
     this.maxPoolSize = 1000000; // Effectively infinite — never cap
     this.refillThreshold = 20; // Refill when pool drops below this
+    // Keep a bounded number of upcoming URLs actively preloading.
+    // This avoids spawning hundreds of concurrent image downloads, which can
+    // starve the *next* image and cause missed swaps on fast onsets.
+    this.preloadWindow = 16;
+  }
+
+  _touchPreloadEntry(url, entry) {
+    if (!url || !entry) return;
+    // Refresh insertion order (approx LRU) so active/used entries are least likely to be evicted.
+    try {
+      this.preloadedImages.delete(url);
+      this.preloadedImages.set(url, entry);
+    } catch {
+      // ignore
+    }
   }
 
   /**
@@ -349,12 +366,54 @@ class ImagePoolManager {
       if (!existing.has(url)) {
         pool.images.push(url);
         existing.add(url);
-        this._preloadImage(url);
       }
     }
+
+    // Start preloading only the next few images we might actually consume.
+    this._ensurePreloadWindow(songId);
+
     // Cap pool size (very high — effectively infinite)
     if (pool.images.length > this.maxPoolSize) {
       pool.images = pool.images.slice(-this.maxPoolSize);
+    }
+  }
+
+  _isUrlFailed(url) {
+    const entry = this.preloadedImages.get(url);
+    return entry?.failed === true;
+  }
+
+  /**
+   * Discard any failed URLs at the head of the queue.
+   * A single failed image should never permanently block onset-driven swapping.
+   */
+  _discardFailedHead(songId, maxDiscards = 25) {
+    const pool = this.getPool(songId);
+    let discards = 0;
+    while (pool.images.length > 0 && discards < maxDiscards) {
+      const head = pool.images[0];
+      if (!head) break;
+      if (head.startsWith('data:')) break;
+      if (!this._isUrlFailed(head)) break;
+      pool.images.shift();
+      discards++;
+    }
+    return discards;
+  }
+
+  /**
+   * Ensure a small lookahead window of images are being preloaded.
+   */
+  _ensurePreloadWindow(songId) {
+    const pool = this.getPool(songId);
+    this._discardFailedHead(songId);
+    const limit = Math.min(pool.images.length, this.preloadWindow);
+    for (let i = 0; i < limit; i++) {
+      const url = pool.images[i];
+      if (!url || url.startsWith('data:')) continue;
+      // Skip known failures; they'll get discarded when they reach head.
+      if (this._isUrlFailed(url)) continue;
+      this._preloadImage(url);
     }
   }
 
@@ -362,6 +421,7 @@ class ImagePoolManager {
    * Peek the next image URL without consuming it.
    */
   peekNextImage(songId) {
+    this._discardFailedHead(songId);
     const pool = this.getPool(songId);
     return pool.images.length > 0 ? pool.images[0] : null;
   }
@@ -370,9 +430,13 @@ class ImagePoolManager {
    * Consume the next image URL from the pool.
    */
   consumeNextImage(songId) {
+    this._discardFailedHead(songId);
     const pool = this.getPool(songId);
     if (pool.images.length === 0) return null;
-    return pool.images.shift();
+    const next = pool.images.shift();
+    // Keep the lookahead window warm.
+    this._ensurePreloadWindow(songId);
+    return next;
   }
 
   /**
@@ -383,11 +447,16 @@ class ImagePoolManager {
     if (!url) return false;
     if (url.startsWith('data:')) return true;
 
+    // Never treat failed URLs as ready.
+    if (this._isUrlFailed(url)) return false;
+
     const entry = this.preloadedImages.get(url);
     if (!entry) {
       this._preloadImage(url);
       return false;
     }
+
+    this._touchPreloadEntry(url, entry);
 
     // Prefer actual browser readiness.
     if (entry.img && entry.img.complete && entry.img.naturalWidth > 0) {
@@ -425,19 +494,23 @@ class ImagePoolManager {
    */
   _preloadImage(url) {
     if (this.preloadedImages.has(url)) {
-      return this.preloadedImages.get(url).promise || Promise.resolve();
+      const existing = this.preloadedImages.get(url);
+      if (existing) this._touchPreloadEntry(url, existing);
+      return existing?.promise || Promise.resolve();
     }
     if (url.startsWith('data:')) return Promise.resolve();
 
     const img = new Image();
-    const entry = { img, promise: null, loaded: false };
+    const entry = { img, promise: null, loaded: false, failed: false };
     const promise = new Promise((resolve) => {
       img.onload = () => {
         entry.loaded = true;
+        entry.failed = false;
         resolve(true);
       };
       img.onerror = () => {
         entry.loaded = false;
+        entry.failed = true;
         resolve(false); // resolve (not reject) so Promise.all doesn't abort
       };
     });
@@ -657,6 +730,28 @@ class MCPImageOrchestrator {
       this._onsetGeneration++;
       this._notifyListeners(newImage);
       return newImage;
+    }
+
+    // If the next real image isn't ready yet, still produce an immediate visual
+    // update for this onset using the procedural generator.
+    // This keeps the UI responsive even when network downloads can't keep up.
+    // We keep the pending swap logic below so a real image replaces it ASAP.
+    const current = this._currentOnsetImage;
+    const hasSomethingDisplayed = typeof current === 'string' && current.length > 0;
+    if (hasSomethingDisplayed) {
+      const procedural = this.getProceduralImage({
+        energy: onsetData.energy,
+        lfc: onsetData.lfc,
+        hfc: onsetData.hfc,
+        spectralCentroid: onsetData.spectralCentroid,
+        type: onsetData.type,
+        strength: onsetData.strength,
+      });
+      if (procedural) {
+        this._currentOnsetImage = procedural;
+        this._onsetGeneration++;
+        this._notifyListeners(procedural);
+      }
     }
 
     // No real image ready at the onset moment. Queue it and fulfill as soon as
@@ -972,17 +1067,12 @@ class MCPImageOrchestrator {
       // Build URL with audio feature params for mood-aware prompts
       // Thumbnail mode: 1 image
       // Full mode: Initial fetch 50 images
-      // Refill: 30 images with nocache for fresh URLs
+      // Refill: 30 images to top up
       let batchCount = 50;
       if (mode === 'thumbnail') batchCount = 1;
       else if (isRefill) batchCount = 30;
 
-      let url = `${apiBaseUrl}/api/images/pool?song_title=${encodedTitle}&song_id=${songContext.id || 0}&count=${batchCount}`;
-
-      // Refills skip cache and get fresh unique URLs via nocache
-      if (isRefill) {
-        url += '&nocache=true';
-      }
+      let url = `${apiBaseUrl}/api/images/pool?song_title=${encodedTitle}&song_id=${songContext.id || 0}&count=${batchCount}&pad_external=false`;
 
       // Append audio features from the AudioFeatures DB table
       const af = audioFeatures || songContext.audioFeatures;
@@ -1056,7 +1146,12 @@ class MCPImageOrchestrator {
              console.warn('[ImageGen] Preload warning:', err);
         });
 
-        console.log(`[ImageGen] Fetched ${imageUrls.length} images for "${songContext.title}" (mode: ${mode}, source: ${data.source})`);
+        const sampleUrl = imageUrls[0] || '';
+        const isS3Cached = sampleUrl.includes('/api/images/file') || sampleUrl.includes('amazonaws.com');
+        const fetchType = isS3Cached ? 'S3/Cached' : (sampleUrl.includes('loremflickr') ? 'LoremFlickr' : 'Other');
+        
+        console.log(`[ImageGen] Fetched ${imageUrls.length} images for "${songContext.title}" (mode: ${mode}, source: ${data.source}) [Type: ${fetchType}]`);
+        console.debug(`[ImageGen] Sample Image URL: ${sampleUrl}`);
       } else {
         console.warn(`[ImageGen] No images returned for "${songContext.title}"`);
       }
