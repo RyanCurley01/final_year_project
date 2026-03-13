@@ -41,17 +41,39 @@ const StockSidebar = () => {
         .then(async (res) => {
           clearTimeout(timeout);
 
-          // Deduplicate by productId — the DB has multiple stock rows per product
-          const seen = new Set();
-          const deduped = res.filter((item) => {
-            if (seen.has(item.productId)) return false;
-            seen.add(item.productId);
-            return true;
+          // Merge duplicate rows by productId.
+          // Some datasets contain historical duplicate records; if any row is available,
+          // show the product as available to avoid false "Unavailable" states.
+          const mergedByProduct = new Map();
+          (res || []).forEach((item) => {
+            const key = item?.productId;
+            if (key === null || key === undefined) return;
+
+            const current = mergedByProduct.get(key);
+            if (!current) {
+              mergedByProduct.set(key, item);
+              return;
+            }
+
+            const currentAvail = current.isAvailable !== undefined ? current.isAvailable : current.available;
+            const itemAvail = item.isAvailable !== undefined ? item.isAvailable : item.available;
+
+            // Keep newest-ish row by larger id (when present), and OR availability.
+            const currentId = Number(current.id ?? current.stockId ?? current.StockID ?? 0);
+            const itemId = Number(item.id ?? item.stockId ?? item.StockID ?? 0);
+            const preferred = itemId >= currentId ? item : current;
+
+            mergedByProduct.set(key, {
+              ...preferred,
+              isAvailable: Boolean(currentAvail) || Boolean(itemAvail),
+            });
           });
-          setData(deduped);
+
+          const merged = Array.from(mergedByProduct.values());
+          setData(merged);
 
           // Enrich with product names
-          const uniqueProductIds = [...new Set(res.map((r) => r.productId))];
+          const uniqueProductIds = [...new Set(merged.map((r) => r.productId))];
           const map = {};
           await Promise.all(
             uniqueProductIds.map(async (pid) => {
