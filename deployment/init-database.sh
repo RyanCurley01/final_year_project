@@ -10,7 +10,7 @@ USE Game_Store_System;
 
     -- DROP existing tables to ensure idempotent initialization
     SET FOREIGN_KEY_CHECKS = 0;
-    DROP TABLE IF EXISTS RealTimeRecommendations, ImageCache, UserInteractions, AudioFeatures, UserRecommendations, Wishlist, Purchased_Products, Sold_Products, CustomerSummary, Payments, Order_Items, Orders, Stock, Products, Accounts;
+    DROP TABLE IF EXISTS RealTimeRecommendations, ImageGeneration, ImageCache, UserInteractions, AudioFeatures, UserRecommendations, Wishlist, Purchased_Products, Sold_Products, CustomerSummary, Payments, Order_Items, Orders, Stock, Products, Accounts;
     SET FOREIGN_KEY_CHECKS = 1;
 
     -- ============================================
@@ -172,6 +172,25 @@ USE Game_Store_System;
         Height INT DEFAULT 1024,
         CreatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         INDEX idx_mood (Mood)
+    );
+
+    -- ImageGeneration: Persist per-song image pools to avoid placeholder UI
+    -- Stores many images per ProductID; URLs are precomputed on service startup.
+    CREATE TABLE IF NOT EXISTS ImageGeneration (
+        ImageGenID BIGINT AUTO_INCREMENT PRIMARY KEY,
+        ProductID INT NOT NULL,
+        Provider VARCHAR(32) NOT NULL DEFAULT 'loremflickr',
+        KeywordTag VARCHAR(64),
+        ImageUrl TEXT NOT NULL,
+        UrlHash CHAR(32) NOT NULL,
+        Width INT DEFAULT 1980,
+        Height INT DEFAULT 1280,
+        LockId INT,
+        CreatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(ProductID) REFERENCES Products(ProductID) ON DELETE CASCADE,
+        UNIQUE KEY uniq_product_hash (ProductID, UrlHash),
+        INDEX idx_product (ProductID),
+        INDEX idx_created (CreatedAt)
     );
 
     -- UserInteractions: Track all user interactions with products

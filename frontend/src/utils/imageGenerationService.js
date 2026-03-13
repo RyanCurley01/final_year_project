@@ -720,8 +720,13 @@ class MCPImageOrchestrator {
       ? pool.images.length >= 10 
       : pool.images.length > 0;
 
-    // Pool already sufficiently populated — nothing to fetch
+    // Pool already sufficiently populated — still ensure the next image is preloaded
+    // so UI can render a real image immediately.
     if (hasEnoughImages) {
+      const peekUrl = this.poolManager.peekNextImage(songId);
+      if (peekUrl && !this.poolManager.isUrlReady(peekUrl)) {
+        await this.poolManager._preloadPriorityBatch([peekUrl], 4000);
+      }
       return;
     }
 
@@ -737,6 +742,13 @@ class MCPImageOrchestrator {
 
     // Populate the pool with mood-aware images (does NOT touch shared image state)
     await this._fetchAndPopulatePool(songContext, audioFeatures, false, mode);
+
+    // Wait briefly for the first real image to preload so callers can render it.
+    const poolAfter = this.poolManager.getPool(songId);
+    const firstUrls = (poolAfter.images || []).slice(0, mode === 'thumbnail' ? 1 : 3);
+    if (firstUrls.length) {
+      await this.poolManager._preloadPriorityBatch(firstUrls, 4000);
+    }
   }
 
   /**
@@ -781,8 +793,6 @@ class MCPImageOrchestrator {
     const pool = this.poolManager.getPool(songId);
     const context = this._songContexts.get(songId) || storedContext || this.currentSongContext;
 
-    // Always emit *some* image immediately on activation so the UI responds instantly.
-    // If the next pool URL isn't loaded yet, use procedural until it is.
     const peekUrl = this.poolManager.peekNextImage(songId);
     if (peekUrl && this.poolManager.isUrlReady(peekUrl)) {
       const initialImage = this.poolManager.consumeNextImage(songId);
@@ -794,25 +804,11 @@ class MCPImageOrchestrator {
       }
     }
 
-    // Not ready or empty pool → procedural immediate fallback
-    const procedural = this.getProceduralImage({
-      id: context?.id ?? songId,
-      title: context?.title,
-      genre: context?.genre,
-    });
-    this._currentOnsetImage = procedural;
-    this._onsetGeneration++;
-    this._notifyListeners(procedural);
-
-    // If we have a pool URL queued, swap to the first REAL image as soon as it finishes loading
-    // (so the playing song doesn't have to wait for another onset to replace the placeholder).
+    // If we have a pool URL queued, swap to the first REAL image as soon as it finishes loading.
+    // Until then we keep the shared image empty and the UI shows the existing loading overlay.
     if (peekUrl) {
       this.poolManager._preloadImage(peekUrl).then(() => {
         if (this._activeSongId != songId) return;
-        const current = this._currentOnsetImage;
-        const isPlaceholder = current == null || (typeof current === 'string' && current.startsWith('data:'));
-        if (!isPlaceholder) return;
-
         const readyUrl = this.poolManager.peekNextImage(songId);
         if (readyUrl && this.poolManager.isUrlReady(readyUrl)) {
           const realImage = this.poolManager.consumeNextImage(songId);
@@ -823,7 +819,7 @@ class MCPImageOrchestrator {
           }
         }
       }).catch(() => {
-        // ignore preload errors; procedural stays visible
+        // ignore preload errors; UI stays in loading state
       });
     }
   }
@@ -861,15 +857,9 @@ class MCPImageOrchestrator {
 
     if (poolImage) return poolImage;
 
-    // If pool URL isn't ready yet, return an instant procedural frame so onsets feel responsive.
-    // We do NOT consume the URL; a later onset will pick it up once loaded.
-    const context = this._songContexts.get(songId) || this.currentSongContext;
-    return this.getProceduralImage({
-      ...onsetData,
-      id: context?.id ?? songId,
-      title: context?.title,
-      genre: context?.genre,
-    });
+    // No real image ready yet.
+    // Return null so the UI keeps its current image (or shows the loading overlay).
+    return null;
   }
 
   /**

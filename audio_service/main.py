@@ -1,6 +1,7 @@
 # audio_service/main.py
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+import asyncio
 import uvicorn
 import os
 
@@ -18,6 +19,8 @@ from routes import (
     visualization,
     image_generation,
 )
+
+from fastapi.concurrency import run_in_threadpool
 
 # Initialize FastAPI app
 app = FastAPI(title="Audio Analysis Service", version="2.0.0")
@@ -48,13 +51,31 @@ async def startup_event():
     """
     console.log("🚀 Starting Audio Analysis Service...")
     
-    # Initialize ML components (Cache, Scaler, PCA)
-    # Wrapped in try/except so the server starts accepting requests even if
-    # the ML pipeline is slow or the DB isn't reachable on first boot.
+    # Warm ML cache in the background.
+    # IMPORTANT: FastAPI does not serve requests until startup completes, so
+    # we must not block here or the frontend will time out and show blanks.
     try:
-        await ml_service.startup_cache()
+        async def _warm_ml_cache_bg():
+            try:
+                await ml_service.startup_cache()
+                console.log("🧠 ML cache warmed")
+            except Exception as e:
+                console.log(f"⚠️ ML startup cache failed (will retry on first request): {e}")
+
+        asyncio.create_task(_warm_ml_cache_bg())
     except Exception as e:
-        console.log(f"⚠️ ML startup cache failed (will retry on first request): {e}")
+        console.log(f"⚠️ ML cache warmup scheduling failed: {e}")
+
+    # Precompute per-song image pools so the UI doesn't display placeholders.
+    # This only generates/stores URLs (fast) — it does not download the images.
+    try:
+        async def _precompute_images_bg():
+            summary = await run_in_threadpool(image_generation.precompute_all_song_image_pools)
+            console.log(f"🖼️ Image pools ready: {summary}")
+
+        asyncio.create_task(_precompute_images_bg())
+    except Exception as e:
+        console.log(f"⚠️ Image pool precompute failed (will fill on-demand): {e}")
 
     # Start the background job that keeps iTunes top-charts in sync
     try:

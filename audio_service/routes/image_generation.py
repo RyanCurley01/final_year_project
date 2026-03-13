@@ -23,6 +23,9 @@ import time
 import hashlib
 import random
 
+from database import get_db_connection
+from utils import console
+
 router = APIRouter(prefix="/api/images", tags=["Image Generation"])
 
 # ============================================
@@ -124,10 +127,210 @@ def _generate_loremflickr_urls(keywords: list, count: int = 30,
             "url": base_url,
             "urlLarge": base_url,
             "tags": keyword,
+            "lock_id": lock_id,
             "width": width,
             "height": height,
         })
     return urls
+
+
+# ============================================
+# DB-BACKED PER-SONG IMAGE POOLS
+# ============================================
+
+_DEFAULT_POOL_SIZE = 80
+
+
+def _safe_int(value: Optional[str]) -> Optional[int]:
+    if value is None:
+        return None
+    try:
+        as_int = int(str(value).strip())
+        return as_int
+    except Exception:
+        return None
+
+
+def _hash_url(url: str) -> str:
+    return hashlib.md5(url.encode("utf-8")).hexdigest()
+
+
+def _db_count_images(cursor, product_id: int) -> int:
+    cursor.execute("SELECT COUNT(*) AS cnt FROM ImageGeneration WHERE ProductID = %s", (product_id,))
+    row = cursor.fetchone() or {}
+    return int(row.get("cnt") or 0)
+
+
+def _db_fetch_images(cursor, product_id: int, count: int) -> list:
+    """Fetch a slice of images without ORDER BY RAND() to avoid heavy scans."""
+    total = _db_count_images(cursor, product_id)
+    if total <= 0:
+        return []
+
+    limit_n = min(count, total)
+    if total <= limit_n:
+        offset = 0
+    else:
+        offset = random.randint(0, total - limit_n)
+
+    cursor.execute(
+        """
+        SELECT ImageUrl AS url, Width AS width, Height AS height, KeywordTag AS tags
+        FROM ImageGeneration
+        WHERE ProductID = %s
+        ORDER BY ImageGenID ASC
+        LIMIT %s OFFSET %s
+        """,
+        (product_id, limit_n, offset),
+    )
+    rows = cursor.fetchall() or []
+    return [
+        {
+            "url": r.get("url"),
+            "urlLarge": r.get("url"),
+            "tags": r.get("tags"),
+            "width": r.get("width"),
+            "height": r.get("height"),
+        }
+        for r in rows
+        if r.get("url")
+    ]
+
+
+def _db_insert_images(cursor, product_id: int, images: list, provider: str = "loremflickr"):
+    if not images:
+        return 0
+
+    payload = []
+    for img in images:
+        url = (img.get("url") or "").strip()
+        if not url:
+            continue
+        payload.append(
+            (
+                product_id,
+                provider,
+                (img.get("tags") or None),
+                url,
+                _hash_url(url),
+                int(img.get("width") or 1980),
+                int(img.get("height") or 1280),
+                int(img.get("lock_id") or 0) or None,
+            )
+        )
+
+    if not payload:
+        return 0
+
+    cursor.executemany(
+        """
+        INSERT IGNORE INTO ImageGeneration
+            (ProductID, Provider, KeywordTag, ImageUrl, UrlHash, Width, Height, LockId)
+        VALUES
+            (%s, %s, %s, %s, %s, %s, %s, %s)
+        """,
+        payload,
+    )
+    return cursor.rowcount
+
+
+def ensure_song_image_pool(
+    product_id: int,
+    song_title: str,
+    desired_size: int = _DEFAULT_POOL_SIZE,
+    *,
+    mood: Optional[str] = None,
+    energy: Optional[float] = None,
+    valence: Optional[float] = None,
+    tempo: Optional[float] = None,
+    danceability: Optional[float] = None,
+    acousticness: Optional[float] = None,
+    genre: Optional[str] = None,
+) -> int:
+    """Ensure there are at least desired_size images stored for a song."""
+    with get_db_connection() as conn:
+        if not conn:
+            return 0
+        with conn.cursor() as cursor:
+            existing = _db_count_images(cursor, product_id)
+            missing = max(0, int(desired_size) - existing)
+            if missing <= 0:
+                return 0
+
+            keywords = _build_keywords_from_features(
+                mood=mood,
+                energy=energy,
+                valence=valence,
+                tempo=tempo,
+                danceability=danceability,
+                acousticness=acousticness,
+                genre=genre,
+                title=song_title,
+            )
+            images = _generate_loremflickr_urls(keywords, missing, nocache=True)
+            inserted = _db_insert_images(cursor, product_id, images)
+            conn.commit()
+            return inserted
+
+
+def precompute_all_song_image_pools(pool_size: int = _DEFAULT_POOL_SIZE) -> dict:
+    """Precompute per-song image pools so the frontend never needs placeholders."""
+    started = time.time()
+    summary = {"songs": 0, "inserted": 0, "skipped": 0, "pool_size": int(pool_size)}
+
+    with get_db_connection() as conn:
+        if not conn:
+            return {**summary, "status": "db_unavailable"}
+
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT p.ProductID, p.AlbumTitle,
+                       af.Mood, af.Energy, af.Valence, af.Tempo,
+                       af.Danceability, af.Acousticness, af.Genre
+                FROM Products p
+                LEFT JOIN AudioFeatures af ON af.ProductID = p.ProductID
+                WHERE p.AlbumTitle IS NOT NULL
+                AND p.AlbumTitle != ''
+                AND p.preview_url IS NOT NULL
+                AND p.preview_url != ''
+                """
+            )
+            rows = cursor.fetchall() or []
+
+            # Existing counts in one query
+            cursor.execute("SELECT ProductID, COUNT(*) AS cnt FROM ImageGeneration GROUP BY ProductID")
+            existing_counts = {int(r["ProductID"]): int(r["cnt"]) for r in (cursor.fetchall() or [])}
+
+            for row in rows:
+                pid = int(row["ProductID"])
+                title = row.get("AlbumTitle") or ""
+                existing = int(existing_counts.get(pid, 0))
+                missing = max(0, int(pool_size) - existing)
+                if missing <= 0:
+                    summary["skipped"] += 1
+                    continue
+
+                keywords = _build_keywords_from_features(
+                    mood=row.get("Mood"),
+                    energy=row.get("Energy"),
+                    valence=row.get("Valence"),
+                    tempo=row.get("Tempo"),
+                    danceability=row.get("Danceability"),
+                    acousticness=row.get("Acousticness"),
+                    genre=row.get("Genre"),
+                    title=title,
+                )
+                images = _generate_loremflickr_urls(keywords, missing, nocache=True)
+                inserted = _db_insert_images(cursor, pid, images)
+                summary["songs"] += 1
+                summary["inserted"] += int(inserted or 0)
+
+            conn.commit()
+
+    summary["status"] = "ok"
+    summary["elapsed_seconds"] = round(time.time() - started, 2)
+    return summary
 
 
 # ============================================
@@ -344,50 +547,94 @@ async def get_image_pool(
     When nocache=true, bypasses cache and appends cache-busters for fresh URLs.
     Count can go up to 1000 for infinite onset generation.
     """
-    if not nocache:
-        cache_key_str = f"pool:{song_title}:{song_id}:{mood}:{energy}:{valence}"
-        cached = _get_cached(cache_key_str)
-        if cached:
-            shuffled = list(cached)
-            random.shuffle(shuffled)
-            return {
-                "images": shuffled[:count],
-                "source": "cache",
-                "song_title": song_title,
-                "tags_used": [],
-            }
+    product_id = _safe_int(song_id)
 
-    # Build keywords from ALL audio features
-    keywords = _build_keywords_from_features(
-        mood=mood,
-        energy=energy,
-        valence=valence,
-        tempo=tempo,
-        danceability=danceability,
-        acousticness=acousticness,
-        genre=genre,
-        title=song_title,
-    )
+    # If there's no DB-backed ProductID (e.g., transient client-only song),
+    # fall back to the old behavior so we don't break the UI.
+    if not product_id or product_id == 0:
+        keywords = _build_keywords_from_features(
+            mood=mood,
+            energy=energy,
+            valence=valence,
+            tempo=tempo,
+            danceability=danceability,
+            acousticness=acousticness,
+            genre=genre,
+            title=song_title,
+        )
+        images = _generate_loremflickr_urls(keywords, count, nocache=True)
+        return {
+            "images": images,
+            "source": "loremflickr_fallback",
+            "song_title": song_title,
+            "tags_used": keywords,
+            "mood": mood,
+        }
 
-    if not keywords:
-        keywords = ["abstract", "landscape", "sky"]
+    # nocache=true means: generate fresh URLs, persist them, and return them.
+    if nocache:
+        keywords = _build_keywords_from_features(
+            mood=mood,
+            energy=energy,
+            valence=valence,
+            tempo=tempo,
+            danceability=danceability,
+            acousticness=acousticness,
+            genre=genre,
+            title=song_title,
+        )
+        images = _generate_loremflickr_urls(keywords, count, nocache=True)
+        try:
+            with get_db_connection() as conn:
+                if conn:
+                    with conn.cursor() as cursor:
+                        _db_insert_images(cursor, product_id, images)
+                        conn.commit()
+        except Exception as e:
+            console.log(f"⚠️ ImageGeneration insert failed for {product_id}: {e}")
 
-    print(f"[ImagePool] Song: '{song_title}' | Mood: {mood} | Energy: {energy} | "
-          f"Valence: {valence} | Tempo: {tempo} | Keywords: {keywords}")
+        return {
+            "images": images,
+            "source": "generated_and_persisted",
+            "song_title": song_title,
+            "tags_used": keywords,
+            "mood": mood,
+        }
 
-    images = _generate_loremflickr_urls(keywords, count, nocache=nocache)
+    # Normal path: serve from DB pool (and backfill if missing).
+    try:
+        # Backfill up to the default pool size, then serve the requested slice.
+        ensure_song_image_pool(
+            product_id,
+            song_title,
+            _DEFAULT_POOL_SIZE,
+            mood=mood,
+            energy=energy,
+            valence=valence,
+            tempo=tempo,
+            danceability=danceability,
+            acousticness=acousticness,
+            genre=genre,
+        )
 
-    if not nocache:
-        cache_key_str = f"pool:{song_title}:{song_id}:{mood}:{energy}:{valence}"
-        _set_cached(cache_key_str, images)
+        with get_db_connection() as conn:
+            if not conn:
+                raise HTTPException(status_code=503, detail="Database connection unavailable")
+            with conn.cursor() as cursor:
+                images = _db_fetch_images(cursor, product_id, count)
 
-    return {
-        "images": images,
-        "source": "loremflickr",
-        "song_title": song_title,
-        "tags_used": keywords,
-        "mood": mood,
-    }
+        return {
+            "images": images,
+            "source": "db_pool",
+            "song_title": song_title,
+            "tags_used": [],
+            "mood": mood,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        console.log(f"❌ Image pool DB error for ProductID={product_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to load image pool")
 
 
 @router.get("/health")

@@ -127,6 +127,14 @@ const OnsetImageCard = ({
 
     const initPool = async () => {
       try {
+        // Clear any stale image from a previous song.
+        // We rely on the loading overlay while real images are fetched/preloaded.
+        if (isMountedRef.current) {
+          setCurrentImage(null);
+          currentImageRef.current = null;
+          setPoolReady(false);
+        }
+
         let imageSet = false;
 
         // 1. Try syncing with shared state first (highest priority if active)
@@ -153,18 +161,7 @@ const OnsetImageCard = ({
           }
         }
 
-        // 3. Fallback: No pool yet — generate procedural placeholder IMMEDIATELY so card isn't blank
-        if (!imageSet && isMountedRef.current && !currentImageRef.current) {
-          const proceduralImage = imageGenerationService.getProceduralImage({
-            id: songId,
-            title: songTitle,
-            genre: 'electronic'
-          });
-          setCurrentImage(proceduralImage);
-          currentImageRef.current = proceduralImage;
-        }
-
-        // 4. Always ensure context is initialized and pool is healthy
+        // 3. Always ensure context is initialized and pool is healthy
         //    (This handles refilling if we successfully synced but the pool is running low)
         const context = {
           id: songId,
