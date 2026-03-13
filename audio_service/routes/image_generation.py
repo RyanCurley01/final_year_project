@@ -246,12 +246,13 @@ def _absolute_url(request: Request, maybe_relative_url: str) -> str:
     return base + maybe_relative_url
 
 
-def _download_image_bytes(source_url: str):
+def _download_image_bytes(source_url: str, timeout_secs: Optional[float] = None):
     """Download an image and return (bytes, content_type).
 
     Enforces a max download size and short timeouts to avoid tying up workers.
     """
-    timeout = (IMAGE_POOL_DOWNLOAD_TIMEOUT_SECS, IMAGE_POOL_DOWNLOAD_TIMEOUT_SECS)
+    effective_timeout = float(timeout_secs or IMAGE_POOL_DOWNLOAD_TIMEOUT_SECS)
+    timeout = (effective_timeout, effective_timeout)
     with requests.get(source_url, stream=True, timeout=timeout, allow_redirects=True) as resp:
         resp.raise_for_status()
         content_type = (resp.headers.get("Content-Type") or "").split(";")[0].strip().lower()
@@ -428,7 +429,15 @@ def _db_insert_hosted_images(cursor, product_id: int, images: list):
     return cursor.rowcount
 
 
-def _host_loremflickr_images_to_s3(product_id: int, images: list):
+def _host_loremflickr_images_to_s3(
+    product_id: int,
+    images: list,
+    *,
+    max_retries: int = 3,
+    retry_backoff_secs: float = 1.0,
+    per_image_delay_secs: float = 0.5,
+    download_timeout_secs: Optional[float] = None,
+):
     """Download LoremFlickr images and upload to S3, returning hosted image dicts.
 
     If S3 isn't configured, returns an empty list.
@@ -444,10 +453,9 @@ def _host_loremflickr_images_to_s3(product_id: int, images: list):
             continue
             
         success = False
-        max_retries = 3
         for attempt in range(max_retries):
             try:
-                data, content_type = _download_image_bytes(source_url)
+                data, content_type = _download_image_bytes(source_url, timeout_secs=download_timeout_secs)
                 url_hash = _hash_bytes(data)
                 ext = _ext_from_content_type(content_type)
                 storage_key = f"{IMAGE_POOL_S3_PREFIX}/{product_id}/{url_hash}{ext}"
@@ -481,17 +489,67 @@ def _host_loremflickr_images_to_s3(product_id: int, images: list):
                     }
                 )
                 success = True
-                time.sleep(0.5)  # Add a polite delay to respect rate limits
+                if per_image_delay_secs > 0:
+                    time.sleep(per_image_delay_secs)  # Add a polite delay to respect rate limits
                 break
             except Exception as e:
                 console.log(f"⚠️ Failed to host image for ProductID={product_id} (attempt {attempt + 1}/{max_retries}): {e}")
                 if attempt < max_retries - 1:
-                    time.sleep(1.0 * (attempt + 1))  # Simple exponential backoff
+                    time.sleep(max(0.0, retry_backoff_secs * (attempt + 1)))  # Simple exponential backoff
         
         if not success:
             failed.append(img)
 
     return hosted, failed
+
+
+def _quick_warmup_s3_images(
+    product_id: int,
+    song_title: str,
+    *,
+    mood: Optional[str] = None,
+    energy: Optional[float] = None,
+    valence: Optional[float] = None,
+    tempo: Optional[float] = None,
+    danceability: Optional[float] = None,
+    acousticness: Optional[float] = None,
+    genre: Optional[str] = None,
+    max_images: int = 1,
+) -> int:
+    """Try a tiny synchronous warmup quickly to avoid request timeouts."""
+    if max_images <= 0:
+        return 0
+
+    keywords = _build_keywords_from_features(
+        mood=mood,
+        energy=energy,
+        valence=valence,
+        tempo=tempo,
+        danceability=danceability,
+        acousticness=acousticness,
+        genre=genre,
+        title=song_title,
+    )
+    images = _generate_loremflickr_urls(keywords, max_images, nocache=True)
+    hosted_images, _ = _host_loremflickr_images_to_s3(
+        product_id,
+        images,
+        max_retries=1,
+        retry_backoff_secs=0.0,
+        per_image_delay_secs=0.0,
+        download_timeout_secs=min(2.0, IMAGE_POOL_DOWNLOAD_TIMEOUT_SECS),
+    )
+
+    if not hosted_images:
+        return 0
+
+    with get_db_connection() as conn:
+        if not conn:
+            return 0
+        with conn.cursor() as cursor:
+            inserted = _db_insert_hosted_images(cursor, product_id, hosted_images)
+            conn.commit()
+            return int(inserted or 0)
 
 
 def ensure_song_image_pool(
@@ -932,10 +990,9 @@ def get_image_pool(
             # do a small synchronous warmup so first paint can still render.
             if len(images or []) == 0 and int(count) <= 3:
                 try:
-                    ensure_song_image_pool(
+                    inserted_now = _quick_warmup_s3_images(
                         int(product_id),
                         song_title,
-                        desired_size=max(3, int(count)),
                         mood=mood,
                         energy=energy,
                         valence=valence,
@@ -943,11 +1000,13 @@ def get_image_pool(
                         danceability=danceability,
                         acousticness=acousticness,
                         genre=genre,
+                        max_images=1,
                     )
-                    with get_db_connection() as retry_conn:
-                        if retry_conn:
-                            with retry_conn.cursor() as retry_cursor:
-                                images = _db_fetch_images(retry_cursor, product_id, count)
+                    if inserted_now > 0:
+                        with get_db_connection() as retry_conn:
+                            if retry_conn:
+                                with retry_conn.cursor() as retry_cursor:
+                                    images = _db_fetch_images(retry_cursor, product_id, count)
                     missing = max(0, int(count) - len(images or []))
                 except Exception as warm_err:
                     console.log(f"⚠️ S3 warmup failed for ProductID={product_id}: {warm_err}")
