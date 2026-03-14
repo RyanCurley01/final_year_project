@@ -383,6 +383,528 @@ def _concat_quote(path: str) -> str:
     return path.replace("'", "'\\''")
 
 
+def _write_ppm(path: str, rgb):
+    """Write an RGB uint8 numpy array to a binary PPM file."""
+    import numpy as np
+
+    arr = np.asarray(rgb, dtype=np.uint8)
+    h, w, c = arr.shape
+    if c != 3:
+        raise ValueError("PPM expects 3-channel RGB data")
+    header = f"P6\n{w} {h}\n255\n".encode("ascii")
+    with open(path, "wb") as f:
+        f.write(header)
+        f.write(arr.tobytes())
+
+
+def _normalize_image_to_ppm(ffmpeg_bin: str, input_path: str, output_path: str) -> bool:
+    """Convert any single image into a one-frame PPM file via ffmpeg."""
+    cmd = [
+        ffmpeg_bin,
+        "-y",
+        "-i",
+        input_path,
+        "-frames:v",
+        "1",
+        output_path,
+    ]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=20, check=False)
+    except Exception:
+        return False
+    return proc.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 0
+
+
+def _generate_procedural_frame(
+    *,
+    out_path: str,
+    width: int,
+    height: int,
+    energy: float,
+    lfc: float,
+    hfc: float,
+    spectral_centroid: float,
+    onset_type: str,
+    glitch: bool,
+    seed: int,
+):
+    """Frontend-style procedural generator ported from imageGenerationService.js."""
+    import numpy as np
+
+    rng = np.random.default_rng(int(seed))
+
+    def _hex_to_rgb(hex_color: str) -> np.ndarray:
+        h = hex_color.lstrip("#")
+        return np.array([int(h[i : i + 2], 16) for i in (0, 2, 4)], dtype=np.float32)
+
+    def _blend(dst: np.ndarray, mask: np.ndarray, color: np.ndarray, alpha: float):
+        if alpha <= 0:
+            return
+        a = np.clip(mask.astype(np.float32) * float(alpha), 0.0, 1.0)[..., None]
+        dst[:] = (dst * (1.0 - a) + color[None, None, :] * a)
+
+    def _clamp01(value: float) -> float:
+        return max(0.0, min(1.0, float(value)))
+
+    palettes = [
+        ["#FF006E", "#8338EC", "#3A86FF", "#06D6A0", "#FFD166"],
+        ["#2D00F7", "#6A00F4", "#8900F2", "#A100F2", "#B100E8"],
+        ["#FF0000", "#FF4400", "#FF8800", "#FFBB00", "#FFFF00"],
+        ["#00F5D4", "#00BBF9", "#9B5DE5", "#F15BB5", "#FEE440"],
+        ["#001219", "#005F73", "#0A9396", "#94D2BD", "#E9D8A6"],
+        ["#10002B", "#240046", "#3C096C", "#5A189A", "#7B2D8E"],
+        ["#03071E", "#370617", "#6A040F", "#9D0208", "#D00000"],
+        ["#006466", "#065A60", "#0B525B", "#144552", "#1B3A4B"],
+    ]
+
+    w = max(64, int(width))
+    h = max(64, int(height))
+    yy, xx = np.mgrid[0:h, 0:w]
+    frame = np.zeros((h, w, 3), dtype=np.float32)
+
+    # Frontend behavior: palette index is floor(spectralCentroid * paletteCount) % paletteCount.
+    palette_idx = int(np.floor(float(spectral_centroid) * len(palettes))) % len(palettes)
+    palette = [_hex_to_rgb(c) for c in palettes[palette_idx]]
+
+    # Background gradient
+    angle = float(rng.random() * np.pi * 2.0)
+    gx1 = w / 2.0 + np.cos(angle) * w / 2.0
+    gy1 = h / 2.0 + np.sin(angle) * h / 2.0
+    gx2 = w - gx1
+    gy2 = h - gy1
+    grad_denom = max(1.0, ((gx2 - gx1) ** 2 + (gy2 - gy1) ** 2))
+    t = ((xx - gx1) * (gx2 - gx1) + (yy - gy1) * (gy2 - gy1)) / grad_denom
+    t = np.clip(t, 0.0, 1.0).astype(np.float32)
+    mix01 = np.clip(t * 2.0, 0.0, 1.0)
+    mix12 = np.clip((t - 0.5) * 2.0, 0.0, 1.0)
+    left = palette[0] * (1.0 - mix01[..., None]) + palette[1] * mix01[..., None]
+    right = palette[1] * (1.0 - mix12[..., None]) + palette[2] * mix12[..., None]
+    frame[:] = np.where((t <= 0.5)[..., None], left, right)
+
+    # Layer 1: organic blobs (LFC-driven count)
+    large_shape_count = 3 + int(np.floor(_clamp01(lfc) * 5.0))
+    for _ in range(large_shape_count):
+        alpha = 0.2 + float(rng.random()) * 0.3
+        color = palette[int(rng.integers(0, len(palette)))]
+        cx = float(rng.random() * w)
+        cy = float(rng.random() * h)
+        radius = 50.0 + _clamp01(energy) * 150.0 + float(rng.random()) * 100.0
+
+        points = 5 + int(rng.integers(0, 4))
+        a_points = np.linspace(0.0, 2.0 * np.pi, points, endpoint=False)
+        jitter = (rng.random(points) - 0.5) * (np.pi / points)
+        a_points = np.mod(a_points + jitter, 2.0 * np.pi)
+        order = np.argsort(a_points)
+        a_points = a_points[order]
+        r_points = radius * (0.7 + rng.random(points) * 0.6)
+        r_points = r_points[order]
+
+        bbox_r = int(min(max(radius * 1.8, 16), max(w, h)))
+        x0 = max(0, int(cx) - bbox_r)
+        x1 = min(w, int(cx) + bbox_r + 1)
+        y0 = max(0, int(cy) - bbox_r)
+        y1 = min(h, int(cy) + bbox_r + 1)
+        if x1 <= x0 or y1 <= y0:
+            continue
+
+        lxx = xx[y0:y1, x0:x1] - cx
+        lyy = yy[y0:y1, x0:x1] - cy
+        theta = np.mod(np.arctan2(lyy, lxx), 2.0 * np.pi)
+        dist = np.sqrt(lxx * lxx + lyy * lyy)
+        a_ext = np.concatenate([a_points, a_points[:1] + 2.0 * np.pi])
+        r_ext = np.concatenate([r_points, r_points[:1]])
+        edge = np.interp(theta.ravel(), a_ext, r_ext).reshape(theta.shape)
+        mask = dist <= edge
+        _blend(frame[y0:y1, x0:x1, :], mask, color, alpha)
+
+    # Layer 2: geometric primitives (HFC-driven count)
+    geo_count = 5 + int(np.floor(_clamp01(hfc) * 15.0))
+    for _ in range(geo_count):
+        alpha = 0.1 + float(rng.random()) * 0.4
+        color = palette[int(rng.integers(0, len(palette)))]
+        line_w = 1.0 + float(rng.random()) * 3.0
+
+        cx = float(rng.random() * w)
+        cy = float(rng.random() * h)
+        size = 10.0 + float(rng.random()) * (60.0 + _clamp01(energy) * 80.0)
+        shape_type = int(rng.integers(0, 4))
+
+        if shape_type == 0:  # Circle
+            dist = np.sqrt((xx - cx) ** 2 + (yy - cy) ** 2)
+            if rng.random() > 0.5:
+                mask = dist <= size
+            else:
+                mask = np.abs(dist - size) <= line_w
+            _blend(frame, mask, color, alpha)
+        elif shape_type == 1:  # Triangle
+            p1 = np.array([cx, cy - size], dtype=np.float32)
+            p2 = np.array([cx - size * 0.866, cy + size * 0.5], dtype=np.float32)
+            p3 = np.array([cx + size * 0.866, cy + size * 0.5], dtype=np.float32)
+
+            def _sign(px, py, ax, ay, bx, by):
+                return (px - bx) * (ay - by) - (ax - bx) * (py - by)
+
+            d1 = _sign(xx, yy, p1[0], p1[1], p2[0], p2[1])
+            d2 = _sign(xx, yy, p2[0], p2[1], p3[0], p3[1])
+            d3 = _sign(xx, yy, p3[0], p3[1], p1[0], p1[1])
+            has_neg = (d1 < 0) | (d2 < 0) | (d3 < 0)
+            has_pos = (d1 > 0) | (d2 > 0) | (d3 > 0)
+            fill_mask = ~(has_neg & has_pos)
+            if rng.random() > 0.5:
+                _blend(frame, fill_mask, color, alpha)
+            else:
+                edge_mask = (np.abs(d1) <= line_w * 120.0) | (np.abs(d2) <= line_w * 120.0) | (np.abs(d3) <= line_w * 120.0)
+                _blend(frame, fill_mask & edge_mask, color, alpha)
+        elif shape_type == 2:  # Line
+            a = float(rng.random() * np.pi * 2.0)
+            x2 = cx + np.cos(a) * size * 2.0
+            y2 = cy + np.sin(a) * size * 2.0
+            vx = x2 - cx
+            vy = y2 - cy
+            denom = max(1e-6, vx * vx + vy * vy)
+            proj = ((xx - cx) * vx + (yy - cy) * vy) / denom
+            proj_clip = np.clip(proj, 0.0, 1.0)
+            nx = cx + proj_clip * vx
+            ny = cy + proj_clip * vy
+            dist = np.sqrt((xx - nx) ** 2 + (yy - ny) ** 2)
+            mask = dist <= (line_w + 0.75)
+            _blend(frame, mask, color, alpha)
+        else:  # Ring
+            dist = np.sqrt((xx - cx) ** 2 + (yy - cy) ** 2)
+            ring1 = np.abs(dist - size) <= line_w
+            ring2 = np.abs(dist - size * 0.6) <= line_w
+            _blend(frame, ring1 | ring2, color, alpha)
+
+    # Layer 3: particles
+    particle_count = int(np.floor(_clamp01(energy) * 100.0))
+    for _ in range(particle_count):
+        alpha = 0.3 + float(rng.random()) * 0.5
+        color = palette[int(rng.integers(0, len(palette)))]
+        px = float(rng.random() * w)
+        py = float(rng.random() * h)
+        pr = 1.0 + float(rng.random()) * 4.0
+        dist = np.sqrt((xx - px) ** 2 + (yy - py) ** 2)
+        _blend(frame, dist <= pr, color, alpha)
+
+    # Layer 4: kick/light flare
+    if onset_type in ("kick", "percussion") or _clamp01(energy) > 0.6:
+        flare_x = w * (0.2 + float(rng.random()) * 0.6)
+        flare_y = h * (0.2 + float(rng.random()) * 0.6)
+        dist = np.sqrt((xx - flare_x) ** 2 + (yy - flare_y) ** 2)
+        t = np.clip(dist / 200.0, 0.0, 1.0)
+        a0 = (1.0 - np.clip(t / 0.5, 0.0, 1.0)) * 0.4
+        a1 = np.where(t < 0.5, np.clip((t - 0.0) / 0.5, 0.0, 1.0), np.clip((1.0 - t) / 0.5, 0.0, 1.0))
+        flare = np.zeros_like(frame)
+        flare += np.array([255.0, 255.0, 255.0], dtype=np.float32)[None, None, :] * a0[..., None]
+        flare += palette[3][None, None, :] * (a1[..., None] * 0.28)
+        frame = np.clip(frame + flare, 0.0, 255.0)
+
+    if glitch:
+        # Frontend glitch detection triggers stronger visual distortion bursts.
+        shift_r = int(rng.integers(-10, 11))
+        shift_g = int(rng.integers(-14, 15))
+        shift_b = int(rng.integers(-8, 9))
+        frame[:, :, 0] = np.roll(frame[:, :, 0], shift=shift_r, axis=1)
+        frame[:, :, 1] = np.roll(frame[:, :, 1], shift=shift_g, axis=1)
+        frame[:, :, 2] = np.roll(frame[:, :, 2], shift=shift_b, axis=0)
+
+        scan = (np.arange(h) % 6) == 0
+        frame[scan, :, :] *= 0.55
+
+        speckle_mask = rng.random((h, w)) < (0.01 + 0.04 * _clamp01(energy))
+        speckle_count = int(np.count_nonzero(speckle_mask))
+        if speckle_count > 0:
+            frame[speckle_mask] = rng.integers(0, 255, size=(speckle_count, 3), dtype=np.uint8)
+
+    frame = np.clip(frame, 0.0, 255.0).astype(np.uint8)
+
+    _write_ppm(out_path, frame)
+
+
+def _detect_frontend_style_events(audio_file: str) -> dict:
+    """Offline detector that mirrors frontend onsetDetection.js logic and thresholds."""
+    import librosa
+    import numpy as np
+
+    y, sr = librosa.load(audio_file, sr=22050, mono=True)
+    audio_duration = float(librosa.get_duration(y=y, sr=sr) or 0.0)
+    if audio_duration <= 0.0:
+        return {"audio_duration": 0.0, "onsets": [], "glitches": []}
+
+    fft_size = 512
+    hop_length = max(1, int(round(sr / 60.0)))
+    stft = np.abs(librosa.stft(y, n_fft=fft_size, hop_length=hop_length, center=False, window="hann"))
+
+    # Approximate analyser.getByteFrequencyData (0-255) on log magnitude.
+    log_mag = np.log1p(stft)
+    scale = float(np.percentile(log_mag, 99.5) or 1.0)
+    if scale <= 1e-9:
+        scale = 1.0
+    byte_spectra = np.clip((log_mag / scale) * 255.0, 0.0, 255.0).astype(np.uint8)
+
+    frame_count = int(byte_spectra.shape[1]) if byte_spectra.ndim == 2 else 0
+    times = (np.arange(frame_count, dtype=np.float64) * float(hop_length) / float(sr)).tolist()
+
+    threshold = 0.5
+    min_time_between_onsets_ms = 100.0
+    min_time_between_glitches_ms = 3500.0
+    anomaly_threshold = 2.5
+    anomaly_history_size = 60
+    kick_threshold = 0.5
+    snare_threshold = 0.9
+
+    prev_spectrum = np.zeros((byte_spectra.shape[0],), dtype=np.uint8)
+    previous_onset_function = 0.0
+    previous_kick_score = 0.0
+    previous_snare_score = 0.0
+    last_onset_ms = -1e9
+    last_glitch_ms = -1e9
+    flux_history: list[float] = []
+    centroid_history: list[float] = []
+
+    onset_events = []
+    glitch_events = []
+
+    for i in range(frame_count):
+        now_sec = float(times[i])
+        now_ms = now_sec * 1000.0
+        spectrum = byte_spectra[:, i]
+        if not np.any(spectrum > 0):
+            prev_spectrum = spectrum.copy()
+            previous_onset_function = 0.0
+            previous_kick_score = 0.0
+            previous_snare_score = 0.0
+            continue
+
+        # Frontend metrics
+        kick_bin_end = min(10, int(spectrum.shape[0]))
+        lfc = 0.0
+        for k in range(kick_bin_end):
+            magnitude = float(spectrum[k]) / 255.0
+            weight = float(kick_bin_end - k)
+            lfc += weight * magnitude * magnitude
+
+        hfc = 0.0
+        for k in range(int(spectrum.shape[0])):
+            magnitude = float(spectrum[k]) / 255.0
+            hfc += float(k) * magnitude * magnitude
+
+        flux = 0.0
+        diffs = np.maximum(0.0, (spectrum.astype(np.float32) - prev_spectrum.astype(np.float32)) / 255.0)
+        flux = float(np.sum(diffs))
+
+        idx = np.arange(spectrum.shape[0], dtype=np.float32)
+        mags = spectrum.astype(np.float32) / 255.0
+        mag_sum = float(np.sum(mags))
+        spectral_centroid = float(np.sum(idx * mags) / mag_sum) if mag_sum > 1e-9 else 0.0
+        energy = float(np.sum(mags * mags))
+
+        # History update (same order as frontend processFrame)
+        flux_history.append(flux)
+        centroid_history.append(spectral_centroid)
+        if len(flux_history) > anomaly_history_size:
+            flux_history.pop(0)
+        if len(centroid_history) > anomaly_history_size:
+            centroid_history.pop(0)
+
+        normalized_lfc = float(lfc / 200.0)
+        normalized_hfc = float(hfc / 10000.0)
+        normalized_flux = float(flux / 10.0)
+
+        recent_energy = flux_history[-4:-1]
+        avg_energy = float(np.mean(recent_energy)) if recent_energy else flux
+        energy_ratio = (flux / avg_energy) if avg_energy > 0.001 else 1.0
+
+        diff_count = int(np.count_nonzero(diffs > 0.02))
+        total_bins = max(1, int(spectrum.shape[0]))
+        onset_bandwidth = float(diff_count) / float(total_bins)
+
+        bandwidth_factor = min(max((onset_bandwidth - 0.05) / 0.15, 0.0), 1.0)
+        transient_factor = min(energy_ratio / 2.5, 1.0)
+        percussiveness = bandwidth_factor * transient_factor
+        tonal_gate = min(max((onset_bandwidth - 0.06) / 0.09, 0.0), 1.0)
+
+        kick_score = (0.4 * normalized_lfc) + (0.2 * normalized_flux) + (0.4 * percussiveness)
+        snare_score = (0.3 * normalized_hfc) + (0.3 * normalized_flux) + (0.4 * percussiveness)
+        is_kick = kick_score > previous_kick_score and kick_score > kick_threshold
+        is_snare = snare_score > previous_snare_score and snare_score > snare_threshold
+
+        raw_onset = (0.2 * normalized_lfc) + (0.15 * normalized_hfc) + (0.35 * normalized_flux) + (0.3 * percussiveness)
+        onset_function = raw_onset * tonal_gate
+        is_drum = percussiveness > 0.60
+
+        is_onset = (
+            (now_ms - last_onset_ms) >= min_time_between_onsets_ms
+            and onset_function > previous_onset_function
+            and onset_function > threshold
+        )
+        if is_onset and is_drum:
+            last_onset_ms = now_ms
+            drum_type = "kick" if is_kick else ("snare" if is_snare else "percussion")
+            onset_events.append(
+                {
+                    "time": now_sec,
+                    "strength": float(onset_function),
+                    "type": drum_type,
+                    "lfc": float(normalized_lfc),
+                    "hfc": float(normalized_hfc),
+                    "flux": float(normalized_flux),
+                    "energy": float(energy),
+                    "spectralCentroid": float(spectral_centroid),
+                }
+            )
+
+        # Frontend glitch anomaly detector
+        if (now_ms - last_glitch_ms) >= min_time_between_glitches_ms and len(flux_history) >= 30:
+            flux_arr = np.array(flux_history, dtype=np.float64)
+            centroid_arr = np.array(centroid_history, dtype=np.float64)
+            flux_mean = float(np.mean(flux_arr))
+            flux_std = float(np.sqrt(np.mean((flux_arr - flux_mean) ** 2)))
+            centroid_mean = float(np.mean(centroid_arr))
+            centroid_std = float(np.sqrt(np.mean((centroid_arr - centroid_mean) ** 2)))
+
+            flux_z = ((flux - flux_mean) / flux_std) if flux_std > 0.001 else 0.0
+            centroid_z = (abs(spectral_centroid - centroid_mean) / centroid_std) if centroid_std > 0.001 else 0.0
+            anomaly_score = max(float(flux_z), float(centroid_z))
+            if anomaly_score > anomaly_threshold:
+                last_glitch_ms = now_ms
+                glitch_events.append({"time": now_sec, "strength": anomaly_score})
+
+        prev_spectrum = spectrum.copy()
+        previous_onset_function = float(onset_function)
+        previous_kick_score = float(kick_score)
+        previous_snare_score = float(snare_score)
+
+    return {
+        "audio_duration": audio_duration,
+        "onsets": onset_events,
+        "glitches": glitch_events,
+    }
+
+
+def _build_concat_manifest_with_onsets(
+    *,
+    manifest_path: str,
+    temp_dir: str,
+    frame_paths: list[str],
+    audio_file: str,
+    fallback_frame_duration: float,
+) -> dict:
+    """Build an ffmpeg concat manifest with beat/onset-synced frame durations.
+
+    Returns metadata:
+      {
+        "used_onsets": bool,
+        "interval_count": int,
+        "audio_duration": float,
+      }
+    """
+    result = {
+        "used_onsets": False,
+        "interval_count": 0,
+        "audio_duration": 0.0,
+        "procedural_count": 0,
+        "glitch_count": 0,
+    }
+
+    if not frame_paths:
+        return result
+
+    if audio_file and os.path.exists(audio_file) and os.path.getsize(audio_file) > 0:
+        try:
+            detection = _detect_frontend_style_events(audio_file)
+            audio_duration = float(detection.get("audio_duration") or 0.0)
+            result["audio_duration"] = max(0.0, audio_duration)
+
+            onsets = detection.get("onsets") or []
+            glitches = detection.get("glitches") or []
+
+            if audio_duration > 0.0 and onsets:
+                times: list[float] = [0.0]
+                for evt in onsets:
+                    ts = float(evt.get("time") or 0.0)
+                    if ts <= 0.0 or ts >= audio_duration:
+                        continue
+                    if ts - times[-1] < 0.02:
+                        continue
+                    times.append(ts)
+                if times[-1] < audio_duration:
+                    times.append(audio_duration)
+
+                if len(times) >= 2:
+                    result["used_onsets"] = True
+                    result["interval_count"] = len(times) - 1
+
+                    segments: list[tuple[str, float]] = []
+                    image_idx = 0
+                    min_real_image_interval = 0.11
+
+                    onset_idx = 0
+                    glitch_idx = 0
+                    for idx in range(len(times) - 1):
+                        start_t = float(times[idx])
+                        end_t = float(times[idx + 1])
+                        duration = max(0.02, end_t - start_t)
+
+                        while onset_idx + 1 < len(onsets) and float(onsets[onset_idx + 1].get("time") or 0.0) <= start_t:
+                            onset_idx += 1
+                        onset_evt = onsets[onset_idx] if onsets else {}
+
+                        has_glitch = False
+                        while glitch_idx < len(glitches):
+                            gt = float(glitches[glitch_idx].get("time") or 0.0)
+                            if gt < start_t:
+                                glitch_idx += 1
+                                continue
+                            if gt < end_t:
+                                has_glitch = True
+                            break
+
+                        needs_procedural_fallback = duration < min_real_image_interval
+
+                        if has_glitch or needs_procedural_fallback:
+                            proc_path = os.path.join(temp_dir, f"proc_{idx:06d}.ppm")
+                            _generate_procedural_frame(
+                                out_path=proc_path,
+                                width=640,
+                                height=360,
+                                energy=float(onset_evt.get("energy") or 0.5),
+                                lfc=float(onset_evt.get("lfc") or 0.0),
+                                hfc=float(onset_evt.get("hfc") or 0.0),
+                                spectral_centroid=float(onset_evt.get("spectralCentroid") or 0.0),
+                                onset_type=str(onset_evt.get("type") or "percussion"),
+                                glitch=bool(has_glitch),
+                                seed=(idx * 1103515245 + 1337) & 0xFFFFFFFF,
+                            )
+                            segments.append((proc_path, duration))
+                            result["procedural_count"] += 1
+                            if has_glitch:
+                                result["glitch_count"] += 1
+                        else:
+                            frame = frame_paths[image_idx % len(frame_paths)]
+                            image_idx += 1
+                            segments.append((frame, duration))
+
+                    with open(manifest_path, "w", encoding="utf-8") as manifest:
+                        for frame, duration in segments:
+                            manifest.write(f"file '{_concat_quote(frame)}'\n")
+                            manifest.write(f"duration {max(0.02, float(duration)):.5f}\n")
+                        manifest.write(f"file '{_concat_quote(segments[-1][0])}'\n")
+
+                    return result
+        except Exception as e:
+            console.log(f"⚠️ Onset detection unavailable, using fixed frame timing: {e}")
+
+    with open(manifest_path, "w", encoding="utf-8") as manifest:
+        # Fallback: fixed-duration slideshow through all pool images.
+        for frame in frame_paths:
+            manifest.write(f"file '{_concat_quote(frame)}'\n")
+            manifest.write(f"duration {float(fallback_frame_duration):.3f}\n")
+        manifest.write(f"file '{_concat_quote(frame_paths[-1])}'\n")
+
+    return result
+
+
 def _cleanup_pool_video_cache():
     now = time.time()
     with _pool_video_cache_lock:
@@ -1228,6 +1750,7 @@ def download_image_pool_video(
     song_title: str = Query("image-pool", description="Song title used in the downloaded filename"),
     audio_url: Optional[str] = Query(None, description="Optional song audio URL to mux into the video"),
     frame_duration: float = Query(0.45, ge=0.1, le=3.0, description="Seconds each image stays on screen"),
+    onset_sync: bool = Query(True, description="When true and audio is available, switch images on detected audio onsets"),
 ):
     """Create and download an MP4 slideshow containing all hosted pool images for a song.
 
@@ -1242,7 +1765,7 @@ def download_image_pool_video(
         raise HTTPException(status_code=503, detail="ffmpeg is not available on this server")
 
     cache_key = hashlib.md5(
-        f"{int(song_id)}|{song_title}|{audio_url or ''}|{float(frame_duration):.3f}".encode("utf-8")
+        f"v3|{int(song_id)}|{song_title}|{audio_url or ''}|{float(frame_duration):.3f}|{bool(onset_sync)}".encode("utf-8")
     ).hexdigest()
     cached = _get_cached_pool_video(cache_key)
     if cached and cached.get("content"):
@@ -1294,22 +1817,64 @@ def download_image_pool_video(
             if not data:
                 continue
 
-            # Use a single numeric sequence extension so ffmpeg can consume image2 pattern reliably.
-            frame_path = os.path.join(tmp_dir, f"frame_{idx:05d}.jpg")
-            with open(frame_path, "wb") as frame_file:
+            content_type = ((row or {}).get("ContentType") or "").strip().lower()
+            source_ext = _ext_from_content_type(content_type)
+            source_path = os.path.join(tmp_dir, f"source_{idx:05d}{source_ext}")
+            with open(source_path, "wb") as frame_file:
                 frame_file.write(data)
-            frame_paths.append(frame_path)
+
+            normalized_path = os.path.join(tmp_dir, f"frame_{idx:05d}.ppm")
+            if _normalize_image_to_ppm(ffmpeg_bin, source_path, normalized_path):
+                frame_paths.append(normalized_path)
+            else:
+                console.log(f"⚠️ Failed to normalize pool image frame ProductID={song_id} idx={idx}")
 
         if not frame_paths:
             raise HTTPException(status_code=404, detail="Hosted pool images are missing in storage")
 
+        audio_file = ""
+        if audio_url:
+            audio_file = os.path.join(tmp_dir, "song_audio.bin")
+            try:
+                timeout = (10, 60)
+                with requests.get(audio_url, stream=True, timeout=timeout, allow_redirects=True) as audio_resp:
+                    audio_resp.raise_for_status()
+                    max_audio_bytes = 150 * 1024 * 1024
+                    written = 0
+                    with open(audio_file, "wb") as out_audio:
+                        for chunk in audio_resp.iter_content(chunk_size=64 * 1024):
+                            if not chunk:
+                                continue
+                            written += len(chunk)
+                            if written > max_audio_bytes:
+                                raise ValueError("Audio file too large")
+                            out_audio.write(chunk)
+            except Exception as e:
+                console.log(f"⚠️ Pool video audio download failed ProductID={song_id}: {e}")
+                audio_file = ""
+
         concat_file = os.path.join(tmp_dir, "frames.txt")
-        with open(concat_file, "w", encoding="utf-8") as manifest:
-            for frame in frame_paths:
-                manifest.write(f"file '{_concat_quote(frame)}'\n")
-                manifest.write(f"duration {float(frame_duration):.3f}\n")
-            # ffmpeg concat requires the last file to be repeated without duration.
-            manifest.write(f"file '{_concat_quote(frame_paths[-1])}'\n")
+        manifest_meta = {
+            "used_onsets": False,
+            "interval_count": 0,
+            "audio_duration": 0.0,
+        }
+        if onset_sync and audio_file and os.path.exists(audio_file) and os.path.getsize(audio_file) > 0:
+            manifest_meta = _build_concat_manifest_with_onsets(
+                manifest_path=concat_file,
+                temp_dir=tmp_dir,
+                frame_paths=frame_paths,
+                audio_file=audio_file,
+                fallback_frame_duration=float(frame_duration),
+            )
+        else:
+            manifest_meta = _build_concat_manifest_with_onsets(
+                manifest_path=concat_file,
+                temp_dir=tmp_dir,
+                frame_paths=frame_paths,
+                audio_file="",
+                fallback_frame_duration=float(frame_duration),
+            )
 
         silent_video_file = os.path.join(tmp_dir, "pool_video_silent.mp4")
         build_cmd = [
@@ -1348,27 +1913,7 @@ def download_image_pool_video(
 
         final_video_file = silent_video_file
 
-        if audio_url:
-            audio_file = os.path.join(tmp_dir, "song_audio.bin")
-            try:
-                timeout = (10, 60)
-                with requests.get(audio_url, stream=True, timeout=timeout, allow_redirects=True) as audio_resp:
-                    audio_resp.raise_for_status()
-                    max_audio_bytes = 150 * 1024 * 1024
-                    written = 0
-                    with open(audio_file, "wb") as out_audio:
-                        for chunk in audio_resp.iter_content(chunk_size=64 * 1024):
-                            if not chunk:
-                                continue
-                            written += len(chunk)
-                            if written > max_audio_bytes:
-                                raise ValueError("Audio file too large")
-                            out_audio.write(chunk)
-            except Exception as e:
-                console.log(f"⚠️ Pool video audio download failed ProductID={song_id}: {e}")
-                audio_file = ""
-
-            if audio_file and os.path.exists(audio_file) and os.path.getsize(audio_file) > 0:
+        if audio_file and os.path.exists(audio_file) and os.path.getsize(audio_file) > 0:
                 with_audio_file = os.path.join(tmp_dir, "pool_video_with_audio.mp4")
                 mux_cmd = [
                     ffmpeg_bin,
@@ -1401,6 +1946,14 @@ def download_image_pool_video(
                     mux_proc = subprocess.run(mux_cmd, capture_output=True, text=True, timeout=240, check=False)
                     if mux_proc.returncode == 0 and os.path.exists(with_audio_file):
                         final_video_file = with_audio_file
+                        if manifest_meta.get("used_onsets"):
+                            console.log(
+                                f"🎬 Pool video onset-sync ProductID={song_id} "
+                                f"intervals={manifest_meta.get('interval_count')} "
+                                f"audio_secs={manifest_meta.get('audio_duration'):.2f} "
+                                f"procedural={manifest_meta.get('procedural_count')} "
+                                f"glitch={manifest_meta.get('glitch_count')}"
+                            )
                     else:
                         console.log(
                             f"⚠️ Pool video mux failed ProductID={song_id}: "
