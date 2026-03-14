@@ -18,13 +18,17 @@ Only nature, landscape, architecture, and abstract imagery.
 """
 
 from fastapi import APIRouter, Query, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from typing import Optional
 import time
 import hashlib
 import random
 import requests
 import threading
+import shutil
+import subprocess
+import tempfile
+import os
 from urllib.parse import urlparse
 
 from database import get_db_connection
@@ -47,6 +51,9 @@ _pool_refill_lock = threading.Lock()
 _pool_refill_last_scheduled: dict[int, float] = {}
 _POOL_REFILL_MIN_INTERVAL_SECS = 60.0
 _EXTERNAL_IMAGE_GENERATION_ENABLED = False
+_POOL_VIDEO_CACHE_TTL_SECS = 60 * 20
+_pool_video_cache_lock = threading.Lock()
+_pool_video_cache: dict[str, dict] = {}
 
 
 def _schedule_pool_refill(
@@ -350,6 +357,128 @@ def _db_fetch_images(cursor, product_id: int, count: int) -> list:
         for r in rows
         if r.get("url")
     ]
+
+
+def _db_fetch_hosted_image_rows(cursor, product_id: int) -> list:
+    """Fetch all hosted image metadata rows for a product in stable order."""
+    cursor.execute(
+        """
+        SELECT ImageGenID, StorageKey, ContentType, ImageUrl
+        FROM ImageGeneration
+        WHERE ProductID = %s AND Provider = 's3'
+        ORDER BY ImageGenID ASC
+        """,
+        (product_id,),
+    )
+    return cursor.fetchall() or []
+
+
+def _sanitize_filename(value: str, fallback: str = "image-pool") -> str:
+    safe = "".join(ch for ch in (value or "") if ch.isalnum() or ch in ("-", "_", " ")).strip()
+    safe = safe.replace(" ", "-")
+    return safe[:80] or fallback
+
+
+def _concat_quote(path: str) -> str:
+    return path.replace("'", "'\\''")
+
+
+def _cleanup_pool_video_cache():
+    now = time.time()
+    with _pool_video_cache_lock:
+        expired = [k for k, v in _pool_video_cache.items() if (now - float(v.get("created_at") or 0)) > _POOL_VIDEO_CACHE_TTL_SECS]
+        for key in expired:
+            _pool_video_cache.pop(key, None)
+
+
+def _cache_pool_video(cache_key: str, content: bytes, filename: str):
+    with _pool_video_cache_lock:
+        _pool_video_cache[cache_key] = {
+            "content": content,
+            "filename": filename,
+            "created_at": time.time(),
+        }
+
+
+def _get_cached_pool_video(cache_key: str) -> Optional[dict]:
+    _cleanup_pool_video_cache()
+    with _pool_video_cache_lock:
+        return _pool_video_cache.get(cache_key)
+
+
+def _parse_range_header(range_header: Optional[str], total_size: int) -> Optional[tuple[int, int]]:
+    if not range_header:
+        return None
+    raw = str(range_header).strip().lower()
+    if not raw.startswith("bytes="):
+        return None
+
+    # Only support single ranges: bytes=start-end
+    value = raw[len("bytes="):]
+    if "," in value:
+        return None
+
+    start_str, sep, end_str = value.partition("-")
+    if sep != "-":
+        return None
+
+    if start_str == "":
+        # Suffix range: bytes=-N
+        try:
+            length = int(end_str)
+        except Exception:
+            return None
+        if length <= 0:
+            return None
+        if length >= total_size:
+            return (0, total_size - 1)
+        return (total_size - length, total_size - 1)
+
+    try:
+        start = int(start_str)
+    except Exception:
+        return None
+    if start < 0 or start >= total_size:
+        return None
+
+    if end_str == "":
+        end = total_size - 1
+    else:
+        try:
+            end = int(end_str)
+        except Exception:
+            return None
+        if end < start:
+            return None
+        end = min(end, total_size - 1)
+
+    return (start, end)
+
+
+def _pool_video_http_response(video_bytes: bytes, filename: str, range_header: Optional[str] = None) -> Response:
+    total = len(video_bytes)
+    if total <= 0:
+        raise HTTPException(status_code=500, detail="Generated video is empty")
+
+    common_headers = {
+        "Content-Disposition": f'attachment; filename="{filename}"',
+        "Cache-Control": "no-store",
+        "Accept-Ranges": "bytes",
+    }
+
+    selected = _parse_range_header(range_header, total)
+    if not selected:
+        headers = {**common_headers, "Content-Length": str(total)}
+        return Response(content=video_bytes, media_type="video/mp4", headers=headers)
+
+    start, end = selected
+    chunk = video_bytes[start : end + 1]
+    headers = {
+        **common_headers,
+        "Content-Range": f"bytes {start}-{end}/{total}",
+        "Content-Length": str(len(chunk)),
+    }
+    return Response(content=chunk, media_type="video/mp4", status_code=206, headers=headers)
 
 
 def _db_insert_images(cursor, product_id: int, images: list, provider: str = "loremflickr"):
@@ -1090,6 +1219,202 @@ def get_hosted_image_file(product_id: int, url_hash: str):
         "ETag": f'"{url_hash}"',
     }
     return StreamingResponse(body, media_type=(content_type or row.get("ContentType") or "image/jpeg"), headers=headers)
+
+
+@router.get("/pool-video")
+def download_image_pool_video(
+    request: Request,
+    song_id: int = Query(..., gt=0, description="Song ProductID for hosted pool video export"),
+    song_title: str = Query("image-pool", description="Song title used in the downloaded filename"),
+    audio_url: Optional[str] = Query(None, description="Optional song audio URL to mux into the video"),
+    frame_duration: float = Query(0.45, ge=0.1, le=3.0, description="Seconds each image stays on screen"),
+):
+    """Create and download an MP4 slideshow containing all hosted pool images for a song.
+
+    If audio_url is provided, the visuals loop to match full audio duration.
+    Supports HTTP byte ranges for resumable downloads.
+    """
+    if not IMAGE_POOL_S3_BUCKET:
+        raise HTTPException(status_code=503, detail="S3 bucket not configured")
+
+    ffmpeg_bin = shutil.which("ffmpeg")
+    if not ffmpeg_bin:
+        raise HTTPException(status_code=503, detail="ffmpeg is not available on this server")
+
+    cache_key = hashlib.md5(
+        f"{int(song_id)}|{song_title}|{audio_url or ''}|{float(frame_duration):.3f}".encode("utf-8")
+    ).hexdigest()
+    cached = _get_cached_pool_video(cache_key)
+    if cached and cached.get("content"):
+        return _pool_video_http_response(
+            cached.get("content") or b"",
+            cached.get("filename") or f"{_sanitize_filename(song_title)}-image-pool.mp4",
+            request.headers.get("range"),
+        )
+
+    rows = []
+    try:
+        with get_db_connection() as conn:
+            if not conn:
+                raise HTTPException(status_code=503, detail="Database connection unavailable")
+            with conn.cursor() as cursor:
+                rows = _db_fetch_hosted_image_rows(cursor, int(song_id))
+    except HTTPException:
+        raise
+    except Exception as e:
+        console.log(f"❌ Pool video DB lookup failed for ProductID={song_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to load image pool metadata")
+
+    if not rows:
+        raise HTTPException(status_code=404, detail="No hosted image pool found for this song")
+
+    with tempfile.TemporaryDirectory(prefix=f"pool_video_{int(song_id)}_") as tmp_dir:
+        frame_paths: list[str] = []
+
+        for idx, row in enumerate(rows):
+            storage_key = (row or {}).get("StorageKey")
+            if not storage_key:
+                continue
+
+            obj = get_object_stream(IMAGE_POOL_S3_BUCKET, storage_key)
+            if not obj:
+                continue
+
+            body, content_type, _content_length = obj
+            try:
+                data = body.read()
+            except Exception:
+                data = None
+            finally:
+                try:
+                    body.close()
+                except Exception:
+                    pass
+
+            if not data:
+                continue
+
+            # Use a single numeric sequence extension so ffmpeg can consume image2 pattern reliably.
+            frame_path = os.path.join(tmp_dir, f"frame_{idx:05d}.jpg")
+            with open(frame_path, "wb") as frame_file:
+                frame_file.write(data)
+            frame_paths.append(frame_path)
+
+        if not frame_paths:
+            raise HTTPException(status_code=404, detail="Hosted pool images are missing in storage")
+
+        concat_file = os.path.join(tmp_dir, "frames.txt")
+        with open(concat_file, "w", encoding="utf-8") as manifest:
+            for frame in frame_paths:
+                manifest.write(f"file '{_concat_quote(frame)}'\n")
+                manifest.write(f"duration {float(frame_duration):.3f}\n")
+            # ffmpeg concat requires the last file to be repeated without duration.
+            manifest.write(f"file '{_concat_quote(frame_paths[-1])}'\n")
+
+        silent_video_file = os.path.join(tmp_dir, "pool_video_silent.mp4")
+        build_cmd = [
+            ffmpeg_bin,
+            "-y",
+            "-f",
+            "concat",
+            "-safe",
+            "0",
+            "-i",
+            concat_file,
+            "-vsync",
+            "vfr",
+            "-vf",
+            "scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2:black",
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            "-movflags",
+            "+faststart",
+            silent_video_file,
+        ]
+
+        try:
+            proc = subprocess.run(build_cmd, capture_output=True, text=True, timeout=180, check=False)
+        except subprocess.TimeoutExpired:
+            raise HTTPException(status_code=504, detail="Video generation timed out")
+
+        if proc.returncode != 0 or not os.path.exists(silent_video_file):
+            console.log(
+                f"❌ ffmpeg pool video generation failed ProductID={song_id}: "
+                f"returncode={proc.returncode} stderr={proc.stderr[-1200:] if proc.stderr else ''}"
+            )
+            raise HTTPException(status_code=500, detail="Failed to generate image pool video")
+
+        final_video_file = silent_video_file
+
+        if audio_url:
+            audio_file = os.path.join(tmp_dir, "song_audio.bin")
+            try:
+                timeout = (10, 60)
+                with requests.get(audio_url, stream=True, timeout=timeout, allow_redirects=True) as audio_resp:
+                    audio_resp.raise_for_status()
+                    max_audio_bytes = 150 * 1024 * 1024
+                    written = 0
+                    with open(audio_file, "wb") as out_audio:
+                        for chunk in audio_resp.iter_content(chunk_size=64 * 1024):
+                            if not chunk:
+                                continue
+                            written += len(chunk)
+                            if written > max_audio_bytes:
+                                raise ValueError("Audio file too large")
+                            out_audio.write(chunk)
+            except Exception as e:
+                console.log(f"⚠️ Pool video audio download failed ProductID={song_id}: {e}")
+                audio_file = ""
+
+            if audio_file and os.path.exists(audio_file) and os.path.getsize(audio_file) > 0:
+                with_audio_file = os.path.join(tmp_dir, "pool_video_with_audio.mp4")
+                mux_cmd = [
+                    ffmpeg_bin,
+                    "-y",
+                    "-stream_loop",
+                    "-1",
+                    "-i",
+                    silent_video_file,
+                    "-i",
+                    audio_file,
+                    "-map",
+                    "0:v:0",
+                    "-map",
+                    "1:a:0",
+                    "-c:v",
+                    "libx264",
+                    "-pix_fmt",
+                    "yuv420p",
+                    "-c:a",
+                    "aac",
+                    "-b:a",
+                    "192k",
+                    "-shortest",
+                    "-movflags",
+                    "+faststart",
+                    with_audio_file,
+                ]
+
+                try:
+                    mux_proc = subprocess.run(mux_cmd, capture_output=True, text=True, timeout=240, check=False)
+                    if mux_proc.returncode == 0 and os.path.exists(with_audio_file):
+                        final_video_file = with_audio_file
+                    else:
+                        console.log(
+                            f"⚠️ Pool video mux failed ProductID={song_id}: "
+                            f"returncode={mux_proc.returncode} stderr={mux_proc.stderr[-1200:] if mux_proc.stderr else ''}"
+                        )
+                except subprocess.TimeoutExpired:
+                    console.log(f"⚠️ Pool video mux timeout ProductID={song_id}")
+
+        with open(final_video_file, "rb") as video_file:
+            video_bytes = video_file.read()
+
+    filename = f"{_sanitize_filename(song_title)}-image-pool.mp4"
+    _cache_pool_video(cache_key, video_bytes, filename)
+    return _pool_video_http_response(video_bytes, filename, request.headers.get("range"))
 
 
 @router.get("/health")

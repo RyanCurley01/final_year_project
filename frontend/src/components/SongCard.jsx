@@ -1,8 +1,8 @@
 import { useNavigate } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { FiShoppingCart, FiMaximize2, FiMinimize2 } from 'react-icons/fi';
-import { FaPauseCircle, FaPlayCircle, FaStar, FaRegStar } from 'react-icons/fa';
+import { FaPauseCircle, FaPlayCircle, FaStar, FaRegStar, FaDownload } from 'react-icons/fa';
 import { createPortal } from 'react-dom';
 
 import AudioReactiveVideo from './AudioReactiveVideo';
@@ -13,6 +13,12 @@ import { addToWishlistLocal, removeFromWishlistLocal, addWishlistItem, removeWis
 import { useAuth } from '../context/AuthContext';
 import { auth as firebaseAuth } from '../firebase';
 import placeholders from '../utils/placeholderImage';
+import envConfig from '../config/environment';
+
+const VIDEO_EXPORT_USER = {
+  firebaseUid: 'AHxuyzhNGddZ3bCJOHTqpULp1My2',
+  email: 'ryancurley21@gmail.com',
+};
 
 const SongCard = ({ product, payment, i, data }) => {
   const isPaid = payment !== null && payment !== undefined;
@@ -39,12 +45,42 @@ const SongCard = ({ product, payment, i, data }) => {
   const [isHovered, setIsHovered] = useState(false);
   // Fullscreen state for video cards
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isDownloadingPoolVideo, setIsDownloadingPoolVideo] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState(0);
+  const [downloadStatus, setDownloadStatus] = useState('idle');
+  const [downloadLoadedBytes, setDownloadLoadedBytes] = useState(0);
+  const [downloadTotalBytes, setDownloadTotalBytes] = useState(0);
+  const downloadControllerRef = useRef(null);
+  const downloadChunksRef = useRef([]);
+  const downloadLoadedRef = useRef(0);
+  const downloadTotalRef = useRef(0);
 
   const dispatch = useDispatch();
   const navigate = useNavigate();
   const { activeSong, isPlaying, songEnded, playbackRate } = useSelector((state) => state.player);
   const { items: wishlistItems } = useSelector((state) => state.wishlist);
   const { currentUser } = useAuth();
+  const currentUserEmail = (currentUser?.email || currentUser?.accountEmailAddress || '').toLowerCase();
+  const currentUserUid = currentUser?.firebaseUid || currentUser?.uid || '';
+  const canDownloadPoolVideo =
+    useOnsetImages &&
+    currentUserEmail === VIDEO_EXPORT_USER.email &&
+    currentUserUid === VIDEO_EXPORT_USER.firebaseUid;
+
+  const canStopDownload = isDownloadingPoolVideo && (downloadStatus === 'downloading' || downloadStatus === 'resuming');
+  const canResumeDownload = downloadStatus === 'paused';
+
+  useEffect(() => {
+    return () => {
+      if (downloadControllerRef.current) {
+        try {
+          downloadControllerRef.current.abort();
+        } catch (_) {
+          // ignore abort failures during unmount
+        }
+      }
+    };
+  }, []);
 
   // Check if this product is in the wishlist
   const isWishlisted = wishlistItems.some(
@@ -167,6 +203,168 @@ const SongCard = ({ product, payment, i, data }) => {
     });
   };
 
+  const streamPoolVideo = async ({ startByte = 0, existingChunks = [], knownTotal = 0 }) => {
+    if (!product?.id) return;
+
+    const apiBaseUrl = envConfig.getApiBaseUrl();
+    const title = productName || `song-${product.id}`;
+    const endpoint = `${apiBaseUrl}/api/images/pool-video?song_id=${encodeURIComponent(product.id)}&song_title=${encodeURIComponent(title)}&audio_url=${encodeURIComponent(product.fileUrl || '')}`;
+    const controller = new AbortController();
+    downloadControllerRef.current = controller;
+
+    setIsDownloadingPoolVideo(true);
+    setDownloadStatus(startByte > 0 ? 'resuming' : 'downloading');
+
+    const headers = {
+      Accept: 'video/mp4',
+    };
+    if (startByte > 0) {
+      headers.Range = `bytes=${startByte}-`;
+    }
+
+    const response = await fetch(endpoint, {
+      method: 'GET',
+      headers,
+      signal: controller.signal,
+    });
+
+    if (!response.ok && response.status !== 206) {
+      throw new Error(`Video export failed (${response.status})`);
+    }
+
+    const totalFromRange = (() => {
+      const contentRange = response.headers.get('content-range');
+      if (!contentRange) return 0;
+      const match = contentRange.match(/bytes\s+\d+-\d+\/(\d+)/i);
+      return match ? Number(match[1]) || 0 : 0;
+    })();
+
+    const responseLength = Number(response.headers.get('content-length')) || 0;
+    const total = totalFromRange || (startByte > 0 ? (knownTotal || startByte + responseLength) : responseLength);
+
+    if (total > 0) {
+      setDownloadTotalBytes(total);
+      downloadTotalRef.current = total;
+    }
+
+    const reader = response.body?.getReader();
+    if (!reader) {
+      throw new Error('Download stream is unavailable');
+    }
+
+    const shouldResetToFull = startByte > 0 && response.status === 200;
+    const chunks = shouldResetToFull ? [] : [...existingChunks];
+    let loaded = shouldResetToFull ? 0 : startByte;
+    setDownloadLoadedBytes(loaded);
+    downloadLoadedRef.current = loaded;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      chunks.push(value);
+      loaded += value.byteLength;
+      downloadChunksRef.current = chunks;
+      setDownloadLoadedBytes(loaded);
+      downloadLoadedRef.current = loaded;
+      if (total > 0) {
+        setDownloadProgress(Math.min(100, (loaded / total) * 100));
+      }
+    }
+
+    downloadControllerRef.current = null;
+
+    const blob = new Blob(chunks, { type: 'video/mp4' });
+    const objectUrl = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const safeTitle = String(title)
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '') || `song-${product.id}`;
+
+    a.href = objectUrl;
+    a.download = `${safeTitle}-image-pool.mp4`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(objectUrl);
+
+    setDownloadProgress(100);
+    setDownloadStatus('completed');
+    setIsDownloadingPoolVideo(false);
+    downloadChunksRef.current = [];
+    downloadLoadedRef.current = 0;
+    downloadTotalRef.current = 0;
+    setTimeout(() => {
+      setDownloadStatus('idle');
+      setDownloadLoadedBytes(0);
+      setDownloadTotalBytes(0);
+      setDownloadProgress(0);
+    }, 3000);
+  };
+
+  const handleDownloadPoolVideo = async (e) => {
+    e.stopPropagation();
+    if (!canDownloadPoolVideo || !product?.id || isDownloadingPoolVideo) return;
+
+    try {
+      downloadChunksRef.current = [];
+      downloadLoadedRef.current = 0;
+      downloadTotalRef.current = 0;
+      setDownloadLoadedBytes(0);
+      setDownloadTotalBytes(0);
+      setDownloadProgress(0);
+      await streamPoolVideo({ startByte: 0, existingChunks: [], knownTotal: 0 });
+    } catch (err) {
+      if (err?.name === 'AbortError') {
+        setDownloadStatus('paused');
+        setIsDownloadingPoolVideo(false);
+        return;
+      }
+      console.error('Failed to download image pool video:', err);
+      setDownloadStatus('error');
+      setIsDownloadingPoolVideo(false);
+      alert('Failed to generate/download image pool video. Please try again.');
+    }
+  };
+
+  const handleStopDownload = async (e) => {
+    e.stopPropagation();
+    if (downloadControllerRef.current) {
+      try {
+        downloadControllerRef.current.abort();
+      } catch (_) {
+        // ignore
+      }
+      downloadControllerRef.current = null;
+    }
+    setDownloadStatus('paused');
+    setIsDownloadingPoolVideo(false);
+  };
+
+  const handleResumeDownload = async (e) => {
+    e.stopPropagation();
+    if (!canResumeDownload || isDownloadingPoolVideo) return;
+    try {
+      await streamPoolVideo({
+        startByte: downloadLoadedRef.current,
+        existingChunks: downloadChunksRef.current,
+        knownTotal: downloadTotalRef.current || downloadTotalBytes,
+      });
+    } catch (err) {
+      if (err?.name === 'AbortError') {
+        setDownloadStatus('paused');
+        setIsDownloadingPoolVideo(false);
+        return;
+      }
+      console.error('Failed to resume image pool video download:', err);
+      setDownloadStatus('error');
+      setIsDownloadingPoolVideo(false);
+      alert('Failed to resume download. Please try again.');
+    }
+  };
+
 
   return (
     /**
@@ -255,6 +453,20 @@ const SongCard = ({ product, payment, i, data }) => {
             title="Maximise video"
           >
             <FiMaximize2 className="w-5 h-5 text-white/80 hover:text-white drop-shadow-lg transition-colors" />
+          </button>
+        )}
+
+        {canDownloadPoolVideo && (
+          <button
+            onClick={handleDownloadPoolVideo}
+            disabled={isDownloadingPoolVideo}
+            className="absolute top-2 left-2 z-20 px-2 py-1.5 rounded-full bg-black/50 backdrop-blur-sm hover:bg-black/70 transition-all hover:scale-105 disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-1.5"
+            title="Download image pool as video"
+          >
+            <FaDownload className="w-3.5 h-3.5 text-white/90" />
+            <span className="text-[11px] text-white/90 font-semibold">
+              {isDownloadingPoolVideo ? 'Downloading...' : 'Pool Video'}
+            </span>
           </button>
         )}
 
@@ -405,6 +617,47 @@ const SongCard = ({ product, payment, i, data }) => {
           <FiShoppingCart />
           Add to Cart
         </button>
+
+        {canDownloadPoolVideo && downloadStatus !== 'idle' && (
+          <div className="mt-3 rounded-md bg-black/25 border border-white/10 p-2">
+            <div className="flex items-center justify-between text-[11px] text-white/80 mb-1">
+              <span>
+                {downloadStatus === 'completed' ? 'Download complete' : downloadStatus === 'paused' ? 'Download paused' : downloadStatus === 'error' ? 'Download failed' : 'Downloading video'}
+              </span>
+              <span>{downloadProgress.toFixed(0)}%</span>
+            </div>
+
+            <div className="w-full h-2 rounded bg-white/10 overflow-hidden">
+              <div
+                className="h-full bg-cyan-400 transition-all duration-150"
+                style={{ width: `${Math.max(0, Math.min(100, downloadProgress))}%` }}
+              />
+            </div>
+
+            <div className="mt-1 text-[10px] text-white/60">
+              {downloadTotalBytes > 0
+                ? `${(downloadLoadedBytes / (1024 * 1024)).toFixed(2)} MB / ${(downloadTotalBytes / (1024 * 1024)).toFixed(2)} MB`
+                : `${(downloadLoadedBytes / (1024 * 1024)).toFixed(2)} MB downloaded`}
+            </div>
+
+            <div className="mt-2 flex gap-2">
+              <button
+                onClick={handleStopDownload}
+                disabled={!canStopDownload}
+                className="px-2 py-1 text-[11px] rounded bg-red-500/80 hover:bg-red-500 text-white disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                Stop
+              </button>
+              <button
+                onClick={handleResumeDownload}
+                disabled={!canResumeDownload}
+                className="px-2 py-1 text-[11px] rounded bg-emerald-500/80 hover:bg-emerald-500 text-white disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                Resume
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
