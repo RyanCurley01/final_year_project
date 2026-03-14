@@ -343,7 +343,16 @@ const OnsetImageCard = ({
 
     // Active song instances publish one shared procedural frame for all subscribers.
     if (isActiveRef.current && activeSongId == songId) {
-      fallback = imageGenerationService.setSharedProceduralImage({}, songId);
+      if (isPrimaryRef.current) {
+        fallback = imageGenerationService.setSharedProceduralImage({}, songId);
+      } else {
+        // Non-primary active instances should not generate a new procedural frame,
+        // or fullscreen/minimized can diverge. Follow the shared frame only.
+        fallback = imageGenerationService.getCurrentImage();
+        if (!fallback) {
+          return;
+        }
+      }
     } else {
       // Non-active instances should follow the current shared frame when available.
       fallback = imageGenerationService.getCurrentImage();

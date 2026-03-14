@@ -109,7 +109,11 @@ const SongCard = ({ product, payment, i, data }) => {
 
   const handlePlayClick = () => {
     console.log("▶️ Playing song:", product.albumTitle);
-    dispatch(setActiveSong({ song: product, data, i }));
+    // Resume same active song without re-dispatching setActiveSong,
+    // which resets playbackRate in the player slice.
+    if (!isThisSongActive) {
+      dispatch(setActiveSong({ song: product, data, i }));
+    }
     dispatch(playPause(true));
     setIsHovered(false); // Hide overlay after clicking
   };
