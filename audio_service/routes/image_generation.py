@@ -23,6 +23,8 @@ from typing import Optional
 import time
 import hashlib
 import random
+import re
+import importlib
 import requests
 import threading
 import shutil
@@ -38,6 +40,10 @@ from config import (
     IMAGE_POOL_S3_PREFIX,
     IMAGE_POOL_MAX_DOWNLOAD_BYTES,
     IMAGE_POOL_DOWNLOAD_TIMEOUT_SECS,
+    IMAGE_POOL_DEFAULT_SIZE,
+    IMAGE_POOL_MAX_TOTAL_BYTES,
+    IMAGE_POOL_ESTIMATED_AVG_IMAGE_BYTES,
+    EXTERNAL_IMAGE_GENERATION_ENABLED,
 )
 from s3_service import upload_bytes, get_object_stream
 from config import executor
@@ -50,7 +56,7 @@ router = APIRouter(prefix="/api/images", tags=["Image Generation"])
 _pool_refill_lock = threading.Lock()
 _pool_refill_last_scheduled: dict[int, float] = {}
 _POOL_REFILL_MIN_INTERVAL_SECS = 60.0
-_EXTERNAL_IMAGE_GENERATION_ENABLED = False
+_EXTERNAL_IMAGE_GENERATION_ENABLED = EXTERNAL_IMAGE_GENERATION_ENABLED
 _POOL_VIDEO_CACHE_TTL_SECS = 60 * 20
 _pool_video_cache_lock = threading.Lock()
 _pool_video_cache: dict[str, dict] = {}
@@ -171,6 +177,54 @@ _VERIFIED_KEYWORDS = frozenset([
     "driftwood", "geode", "crystal", "cactus",
 ])
 
+# Hard safety exclusion list for generated image concepts.
+# These are blocked from title/prompt parsing and DB writes.
+_BANNED_FIGURE_TERMS = frozenset([
+    # Political/public office and governance
+    "politic", "political", "politician", "politicians", "government", "governor",
+    "senate", "senator", "congress", "congressman", "congresswoman", "president",
+    "prime", "minister", "parliament", "election", "campaign", "diplomat", "leader",
+    "leaders", "rally", "protest", "state", "statesman", "stateswoman",
+    # Royal/princess archetypes
+    "princess", "queen", "king", "prince", "royal", "royalty", "monarch", "monarchy",
+    "duchess", "duke", "crown", "tiara",
+    # Child/minor figures
+    "child", "children", "kid", "kids", "minor", "minors", "toddler", "toddlers",
+    "teen", "teens", "teenager", "teenagers", "baby", "babies", "infant", "infants",
+    "girl", "girls", "boy", "boys", "schoolgirl", "schoolboy",
+])
+
+
+def _tokenize_text(value: Optional[str]) -> list[str]:
+    if not value:
+        return []
+    return [t for t in re.findall(r"[a-z0-9]+", str(value).lower()) if len(t) > 1]
+
+
+def _contains_banned_figure_terms(value: Optional[str]) -> bool:
+    if not value:
+        return False
+    tokens = _tokenize_text(value)
+    for token in tokens:
+        if token in _BANNED_FIGURE_TERMS:
+            return True
+    return False
+
+
+def _safe_prompt_keywords(prompt: Optional[str]) -> list[str]:
+    """Return verified-safe keywords only, excluding blocked figure terms."""
+    safe = []
+    seen = set()
+    for token in _tokenize_text(prompt):
+        if token in seen:
+            continue
+        if token in _BANNED_FIGURE_TERMS:
+            continue
+        if token in _VERIFIED_KEYWORDS:
+            safe.append(token)
+            seen.add(token)
+    return safe
+
 
 # ============================================
 # LOREM FLICKR PROVIDER (Single Keyword Per URL)
@@ -216,7 +270,7 @@ def _generate_loremflickr_urls(keywords: list, count: int = 30,
 # DB-BACKED PER-SONG IMAGE POOLS
 # ============================================
 
-_DEFAULT_POOL_SIZE = 80
+_DEFAULT_POOL_SIZE = max(1, int(IMAGE_POOL_DEFAULT_SIZE))
 
 
 def _safe_int(value: Optional[str]) -> Optional[int]:
@@ -285,6 +339,92 @@ def _download_image_bytes(source_url: str, timeout_secs: Optional[float] = None)
         return data, content_type
 
 
+def _decode_image_bgr(data: bytes):
+    """Decode image bytes into OpenCV BGR ndarray (or None on failure)."""
+    try:
+        cv2 = importlib.import_module("cv2")
+        import numpy as np
+
+        arr = np.frombuffer(data, dtype=np.uint8)
+        if arr.size == 0:
+            return None
+        img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+        return img
+    except Exception:
+        return None
+
+
+def _detect_faces_in_image(data: bytes) -> bool:
+    """Detect human faces using Haar cascade object detection."""
+    try:
+        cv2 = importlib.import_module("cv2")
+    except Exception:
+        # If detector dependency is unavailable, fail open so ingestion doesn't crash.
+        return False
+
+    img = _decode_image_bgr(data)
+    if img is None:
+        return False
+
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    cascade_path = os.path.join(cv2.data.haarcascades, "haarcascade_frontalface_default.xml")
+    detector = cv2.CascadeClassifier(cascade_path)
+    if detector.empty():
+        return False
+
+    faces = detector.detectMultiScale(
+        gray,
+        scaleFactor=1.1,
+        minNeighbors=5,
+        minSize=(24, 24),
+        flags=cv2.CASCADE_SCALE_IMAGE,
+    )
+    return len(faces) > 0
+
+
+def _detect_red_border_in_image(data: bytes) -> bool:
+    """Detect strong red border overlays around image edges."""
+    img = _decode_image_bgr(data)
+    if img is None:
+        return False
+
+    h, w = img.shape[:2]
+    if h < 20 or w < 20:
+        return False
+
+    border_px = max(4, int(min(h, w) * 0.06))
+    top = img[:border_px, :, :]
+    bottom = img[h - border_px :, :, :]
+    left = img[:, :border_px, :]
+    right = img[:, w - border_px :, :]
+
+    import numpy as np
+
+    border = np.concatenate([
+        top.reshape(-1, 3),
+        bottom.reshape(-1, 3),
+        left.reshape(-1, 3),
+        right.reshape(-1, 3),
+    ], axis=0)
+
+    b = border[:, 0].astype(np.int16)
+    g = border[:, 1].astype(np.int16)
+    r = border[:, 2].astype(np.int16)
+
+    # Strong red dominance in edge pixels => likely red frame/border overlay.
+    red_mask = (r > 150) & (r > (g + 45)) & (r > (b + 45))
+    red_ratio = float(np.count_nonzero(red_mask)) / float(max(1, red_mask.size))
+    return red_ratio >= 0.55
+
+
+def _moderation_rejection_reason(data: bytes) -> Optional[str]:
+    if _detect_faces_in_image(data):
+        return "face_detected"
+    if _detect_red_border_in_image(data):
+        return "red_border_detected"
+    return None
+
+
 def _ext_from_content_type(content_type: str) -> str:
     if content_type == "image/jpeg":
         return ".jpg"
@@ -310,6 +450,60 @@ def _db_count_images_by_provider(cursor, product_id: int, provider: str) -> int:
     )
     row = cursor.fetchone() or {}
     return int(row.get("cnt") or 0)
+
+
+def _db_trim_song_pool_by_provider(cursor, product_id: int, provider: str, keep_count: int) -> int:
+    """Trim older rows so a song keeps at most keep_count images for a provider."""
+    keep_n = max(0, int(keep_count))
+    cursor.execute(
+        """
+        DELETE ig
+        FROM ImageGeneration ig
+        JOIN (
+            SELECT ImageGenID
+            FROM (
+                SELECT ImageGenID,
+                       ROW_NUMBER() OVER (PARTITION BY ProductID ORDER BY ImageGenID DESC) AS rn
+                FROM ImageGeneration
+                WHERE ProductID = %s AND Provider = %s
+            ) ranked
+            WHERE rn > %s
+        ) doomed ON doomed.ImageGenID = ig.ImageGenID
+        """,
+        (product_id, provider, keep_n),
+    )
+    return int(cursor.rowcount or 0)
+
+
+def _db_product_exists(cursor, product_id: int) -> bool:
+    cursor.execute("SELECT 1 AS ok FROM Products WHERE ProductID = %s LIMIT 1", (product_id,))
+    row = cursor.fetchone() or {}
+    return bool(row.get("ok"))
+
+
+def _db_s3_storage_stats(cursor) -> tuple[int, int]:
+    cursor.execute(
+        """
+        SELECT COALESCE(SUM(ByteSize), 0) AS total_bytes,
+               COUNT(*) AS total_images
+        FROM ImageGeneration
+        WHERE Provider = 's3'
+        """
+    )
+    row = cursor.fetchone() or {}
+    return int(row.get("total_bytes") or 0), int(row.get("total_images") or 0)
+
+
+def _allowed_images_by_budget(remaining_bytes: int, avg_image_bytes: int) -> int:
+    avg = max(1, int(avg_image_bytes or 1))
+    if remaining_bytes <= 0:
+        return 0
+    return max(0, int(remaining_bytes // avg))
+
+
+def _is_library_product_id(product_id: int) -> bool:
+    """Library songs use positive ProductIDs; iTunes-imported songs use negative IDs."""
+    return int(product_id) > 0
 
 
 def _db_fetch_images(cursor, product_id: int, count: int) -> list:
@@ -1012,11 +1206,14 @@ def _db_insert_images(cursor, product_id: int, images: list, provider: str = "lo
         url = (img.get("url") or "").strip()
         if not url:
             continue
+        tags = (img.get("tags") or "").strip()
+        if _contains_banned_figure_terms(tags) or _contains_banned_figure_terms(url):
+            continue
         payload.append(
             (
                 product_id,
                 provider,
-                (img.get("tags") or None),
+                (tags or None),
                 url,
                 _hash_url(url),
                 int(img.get("width") or 1980),
@@ -1050,12 +1247,16 @@ def _db_insert_hosted_images(cursor, product_id: int, images: list):
         url = (img.get("url") or "").strip()
         if not url:
             continue
+        tags = (img.get("tags") or "").strip()
+        source_url = (img.get("sourceUrl") or "").strip()
+        if _contains_banned_figure_terms(tags) or _contains_banned_figure_terms(source_url) or _contains_banned_figure_terms(url):
+            continue
         payload.append(
             (
                 product_id,
                 "s3",
-                (img.get("tags") or None),
-                (img.get("sourceUrl") or None),
+                (tags or None),
+                (source_url or None),
                 (img.get("storageKey") or None),
                 (img.get("contentType") or None),
                 int(img.get("byteSize") or 0) or None,
@@ -1106,11 +1307,19 @@ def _host_loremflickr_images_to_s3(
         source_url = (img.get("url") or "").strip()
         if not source_url:
             continue
+        if _contains_banned_figure_terms(img.get("tags")) or _contains_banned_figure_terms(source_url):
+            failed.append(img)
+            continue
             
         success = False
         for attempt in range(max_retries):
             try:
                 data, content_type = _download_image_bytes(source_url, timeout_secs=download_timeout_secs)
+
+                rejection = _moderation_rejection_reason(data)
+                if rejection:
+                    raise ValueError(f"Moderation rejected image: {rejection}")
+
                 url_hash = _hash_bytes(data)
                 ext = _ext_from_content_type(content_type)
                 storage_key = f"{IMAGE_POOL_S3_PREFIX}/{product_id}/{url_hash}{ext}"
@@ -1149,6 +1358,8 @@ def _host_loremflickr_images_to_s3(
                 break
             except Exception as e:
                 console.log(f"⚠️ Failed to host image for ProductID={product_id} (attempt {attempt + 1}/{max_retries}): {e}")
+                if "Moderation rejected image" in str(e):
+                    break
                 if attempt < max_retries - 1:
                     time.sleep(max(0.0, retry_backoff_secs * (attempt + 1)))  # Simple exponential backoff
         
@@ -1227,13 +1438,36 @@ def ensure_song_image_pool(
     if not _EXTERNAL_IMAGE_GENERATION_ENABLED:
         return 0
 
+    if not _is_library_product_id(product_id):
+        return 0
+
     with get_db_connection() as conn:
         if not conn:
             return 0
         with conn.cursor() as cursor:
+            _db_trim_song_pool_by_provider(cursor, product_id, "s3", int(desired_size))
+
             existing = _db_count_images_by_provider(cursor, product_id, "s3")
             missing = max(0, int(desired_size) - existing)
             if missing <= 0:
+                conn.commit()
+                return 0
+
+            total_s3_bytes, total_s3_images = _db_s3_storage_stats(cursor)
+            remaining_budget_bytes = max(0, int(IMAGE_POOL_MAX_TOTAL_BYTES) - int(total_s3_bytes))
+            avg_image_bytes = (
+                int(total_s3_bytes // total_s3_images)
+                if total_s3_images > 0
+                else int(IMAGE_POOL_ESTIMATED_AVG_IMAGE_BYTES)
+            )
+            budget_limited_missing = min(
+                missing,
+                _allowed_images_by_budget(remaining_budget_bytes, avg_image_bytes),
+            )
+            if budget_limited_missing <= 0:
+                console.log(
+                    f"🧱 Pool refill budget cap reached: total_s3_bytes={total_s3_bytes} limit={IMAGE_POOL_MAX_TOTAL_BYTES}"
+                )
                 return 0
 
             keywords = _build_keywords_from_features(
@@ -1246,7 +1480,7 @@ def ensure_song_image_pool(
                 genre=genre,
                 title=song_title,
             )
-            images = _generate_loremflickr_urls(keywords, missing, nocache=True)
+            images = _generate_loremflickr_urls(keywords, budget_limited_missing, nocache=True)
 
             # Prefer hosting to S3 for stable URLs + browser caching.
             hosted_images, failed_images = _host_loremflickr_images_to_s3(product_id, images)
@@ -1275,7 +1509,13 @@ def precompute_all_song_image_pools(pool_size: int = _DEFAULT_POOL_SIZE) -> dict
         }
 
     started = time.time()
-    summary = {"songs": 0, "inserted": 0, "skipped": 0, "pool_size": int(pool_size)}
+    summary = {
+        "songs": 0,
+        "inserted": 0,
+        "skipped": 0,
+        "pool_size": int(pool_size),
+        "s3_limit_bytes": int(IMAGE_POOL_MAX_TOTAL_BYTES),
+    }
 
     with get_db_connection() as conn:
         if not conn:
@@ -1293,6 +1533,7 @@ def precompute_all_song_image_pools(pool_size: int = _DEFAULT_POOL_SIZE) -> dict
                 AND p.AlbumTitle != ''
                 AND p.preview_url IS NOT NULL
                 AND p.preview_url != ''
+                AND p.ProductID > 0
                 """
             )
             rows = cursor.fetchall() or []
@@ -1300,15 +1541,37 @@ def precompute_all_song_image_pools(pool_size: int = _DEFAULT_POOL_SIZE) -> dict
             # Existing S3 counts in one query (frontend now requests hosted-only pools)
             cursor.execute("SELECT ProductID, COUNT(*) AS cnt FROM ImageGeneration WHERE Provider = 's3' GROUP BY ProductID")
             existing_counts = {int(r["ProductID"]): int(r["cnt"]) for r in (cursor.fetchall() or [])}
+            total_s3_bytes, total_s3_images = _db_s3_storage_stats(cursor)
 
             for row in rows:
                 pid = int(row["ProductID"])
                 title = row.get("AlbumTitle") or ""
+                _db_trim_song_pool_by_provider(cursor, pid, "s3", int(pool_size))
                 existing = int(existing_counts.get(pid, 0))
+                if existing > int(pool_size):
+                    existing = int(pool_size)
                 missing = max(0, int(pool_size) - existing)
                 if missing <= 0:
                     summary["skipped"] += 1
+                    conn.commit()
                     continue
+
+                remaining_budget_bytes = max(0, int(IMAGE_POOL_MAX_TOTAL_BYTES) - int(total_s3_bytes))
+                avg_image_bytes = (
+                    int(total_s3_bytes // total_s3_images)
+                    if total_s3_images > 0
+                    else int(IMAGE_POOL_ESTIMATED_AVG_IMAGE_BYTES)
+                )
+                budget_limited_missing = min(
+                    missing,
+                    _allowed_images_by_budget(remaining_budget_bytes, avg_image_bytes),
+                )
+                if budget_limited_missing <= 0:
+                    summary["status"] = "budget_cap_reached"
+                    console.log(
+                        f"🧱 Precompute stopped by budget cap: total_s3_bytes={total_s3_bytes} limit={IMAGE_POOL_MAX_TOTAL_BYTES}"
+                    )
+                    break
 
                 keywords = _build_keywords_from_features(
                     mood=row.get("Mood"),
@@ -1320,12 +1583,21 @@ def precompute_all_song_image_pools(pool_size: int = _DEFAULT_POOL_SIZE) -> dict
                     genre=row.get("Genre"),
                     title=title,
                 )
-                images = _generate_loremflickr_urls(keywords, missing, nocache=True)
-                hosted_images, failed_images = _host_loremflickr_images_to_s3(pid, images)
+                images = _generate_loremflickr_urls(keywords, budget_limited_missing, nocache=True)
+                hosted_images, failed_images = _host_loremflickr_images_to_s3(
+                    pid,
+                    images,
+                    max_retries=2,
+                    retry_backoff_secs=0.5,
+                    per_image_delay_secs=0.1,
+                )
 
                 inserted = 0
                 if hosted_images:
                     inserted += _db_insert_hosted_images(cursor, pid, hosted_images)
+                    for hosted in hosted_images:
+                        total_s3_bytes += int(hosted.get("byteSize") or 0)
+                        total_s3_images += 1
 
                 if failed_images:
                     inserted += _db_insert_images(cursor, pid, failed_images, provider="loremflickr")
@@ -1333,9 +1605,18 @@ def precompute_all_song_image_pools(pool_size: int = _DEFAULT_POOL_SIZE) -> dict
                 summary["songs"] += 1
                 summary["inserted"] += int(inserted or 0)
 
-            conn.commit()
+                # Persist incrementally so startup precompute makes visible progress.
+                conn.commit()
 
-    summary["status"] = "ok"
+                if (summary["songs"] % 10) == 0:
+                    console.log(
+                        f"🖼️ Precompute progress: songs={summary['songs']}/{len(rows)} "
+                        f"inserted={summary['inserted']} skipped={summary['skipped']}"
+                    )
+
+    summary["status"] = summary.get("status") or "ok"
+    summary["s3_total_bytes"] = int(total_s3_bytes) if 'total_s3_bytes' in locals() else 0
+    summary["s3_total_images"] = int(total_s3_images) if 'total_s3_images' in locals() else 0
     summary["elapsed_seconds"] = round(time.time() - started, 2)
     return summary
 
@@ -1454,11 +1735,13 @@ def _build_keywords_from_features(
 
     # 1. Title keywords (primary differentiator — makes each song unique)
     if title:
-        for word in title.lower().split():
-            for key, kws in _title_keyword_map.items():
-                if key in word or word in key:
-                    _add(kws, 2)
-                    break
+        title_tokens = _tokenize_text(title)
+        if not any(t in _BANNED_FIGURE_TERMS for t in title_tokens):
+            for word in title_tokens:
+                for key, kws in _title_keyword_map.items():
+                    if key in word or word in key:
+                        _add(kws, 2)
+                        break
 
     # 2. Mood keywords (atmosphere)
     mood_key = (mood or "").lower().strip()
@@ -1526,8 +1809,7 @@ async def search_images(
             return {"images": shuffled[:count], "source": "cache", "prompt": prompt}
 
     # Filter to only verified keywords
-    raw_tags = [w.strip() for w in prompt.lower().split() if len(w.strip()) > 2]
-    keywords = [t for t in raw_tags if t in _VERIFIED_KEYWORDS]
+    keywords = _safe_prompt_keywords(prompt)
     if not keywords:
         keywords = ["abstract", "landscape", "sky"]
 
@@ -1575,6 +1857,41 @@ def get_image_pool(
             "mood": mood,
         }
 
+    if not _is_library_product_id(int(product_id)):
+        return {
+            "images": [],
+            "source": "library_song_only",
+            "song_title": song_title,
+            "tags_used": [],
+            "mood": mood,
+        }
+
+    # Validate ProductID exists so refill attempts don't silently no-op.
+    try:
+        with get_db_connection() as conn:
+            if not conn:
+                raise HTTPException(status_code=503, detail="Database connection unavailable")
+            with conn.cursor() as cursor:
+                if not _db_product_exists(cursor, int(product_id)):
+                    return {
+                        "images": [],
+                        "source": "invalid_song_id_not_found",
+                        "song_title": song_title,
+                        "tags_used": [],
+                        "mood": mood,
+                    }
+    except HTTPException:
+        raise
+    except Exception as e:
+        console.log(f"❌ Product existence check failed for ProductID={product_id}: {e}")
+        return {
+            "images": [],
+            "source": "db_error",
+            "song_title": song_title,
+            "tags_used": [],
+            "mood": mood,
+        }
+
     # External URL generation is disabled. nocache only affects clients; server still serves DB/S3 pool.
     if nocache:
         try:
@@ -1582,6 +1899,8 @@ def get_image_pool(
                 if not conn:
                     raise HTTPException(status_code=503, detail="Database connection unavailable")
                 with conn.cursor() as cursor:
+                    _db_trim_song_pool_by_provider(cursor, int(product_id), "s3", int(_DEFAULT_POOL_SIZE))
+                    conn.commit()
                     images = _db_fetch_images(cursor, product_id, count)
             images = [
                 {**img, "url": _absolute_url(request, img.get("url")), "urlLarge": _absolute_url(request, img.get("urlLarge") or img.get("url"))}
@@ -1613,12 +1932,14 @@ def get_image_pool(
             if not conn:
                 raise HTTPException(status_code=503, detail="Database connection unavailable")
             with conn.cursor() as cursor:
+                _db_trim_song_pool_by_provider(cursor, int(product_id), "s3", int(_DEFAULT_POOL_SIZE))
+                conn.commit()
                 images = _db_fetch_images(cursor, product_id, count)
 
-        missing = max(0, int(count) - len(images or []))
-        if missing > 0:
+        missing_target = max(0, int(_DEFAULT_POOL_SIZE) - len(images or []))
+        if missing_target > 0:
             # Schedule a background refill so future calls return stable hosted URLs.
-            desired_size = max(_DEFAULT_POOL_SIZE, int(count))
+            desired_size = int(_DEFAULT_POOL_SIZE)
             _schedule_pool_refill(
                 product_id=int(product_id),
                 song_title=song_title,
@@ -1652,8 +1973,10 @@ def get_image_pool(
                         with get_db_connection() as retry_conn:
                             if retry_conn:
                                 with retry_conn.cursor() as retry_cursor:
+                                    _db_trim_song_pool_by_provider(retry_cursor, int(product_id), "s3", int(_DEFAULT_POOL_SIZE))
+                                    retry_conn.commit()
                                     images = _db_fetch_images(retry_cursor, product_id, count)
-                    missing = max(0, int(count) - len(images or []))
+                    missing_target = max(0, int(_DEFAULT_POOL_SIZE) - len(images or []))
                 except Exception as warm_err:
                     console.log(f"⚠️ S3 warmup failed for ProductID={product_id}: {warm_err}")
 
@@ -1669,7 +1992,9 @@ def get_image_pool(
             "images": images,
             "source": (
                 "db_pool"
-                if missing == 0
+                if missing_target == 0
+                else "db_pool_short_external_disabled"
+                if not _EXTERNAL_IMAGE_GENERATION_ENABLED
                 else "db_pool_short_refill_scheduled"
             ),
             "song_title": song_title,

@@ -42,6 +42,19 @@ IMAGE_POOL_S3_BUCKET = os.getenv("IMAGE_POOL_S3_BUCKET", S3_CONFIG['bucket_name'
 IMAGE_POOL_S3_PREFIX = os.getenv("IMAGE_POOL_S3_PREFIX", "generated-images")
 IMAGE_POOL_MAX_DOWNLOAD_BYTES = int(os.getenv("IMAGE_POOL_MAX_DOWNLOAD_BYTES", "8000000"))  # 8MB
 IMAGE_POOL_DOWNLOAD_TIMEOUT_SECS = float(os.getenv("IMAGE_POOL_DOWNLOAD_TIMEOUT_SECS", "6"))
+IMAGE_POOL_DEFAULT_SIZE = int(os.getenv("IMAGE_POOL_DEFAULT_SIZE", "100"))
+IMAGE_POOL_MAX_TOTAL_BYTES = int(os.getenv("IMAGE_POOL_MAX_TOTAL_BYTES", "1000000000"))  # 1.0GB generated-images cap
+IMAGE_POOL_ESTIMATED_AVG_IMAGE_BYTES = int(os.getenv("IMAGE_POOL_ESTIMATED_AVG_IMAGE_BYTES", "350000"))
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return str(raw).strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+EXTERNAL_IMAGE_GENERATION_ENABLED = _env_bool("EXTERNAL_IMAGE_GENERATION_ENABLED", default=False)
 
 # iTunes API configuration from environment
 # EXECUTION ORDER: Run on module import.

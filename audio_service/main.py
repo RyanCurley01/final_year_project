@@ -6,7 +6,7 @@ import uvicorn
 import os
 
 from utils import console
-from config import executor
+from config import executor, EXTERNAL_IMAGE_GENERATION_ENABLED
 import ml_service
 
 # Import Routers
@@ -69,9 +69,16 @@ async def startup_event():
     # Precompute per-song image pools so the UI doesn't display placeholders.
     # This only generates/stores URLs (fast) — it does not download the images.
     try:
+        console.log(
+            f"🖼️ Image precompute startup: external_generation_enabled={EXTERNAL_IMAGE_GENERATION_ENABLED}"
+        )
+
         async def _precompute_images_bg():
-            summary = await run_in_threadpool(image_generation.precompute_all_song_image_pools)
-            console.log(f"🖼️ Image pools ready: {summary}")
+            try:
+                summary = await run_in_threadpool(image_generation.precompute_all_song_image_pools)
+                console.log(f"🖼️ Image pools ready: {summary}")
+            except Exception as e:
+                console.log(f"⚠️ Image pool precompute task failed: {e}")
 
         asyncio.create_task(_precompute_images_bg())
     except Exception as e:
@@ -128,5 +135,6 @@ app.include_router(image_generation.router)
 if __name__ == "__main__":
     # For local debugging
     port = int(os.getenv("PORT", 5000))
+    reload_enabled = str(os.getenv("UVICORN_RELOAD", "false")).strip().lower() in {"1", "true", "yes", "on"}
     console.log(f"🔌 Running on port {port}")
-    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=reload_enabled)

@@ -6,6 +6,7 @@ pydantic>=2.5.0
 # ML Inference (lightweight - no torch needed)
 onnxruntime>=1.16.0
 numpy>=1.24.2
+opencv-python-headless>=4.10.0
 
 # Audio Feature Extraction for ML Similarity
 librosa>=0.10.1
