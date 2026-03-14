@@ -45,7 +45,7 @@ from config import (
     IMAGE_POOL_ESTIMATED_AVG_IMAGE_BYTES,
     EXTERNAL_IMAGE_GENERATION_ENABLED,
 )
-from s3_service import upload_bytes, get_object_stream
+from s3_service import upload_bytes, get_object_stream, delete_object, object_exists, list_object_keys
 from config import executor
 
 router = APIRouter(prefix="/api/images", tags=["Image Generation"])
@@ -57,9 +57,21 @@ _pool_refill_lock = threading.Lock()
 _pool_refill_last_scheduled: dict[int, float] = {}
 _POOL_REFILL_MIN_INTERVAL_SECS = 60.0
 _EXTERNAL_IMAGE_GENERATION_ENABLED = EXTERNAL_IMAGE_GENERATION_ENABLED
+_pool_song_locks_guard = threading.Lock()
+_pool_song_locks: dict[int, threading.Lock] = {}
 _POOL_VIDEO_CACHE_TTL_SECS = 60 * 20
 _pool_video_cache_lock = threading.Lock()
 _pool_video_cache: dict[str, dict] = {}
+
+
+def _get_song_pool_lock(product_id: int) -> threading.Lock:
+    pid = int(product_id)
+    with _pool_song_locks_guard:
+        lock = _pool_song_locks.get(pid)
+        if lock is None:
+            lock = threading.Lock()
+            _pool_song_locks[pid] = lock
+        return lock
 
 
 def _schedule_pool_refill(
@@ -452,9 +464,28 @@ def _db_count_images_by_provider(cursor, product_id: int, provider: str) -> int:
     return int(row.get("cnt") or 0)
 
 
-def _db_trim_song_pool_by_provider(cursor, product_id: int, provider: str, keep_count: int) -> int:
-    """Trim older rows so a song keeps at most keep_count images for a provider."""
+def _db_trim_song_pool_by_provider(cursor, product_id: int, provider: str, keep_count: int) -> tuple[int, list[str]]:
+    """Trim older rows so a song keeps at most keep_count images for a provider.
+
+    Returns (deleted_row_count, deleted_storage_keys).
+    """
     keep_n = max(0, int(keep_count))
+    cursor.execute(
+        """
+        SELECT StorageKey
+        FROM (
+            SELECT StorageKey,
+                   ROW_NUMBER() OVER (PARTITION BY ProductID ORDER BY ImageGenID DESC) AS rn
+            FROM ImageGeneration
+            WHERE ProductID = %s AND Provider = %s
+        ) ranked
+        WHERE rn > %s AND StorageKey IS NOT NULL AND StorageKey != ''
+        """,
+        (product_id, provider, keep_n),
+    )
+    doomed_rows = cursor.fetchall() or []
+    doomed_keys = [str(r.get("StorageKey")).strip() for r in doomed_rows if (r.get("StorageKey") or "").strip()]
+
     cursor.execute(
         """
         DELETE ig
@@ -472,7 +503,23 @@ def _db_trim_song_pool_by_provider(cursor, product_id: int, provider: str, keep_
         """,
         (product_id, provider, keep_n),
     )
-    return int(cursor.rowcount or 0)
+    return int(cursor.rowcount or 0), doomed_keys
+
+
+def _delete_s3_keys_best_effort(storage_keys: list[str]) -> int:
+    """Delete S3 objects for trimmed DB rows; failures are logged and ignored."""
+    if not IMAGE_POOL_S3_BUCKET:
+        return 0
+    deleted = 0
+    for key in (storage_keys or []):
+        if not key:
+            continue
+        try:
+            if delete_object(IMAGE_POOL_S3_BUCKET, key):
+                deleted += 1
+        except Exception as e:
+            console.log(f"⚠️ Failed to delete trimmed S3 object: {key} ({e})")
+    return deleted
 
 
 def _db_product_exists(cursor, product_id: int) -> bool:
@@ -492,6 +539,131 @@ def _db_s3_storage_stats(cursor) -> tuple[int, int]:
     )
     row = cursor.fetchone() or {}
     return int(row.get("total_bytes") or 0), int(row.get("total_images") or 0)
+
+
+def _db_delete_non_s3_library_rows(cursor) -> int:
+    """Delete legacy non-S3 rows for library songs to keep pools S3-only."""
+    cursor.execute("DELETE FROM ImageGeneration WHERE ProductID > 0 AND Provider <> 's3'")
+    return int(cursor.rowcount or 0)
+
+
+def _db_reconcile_song_s3_rows(cursor, product_id: int) -> int:
+    """Delete DB rows whose S3 objects are missing so DB matches bucket state."""
+    cursor.execute(
+        """
+        SELECT ImageGenID, StorageKey
+        FROM ImageGeneration
+        WHERE ProductID = %s AND Provider = 's3'
+        """,
+        (product_id,),
+    )
+    rows = cursor.fetchall() or []
+    if not rows:
+        return 0
+
+    missing_ids: list[int] = []
+    for row in rows:
+        image_gen_id = int(row.get("ImageGenID") or 0)
+        storage_key = (row.get("StorageKey") or "").strip()
+        if image_gen_id <= 0:
+            continue
+        if not storage_key:
+            missing_ids.append(image_gen_id)
+            continue
+        if not object_exists(IMAGE_POOL_S3_BUCKET, storage_key):
+            missing_ids.append(image_gen_id)
+
+    if not missing_ids:
+        return 0
+
+    placeholders = ",".join(["%s"] * len(missing_ids))
+    cursor.execute(f"DELETE FROM ImageGeneration WHERE ImageGenID IN ({placeholders})", tuple(missing_ids))
+    return int(cursor.rowcount or 0)
+
+
+def _db_song_storage_keys(cursor, product_id: int) -> set[str]:
+    cursor.execute(
+        """
+        SELECT StorageKey
+        FROM ImageGeneration
+        WHERE ProductID = %s AND Provider = 's3' AND StorageKey IS NOT NULL AND StorageKey != ''
+        """,
+        (product_id,),
+    )
+    rows = cursor.fetchall() or []
+    return {str(r.get("StorageKey")).strip() for r in rows if (r.get("StorageKey") or "").strip()}
+
+
+def _reconcile_song_s3_orphans_with_db(cursor, product_id: int) -> int:
+    """Delete S3 objects under generated-images/{product_id}/ that are not referenced by DB rows."""
+    if not IMAGE_POOL_S3_BUCKET:
+        return 0
+
+    db_keys = _db_song_storage_keys(cursor, product_id)
+    prefix = f"{IMAGE_POOL_S3_PREFIX}/{int(product_id)}/"
+    s3_keys = set(list_object_keys(IMAGE_POOL_S3_BUCKET, prefix))
+    orphan_keys = sorted(k for k in s3_keys if k not in db_keys)
+    if not orphan_keys:
+        return 0
+
+    deleted = _delete_s3_keys_best_effort(orphan_keys)
+    if deleted > 0:
+        console.log(
+            f"🧹 Reconciled S3 orphans ProductID={product_id}: deleted={deleted}"
+        )
+    return deleted
+
+
+def _s3_song_object_keys(product_id: int) -> list[str]:
+    if not IMAGE_POOL_S3_BUCKET:
+        return []
+    prefix = f"{IMAGE_POOL_S3_PREFIX}/{int(product_id)}/"
+    return list_object_keys(IMAGE_POOL_S3_BUCKET, prefix)
+
+
+def _db_delete_song_s3_rows(cursor, product_id: int) -> int:
+    cursor.execute(
+        "DELETE FROM ImageGeneration WHERE ProductID = %s AND Provider = 's3'",
+        (int(product_id),),
+    )
+    return int(cursor.rowcount or 0)
+
+
+def _hard_reset_song_pool(cursor, product_id: int) -> dict:
+    """Delete all S3 objects and DB s3 rows for one song pool."""
+    keys = _s3_song_object_keys(product_id)
+    deleted_s3 = _delete_s3_keys_best_effort(keys)
+    deleted_db = _db_delete_song_s3_rows(cursor, int(product_id))
+    return {
+        "deleted_s3_objects": int(deleted_s3),
+        "deleted_db_rows": int(deleted_db),
+    }
+
+
+def _check_and_delete_mismatched_song_pool(cursor, product_id: int) -> bool:
+    """When DB and S3 counts differ for a song, hard-delete both sides to resync."""
+    db_count = _db_count_images_by_provider(cursor, int(product_id), "s3")
+    s3_count = len(_s3_song_object_keys(int(product_id)))
+    if db_count == s3_count:
+        return False
+
+    result = _hard_reset_song_pool(cursor, int(product_id))
+    console.log(
+        f"🧨 Mismatch reset ProductID={product_id}: db_count={db_count}, s3_count={s3_count}, "
+        f"deleted_db={result['deleted_db_rows']}, deleted_s3={result['deleted_s3_objects']}"
+    )
+    return True
+
+
+def _normalize_song_pool_state(cursor, product_id: int, desired_size: int) -> int:
+    """Reconcile DB<->S3 and enforce hard per-song cap before/after fills."""
+    _db_reconcile_song_s3_rows(cursor, int(product_id))
+    _reconcile_song_s3_orphans_with_db(cursor, int(product_id))
+    trimmed_rows, trimmed_keys = _db_trim_song_pool_by_provider(cursor, int(product_id), "s3", int(desired_size))
+    if trimmed_rows > 0:
+        _delete_s3_keys_best_effort(trimmed_keys)
+    _reconcile_song_s3_orphans_with_db(cursor, int(product_id))
+    return _db_count_images_by_provider(cursor, int(product_id), "s3")
 
 
 def _allowed_images_by_budget(remaining_bytes: int, avg_image_bytes: int) -> int:
@@ -1441,59 +1613,72 @@ def ensure_song_image_pool(
     if not _is_library_product_id(product_id):
         return 0
 
-    with get_db_connection() as conn:
-        if not conn:
-            return 0
-        with conn.cursor() as cursor:
-            _db_trim_song_pool_by_provider(cursor, product_id, "s3", int(desired_size))
+    with _get_song_pool_lock(int(product_id)):
+        with get_db_connection() as conn:
+            if not conn:
+                return 0
+            with conn.cursor() as cursor:
+                _db_delete_non_s3_library_rows(cursor)
+                _check_and_delete_mismatched_song_pool(cursor, int(product_id))
+                _normalize_song_pool_state(cursor, int(product_id), int(desired_size))
 
-            existing = _db_count_images_by_provider(cursor, product_id, "s3")
-            missing = max(0, int(desired_size) - existing)
-            if missing <= 0:
+                inserted_total = 0
+                max_rounds = 6
+                for _ in range(max_rounds):
+                    existing = _db_count_images_by_provider(cursor, product_id, "s3")
+                    missing = max(0, int(desired_size) - existing)
+                    if missing <= 0:
+                        break
+
+                    total_s3_bytes, total_s3_images = _db_s3_storage_stats(cursor)
+                    remaining_budget_bytes = max(0, int(IMAGE_POOL_MAX_TOTAL_BYTES) - int(total_s3_bytes))
+                    avg_image_bytes = (
+                        int(total_s3_bytes // total_s3_images)
+                        if total_s3_images > 0
+                        else int(IMAGE_POOL_ESTIMATED_AVG_IMAGE_BYTES)
+                    )
+                    budget_limited_missing = min(
+                        missing,
+                        _allowed_images_by_budget(remaining_budget_bytes, avg_image_bytes),
+                    )
+                    if budget_limited_missing <= 0:
+                        console.log(
+                            f"🧱 Pool refill budget cap reached: total_s3_bytes={total_s3_bytes} limit={IMAGE_POOL_MAX_TOTAL_BYTES}"
+                        )
+                        break
+
+                    keywords = _build_keywords_from_features(
+                        mood=mood,
+                        energy=energy,
+                        valence=valence,
+                        tempo=tempo,
+                        danceability=danceability,
+                        acousticness=acousticness,
+                        genre=genre,
+                        title=song_title,
+                    )
+                    images = _generate_loremflickr_urls(keywords, budget_limited_missing, nocache=True)
+
+                    # Prefer hosting to S3 for stable URLs + browser caching.
+                    hosted_images, failed_images = _host_loremflickr_images_to_s3(product_id, images)
+                    inserted_round = 0
+                    if hosted_images:
+                        inserted_round += _db_insert_hosted_images(cursor, product_id, hosted_images)
+
+                    if failed_images:
+                        console.log(
+                            f"⚠️ Skipped non-hosted images for ProductID={product_id}: failed={len(failed_images)}"
+                        )
+
+                    inserted_total += int(inserted_round or 0)
+                    conn.commit()
+
+                    if inserted_round <= 0:
+                        break
+
+                _normalize_song_pool_state(cursor, int(product_id), int(desired_size))
                 conn.commit()
-                return 0
-
-            total_s3_bytes, total_s3_images = _db_s3_storage_stats(cursor)
-            remaining_budget_bytes = max(0, int(IMAGE_POOL_MAX_TOTAL_BYTES) - int(total_s3_bytes))
-            avg_image_bytes = (
-                int(total_s3_bytes // total_s3_images)
-                if total_s3_images > 0
-                else int(IMAGE_POOL_ESTIMATED_AVG_IMAGE_BYTES)
-            )
-            budget_limited_missing = min(
-                missing,
-                _allowed_images_by_budget(remaining_budget_bytes, avg_image_bytes),
-            )
-            if budget_limited_missing <= 0:
-                console.log(
-                    f"🧱 Pool refill budget cap reached: total_s3_bytes={total_s3_bytes} limit={IMAGE_POOL_MAX_TOTAL_BYTES}"
-                )
-                return 0
-
-            keywords = _build_keywords_from_features(
-                mood=mood,
-                energy=energy,
-                valence=valence,
-                tempo=tempo,
-                danceability=danceability,
-                acousticness=acousticness,
-                genre=genre,
-                title=song_title,
-            )
-            images = _generate_loremflickr_urls(keywords, budget_limited_missing, nocache=True)
-
-            # Prefer hosting to S3 for stable URLs + browser caching.
-            hosted_images, failed_images = _host_loremflickr_images_to_s3(product_id, images)
-            inserted = 0
-            if hosted_images:
-                inserted += _db_insert_hosted_images(cursor, product_id, hosted_images)
-
-            # Fallback: persist original URLs for images that failed hosting.
-            if failed_images:
-                inserted += _db_insert_images(cursor, product_id, failed_images, provider="loremflickr")
-
-            conn.commit()
-            return inserted
+                return int(inserted_total)
 
 
 def precompute_all_song_image_pools(pool_size: int = _DEFAULT_POOL_SIZE) -> dict:
@@ -1515,6 +1700,11 @@ def precompute_all_song_image_pools(pool_size: int = _DEFAULT_POOL_SIZE) -> dict
         "skipped": 0,
         "pool_size": int(pool_size),
         "s3_limit_bytes": int(IMAGE_POOL_MAX_TOTAL_BYTES),
+        "purged_non_s3_rows": 0,
+        "reconciled_missing_s3_rows": 0,
+        "reconciled_orphan_s3_objects": 0,
+        "underfilled_songs": 0,
+        "mismatch_resets": 0,
     }
 
     with get_db_connection() as conn:
@@ -1522,6 +1712,8 @@ def precompute_all_song_image_pools(pool_size: int = _DEFAULT_POOL_SIZE) -> dict
             return {**summary, "status": "db_unavailable"}
 
         with conn.cursor() as cursor:
+            summary["purged_non_s3_rows"] = _db_delete_non_s3_library_rows(cursor)
+
             cursor.execute(
                 """
                 SELECT p.ProductID, p.AlbumTitle,
@@ -1546,67 +1738,86 @@ def precompute_all_song_image_pools(pool_size: int = _DEFAULT_POOL_SIZE) -> dict
             for row in rows:
                 pid = int(row["ProductID"])
                 title = row.get("AlbumTitle") or ""
-                _db_trim_song_pool_by_provider(cursor, pid, "s3", int(pool_size))
-                existing = int(existing_counts.get(pid, 0))
-                if existing > int(pool_size):
-                    existing = int(pool_size)
-                missing = max(0, int(pool_size) - existing)
-                if missing <= 0:
+                if _check_and_delete_mismatched_song_pool(cursor, pid):
+                    summary["mismatch_resets"] += 1
+                summary["reconciled_missing_s3_rows"] += _db_reconcile_song_s3_rows(cursor, pid)
+                summary["reconciled_orphan_s3_objects"] += _reconcile_song_s3_orphans_with_db(cursor, pid)
+                trimmed_rows, trimmed_keys = _db_trim_song_pool_by_provider(cursor, pid, "s3", int(pool_size))
+                if trimmed_rows > 0:
+                    _delete_s3_keys_best_effort(trimmed_keys)
+                existing = _db_count_images_by_provider(cursor, pid, "s3")
+                if existing >= int(pool_size):
                     summary["skipped"] += 1
                     conn.commit()
                     continue
 
-                remaining_budget_bytes = max(0, int(IMAGE_POOL_MAX_TOTAL_BYTES) - int(total_s3_bytes))
-                avg_image_bytes = (
-                    int(total_s3_bytes // total_s3_images)
-                    if total_s3_images > 0
-                    else int(IMAGE_POOL_ESTIMATED_AVG_IMAGE_BYTES)
-                )
-                budget_limited_missing = min(
-                    missing,
-                    _allowed_images_by_budget(remaining_budget_bytes, avg_image_bytes),
-                )
-                if budget_limited_missing <= 0:
-                    summary["status"] = "budget_cap_reached"
-                    console.log(
-                        f"🧱 Precompute stopped by budget cap: total_s3_bytes={total_s3_bytes} limit={IMAGE_POOL_MAX_TOTAL_BYTES}"
+                max_rounds = 6
+                inserted_song_total = 0
+                for _ in range(max_rounds):
+                    existing = _db_count_images_by_provider(cursor, pid, "s3")
+                    missing = max(0, int(pool_size) - existing)
+                    if missing <= 0:
+                        break
+
+                    remaining_budget_bytes = max(0, int(IMAGE_POOL_MAX_TOTAL_BYTES) - int(total_s3_bytes))
+                    avg_image_bytes = (
+                        int(total_s3_bytes // total_s3_images)
+                        if total_s3_images > 0
+                        else int(IMAGE_POOL_ESTIMATED_AVG_IMAGE_BYTES)
                     )
-                    break
+                    budget_limited_missing = min(
+                        missing,
+                        _allowed_images_by_budget(remaining_budget_bytes, avg_image_bytes),
+                    )
+                    if budget_limited_missing <= 0:
+                        summary["status"] = "budget_cap_reached"
+                        console.log(
+                            f"🧱 Precompute stopped by budget cap: total_s3_bytes={total_s3_bytes} limit={IMAGE_POOL_MAX_TOTAL_BYTES}"
+                        )
+                        break
 
-                keywords = _build_keywords_from_features(
-                    mood=row.get("Mood"),
-                    energy=row.get("Energy"),
-                    valence=row.get("Valence"),
-                    tempo=row.get("Tempo"),
-                    danceability=row.get("Danceability"),
-                    acousticness=row.get("Acousticness"),
-                    genre=row.get("Genre"),
-                    title=title,
-                )
-                images = _generate_loremflickr_urls(keywords, budget_limited_missing, nocache=True)
-                hosted_images, failed_images = _host_loremflickr_images_to_s3(
-                    pid,
-                    images,
-                    max_retries=2,
-                    retry_backoff_secs=0.5,
-                    per_image_delay_secs=0.1,
-                )
+                    keywords = _build_keywords_from_features(
+                        mood=row.get("Mood"),
+                        energy=row.get("Energy"),
+                        valence=row.get("Valence"),
+                        tempo=row.get("Tempo"),
+                        danceability=row.get("Danceability"),
+                        acousticness=row.get("Acousticness"),
+                        genre=row.get("Genre"),
+                        title=title,
+                    )
+                    images = _generate_loremflickr_urls(keywords, budget_limited_missing, nocache=True)
+                    hosted_images, failed_images = _host_loremflickr_images_to_s3(
+                        pid,
+                        images,
+                        max_retries=2,
+                        retry_backoff_secs=0.5,
+                        per_image_delay_secs=0.1,
+                    )
 
-                inserted = 0
-                if hosted_images:
-                    inserted += _db_insert_hosted_images(cursor, pid, hosted_images)
-                    for hosted in hosted_images:
-                        total_s3_bytes += int(hosted.get("byteSize") or 0)
-                        total_s3_images += 1
+                    inserted_round = 0
+                    if hosted_images:
+                        inserted_round += _db_insert_hosted_images(cursor, pid, hosted_images)
+                        for hosted in hosted_images:
+                            total_s3_bytes += int(hosted.get("byteSize") or 0)
+                            total_s3_images += 1
 
-                if failed_images:
-                    inserted += _db_insert_images(cursor, pid, failed_images, provider="loremflickr")
+                    if failed_images:
+                        console.log(f"⚠️ Skipped non-hosted precompute images ProductID={pid}: failed={len(failed_images)}")
+
+                    inserted_song_total += int(inserted_round or 0)
+                    conn.commit()
+
+                    if inserted_round <= 0:
+                        break
+
+                final_existing = _normalize_song_pool_state(cursor, pid, int(pool_size))
+                conn.commit()
+                if final_existing < int(pool_size):
+                    summary["underfilled_songs"] += 1
 
                 summary["songs"] += 1
-                summary["inserted"] += int(inserted or 0)
-
-                # Persist incrementally so startup precompute makes visible progress.
-                conn.commit()
+                summary["inserted"] += int(inserted_song_total or 0)
 
                 if (summary["songs"] % 10) == 0:
                     console.log(
@@ -1787,6 +1998,68 @@ def _build_keywords_from_features(
 # API ENDPOINTS
 # ============================================
 
+@router.post("/reconcile-delete-mismatched")
+def reconcile_delete_mismatched_song_pools(
+    apply: bool = Query(True, description="When true, delete mismatched song pools from both DB and S3"),
+):
+    """Check DB-vs-S3 counts per library song; optionally delete mismatched pools."""
+    result = {
+        "checked": 0,
+        "mismatched": 0,
+        "reset": 0,
+        "songs": [],
+        "apply": bool(apply),
+    }
+
+    with get_db_connection() as conn:
+        if not conn:
+            raise HTTPException(status_code=503, detail="Database connection unavailable")
+
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT ProductID
+                FROM Products
+                WHERE ProductID > 0
+                AND AlbumTitle IS NOT NULL AND AlbumTitle != ''
+                AND preview_url IS NOT NULL AND preview_url != ''
+                ORDER BY ProductID ASC
+                """
+            )
+            rows = cursor.fetchall() or []
+
+            for row in rows:
+                pid = int(row.get("ProductID") or 0)
+                if pid <= 0:
+                    continue
+                result["checked"] += 1
+
+                db_count = _db_count_images_by_provider(cursor, pid, "s3")
+                s3_count = len(_s3_song_object_keys(pid))
+                if db_count == s3_count:
+                    continue
+
+                result["mismatched"] += 1
+                entry = {
+                    "product_id": pid,
+                    "db_count": int(db_count),
+                    "s3_count": int(s3_count),
+                    "action": "none",
+                }
+
+                if apply:
+                    reset_info = _hard_reset_song_pool(cursor, pid)
+                    entry["action"] = "deleted"
+                    entry.update(reset_info)
+                    result["reset"] += 1
+
+                result["songs"].append(entry)
+
+            if apply:
+                conn.commit()
+
+    return result
+
 @router.get("/search")
 async def search_images(
     prompt: str = Query(..., description="Search keywords for image retrieval"),
@@ -1895,13 +2168,14 @@ def get_image_pool(
     # External URL generation is disabled. nocache only affects clients; server still serves DB/S3 pool.
     if nocache:
         try:
-            with get_db_connection() as conn:
-                if not conn:
-                    raise HTTPException(status_code=503, detail="Database connection unavailable")
-                with conn.cursor() as cursor:
-                    _db_trim_song_pool_by_provider(cursor, int(product_id), "s3", int(_DEFAULT_POOL_SIZE))
-                    conn.commit()
-                    images = _db_fetch_images(cursor, product_id, count)
+            with _get_song_pool_lock(int(product_id)):
+                with get_db_connection() as conn:
+                    if not conn:
+                        raise HTTPException(status_code=503, detail="Database connection unavailable")
+                    with conn.cursor() as cursor:
+                        _normalize_song_pool_state(cursor, int(product_id), int(_DEFAULT_POOL_SIZE))
+                        conn.commit()
+                        images = _db_fetch_images(cursor, product_id, count)
             images = [
                 {**img, "url": _absolute_url(request, img.get("url")), "urlLarge": _absolute_url(request, img.get("urlLarge") or img.get("url"))}
                 for img in (images or [])
@@ -1928,13 +2202,14 @@ def get_image_pool(
     # Normal path: serve from DB pool (no blocking backfill in-request).
     try:
         images = []
-        with get_db_connection() as conn:
-            if not conn:
-                raise HTTPException(status_code=503, detail="Database connection unavailable")
-            with conn.cursor() as cursor:
-                _db_trim_song_pool_by_provider(cursor, int(product_id), "s3", int(_DEFAULT_POOL_SIZE))
-                conn.commit()
-                images = _db_fetch_images(cursor, product_id, count)
+        with _get_song_pool_lock(int(product_id)):
+            with get_db_connection() as conn:
+                if not conn:
+                    raise HTTPException(status_code=503, detail="Database connection unavailable")
+                with conn.cursor() as cursor:
+                    _normalize_song_pool_state(cursor, int(product_id), int(_DEFAULT_POOL_SIZE))
+                    conn.commit()
+                    images = _db_fetch_images(cursor, product_id, count)
 
         missing_target = max(0, int(_DEFAULT_POOL_SIZE) - len(images or []))
         if missing_target > 0:
@@ -1970,12 +2245,13 @@ def get_image_pool(
                         max_images=1,
                     )
                     if inserted_now > 0:
-                        with get_db_connection() as retry_conn:
-                            if retry_conn:
-                                with retry_conn.cursor() as retry_cursor:
-                                    _db_trim_song_pool_by_provider(retry_cursor, int(product_id), "s3", int(_DEFAULT_POOL_SIZE))
-                                    retry_conn.commit()
-                                    images = _db_fetch_images(retry_cursor, product_id, count)
+                        with _get_song_pool_lock(int(product_id)):
+                            with get_db_connection() as retry_conn:
+                                if retry_conn:
+                                    with retry_conn.cursor() as retry_cursor:
+                                        _normalize_song_pool_state(retry_cursor, int(product_id), int(_DEFAULT_POOL_SIZE))
+                                        retry_conn.commit()
+                                        images = _db_fetch_images(retry_cursor, product_id, count)
                     missing_target = max(0, int(_DEFAULT_POOL_SIZE) - len(images or []))
                 except Exception as warm_err:
                     console.log(f"⚠️ S3 warmup failed for ProductID={product_id}: {warm_err}")
