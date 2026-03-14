@@ -336,13 +336,26 @@ const OnsetImageCard = ({
 
   // Handle image load errors — revert to procedural so no blank cards
   const handleImageError = useCallback(() => {
-    if (isMountedRef.current) {
-      const fallback = imageGenerationService.getProceduralImage();
-      setCurrentImage(fallback);
-      currentImageRef.current = fallback;
-      setImageError(true);
+    if (!isMountedRef.current) return;
+
+    const activeSongId = imageGenerationService.getActiveSongId();
+    let fallback = null;
+
+    // Active song instances publish one shared procedural frame for all subscribers.
+    if (isActiveRef.current && activeSongId == songId) {
+      fallback = imageGenerationService.setSharedProceduralImage({}, songId);
+    } else {
+      // Non-active instances should follow the current shared frame when available.
+      fallback = imageGenerationService.getCurrentImage();
+      if (!fallback) {
+        fallback = imageGenerationService.getProceduralImage();
+      }
     }
-  }, []);
+
+    setCurrentImage(fallback);
+    currentImageRef.current = fallback;
+    setImageError(true);
+  }, [songId]);
 
   // Compute glitch styles once per render (random values refresh each render while glitching)
   const activeGlitch = isActive && isPlaying ? glitchStyle(isGlitching) : glitchStyle(false);

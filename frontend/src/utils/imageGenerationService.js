@@ -945,13 +945,27 @@ class MCPImageOrchestrator {
    * @param {string|number} songId
    */
   activateForPlayback(songId) {
+    const wasActiveSongId = this._activeSongId;
+    const isSameSongActivation =
+      wasActiveSongId != null && songId != null && String(wasActiveSongId) === String(songId);
+
     this._activeSongId = songId;
     // Update currentSongContext to point to the active song's stored context
     const storedContext = this._songContexts.get(songId);
     if (storedContext) {
       this.currentSongContext = storedContext;
     }
-    // Force-release onset primary so the new active card can claim it
+
+    // If this is just another view of the SAME active song (e.g. fullscreen portal),
+    // keep the current shared frame and primary onset owner untouched.
+    if (isSameSongActivation) {
+      if (this._currentOnsetImage) {
+        this._notifyListeners(this._currentOnsetImage);
+      }
+      return;
+    }
+
+    // Song actually changed: release onset primary so the new active card can claim it.
     this._onsetRegistered = false;
     const pool = this.poolManager.getPool(songId);
     const context = this._songContexts.get(songId) || storedContext || this.currentSongContext;
@@ -1033,6 +1047,28 @@ class MCPImageOrchestrator {
    */
   getProceduralImage(params = {}) {
     return this.proceduralGenerator.generate(params);
+  }
+
+  /**
+   * Generate and publish a shared procedural fallback frame for the active song.
+   * Keeps all subscribers (card + fullscreen + track widgets) visually in sync.
+   */
+  setSharedProceduralImage(params = {}, targetSongId = null) {
+    const activeSongId = this._activeSongId;
+    const songId = targetSongId ?? activeSongId;
+
+    // Only publish shared fallback for the currently active song.
+    if (activeSongId == null || songId == null || String(activeSongId) !== String(songId)) {
+      return this.getProceduralImage(params);
+    }
+
+    const procedural = this.getProceduralImage(params);
+    if (procedural) {
+      this._currentOnsetImage = procedural;
+      this._onsetGeneration++;
+      this._notifyListeners(procedural);
+    }
+    return procedural;
   }
 
   /**
