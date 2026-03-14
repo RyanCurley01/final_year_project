@@ -56,6 +56,10 @@ export default function MidiExplorer() {
   const [loading, setLoading] = useState(false);
   const [products, setProducts] = useState([]);
   const [showMapping, setShowMapping] = useState(false);
+  const [melodySeedMatch, setMelodySeedMatch] = useState(null);
+  const [melodyAlternatives, setMelodyAlternatives] = useState([]);
+  const [melodyStatus, setMelodyStatus] = useState('idle');
+  const [melodyLoading, setMelodyLoading] = useState(false);
 
   // Dirty flag — knobs moved, need to re-query
   const dirtyRef = useRef(false);
@@ -162,6 +166,85 @@ export default function MidiExplorer() {
     setTarget((prev) => ({ ...prev, [featureKey]: Math.min(1, Math.max(0, val)) }));
     dirtyRef.current = true;
   }, []);
+
+  // ── Melody Finder: backend contour matching from played notes ───────────────
+  useEffect(() => {
+    const cutoff = Date.now() - 10000;
+    const recent = noteHistory.filter((n) => n.ts > cutoff);
+
+    if (recent.length < 4) {
+      setMelodySeedMatch(null);
+      setMelodyAlternatives([]);
+      setMelodyStatus(recommendations.length ? 'waiting-notes' : 'idle');
+      return;
+    }
+
+    if (!recommendations.length) {
+      setMelodySeedMatch(null);
+      setMelodyAlternatives([]);
+      setMelodyStatus('idle');
+      return;
+    }
+
+    let cancelled = false;
+    const timeout = setTimeout(async () => {
+      try {
+        setMelodyLoading(true);
+        setMelodyStatus('searching');
+        const apiUrl = envConfig.getApiBaseUrl();
+        const resp = await fetch(`${apiUrl}/api/audio/melody-finder`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            notes: recent.map((n) => ({ note: n.note, velocity: n.velocity, ts: n.ts })),
+            allowed_ids: allowedIdsRef.current,
+            candidate_ids: recommendations.map((r) => Number(r.product_id)).filter((id) => Number.isFinite(id)),
+            limit: 1,
+            similar_limit: 6,
+          }),
+        });
+
+        if (!resp.ok) {
+          if (!cancelled) {
+            setMelodySeedMatch(null);
+            setMelodyAlternatives([]);
+            setMelodyStatus('no-match');
+          }
+          return;
+        }
+
+        const data = await resp.json();
+        if (cancelled) return;
+
+        const seed = data?.seed_match || null;
+        const alts = data?.alternatives || [];
+
+        if (!seed || (seed.melody_match || 0) < 0.48) {
+          setMelodySeedMatch(null);
+          setMelodyAlternatives([]);
+          setMelodyStatus('no-match');
+          return;
+        }
+
+        setMelodySeedMatch(seed);
+        setMelodyAlternatives(alts);
+        setMelodyStatus('ready');
+      } catch (err) {
+        if (!cancelled) {
+          setMelodySeedMatch(null);
+          setMelodyAlternatives([]);
+          setMelodyStatus('no-match');
+        }
+      } finally {
+        if (!cancelled) setMelodyLoading(false);
+      }
+    }, 450);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timeout);
+    };
+  }, [noteHistory, recommendations]);
 
   // ── Poll backend when dirty ───────────────────────────────────
   useEffect(() => {
@@ -492,6 +575,77 @@ export default function MidiExplorer() {
       )}
 
       {/* ── Recommendations grid ─────────────────────────────── */}
+      <div className="bg-white/5 backdrop-blur-sm rounded-xl p-5 border border-white/10 mb-6">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-bold text-white/70 uppercase tracking-wider">Melody Finder</h3>
+          {melodySeedMatch && (
+            <span className="text-xs text-cyan-300">
+              Melody match {((melodySeedMatch.melody_match || 0) * 100).toFixed(0)}%
+            </span>
+          )}
+        </div>
+
+        {melodyStatus === 'searching' && (
+          <p className="text-xs text-gray-400">Searching for contour matches...</p>
+        )}
+
+        {melodyStatus === 'waiting-notes' && (
+          <p className="text-xs text-gray-400">Play at least 4 notes in the last 10 seconds to search melodies.</p>
+        )}
+
+        {melodyStatus === 'no-match' && (
+          <p className="text-xs text-gray-400">No strong melody hit yet. Try a clearer motif or repeat your phrase once.</p>
+        )}
+
+        {melodyStatus === 'ready' && melodySeedMatch && (
+          <div className="space-y-4">
+            <div
+              onClick={() => handlePlay(melodySeedMatch)}
+              className="group bg-cyan-500/10 hover:bg-cyan-500/20 rounded-lg p-3 cursor-pointer border border-cyan-400/30 transition-all"
+            >
+              <div className="flex items-center gap-3">
+                {melodySeedMatch.artworkUrl100 && !melodySeedMatch.artworkUrl100.toLowerCase().includes('.mp4') ? (
+                  <img src={melodySeedMatch.artworkUrl100} alt="" className="w-12 h-12 rounded-lg object-cover shrink-0" />
+                ) : (
+                  <div className="w-12 h-12 rounded-lg bg-linear-to-br from-cyan-600 to-blue-700 flex items-center justify-center text-white text-lg shrink-0">
+                    🎼
+                  </div>
+                )}
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold text-white truncate">
+                    {fixText(melodySeedMatch.trackName) || `Song #${melodySeedMatch.product_id}`}
+                  </p>
+                  <p className="text-xs text-cyan-200/80 truncate">Closest melody contour to your played phrase</p>
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <p className="text-xs text-gray-300 mb-2 uppercase tracking-wide">Similar Notes, Different Order</p>
+              {melodyAlternatives.length === 0 ? (
+                <p className="text-xs text-gray-400">No reordered alternatives yet. Keep playing or adjust your phrase timing.</p>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+                  {melodyAlternatives.map((rec) => (
+                    <button
+                      key={`melody-alt-${rec.product_id}`}
+                      type="button"
+                      onClick={() => handlePlay(rec)}
+                      className="text-left rounded-lg border border-indigo-400/20 bg-indigo-500/10 hover:bg-indigo-500/20 px-3 py-2 transition-colors"
+                    >
+                      <p className="text-sm text-white truncate">{fixText(rec.trackName) || `Song #${rec.product_id}`}</p>
+                      <p className="text-[11px] text-indigo-200/80 truncate">
+                        Reordered-note similarity {((rec.different_order_score || 0) * 100).toFixed(0)}%
+                      </p>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
       <div className="flex items-center gap-3 mb-4">
         <h3 className="text-sm font-bold text-white/70 uppercase tracking-wider">Matching Songs</h3>
         {loading && <Loader title="" />}

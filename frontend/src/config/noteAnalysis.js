@@ -132,3 +132,184 @@ export function analyseNoteWindow(notes) {
     spectral_centroid,
   };
 }
+
+const KEY_TO_PC = {
+  C: 0,
+  'C#': 1,
+  Db: 1,
+  D: 2,
+  'D#': 3,
+  Eb: 3,
+  E: 4,
+  F: 5,
+  'F#': 6,
+  Gb: 6,
+  G: 7,
+  'G#': 8,
+  Ab: 8,
+  A: 9,
+  'A#': 10,
+  Bb: 10,
+  B: 11,
+};
+
+const clamp = (v, min = 0, max = 1) => Math.max(min, Math.min(max, v));
+
+function normalize(vec) {
+  if (!Array.isArray(vec) || vec.length === 0) return [];
+  const sum = vec.reduce((a, b) => a + Math.max(0, Number(b) || 0), 0);
+  if (sum <= 1e-9) return vec.map(() => 0);
+  return vec.map((v) => (Math.max(0, Number(v) || 0)) / sum);
+}
+
+function cosine(a, b) {
+  if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length || a.length === 0) return 0;
+  let dot = 0;
+  let aa = 0;
+  let bb = 0;
+  for (let i = 0; i < a.length; i += 1) {
+    dot += a[i] * b[i];
+    aa += a[i] * a[i];
+    bb += b[i] * b[i];
+  }
+  if (aa <= 1e-9 || bb <= 1e-9) return 0;
+  return dot / (Math.sqrt(aa) * Math.sqrt(bb));
+}
+
+function topIndices(values, n = 6) {
+  return values
+    .map((value, index) => ({ index, value }))
+    .sort((a, b) => b.value - a.value)
+    .slice(0, n)
+    .map((entry) => entry.index);
+}
+
+function orderAgreement(a, b) {
+  if (!a.length || !b.length) return 0;
+  const limit = Math.min(a.length, b.length);
+  const posB = new Map();
+  b.forEach((v, i) => posB.set(v, i));
+  let inOrder = 0;
+  let compared = 0;
+  for (let i = 0; i < limit; i += 1) {
+    const v = a[i];
+    if (!posB.has(v)) continue;
+    compared += 1;
+    const delta = Math.abs(i - posB.get(v));
+    if (delta <= 1) inOrder += 1;
+  }
+  if (compared === 0) return 0;
+  return inOrder / compared;
+}
+
+/**
+ * Build melody fingerprint from played MIDI notes.
+ * Captures both order-independent pitch class content and order-sensitive contour.
+ */
+export function buildPlayedMelodyProfile(notes) {
+  if (!Array.isArray(notes) || notes.length < 4) return null;
+
+  const onNotes = notes
+    .filter((n) => Number.isFinite(n?.note) && Number.isFinite(n?.velocity) && Number.isFinite(n?.ts))
+    .slice(-64);
+
+  if (onNotes.length < 4) return null;
+
+  const pitchClassHist = Array.from({ length: 12 }, () => 0);
+  const intervalClassHist = Array.from({ length: 12 }, () => 0);
+  const contour = { up: 0, down: 0, repeat: 0 };
+
+  for (let i = 0; i < onNotes.length; i += 1) {
+    const pc = ((onNotes[i].note % 12) + 12) % 12;
+    pitchClassHist[pc] += 1;
+    if (i === 0) continue;
+    const diff = onNotes[i].note - onNotes[i - 1].note;
+    const ic = Math.abs(diff) % 12;
+    intervalClassHist[ic] += 1;
+    if (diff > 0) contour.up += 1;
+    else if (diff < 0) contour.down += 1;
+    else contour.repeat += 1;
+  }
+
+  const pitchClassNorm = normalize(pitchClassHist);
+  const intervalClassNorm = normalize(intervalClassHist);
+  const contourTotal = contour.up + contour.down + contour.repeat || 1;
+  const contourVec = [
+    contour.up / contourTotal,
+    contour.down / contourTotal,
+    contour.repeat / contourTotal,
+  ];
+
+  const avgVelocity = onNotes.reduce((sum, n) => sum + n.velocity, 0) / onNotes.length;
+  const ioi = [];
+  for (let i = 1; i < onNotes.length; i += 1) {
+    ioi.push(Math.max(1, onNotes[i].ts - onNotes[i - 1].ts));
+  }
+  const avgIOI = ioi.length ? ioi.reduce((a, b) => a + b, 0) / ioi.length : 250;
+  const tempoProxy = clamp(60000 / (4 * avgIOI) / 200);
+
+  return {
+    noteCount: onNotes.length,
+    pitchClassNorm,
+    intervalClassNorm,
+    contourVec,
+    pitchClassOrder: topIndices(pitchClassNorm, 6),
+    tempoProxy,
+    energyProxy: clamp(avgVelocity / 127),
+  };
+}
+
+/**
+ * Build a song melody proxy from audio-feature cache rows.
+ */
+export function buildSongMelodyProxy(features) {
+  if (!features || typeof features !== 'object') return null;
+
+  const rawChroma = Array.isArray(features.chroma_mean) && features.chroma_mean.length === 12
+    ? features.chroma_mean
+    : Array.from({ length: 12 }, () => 1 / 12);
+  const chromaNorm = normalize(rawChroma);
+
+  const keySignature = features.key_signature || features.key || null;
+  const keyPc = keySignature && KEY_TO_PC[keySignature] != null ? KEY_TO_PC[keySignature] : null;
+  const keyVector = Array.from({ length: 12 }, (_, i) => (keyPc != null && i === keyPc ? 1 : 0));
+
+  return {
+    pitchClassNorm: chromaNorm,
+    pitchClassOrder: topIndices(chromaNorm, 6),
+    keyVector,
+    keyPc,
+    tempoNorm: clamp((Number(features.tempo) || 120) / 200),
+    energyNorm: clamp(Number(features.energy) || 0.5),
+    danceNorm: clamp(Number(features.danceability) || 0.5),
+  };
+}
+
+/**
+ * Score whether played notes are likely contained in a song melody space.
+ */
+export function scoreMelodyContainment(playedProfile, songProxy) {
+  if (!playedProfile || !songProxy) return 0;
+
+  const pitchOverlap = clamp(cosine(playedProfile.pitchClassNorm, songProxy.pitchClassNorm));
+  const keyAgreement = songProxy.keyPc == null
+    ? 0.5
+    : clamp(playedProfile.pitchClassNorm[songProxy.keyPc] * 2);
+  const tempoAgreement = 1 - Math.abs((playedProfile.tempoProxy || 0.5) - (songProxy.tempoNorm || 0.5));
+
+  return clamp((pitchOverlap * 0.65) + (keyAgreement * 0.2) + (tempoAgreement * 0.15));
+}
+
+/**
+ * Score "same note palette but different order" vs played melody.
+ */
+export function scoreDifferentOrderSimilarity(playedProfile, songProxy) {
+  if (!playedProfile || !songProxy) return 0;
+
+  const pitchOverlap = clamp(cosine(playedProfile.pitchClassNorm, songProxy.pitchClassNorm));
+  const orderAlign = clamp(orderAgreement(playedProfile.pitchClassOrder, songProxy.pitchClassOrder));
+  const rhythmCompat = clamp(1 - Math.abs((playedProfile.tempoProxy || 0.5) - (songProxy.tempoNorm || 0.5)));
+
+  // High overlap, low order alignment => likely similar notes in a different arrangement.
+  return clamp((pitchOverlap * 0.7) + ((1 - orderAlign) * 0.2) + (rhythmCompat * 0.1));
+}

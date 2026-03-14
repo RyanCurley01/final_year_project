@@ -22,7 +22,8 @@ from models import (
     UnifiedRecommendationRequest,
     LibraryMatchRequest,
     LibraryMatchResult,
-    MidiTargetRequest
+    MidiTargetRequest,
+    MelodyFinderRequest,
 )
 from feature_extraction import (
     extract_audio_features_from_preview,
@@ -1152,5 +1153,281 @@ async def get_midi_recommendations(request: MidiTargetRequest):
         raise
     except Exception as e:
         console.log(f"Error in midi-recommendations: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+def _normalize_dist(values: list[float]) -> list[float]:
+    if not values:
+        return []
+    arr = np.array([max(0.0, float(v)) for v in values], dtype=float)
+    s = float(np.sum(arr))
+    if s <= 1e-9:
+        return [0.0 for _ in arr.tolist()]
+    return (arr / s).tolist()
+
+
+def _cosine(a: list[float], b: list[float]) -> float:
+    if not a or not b or len(a) != len(b):
+        return 0.0
+    aa = np.array(a, dtype=float)
+    bb = np.array(b, dtype=float)
+    na = float(np.linalg.norm(aa))
+    nb = float(np.linalg.norm(bb))
+    if na <= 1e-9 or nb <= 1e-9:
+        return 0.0
+    return float(np.dot(aa, bb) / (na * nb))
+
+
+def _top_indices(values: list[float], n: int = 6) -> list[int]:
+    return [i for i, _ in sorted(enumerate(values), key=lambda x: x[1], reverse=True)[:n]]
+
+
+def _order_agreement(a: list[int], b: list[int]) -> float:
+    if not a or not b:
+        return 0.0
+    pos = {v: i for i, v in enumerate(b)}
+    compared = 0
+    in_order = 0
+    for i, v in enumerate(a):
+        if v not in pos:
+            continue
+        compared += 1
+        if abs(i - pos[v]) <= 1:
+            in_order += 1
+    if compared == 0:
+        return 0.0
+    return float(in_order) / float(compared)
+
+
+def _extract_played_profile(note_events: list[dict]) -> Optional[dict]:
+    if not note_events or len(note_events) < 4:
+        return None
+
+    notes = []
+    for ev in note_events[-80:]:
+        try:
+            n = int(ev.get("note"))
+            v = int(ev.get("velocity") or 100)
+            ts = int(ev.get("ts") or 0)
+            notes.append({"note": n, "velocity": v, "ts": ts})
+        except Exception:
+            continue
+
+    if len(notes) < 4:
+        return None
+
+    pitch_hist = [0.0] * 12
+    interval_hist = [0.0] * 12
+    up = down = rep = 0.0
+
+    for i, n in enumerate(notes):
+        pc = ((int(n["note"]) % 12) + 12) % 12
+        pitch_hist[pc] += 1.0
+        if i == 0:
+            continue
+        diff = int(notes[i]["note"]) - int(notes[i - 1]["note"])
+        interval_hist[abs(diff) % 12] += 1.0
+        if diff > 0:
+            up += 1.0
+        elif diff < 0:
+            down += 1.0
+        else:
+            rep += 1.0
+
+    vels = [float(n["velocity"]) for n in notes]
+    avg_vel = float(np.mean(vels)) if vels else 90.0
+
+    iois = []
+    for i in range(1, len(notes)):
+        dt = max(1, int(notes[i]["ts"]) - int(notes[i - 1]["ts"]))
+        iois.append(dt)
+    avg_ioi = float(np.mean(iois)) if iois else 250.0
+    tempo_proxy = max(0.0, min(1.0, (60000.0 / (4.0 * avg_ioi)) / 200.0))
+
+    contour_total = up + down + rep
+    if contour_total <= 0:
+        contour_vec = [0.33, 0.33, 0.34]
+    else:
+        contour_vec = [up / contour_total, down / contour_total, rep / contour_total]
+
+    pitch_norm = _normalize_dist(pitch_hist)
+    interval_norm = _normalize_dist(interval_hist)
+
+    return {
+        "pitch": pitch_norm,
+        "interval": interval_norm,
+        "contour": contour_vec,
+        "order": _top_indices(pitch_norm, 6),
+        "tempo": tempo_proxy,
+        "energy": max(0.0, min(1.0, avg_vel / 127.0)),
+        "note_count": len(notes),
+    }
+
+
+def _song_proxy_from_cached(data: dict) -> dict:
+    chroma = data.get("chroma_mean")
+    if isinstance(chroma, str):
+        chroma = _parse_json_list(chroma, 12)
+    if not isinstance(chroma, list) or len(chroma) != 12:
+        chroma = [1.0 / 12.0] * 12
+
+    pitch = _normalize_dist([float(x) for x in chroma])
+
+    key_idx = KEY_NAME_TO_INDEX.get(data.get("key_signature") or "", None)
+    key_vec = [0.0] * 12
+    if key_idx is not None:
+        key_vec[int(key_idx)] = 1.0
+
+    tempo = max(0.0, min(1.0, float(data.get("tempo") or 120.0) / 200.0))
+    energy = max(0.0, min(1.0, float(data.get("energy") or 0.5)))
+
+    return {
+        "pitch": pitch,
+        "order": _top_indices(pitch, 6),
+        "key_vec": key_vec,
+        "key_idx": key_idx,
+        "tempo": tempo,
+        "energy": energy,
+    }
+
+
+def _score_containment(played: dict, song: dict) -> float:
+    pitch_overlap = max(0.0, min(1.0, _cosine(played["pitch"], song["pitch"])))
+    key_agree = 0.5
+    if song.get("key_idx") is not None:
+        key_agree = max(0.0, min(1.0, float(played["pitch"][int(song["key_idx"])] * 2.0)))
+    tempo_agree = max(0.0, min(1.0, 1.0 - abs(float(played["tempo"]) - float(song["tempo"]))))
+    energy_agree = max(0.0, min(1.0, 1.0 - abs(float(played["energy"]) - float(song["energy"]))))
+    return max(0.0, min(1.0, (pitch_overlap * 0.55) + (key_agree * 0.2) + (tempo_agree * 0.15) + (energy_agree * 0.10)))
+
+
+def _score_diff_order(played: dict, song: dict, seed: dict) -> float:
+    overlap = max(0.0, min(1.0, _cosine(played["pitch"], song["pitch"])))
+    seed_order_agree = max(0.0, min(1.0, _order_agreement(song["order"], seed["order"])))
+    played_order_agree = max(0.0, min(1.0, _order_agreement(song["order"], played["order"])))
+    order_diff = 1.0 - ((seed_order_agree * 0.6) + (played_order_agree * 0.4))
+    tempo_agree = max(0.0, min(1.0, 1.0 - abs(float(played["tempo"]) - float(song["tempo"]))))
+    return max(0.0, min(1.0, (overlap * 0.65) + (order_diff * 0.25) + (tempo_agree * 0.10)))
+
+
+def _hydrate_song_metadata(rows: list[dict]):
+    if not rows:
+        return
+    ids = [int(r["product_id"]) for r in rows if isinstance(r.get("product_id"), int)]
+    if not ids:
+        return
+
+    placeholders = ",".join(["%s"] * len(ids))
+    try:
+        with get_db_connection() as conn:
+            if not conn:
+                return
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    f"SELECT ProductID, AlbumTitle, albumCoverImageUrl, preview_url, file_url FROM Products WHERE ProductID IN ({placeholders})",
+                    ids,
+                )
+                db_rows = cursor.fetchall() or []
+    except Exception:
+        return
+
+    meta = {int(r.get("ProductID")): r for r in db_rows if r.get("ProductID") is not None}
+    for item in rows:
+        m = meta.get(int(item["product_id"]))
+        if not m:
+            continue
+        item["trackName"] = m.get("AlbumTitle")
+        item["artworkUrl100"] = m.get("albumCoverImageUrl")
+        item["previewUrl"] = m.get("preview_url")
+        if m.get("file_url"):
+            item["fileUrl"] = m.get("file_url")
+
+
+@router.post("/api/audio/melody-finder")
+async def melody_finder(request: MelodyFinderRequest):
+    """Find best melody match for played notes and alternatives with reordered note emphasis."""
+    try:
+        if not ml_service.cache_loaded or not ml_service.audio_features_cache:
+            raise HTTPException(status_code=503, detail="Audio features cache not loaded yet")
+
+        played = _extract_played_profile([n.model_dump() for n in request.notes])
+        if not played:
+            return {
+                "status": "success",
+                "message": "Need at least 4 notes",
+                "seed_match": None,
+                "alternatives": [],
+            }
+
+        allowed = set(request.allowed_ids or [])
+        candidates_filter = set(request.candidate_ids or [])
+
+        scored = []
+        for pid, data in ml_service.audio_features_cache.items():
+            if allowed and pid not in allowed:
+                continue
+            if candidates_filter and pid not in candidates_filter:
+                continue
+
+            song = _song_proxy_from_cached(data)
+            containment = _score_containment(played, song)
+            scored.append(
+                {
+                    "product_id": int(pid),
+                    "melody_match": round(float(containment), 3),
+                    "song_proxy": song,
+                }
+            )
+
+        if not scored:
+            return {
+                "status": "success",
+                "seed_match": None,
+                "alternatives": [],
+            }
+
+        scored.sort(key=lambda x: x["melody_match"], reverse=True)
+        seed = scored[0]
+
+        seed_proxy = seed["song_proxy"]
+        alternatives = []
+        for item in scored[1:]:
+            diff_score = _score_diff_order(played, item["song_proxy"], seed_proxy)
+            if diff_score < 0.35:
+                continue
+            alternatives.append(
+                {
+                    "product_id": item["product_id"],
+                    "melody_match": item["melody_match"],
+                    "different_order_score": round(float(diff_score), 3),
+                }
+            )
+
+        alternatives.sort(key=lambda x: x["different_order_score"], reverse=True)
+        alternatives = alternatives[: max(1, int(request.similar_limit))]
+
+        seed_match = {
+            "product_id": seed["product_id"],
+            "melody_match": seed["melody_match"],
+        }
+
+        # Attach metadata used by frontend cards/buttons.
+        hydration_rows = [seed_match, *alternatives]
+        _hydrate_song_metadata(hydration_rows)
+
+        console.log(
+            f"🎼 Melody finder: notes={played.get('note_count')} seed={seed_match.get('product_id')} "
+            f"score={seed_match.get('melody_match')} alternatives={len(alternatives)}"
+        )
+
+        return {
+            "status": "success",
+            "seed_match": seed_match,
+            "alternatives": alternatives,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        console.log(f"Error in melody-finder: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 

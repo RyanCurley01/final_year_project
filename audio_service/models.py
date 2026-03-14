@@ -178,6 +178,22 @@ class MidiTargetRequest(BaseModel):
     source: str = 'midi_explorer'  # allows candidate filtering
     allowed_ids: Optional[List[int]] = None  # restrict candidates to these ProductIDs
 
+
+class MelodyNoteEvent(BaseModel):
+    """Single played MIDI note event used for melody matching."""
+    note: int
+    velocity: Optional[int] = 100
+    ts: Optional[int] = None
+
+
+class MelodyFinderRequest(BaseModel):
+    """Request for contour-aware melody matching from played MIDI notes."""
+    notes: List[MelodyNoteEvent]
+    allowed_ids: Optional[List[int]] = None
+    candidate_ids: Optional[List[int]] = None
+    limit: int = 1
+    similar_limit: int = 6
+
 class LibraryMatchRequest(BaseModel):
     """Request to match external songs against the internal library (cached products)"""
     candidates: List[SearchSong]
