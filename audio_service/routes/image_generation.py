@@ -45,7 +45,7 @@ from config import (
     IMAGE_POOL_ESTIMATED_AVG_IMAGE_BYTES,
     EXTERNAL_IMAGE_GENERATION_ENABLED,
 )
-from s3_service import upload_bytes, get_object_stream
+from s3_service import upload_bytes, get_object_stream, delete_object
 from config import executor
 
 router = APIRouter(prefix="/api/images", tags=["Image Generation"])
@@ -473,6 +473,41 @@ def _db_trim_song_pool_by_provider(cursor, product_id: int, provider: str, keep_
         (product_id, provider, keep_n),
     )
     return int(cursor.rowcount or 0)
+
+
+def _db_trim_song_pool_by_provider_with_keys(cursor, product_id: int, provider: str, keep_count: int) -> tuple[int, list[str]]:
+    """Trim older rows so a song keeps at most keep_count images and return removed storage keys."""
+    keep_n = max(0, int(keep_count))
+    cursor.execute(
+        """
+        SELECT StorageKey
+        FROM ImageGeneration
+        WHERE ProductID = %s AND Provider = %s
+        ORDER BY ImageGenID DESC
+        LIMIT 18446744073709551615 OFFSET %s
+        """,
+        (product_id, provider, keep_n),
+    )
+    doomed_rows = cursor.fetchall() or []
+    doomed_keys = [str(r.get("StorageKey") or "").strip() for r in doomed_rows if str(r.get("StorageKey") or "").strip()]
+
+    trimmed = _db_trim_song_pool_by_provider(cursor, product_id, provider, keep_n)
+    return int(trimmed or 0), doomed_keys
+
+
+def _delete_s3_keys_best_effort(storage_keys: list[str]) -> int:
+    if not IMAGE_POOL_S3_BUCKET:
+        return 0
+    deleted = 0
+    for key in (storage_keys or []):
+        if not key:
+            continue
+        try:
+            if delete_object(IMAGE_POOL_S3_BUCKET, key):
+                deleted += 1
+        except Exception as e:
+            console.log(f"⚠️ Failed to delete S3 object during trim: {key} ({e})")
+    return deleted
 
 
 def _db_product_exists(cursor, product_id: int) -> bool:
@@ -1445,7 +1480,9 @@ def ensure_song_image_pool(
         if not conn:
             return 0
         with conn.cursor() as cursor:
-            _db_trim_song_pool_by_provider(cursor, product_id, "s3", int(desired_size))
+            trimmed_rows, trimmed_keys = _db_trim_song_pool_by_provider_with_keys(cursor, product_id, "s3", int(desired_size))
+            if trimmed_rows > 0:
+                _delete_s3_keys_best_effort(trimmed_keys)
 
             existing = _db_count_images_by_provider(cursor, product_id, "s3")
             missing = max(0, int(desired_size) - existing)
@@ -1488,9 +1525,10 @@ def ensure_song_image_pool(
             if hosted_images:
                 inserted += _db_insert_hosted_images(cursor, product_id, hosted_images)
 
-            # Fallback: persist original URLs for images that failed hosting.
             if failed_images:
-                inserted += _db_insert_images(cursor, product_id, failed_images, provider="loremflickr")
+                console.log(
+                    f"⚠️ Skipped non-hosted images for ProductID={product_id}: failed={len(failed_images)}"
+                )
 
             conn.commit()
             return inserted
@@ -1544,7 +1582,9 @@ def precompute_all_song_image_pools(pool_size: int = _DEFAULT_POOL_SIZE) -> dict
             for row in rows:
                 pid = int(row["ProductID"])
                 title = row.get("AlbumTitle") or ""
-                _db_trim_song_pool_by_provider(cursor, pid, "s3", int(pool_size))
+                trimmed_rows, trimmed_keys = _db_trim_song_pool_by_provider_with_keys(cursor, pid, "s3", int(pool_size))
+                if trimmed_rows > 0:
+                    _delete_s3_keys_best_effort(trimmed_keys)
                 existing = _db_count_images_by_provider(cursor, pid, "s3")
                 inserted_for_song = 0
 
@@ -1591,9 +1631,9 @@ def precompute_all_song_image_pools(pool_size: int = _DEFAULT_POOL_SIZE) -> dict
                         hosted_images, _failed_images = _host_loremflickr_images_to_s3(
                             pid,
                             images,
-                            max_retries=2,
-                            retry_backoff_secs=0.5,
-                            per_image_delay_secs=0.1,
+                            max_retries=1,
+                            retry_backoff_secs=0.0,
+                            per_image_delay_secs=0.0,
                         )
 
                         inserted_round = 0
@@ -1919,7 +1959,9 @@ def get_image_pool(
                 if not conn:
                     raise HTTPException(status_code=503, detail="Database connection unavailable")
                 with conn.cursor() as cursor:
-                    _db_trim_song_pool_by_provider(cursor, int(product_id), "s3", int(_DEFAULT_POOL_SIZE))
+                    trimmed_rows, trimmed_keys = _db_trim_song_pool_by_provider_with_keys(cursor, int(product_id), "s3", int(_DEFAULT_POOL_SIZE))
+                    if trimmed_rows > 0:
+                        _delete_s3_keys_best_effort(trimmed_keys)
                     conn.commit()
                     images = _db_fetch_images(cursor, product_id, count)
             images = [
@@ -1952,7 +1994,9 @@ def get_image_pool(
             if not conn:
                 raise HTTPException(status_code=503, detail="Database connection unavailable")
             with conn.cursor() as cursor:
-                _db_trim_song_pool_by_provider(cursor, int(product_id), "s3", int(_DEFAULT_POOL_SIZE))
+                trimmed_rows, trimmed_keys = _db_trim_song_pool_by_provider_with_keys(cursor, int(product_id), "s3", int(_DEFAULT_POOL_SIZE))
+                if trimmed_rows > 0:
+                    _delete_s3_keys_best_effort(trimmed_keys)
                 conn.commit()
                 images = _db_fetch_images(cursor, product_id, count)
 
@@ -1993,7 +2037,9 @@ def get_image_pool(
                         with get_db_connection() as retry_conn:
                             if retry_conn:
                                 with retry_conn.cursor() as retry_cursor:
-                                    _db_trim_song_pool_by_provider(retry_cursor, int(product_id), "s3", int(_DEFAULT_POOL_SIZE))
+                                    trimmed_rows, trimmed_keys = _db_trim_song_pool_by_provider_with_keys(retry_cursor, int(product_id), "s3", int(_DEFAULT_POOL_SIZE))
+                                    if trimmed_rows > 0:
+                                        _delete_s3_keys_best_effort(trimmed_keys)
                                     retry_conn.commit()
                                     images = _db_fetch_images(retry_cursor, product_id, count)
                     missing_target = max(0, int(_DEFAULT_POOL_SIZE) - len(images or []))

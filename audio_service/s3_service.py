@@ -118,3 +118,51 @@ def get_object_stream(bucket_name: str, object_key: str):
     except ClientError as e:
         console.log(f"Error fetching S3 object ({bucket_name}/{object_key}): {e}")
         return None
+
+
+def delete_object(bucket_name: str, object_key: str) -> bool:
+    """Delete an S3 object. Returns True on success."""
+    if s3_client is None:
+        return False
+    try:
+        s3_client.delete_object(Bucket=bucket_name, Key=object_key)
+        return True
+    except ClientError as e:
+        console.log(f"Error deleting S3 object ({bucket_name}/{object_key}): {e}")
+        return False
+
+
+def object_exists(bucket_name: str, object_key: str) -> bool:
+    """Check whether an object exists in S3."""
+    if s3_client is None:
+        return False
+    try:
+        s3_client.head_object(Bucket=bucket_name, Key=object_key)
+        return True
+    except ClientError:
+        return False
+
+
+def list_object_keys(bucket_name: str, prefix: str) -> list[str]:
+    """List all S3 object keys under a prefix."""
+    if s3_client is None:
+        return []
+    keys: list[str] = []
+    continuation_token = None
+    try:
+        while True:
+            kwargs = {"Bucket": bucket_name, "Prefix": prefix}
+            if continuation_token:
+                kwargs["ContinuationToken"] = continuation_token
+            resp = s3_client.list_objects_v2(**kwargs)
+            for obj in resp.get("Contents", []) or []:
+                key = (obj or {}).get("Key")
+                if key:
+                    keys.append(str(key))
+            if not resp.get("IsTruncated"):
+                break
+            continuation_token = resp.get("NextContinuationToken")
+        return keys
+    except ClientError as e:
+        console.log(f"Error listing S3 objects ({bucket_name}/{prefix}): {e}")
+        return []
