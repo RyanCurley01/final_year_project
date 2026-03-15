@@ -1513,6 +1513,7 @@ def precompute_all_song_image_pools(pool_size: int = _DEFAULT_POOL_SIZE) -> dict
         "songs": 0,
         "inserted": 0,
         "skipped": 0,
+        "underfilled_songs": 0,
         "pool_size": int(pool_size),
         "s3_limit_bytes": int(IMAGE_POOL_MAX_TOTAL_BYTES),
     }
@@ -1537,76 +1538,95 @@ def precompute_all_song_image_pools(pool_size: int = _DEFAULT_POOL_SIZE) -> dict
                 """
             )
             rows = cursor.fetchall() or []
-
-            # Existing S3 counts in one query (frontend now requests hosted-only pools)
-            cursor.execute("SELECT ProductID, COUNT(*) AS cnt FROM ImageGeneration WHERE Provider = 's3' GROUP BY ProductID")
-            existing_counts = {int(r["ProductID"]): int(r["cnt"]) for r in (cursor.fetchall() or [])}
             total_s3_bytes, total_s3_images = _db_s3_storage_stats(cursor)
+            budget_exhausted = False
 
             for row in rows:
                 pid = int(row["ProductID"])
                 title = row.get("AlbumTitle") or ""
                 _db_trim_song_pool_by_provider(cursor, pid, "s3", int(pool_size))
-                existing = int(existing_counts.get(pid, 0))
-                if existing > int(pool_size):
-                    existing = int(pool_size)
-                missing = max(0, int(pool_size) - existing)
-                if missing <= 0:
+                existing = _db_count_images_by_provider(cursor, pid, "s3")
+                inserted_for_song = 0
+
+                if existing >= int(pool_size):
                     summary["skipped"] += 1
-                    conn.commit()
-                    continue
+                else:
+                    rounds = 0
+                    no_progress_rounds = 0
+                    max_rounds_per_song = 8
 
-                remaining_budget_bytes = max(0, int(IMAGE_POOL_MAX_TOTAL_BYTES) - int(total_s3_bytes))
-                avg_image_bytes = (
-                    int(total_s3_bytes // total_s3_images)
-                    if total_s3_images > 0
-                    else int(IMAGE_POOL_ESTIMATED_AVG_IMAGE_BYTES)
-                )
-                budget_limited_missing = min(
-                    missing,
-                    _allowed_images_by_budget(remaining_budget_bytes, avg_image_bytes),
-                )
-                if budget_limited_missing <= 0:
-                    summary["status"] = "budget_cap_reached"
-                    console.log(
-                        f"🧱 Precompute stopped by budget cap: total_s3_bytes={total_s3_bytes} limit={IMAGE_POOL_MAX_TOTAL_BYTES}"
-                    )
-                    break
+                    while existing < int(pool_size) and rounds < max_rounds_per_song:
+                        rounds += 1
+                        missing = max(0, int(pool_size) - existing)
 
-                keywords = _build_keywords_from_features(
-                    mood=row.get("Mood"),
-                    energy=row.get("Energy"),
-                    valence=row.get("Valence"),
-                    tempo=row.get("Tempo"),
-                    danceability=row.get("Danceability"),
-                    acousticness=row.get("Acousticness"),
-                    genre=row.get("Genre"),
-                    title=title,
-                )
-                images = _generate_loremflickr_urls(keywords, budget_limited_missing, nocache=True)
-                hosted_images, failed_images = _host_loremflickr_images_to_s3(
-                    pid,
-                    images,
-                    max_retries=2,
-                    retry_backoff_secs=0.5,
-                    per_image_delay_secs=0.1,
-                )
+                        remaining_budget_bytes = max(0, int(IMAGE_POOL_MAX_TOTAL_BYTES) - int(total_s3_bytes))
+                        avg_image_bytes = (
+                            int(total_s3_bytes // total_s3_images)
+                            if total_s3_images > 0
+                            else int(IMAGE_POOL_ESTIMATED_AVG_IMAGE_BYTES)
+                        )
+                        budget_limited_missing = min(
+                            missing,
+                            _allowed_images_by_budget(remaining_budget_bytes, avg_image_bytes),
+                        )
+                        if budget_limited_missing <= 0:
+                            budget_exhausted = True
+                            summary["status"] = "budget_cap_reached"
+                            console.log(
+                                f"🧱 Precompute stopped by budget cap: total_s3_bytes={total_s3_bytes} limit={IMAGE_POOL_MAX_TOTAL_BYTES}"
+                            )
+                            break
 
-                inserted = 0
-                if hosted_images:
-                    inserted += _db_insert_hosted_images(cursor, pid, hosted_images)
-                    for hosted in hosted_images:
-                        total_s3_bytes += int(hosted.get("byteSize") or 0)
-                        total_s3_images += 1
+                        keywords = _build_keywords_from_features(
+                            mood=row.get("Mood"),
+                            energy=row.get("Energy"),
+                            valence=row.get("Valence"),
+                            tempo=row.get("Tempo"),
+                            danceability=row.get("Danceability"),
+                            acousticness=row.get("Acousticness"),
+                            genre=row.get("Genre"),
+                            title=title,
+                        )
+                        images = _generate_loremflickr_urls(keywords, budget_limited_missing, nocache=True)
+                        hosted_images, _failed_images = _host_loremflickr_images_to_s3(
+                            pid,
+                            images,
+                            max_retries=2,
+                            retry_backoff_secs=0.5,
+                            per_image_delay_secs=0.1,
+                        )
 
-                if failed_images:
-                    inserted += _db_insert_images(cursor, pid, failed_images, provider="loremflickr")
+                        inserted_round = 0
+                        if hosted_images:
+                            inserted_round += _db_insert_hosted_images(cursor, pid, hosted_images)
+                            for hosted in hosted_images:
+                                total_s3_bytes += int(hosted.get("byteSize") or 0)
+                                total_s3_images += 1
+
+                        inserted_for_song += int(inserted_round or 0)
+
+                        # Persist every round so progress is visible and recoverable.
+                        conn.commit()
+
+                        refreshed_existing = _db_count_images_by_provider(cursor, pid, "s3")
+                        if refreshed_existing <= existing:
+                            no_progress_rounds += 1
+                        else:
+                            no_progress_rounds = 0
+                        existing = refreshed_existing
+
+                        if no_progress_rounds >= 2:
+                            # Stop retrying this song if hosting/moderation made no progress.
+                            break
+
+                    if existing < int(pool_size):
+                        summary["underfilled_songs"] += 1
 
                 summary["songs"] += 1
-                summary["inserted"] += int(inserted or 0)
+                summary["inserted"] += int(inserted_for_song or 0)
 
-                # Persist incrementally so startup precompute makes visible progress.
-                conn.commit()
+                if budget_exhausted:
+                    break
 
                 if (summary["songs"] % 10) == 0:
                     console.log(
