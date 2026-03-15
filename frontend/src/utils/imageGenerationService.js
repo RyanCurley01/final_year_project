@@ -1100,13 +1100,13 @@ class MCPImageOrchestrator {
       const apiBaseUrl = envConfig.getApiBaseUrl();
       const encodedTitle = encodeURIComponent(songContext.title || 'electronic music');
 
-      // Build URL with audio feature params for mood-aware prompts
-      // Thumbnail mode: 1 image
-      // Full mode: Initial fetch 50 images
-      // Refill: 30 images to top up
-      let batchCount = 50;
+      // Build URL with audio feature params for mood-aware prompts.
+      // Keep client fetch sizing aligned with backend pool target defaults.
+      const fullPoolTarget = 80;
+      const refillBatch = 80;
+      let batchCount = fullPoolTarget;
       if (mode === 'thumbnail') batchCount = 1;
-      else if (isRefill) batchCount = 30;
+      else if (isRefill) batchCount = refillBatch;
 
       let url = `${apiBaseUrl}/api/images/pool?song_title=${encodedTitle}&song_id=${songContext.id || 0}&count=${batchCount}&pad_external=false`;
 
