@@ -1,15 +1,15 @@
 /**
  * Image Generation Service
  * 
- * RAG-Enhanced Image Pool Manager for onset-reactive visuals.
- * Uses song metadata (title, genre, audio features) to construct contextually
- * relevant Flickr keyword tags, then retrieves pools of real photographs from
- * LoremFlickr via the audio_service backend proxy.
+ * Song-aware image orchestration for onset-reactive visuals.
+ * This service requests backend-managed image pools, preloads upcoming frames,
+ * synchronizes image swaps across UI subscribers, and provides procedural
+ * fallback frames when a network image is not ready at onset time.
  * 
  * MCP (Model Context Protocol) Pattern:
- * - Acts as a tool that the onset detection system invokes
- * - Manages context (song metadata, audio features, image pools) across calls
- * - Orchestrates multiple providers with fallback chains
+ * - Called by onset detection as the image-selection engine
+ * - Stores per-song context, audio-feature context, and pool state
+ * - Coordinates hosted pool images with procedural fallback behavior
  * 
  * Architecture:
  * 1. ImagePoolManager - Manages per-song image pools with pre-fetching
@@ -206,11 +206,15 @@ class ProceduralGenerator {
  */
 class ImagePoolManager {
   constructor() {
+    // Per-song queue state. Each song gets an independent stream of upcoming
+    // images so switching tracks does not reset another song's queue.
     this.pools = new Map(); // songId → { images: string[], index: number, loading: boolean }
     // url → { img: HTMLImageElement, promise: Promise<boolean>, loaded: boolean, failed: boolean }
     // Map iteration order is used as an approximate LRU.
     this.preloadedImages = new Map();
+    // High cap keeps long sessions smooth by avoiding aggressive trimming.
     this.maxPoolSize = 1000000; // Effectively infinite — never cap
+    // When queue depth falls below this value, background refill is requested.
     this.refillThreshold = 20; // Refill when pool drops below this
     // Keep a bounded number of upcoming URLs actively preloading.
     // This avoids spawning hundreds of concurrent image downloads, which can
@@ -220,7 +224,8 @@ class ImagePoolManager {
 
   _touchPreloadEntry(url, entry) {
     if (!url || !entry) return;
-    // Refresh insertion order (approx LRU) so active/used entries are least likely to be evicted.
+    // Refresh insertion order (approximate LRU behavior) so recently used
+    // entries are less likely to be evicted from the preload cache.
     try {
       this.preloadedImages.delete(url);
       this.preloadedImages.set(url, entry);
@@ -234,6 +239,7 @@ class ImagePoolManager {
    */
   getPool(songId) {
     if (!this.pools.has(songId)) {
+      // lastFetch is reserved for potential per-song throttling diagnostics.
       this.pools.set(songId, {
         images: [],
         index: 0,
@@ -258,7 +264,8 @@ class ImagePoolManager {
       }
     }
 
-    // Start preloading only the next few images we might actually consume.
+    // Start preloading only near-future images so bandwidth is focused on
+    // frames most likely to be shown next.
     this._ensurePreloadWindow(songId);
 
     // Cap pool size (very high — effectively infinite)
@@ -282,6 +289,7 @@ class ImagePoolManager {
     while (pool.images.length > 0 && discards < maxDiscards) {
       const head = pool.images[0];
       if (!head) break;
+      // Data URLs are procedural frames and should never be discarded here.
       if (head.startsWith('data:')) break;
       if (!this._isUrlFailed(head)) break;
       pool.images.shift();
@@ -306,18 +314,24 @@ class ImagePoolManager {
     }
   }
 
-  /**
-   * Peek the next image URL without consuming it.
-   */
+
+  // Looks at the next image in the queue without removing it from the queue yet
   peekNextImage(songId) {
+    // If the first image in the queue is known to be a broken link 
+    // (e.g., a 404 error from a failed background download), 
+    // it throws it away so the code doesn't get stuck staring at a broken image.
     this._discardFailedHead(songId);
+
+    // Grabs the specific image array queue for whatever song is currently playing.
     const pool = this.getPool(songId);
+
+    // If there are images left in the array, it returns the very first one index [0]. 
+    // If the pool is empty, it returns null.
     return pool.images.length > 0 ? pool.images[0] : null;
   }
 
-  /**
-   * Consume the next image URL from the pool.
-   */
+  // Permanently removes the next image from the front of the queue and 
+  // returns it so it can be displayed on the screen
   consumeNextImage(songId) {
     this._discardFailedHead(songId);
     const pool = this.getPool(songId);
@@ -328,12 +342,13 @@ class ImagePoolManager {
     return next;
   }
 
-  /**
-   * Returns true if an URL is already loaded (or is a data URL).
-   * If the URL is not tracked yet, this will start a preload.
-   */
+  // Checks if the browser has fully downloaded the image 
+  // (meaning it safely resides in browser memory/cache) 
+  // so that when it appears on the screen, there is no "pop-in"
+  // or jarring grey loading flicker
   isUrlReady(url) {
     if (!url) return false;
+    // Procedural frames are generated locally and render immediately.
     if (url.startsWith('data:')) return true;
 
     // Never treat failed URLs as ready.
@@ -356,6 +371,7 @@ class ImagePoolManager {
     return entry.loaded === true;
   }
 
+
   /**
    * Check if pool needs refilling.
    */
@@ -372,11 +388,13 @@ class ImagePoolManager {
   _preloadImage(url) {
     if (this.preloadedImages.has(url)) {
       const existing = this.preloadedImages.get(url);
+      // Reuse in-flight work to avoid duplicate network downloads.
       if (existing) this._touchPreloadEntry(url, existing);
       return existing?.promise || Promise.resolve();
     }
     if (url.startsWith('data:')) return Promise.resolve();
 
+    // Browser image object is used for preload-state truth (complete + width).
     const img = new Image();
     const entry = { img, promise: null, loaded: false, failed: false };
     const promise = new Promise((resolve) => {
@@ -396,7 +414,7 @@ class ImagePoolManager {
     entry.promise = promise;
     this.preloadedImages.set(url, entry);
 
-    // Limit preload cache size
+    // Limit preload cache size to prevent unbounded memory growth.
     if (this.preloadedImages.size > 200) {
       const firstKey = this.preloadedImages.keys().next().value;
       this.preloadedImages.delete(firstKey);
@@ -460,7 +478,7 @@ class MCPImageOrchestrator {
       loremflickr: { available: true, lastError: null, errorCount: 0 },
     };
 
-    // Rate limiting
+    // Global fetch throttle for refill calls.
     this.lastFetchTime = 0;
     this.minFetchInterval = 2000; // 2 seconds between API calls
 
@@ -477,23 +495,36 @@ class MCPImageOrchestrator {
     // Singleton onset registration: only one component drives onsets
     this._onsetRegistered = false;
 
-    // If an onset happens while the next pool image is still downloading,
-    // we queue a "pending" onset and swap to the next real image as soon as it loads.
+    // If an onset occurs while the next real image is still downloading,
+    // queue one pending visual update and fulfill it as soon as the next
+    // image becomes ready.
     this._pendingOnsetCount = new Map(); // songId -> number
     this._pendingSwapScheduled = new Set(); // songId
   }
 
+  /**
+   * Resolve the song currently allowed to drive onset image progression.
+   * Active-song state is preferred over context because context can be
+   * touched by thumbnail cards that are not currently playing.
+   */
   _resolveActiveSongId() {
     return this._activeSongId || (this.currentSongContext?.id || this.currentSongContext?.title);
   }
 
+  /**
+   * Queue a deferred swap request when an onset arrives before the next
+   * network image is fully decoded by the browser.
+   */
   _incrementPendingOnset(songId) {
     const key = String(songId);
-    // Clamp to 1: if multiple onsets happen while downloading, we collapse them
-    // into a single pending visual update (prevents rapid catch-up cycling).
+    // Clamp to 1 so burst onsets during download collapse into one pending
+    // swap instead of rapid catch-up cycling.
     this._pendingOnsetCount.set(key, 1);
   }
 
+  /**
+   * Mark one deferred onset as fulfilled. Returns remaining count.
+   */
   _decrementPendingOnset(songId) {
     const key = String(songId);
     const current = this._pendingOnsetCount.get(key) || 0;
@@ -503,6 +534,10 @@ class MCPImageOrchestrator {
     return next;
   }
 
+  /**
+   * If a real image is currently loading, finalize the swap once ready.
+   * This keeps onset visuals responsive without skipping real pool frames.
+   */
   _scheduleSwapWhenReady(songId) {
     const key = String(songId);
     if (this._pendingSwapScheduled.has(key)) return;
@@ -518,6 +553,7 @@ class MCPImageOrchestrator {
       // Only fulfill pending onsets for the currently active song.
       if (String(this._activeSongId || '') !== key) return;
 
+      // Only process if at least one onset is waiting for this real frame.
       const pending = this._pendingOnsetCount.get(key) || 0;
       if (pending <= 0) return;
 
@@ -543,14 +579,14 @@ class MCPImageOrchestrator {
    * @param {string|number} songId - ID of the song requesting primary status
    */
   claimOnsetPrimary(songId) {
-    // If we are the active song, we can ALWAYS claim/steal primary status
-    // This solves race conditions where the previous song hasn't released it yet
+    // The active song may always claim primary status. This prevents race
+    // conditions when a previous owner has not released registration yet.
     const normalizedActive = String(this._activeSongId || '');
     const normalizedRequest = String(songId || '');
 
     // Allow claim if:
     // 1. No one has claimed it yet
-    // 2. We are the designated active song (we can steal/re-claim it)
+    // 2. Requesting song matches the active song
     if (!this._onsetRegistered || (normalizedActive && normalizedActive === normalizedRequest)) {
       this._onsetRegistered = true;
       return true;
@@ -566,13 +602,13 @@ class MCPImageOrchestrator {
   releaseOnsetPrimary(songId) {
     // Prevent "stolen" claims from being released by the previous owner.
     // Only release if the requesting song is actually the active song.
-    // If active song has changed (e.g. A releases after B activated), 
-    // we assume B has already claimed/will claim it, so A shouldn't touch the flag.
+    // If active song has changed (example: A releases after B activates),
+    // only the active song may modify the primary-registration flag.
     const normalizedActive = String(this._activeSongId || '');
     const normalizedRequest = String(songId || '');
     
-    // If no songId provided, fallback to unsafe release (legacy behavior)
-    // but honestly we should probably enforce it.
+    // Preserve legacy behavior for empty songId while still protecting the
+    // active-song case above.
     if (!songId || normalizedActive === normalizedRequest) {
       this._onsetRegistered = false;
     }
@@ -608,10 +644,9 @@ class MCPImageOrchestrator {
       return newImage;
     }
 
-    // If the next real image isn't ready yet, still produce an immediate visual
-    // update for this onset using the procedural generator.
-    // This keeps the UI responsive even when network downloads can't keep up.
-    // We keep the pending swap logic below so a real image replaces it ASAP.
+    // If the next real image is not ready yet, emit an immediate procedural
+    // frame so the onset still produces a visible reaction. Pending-swap logic
+    // below replaces the procedural frame with a real image as soon as ready.
     const current = this._currentOnsetImage;
     const hasSomethingDisplayed = typeof current === 'string' && current.length > 0;
     if (hasSomethingDisplayed) {
@@ -689,6 +724,7 @@ class MCPImageOrchestrator {
         if (!response.ok) throw new Error(`Status ${response.status}`);
         const data = await response.json();
         if (data.status === 'success' && data.features) {
+          // Cache once for session lifetime to avoid repeated large payloads.
           this._audioFeaturesCache = data.features;
           console.log(`[ImageGen] Loaded audio features for ${data.count} songs`);
           return this._audioFeaturesCache;
@@ -736,7 +772,7 @@ class MCPImageOrchestrator {
       this.currentSongContext = songContext;
     }
 
-    // Check if we already have a pool for this song
+    // Reuse existing pool object for this song if present.
     const pool = this.poolManager.getPool(songId);
 
     // If pool is currently loading (another instance started the fetch), wait for it
@@ -744,15 +780,15 @@ class MCPImageOrchestrator {
       await pool._loadPromise;
     }
 
-    // Determine if we have enough images for the requested mode
+    // Determine whether current pool size already satisfies requested mode.
     // Thumbnail mode: needs at least 1 image
     // Full mode: needs at least 10 images (arbitrary non-empty threshold)
-    const hasEnoughImages = mode === 'full' 
+    const hasEnoughImages = mode === 'full'
       ? pool.images.length >= 10 
       : pool.images.length > 0;
 
-    // Pool already sufficiently populated — still ensure the next image is preloaded
-    // so UI can render a real image immediately.
+    // Even when enough URLs exist, preload at least one upcoming image so
+    // first render can display a ready frame.
     if (hasEnoughImages) {
       const peekUrl = this.poolManager.peekNextImage(songId);
       if (peekUrl && !this.poolManager.isUrlReady(peekUrl)) {
@@ -761,13 +797,13 @@ class MCPImageOrchestrator {
       return;
     }
 
-    // Fetch audio features for this song from the DB cache
+    // Fetch missing audio features from backend cache when not supplied.
     let audioFeatures = songContext.audioFeatures || null;
     if (!audioFeatures && songContext.id) {
       audioFeatures = await this.getAudioFeaturesForSong(songContext.id);
     }
 
-    // Store features in context for later use
+    // Persist resolved feature context for subsequent refills and requests.
     songContext.audioFeatures = audioFeatures;
     this._songContexts.set(songId, songContext);
 
@@ -833,7 +869,8 @@ class MCPImageOrchestrator {
       return;
     }
 
-    // Song actually changed: release onset primary so the new active card can claim it.
+    // Song changed: release primary onset ownership so the new active instance
+    // can claim callback ownership.
     this._onsetRegistered = false;
     const pool = this.poolManager.getPool(songId);
     const context = this._songContexts.get(songId) || storedContext || this.currentSongContext;
@@ -849,8 +886,8 @@ class MCPImageOrchestrator {
       }
     }
 
-    // If we have a pool URL queued, swap to the first REAL image as soon as it finishes loading.
-    // Until then we keep the shared image empty and the UI shows the existing loading overlay.
+    // If a queued URL exists, swap to the first real image immediately after
+    // preload completes. Until then, UI may continue showing loading visuals.
     if (peekUrl) {
       this.poolManager._preloadImage(peekUrl).then(() => {
         if (this._activeSongId != songId) return;
@@ -876,17 +913,16 @@ class MCPImageOrchestrator {
    * @returns {string} Image URL or data URL
    */
   getNextImage(onsetData = {}, resolvedSongId = null) {
-    // CRITICAL: use _activeSongId, not currentSongContext.id!
-    // currentSongContext gets overwritten by every thumbnail card that mounts.
-    // _activeSongId is only set by activateForPlayback (the actually playing song).
+    // Use _activeSongId as source of truth. currentSongContext can be updated
+    // by non-playing thumbnail instances and is not reliable for onset driving.
     const songId = resolvedSongId || this._resolveActiveSongId();
 
     if (!songId) {
       return null;
     }
 
-    // Try API-sourced image from pool — but only consume it when it's actually loaded.
-    // Otherwise the UI "updates" to a URL that hasn't downloaded yet (looks like a lag).
+    // Consume a pool image only after browser readiness check. This avoids
+    // visible lag from swapping to a URL that is still downloading.
     const peekUrl = this.poolManager.peekNextImage(songId);
     let poolImage = null;
     if (peekUrl && this.poolManager.isUrlReady(peekUrl)) {
@@ -901,9 +937,8 @@ class MCPImageOrchestrator {
 
     if (poolImage) return poolImage;
 
-    // No real image ready yet.
-    // Start a preload and return null so the UI keeps its current image
-    // (or shows the loading overlay).
+    // No real image ready yet. Trigger preload and return null so caller keeps
+    // current frame (or loading overlay) until a frame is ready.
     if (peekUrl) {
       this._scheduleSwapWhenReady(songId);
     }
@@ -954,14 +989,14 @@ class MCPImageOrchestrator {
     if (pool.loading) return;
     pool.loading = true;
 
-    // Store the load promise so other instances can await it
+    // Store active load promise so concurrent callers can await shared work.
     pool._loadPromise = (async () => {
     try {
       const apiBaseUrl = envConfig.getApiBaseUrl();
       const encodedTitle = encodeURIComponent(songContext.title || 'electronic music');
 
-      // Build URL with audio feature params for mood-aware prompts.
-      // Keep client fetch sizing aligned with backend pool target defaults.
+      // Build backend request URL with feature parameters for mood-aware
+      // keyword generation and refill sizing.
       const fullPoolTarget = 80;
       const refillBatch = 80;
       let batchCount = fullPoolTarget;
@@ -970,10 +1005,14 @@ class MCPImageOrchestrator {
 
       let url = `${apiBaseUrl}/api/images/pool?song_title=${encodedTitle}&song_id=${songContext.id || 0}&count=${batchCount}&pad_external=false`;
 
-      // Append audio features from the AudioFeatures DB table
+      // Append audio feature query parameters only when values are present.
+      // These values are consumed by backend keyword mapping, which then decides
+      // what safe visual tags are used to fetch song-specific images.
       const af = audioFeatures || songContext.audioFeatures;
       if (af) {
+        // Text fields are URL-encoded to preserve spaces/special characters.
         if (af.mood) url += `&mood=${encodeURIComponent(af.mood)}`;
+        // Numeric fields use `!= null` so valid zero values are not dropped.
         if (af.energy != null) url += `&energy=${af.energy}`;
         if (af.valence != null) url += `&valence=${af.valence}`;
         if (af.tempo != null) url += `&tempo=${af.tempo}`;
@@ -997,15 +1036,16 @@ class MCPImageOrchestrator {
 
       if (images.length > 0) {
         // Use url (640x480) — same resolution for thumbnails and fullscreen
+        // Backend returns normalized objects; prefer standard URL key.
         const imageUrls = images.map(img => img.url || img.urlLarge);
 
-        // Add all URLs to pool IMMEDIATELY so they are available for playback logic
-        // We do this BEFORE preloading to prevent "empty pool" states during the download phase
+        // Add URLs before preload starts so playback logic can read queue state
+        // immediately, even while downloads are still in progress.
         this.poolManager.addImages(songId, imageUrls);
         this._updateProviderStatus('loremflickr', true);
 
-        // KICKSTART FIX: If this is the active song and we're currently showing nothing OR a procedural placeholder,
-        // swap to the first real image as soon as it's preloaded (no need to wait for a beat).
+        // Kickstart behavior: for active songs showing placeholder content,
+        // switch to first real image as soon as preload completes.
         if (this._activeSongId == songId) {
           const current = this._currentOnsetImage;
           const isPlaceholder = current == null || (typeof current === 'string' && current.startsWith('data:'));
@@ -1034,14 +1074,15 @@ class MCPImageOrchestrator {
           }
         }
 
-        // Priority preload: start downloading first few images in background
-        // We do NOT await this, so initPool returns as soon as we have URLs
+        // Priority preload starts in background. Initialization may return as
+        // soon as URLs are queued, without waiting for full image download.
         const priorityCount = mode === 'thumbnail' ? 1 : 12;
         const priorityUrls = imageUrls.slice(0, priorityCount);
         this.poolManager._preloadPriorityBatch(priorityUrls, 4000).catch(err => {
              console.warn('[ImageGen] Preload warning:', err);
         });
 
+        // Lightweight source classification for runtime debugging logs.
         const sampleUrl = imageUrls[0] || '';
         const isS3Cached = sampleUrl.includes('/api/images/file') || sampleUrl.includes('amazonaws.com');
         const fetchType = isS3Cached ? 'S3/Cached' : (sampleUrl.includes('loremflickr') ? 'LoremFlickr' : 'Other');
@@ -1077,6 +1118,7 @@ class MCPImageOrchestrator {
       return;
     }
 
+    // Refill runs in normal pool flow and reuses the same loading guards.
     await this._fetchAndPopulatePool(songContext, songContext.audioFeatures, true);
   }
 
@@ -1100,6 +1142,7 @@ class MCPImageOrchestrator {
    * Reset the orchestrator (e.g., on cleanup).
    */
   reset() {
+    // Resetting keeps singleton instance reusable across route/view changes.
     this.currentSongContext = null;
     this._songContexts.clear();
     this.poolManager.clearAll();

@@ -6,8 +6,14 @@ import re
 
 """Keyword safety and feature-to-keyword mapping helpers.
 
-This module centralizes all rules for converting user/song context into a
-restricted, provider-safe keyword list.
+This module is the core translation layer from song metadata/audio features to
+provider-safe image keywords.
+
+Pipeline summary:
+1) Tokenize free text (title/prompt) into normalized tokens.
+2) Remove blocked figure/political/child-related terms.
+3) Keep only keywords that are whitelisted and verified for provider stability.
+4) Blend title hints + mood + genre + numeric features into a final keyword set.
 """
 
 _VERIFIED_KEYWORDS = frozenset([
@@ -35,14 +41,26 @@ _BANNED_FIGURE_TERMS = frozenset([
 
 
 def _tokenize_text(value: Optional[str]) -> list[str]:
-    """Normalize arbitrary text into lowercase alphanumeric tokens."""
+    """Normalize arbitrary text into lowercase alphanumeric tokens.
+
+    Example:
+    - "Neon-Rain 2024!" -> ["neon", "rain", "2024"]
+
+    Why this exists:
+    - Prevent punctuation/case from fragmenting matching logic.
+    - Ensure title/prompt terms can be compared against keyword maps.
+    """
     if not value:
         return []
     return [t for t in re.findall(r"[a-z0-9]+", str(value).lower()) if len(t) > 1]
 
 
 def _contains_banned_figure_terms(value: Optional[str]) -> bool:
-    """True when any blocked token appears in the provided text."""
+    """True when any blocked token appears in the provided text.
+
+    Used as a safety gate so prompts/titles containing disallowed people-focused
+    terms are not allowed to steer keyword generation.
+    """
     if not value:
         return False
     tokens = _tokenize_text(value)
@@ -53,7 +71,13 @@ def _contains_banned_figure_terms(value: Optional[str]) -> bool:
 
 
 def _safe_prompt_keywords(prompt: Optional[str]) -> list[str]:
-    """Keep only unique verified-safe tokens from user prompt text."""
+    """Keep only unique verified-safe tokens from user prompt text.
+
+    This is a strict filter:
+    - token must not be banned
+    - token must exist in _VERIFIED_KEYWORDS
+    - duplicates are removed while preserving original order
+    """
     safe = []
     seen = set()
     for token in _tokenize_text(prompt):
@@ -131,7 +155,11 @@ _energy_keywords = {
 
 
 def _derive_mood(energy: float, valence: float) -> str:
-    """Infer mood bucket from energy/valence when mood metadata is missing."""
+    """Infer mood bucket from energy/valence when mood metadata is missing.
+
+    This fallback keeps generation deterministic even when the DB row lacks a
+    precomputed mood label.
+    """
     if energy > 0.6 and valence > 0.5:
         return "energetic"
     if valence > 0.5:
@@ -151,17 +179,39 @@ def _build_keywords_from_features(
     genre: str = None,
     title: str = None,
 ) -> list:
-    """Build final deduplicated keyword list from song metadata + audio features."""
-    # danceability is currently accepted for API compatibility but not used in
-    # ranking rules yet.
+    """Build final deduplicated keyword list from song metadata + audio features.
+
+    How mapping influences image generation:
+    - title: injects semantic hints (e.g., "storm" -> rain/cloud/mountain)
+    - mood: chooses a baseline visual palette
+    - genre: adds style-specific accents
+    - energy: controls intensity bucket keywords
+    - acousticness/tempo: add targeted modifiers
+
+    The resulting keyword list is later used to build provider image URLs,
+    which means these keywords directly control what photographs are fetched.
+    """
+    # Deletes the danceability variable from memory. It's accepted as a parameter so that the API 
+    # doesn't break if a user sends it, but the code doesn't actually use it for anything yet.
     del danceability
 
+    # stores the final sequence of keywords to return
     keywords = []
+    
+    # keeps track of keywords already added so the same word is not added twice. 
     used = set()
 
     def _add(kw_list, max_n=3):
-        # Preserve insertion order while preventing duplicates.
+        """ params: 
+        - kw_list: proposed keywords to add
+        - max_n: maximum number of keywords to add from the proposed list, default is 3. 
+        """
+             
         added = 0
+        
+        # Loops through all keywords in the proposed list and 
+        # only adds keywords that have NOT already been used (to prevent duplicates) 
+        # AND that exist in the approved hardcoded list (_VERIFIED_KEYWORDS).
         for kw in kw_list:
             if kw not in used and kw in _VERIFIED_KEYWORDS:
                 keywords.append(kw)
@@ -170,7 +220,11 @@ def _build_keywords_from_features(
                 if added >= max_n:
                     break
 
-    # 1) Song title token hints.
+    # 1) Uses tokenization to extract keywords from prompt title and 
+    # turn the title into a clean list of lowercase words (tokens). 
+    # e.g., "Neon-Rain 2024!" becomes ["neon", "rain", "2024"].
+    # Matches the title words against a predefined dictionary (_title_keyword_map).
+    # If a match is found, it adds up to 2 associated image visual keywords to the final list.
     if title:
         title_tokens = _tokenize_text(title)
         if not any(t in _BANNED_FIGURE_TERMS for t in title_tokens):
@@ -180,16 +234,25 @@ def _build_keywords_from_features(
                         _add(kws, 2)
                         break
 
+
     # 2) Mood-derived baseline.
+    # Mood contributes the strongest initial theme and always adds up to 3 tags.
     mood_key = (mood or "").lower().strip()
     if not mood_key or mood_key == "unknown":
         e = energy if energy is not None else 0.5
         v = valence if valence is not None else 0.5
         mood_key = _derive_mood(e, v)
+       
+        
+    # Looks up the keywords for the mood_key in _mood_keyword_map. 
+    # If the mood isn't found in the map, it defaults to the keywords for "calm".
+    # Adds up to 3 keywords from this mood list to the final list.
     mood_kws = _mood_keyword_map.get(mood_key, _mood_keyword_map["calm"])
     _add(mood_kws, 3)
 
-    # 3) Genre refinements.
+
+    # 3) Matches the song's genre against a predefined dictionary (_genre_keyword_map).
+    # If a match is found, it adds up to 2 mapped visual keywords to the final list.
     if genre:
         genre_lower = genre.lower().strip()
         for g_key, g_kws in _genre_keyword_map.items():
@@ -197,7 +260,10 @@ def _build_keywords_from_features(
                 _add(g_kws, 2)
                 break
 
-    # 4) Energy intensity accents.
+    
+    # 4) If the energy feature was provided, it checks where it lands on a scale.
+    # High energy > 0.7, medium > 0.4, else low. It then adds up to 2 keywords 
+    # from the corresponding intensity bucket.
     if energy is not None:
         if energy > 0.7:
             _add(_energy_keywords["high"], 2)
@@ -206,15 +272,27 @@ def _build_keywords_from_features(
         else:
             _add(_energy_keywords["low"], 2)
 
+    
     # 5) Feature-specific tweaks.
+    # If the track is highly acoustic (over 70%), inject a natural, earthy keyword (max 1)
     if acousticness is not None and acousticness > 0.7:
         _add(["forest", "fern", "river"], 1)
+        
+    # If the track is fast (above 140 BPM), inject an environment keyword that feels sweeping or intense (max 1).   
     if tempo is not None and tempo > 140:
         _add(["sunset", "canyon", "glacier"], 1)
 
-    # Always return a minimally diverse set.
+    
+    # The image provider might fail if we give it zero keywords. 
+    # If the generated list has less than 3 image keywords total, 
+    # force-add some generic scenic defaults until we have exactly 3.
     if len(keywords) < 3:
         _add(["abstract", "landscape", "sky", "ocean", "mountain"], 3 - len(keywords))
 
+    
+    # Jumbles the order of the generated keywords so if this exact same song is requested 
+    # 10 times, the API doesn't get the exact same A, B, C ordered string 
+    # every time (which helps generate slightly different images).
     random.shuffle(keywords)
+    
     return keywords

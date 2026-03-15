@@ -79,6 +79,9 @@ _pool_video_cache_lock = threading.Lock()
 _pool_video_cache: dict[str, dict] = {}
 
 
+# The Batch Refill (Background Job): The server spawns a background task 
+# (_schedule_pool_refill) that silently goes to work downloading the rest of the images 
+# (the batch) so that as the song progresses, the queue never runs out.
 def _schedule_pool_refill(
     *,
     product_id: int,
@@ -1183,7 +1186,8 @@ def _host_loremflickr_images_to_s3(
 
     return hosted, failed
 
-
+# The Fast Path (Warmup): Respond to the user immediately with 1 or 2 images 
+# it grabs as fast as possible so the animation can start.
 def _quick_warmup_s3_images(
     product_id: int,
     song_title: str,
@@ -1269,11 +1273,19 @@ def ensure_song_image_pool(
         if not conn:
             return 0
         with conn.cursor() as cursor:
-            # Trim excess rows first so pool size remains bounded.
+            # Before adding images, it checks if the pool is too big. 
+            # If the target pool size is 30 but somehow there are 50 images saved, 
+            # it explicitly trims those 20 extra images from the database and 
+            # deletes the files from S3 to save storage space.
             trimmed_rows, trimmed_keys = _db_trim_song_pool_by_provider_with_keys(cursor, product_id, "s3", int(desired_size))
             if trimmed_rows > 0:
                 _delete_s3_keys_best_effort(trimmed_keys)
 
+
+            # It looks at the database to see how many images this song already has. 
+            # If it already has the desired_size (e.g., 30), 
+            # it stops and returns instantly and does no work. 
+            # If it only has 5, it knows it is missing 25.
             existing = _db_count_images_by_provider(cursor, product_id, "s3")
             missing = max(0, int(desired_size) - existing)
             if missing <= 0:
@@ -1281,6 +1293,9 @@ def ensure_song_image_pool(
                 conn.commit()
                 return 0
 
+
+            # Recalculates the average file size and figures out how many bytes are entirely left on the system. 
+            # It limits the batch refill specifically to ensure it never exceeds the total storage limit set for the server.
             total_s3_bytes, total_s3_images = _db_s3_storage_stats(cursor)
             remaining_budget_bytes = max(0, int(IMAGE_POOL_MAX_TOTAL_BYTES) - int(total_s3_bytes))
             avg_image_bytes = (
@@ -1310,7 +1325,10 @@ def ensure_song_image_pool(
             )
             images = _generate_loremflickr_urls(keywords, budget_limited_missing, nocache=True)
 
-            # Prefer hosting to S3 for stable URLs + browser caching.
+
+            # Rather than saving standard URLs to the database, it downloads the images to the server's S3 Bucket. 
+            # This prevents "link rot" (where the external provider changes the image) and 
+            # ensures the images are delivered lightning-fast over a CDN to the React frontend.
             hosted_images, failed_images = _host_loremflickr_images_to_s3(product_id, images)
             inserted = 0
             if hosted_images:

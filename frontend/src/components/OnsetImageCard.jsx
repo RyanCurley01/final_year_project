@@ -45,7 +45,7 @@ const OnsetImageCard = ({
   onError,
   ...props
 }) => {
-  // Normalize the songId so all instances of the same song share one image pool
+  // Normalize IDs up-front so every UI surface references the same pool key.
   const songId = normalizeId(rawSongId);
   // Two-layer crossfade refs
   const containerRef = useRef(null);
@@ -56,13 +56,14 @@ const OnsetImageCard = ({
   const [poolReady, setPoolReady] = useState(false);
   const poolPollRef = useRef(null);
 
-  // Refs for avoiding stale closures in callbacks
+  // Refs for avoiding stale closures in callbacks and async effects.
   const isActiveRef = useRef(isActive);
   const isPlayingRef = useRef(isPlaying);
   const currentImageRef = useRef(null);
   const isMountedRef = useRef(true);
   const initPromiseRef = useRef(null);
-  // Track whether this instance is the "primary" onset driver (first active instance)
+  // Track whether this instance is the "primary" onset driver (first active instance).
+  // Only this instance should subscribe to raw onset events to avoid duplicates.
   const isPrimaryRef = useRef(false);
   // Glitch state — mirrors AudioReactiveVideo's glitch effect exactly
   const [isGlitching, setIsGlitching] = useState(false);
@@ -90,7 +91,8 @@ const OnsetImageCard = ({
     };
   }, []);
 
-  // Continuously poll pool status — show loading overlay whenever pool has no images
+  // Continuously poll pool status — show loading overlay whenever pool has no
+  // real network images available yet.
   useEffect(() => {
     if (!songId) return;
 
@@ -113,7 +115,8 @@ const OnsetImageCard = ({
     };
   }, [songId]);
 
-  // Instant swap helper - shared between onset handler and image change listener
+  // Instant swap helper shared by subscription events and direct updates.
+  // Guarding against identical URLs prevents unnecessary React re-renders.
   const swapTo = useCallback((newImage) => {
     if (!isMountedRef.current) return;
     if (!newImage || newImage === currentImageRef.current) return;
@@ -121,20 +124,22 @@ const OnsetImageCard = ({
     currentImageRef.current = newImage;
   }, []);
 
-  // Initialize image pool when song changes or component mounts
+  // Initialize image pool when song changes or component mounts.
+  // This flow prioritizes shared state, then local pool, then fresh fetch.
   useEffect(() => {
     if (!songTitle) return;
 
     const initPool = async () => {
       try {
         // Clear any stale image from a previous song.
-        // We rely on the loading overlay while real images are fetched/preloaded.
+        // Loading overlay remains visible until a real image is fetched/preloaded.
         if (isMountedRef.current) {
           setCurrentImage(null);
           currentImageRef.current = null;
           setPoolReady(false);
         }
 
+        // Tracks whether an immediate usable image was found before network init.
         let imageSet = false;
 
         // 1. Try syncing with shared state first (highest priority if active)
@@ -149,7 +154,7 @@ const OnsetImageCard = ({
           }
         }
 
-        // 2. If no shared image, try getting best available from pool
+        // 2. If no shared image, try using first available pool frame.
         if (!imageSet) {
           const existingPoolImage = imageGenerationService.getFirstPoolImage(songId);
           if (existingPoolImage && isMountedRef.current) {
@@ -161,23 +166,25 @@ const OnsetImageCard = ({
           }
         }
 
-        // 3. Always ensure context is initialized and pool is healthy
-        //    (This handles refilling if we successfully synced but the pool is running low)
+        // 3) Always initialize context and verify pool health.
+        // This also handles refill when a synced image exists but pool depth is low.
         const context = {
           id: songId,
           title: songTitle,
           genre: 'electronic',
         };
 
+        // Active cards request deeper queues; inactive cards request lightweight
+        // thumbnail queues for quick list rendering.
         const initPromise = imageGenerationService.initializeSongContext(context, isActive ? 'full' : 'thumbnail');
         initPromiseRef.current = initPromise;
         
-        // If we didn't have a real image yet, update when the fetch completes
+        // If no real image is currently available, update after fetch completes.
         if (!imageSet) {
           await initPromise;
           if (isMountedRef.current) {
-            // Force a re-check of the pool. Sometimes the promise resolves but the pool isn't updated
-            // immediately in logic above if we didn't check
+            // Force a second pool check. Some timing paths resolve the promise
+            // before the first read reflects updated pool data.
             const myImage = imageGenerationService.getFirstPoolImage(songId);
             if (myImage) {
               setCurrentImage(myImage);
@@ -185,18 +192,19 @@ const OnsetImageCard = ({
               setIsInitialized(true);
               setPoolReady(true);
               
-              // If we're active, force update the shared state too so other components see it
+              // Active instance also updates shared state for all subscribers.
               if (isActive) {
                 imageGenerationService.activateForPlayback(songId);
               }
             } else if (isActive) {
-               // If after fetch we STILL have no image and we are active, try forcing a refill
-               // This is the "kickstart" for returning to a song with an empty pool
+               // If no image exists after fetch for an active song, trigger
+               // another full-mode initialization as a kickstart refill path.
                imageGenerationService.initializeSongContext(context, 'full');
             }
           }
         } else {
-          // Even if we had an image, we still await the fetch secretly to ensure pool is filled
+          // Even with an existing image, await completion so pool depth is
+          // ready for upcoming onset events.
           await initPromise; 
         }
 
@@ -208,17 +216,18 @@ const OnsetImageCard = ({
     initPool();
   }, [songTitle, songId, swapTo, isActive]);
 
-  // Subscribe to shared image changes — ONLY active song instances follow onset images
-  // Subscribe when isActive (regardless of playing state) so paused fullscreen stays in sync
+  // Subscribe to shared image changes — active song instances follow onset
+  // image changes from the singleton orchestrator.
+  // Subscription stays active while paused so fullscreen and inline cards remain aligned.
   useEffect(() => {
     if (!isActive) return;
 
-    // Force activation: Ensures that when this component becomes active,
-    // the service knows this IS the active song and prepares the state.
-    // This MUST happen before we try to claim onset primary status.
+    // Force activation first so service state points to this active song.
+    // Primary-onset claim below depends on this active-song state.
     imageGenerationService.activateForPlayback(songId);
 
-    // On subscription, immediately sync to the current shared image
+    // On subscription, immediately sync to the current shared image to avoid
+    // brief visual mismatch when opening a second view.
     const sharedImage = imageGenerationService.getCurrentImage();
     if (sharedImage && sharedImage !== currentImageRef.current) {
       setCurrentImage(sharedImage);
@@ -235,7 +244,7 @@ const OnsetImageCard = ({
     };
   }, [isActive, songId, swapTo]);
 
-  // Passive sync: non-active instances of the same song follow onset image changes
+  // Passive sync: non-active instances of the same song follow onset image changes.
   // This keeps wishlist, stock, purchased products etc. in sync with the playing song
   useEffect(() => {
     if (isActive) return; // Active instances are handled above
@@ -248,7 +257,7 @@ const OnsetImageCard = ({
       }
     };
 
-    // Also check on mount if the active song matches and has a current image
+    // Also check once on mount so list cards instantly reflect already-playing state.
     const currentActiveSongId = imageGenerationService.getActiveSongId();
     if (currentActiveSongId == songId) {
       const sharedImage = imageGenerationService.getCurrentImage();
@@ -264,12 +273,13 @@ const OnsetImageCard = ({
     };
   }, [isActive, songId, swapTo]);
 
-  // Handle onset (drum hit) — only the primary instance advances the pool
+  // Handle onset (drum hit). Only the primary active instance advances the
+  // shared image state, then all subscribers receive the same update.
   const handleOnset = useCallback((onset) => {
     if (!isMountedRef.current) return;
     if (!isActiveRef.current || !isPlayingRef.current) return;
 
-    // advanceImage notifies all subscribers (including this one via onImageChange)
+    // advanceImage emits to all subscribers (including this component).
     imageGenerationService.advanceImage({
       energy: onset.energy || 0.5,
       lfc: onset.lfc || 0.5,
@@ -280,8 +290,9 @@ const OnsetImageCard = ({
     });
   }, []);
 
-    // Register/unregister onset callback — only ONE instance globally drives onsets
-    useEffect(() => {
+  // Register/unregister onset callback — only one component globally owns
+  // the raw onset subscription at any given moment.
+  useEffect(() => {
     if (!isActive || !isPlaying) {
       if (isPrimaryRef.current) {
         globalAudioContext.offOnset(handleOnset);
@@ -291,12 +302,11 @@ const OnsetImageCard = ({
       return;
     }
 
-    // CRITICAL: Force activation here to ensure sequential execution
-    // 1. Set this song as active in service
+    // Sequential setup keeps ownership deterministic across rapid UI remounts.
+    // 1) Set active song in service
     imageGenerationService.activateForPlayback(songId);
 
-    // 2. Now allow claiming (since we just set ourselves as active, this will match)
-    // Try to claim primary — only the first active instance wins
+    // 2) Claim primary onset callback ownership. Only one active instance wins.
     if (imageGenerationService.claimOnsetPrimary(songId)) {
       isPrimaryRef.current = true;
       globalAudioContext.onOnset(handleOnset);
@@ -311,7 +321,8 @@ const OnsetImageCard = ({
     };
   }, [isActive, isPlaying, handleOnset, songId]);
 
-  // Listen for glitch events (high-frequency transients) — same logic as AudioReactiveVideo
+  // Listen for glitch events (high-frequency transients).
+  // The timeout enforces a consistent visual glitch pulse duration.
   useEffect(() => {
     if (!isActive || !isPlaying) return;
 
@@ -334,7 +345,8 @@ const OnsetImageCard = ({
     };
   }, [isActive, isPlaying]);
 
-  // Handle image load errors — revert to procedural so no blank cards
+  // Handle image load errors — fallback guarantees that the card never renders
+  // as an empty surface even if network images fail.
   const handleImageError = useCallback(() => {
     if (!isMountedRef.current) return;
 
@@ -354,7 +366,8 @@ const OnsetImageCard = ({
         }
       }
     } else {
-      // Non-active instances should follow the current shared frame when available.
+      // Non-active instances follow current shared frame when available, then
+      // fallback to a local procedural frame if nothing is shared yet.
       fallback = imageGenerationService.getCurrentImage();
       if (!fallback) {
         fallback = imageGenerationService.getProceduralImage();
@@ -366,7 +379,8 @@ const OnsetImageCard = ({
     setImageError(true);
   }, [songId]);
 
-  // Compute glitch styles once per render (random values refresh each render while glitching)
+  // Compute glitch styles per render. During glitch-active frames, random
+  // values are recomputed to create visual jitter.
   const activeGlitch = isActive && isPlaying ? glitchStyle(isGlitching) : glitchStyle(false);
 
   return (
