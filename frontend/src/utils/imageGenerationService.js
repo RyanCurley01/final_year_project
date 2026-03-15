@@ -12,123 +12,12 @@
  * - Orchestrates multiple providers with fallback chains
  * 
  * Architecture:
- * 1. SongContextRAG - Maps song metadata → visual prompts
- * 2. ImagePoolManager - Manages per-song image pools with pre-fetching
- * 3. ProceduralGenerator - Canvas-based instant fallback
- * 4. MCPImageOrchestrator - Coordinates providers and tool calls
+ * 1. ImagePoolManager - Manages per-song image pools with pre-fetching
+ * 2. ProceduralGenerator - Canvas-based instant fallback
+ * 3. MCPImageOrchestrator - Coordinates providers and tool calls
  */
 
 import envConfig from '../config/environment';
-
-// ============================================
-// SONG CONTEXT RAG (Retrieval-Augmented Generation)
-// ============================================
-
-/**
- * Maps song metadata to contextually relevant visual themes.
- * This is the "retrieval" component - it retrieves relevant visual context
- * from a knowledge base indexed by musical keywords.
- */
-class SongContextRAG {
-  constructor() {
-    // Knowledge base: keyword → visual theme associations
-    this.themeKnowledgeBase = {
-      acid: ['psychedelic neon fractal art', 'acid trip colorful digital abstract', 'alien acid landscape surreal dissolving'],
-      alien: ['alien landscape sci-fi otherworldly', 'extraterrestrial abstract neon glowing', 'alien world surreal desert neon'],
-      bass: ['deep bass pressure wave underwater', 'bass frequency vibration neon pulse', 'subwoofer visualization dark energy'],
-      dream: ['dreamscape surreal fantasy ethereal', 'lucid dream clouds colorful floating', 'dream portal abstract soft glow'],
-      ghost: ['spectral ethereal glow transparent', 'ghostly mist digital art luminous', 'phantom translucent neon abstract'],
-      glitch: ['glitch art digital corruption pixel', 'databend glitch cyberpunk neon', 'broken screen digital abstract vivid'],
-      night: ['night sky aurora neon abstract', 'dark nocturnal cyberpunk glow', 'midnight abstract digital art stars'],
-      space: ['outer space nebula cosmic colorful', 'galaxy stars supernova abstract', 'cosmic void nebula digital art'],
-      dark: ['dark moody abstract shadows depth', 'dark energy void neon contrast', 'shadow realm abstract art dark'],
-      light: ['light rays prismatic abstract art', 'luminous ethereal bright energy', 'light beam spectrum colorful abstract'],
-      fire: ['fire plasma energy abstract vivid', 'burning abstract flames neon art', 'inferno energy visualization digital'],
-      water: ['underwater abstract deep ocean art', 'water reflection ripple neon', 'aquatic abstract visualization fluid'],
-      electric: ['electric lightning arc neon vivid', 'electric field abstract energy art', 'voltage spark visualization neon'],
-      cyber: ['cyberpunk neon cityscape abstract', 'cyberspace grid neon wireframe', 'cybernetic interface abstract art'],
-      pulse: ['pulse wave heartbeat neon rhythm', 'pulsating energy abstract vivid', 'rhythm pulse visualization art'],
-      wave: ['sound wave abstract colorful flow', 'wave interference pattern neon', 'ocean wave energy abstract art'],
-      storm: ['storm lightning dramatic abstract art', 'tempest energy abstract neon swirl', 'storm cell dramatic visualization'],
-      crystal: ['crystal structure refraction abstract', 'crystalline geometry neon colorful', 'crystal formation abstract art'],
-      echo: ['echo wave ripple abstract digital', 'reverb visualization abstract neon', 'sound echo abstract layered art'],
-      drift: ['drifting motion abstract flowing art', 'drift blur movement neon abstract', 'floating drift abstract colorful'],
-      void: ['void darkness minimal abstract art', 'empty void deep space abstract', 'void portal abstract dark neon'],
-      neon: ['neon lights abstract cyberpunk vivid', 'neon glow abstract digital art', 'neon sign abstract colorful warm'],
-      zen: ['zen minimal peaceful abstract art', 'meditative calm abstract digital', 'zen ripple water abstract art'],
-      chaos: ['chaos entropy abstract vivid art', 'chaotic energy neon explosion', 'fractal chaos abstract colorful art'],
-      shadow: ['shadow play contrast abstract art', 'dark shadow abstract neon accent', 'shadow depth abstract digital art'],
-      emotion: ['abstract emotion color expression art', 'emotional abstract digital painting', 'feeling emotion abstract vivid art'],
-      ted: ['electronic music abstract visualization', 'electronic beats digital abstract art', 'techno abstract neon visualization'],
-    };
-
-    // Genre-specific base modifiers
-    this.genreModifiers = {
-      electronic: 'electronic music digital art abstract visualization',
-      techno: 'techno dark industrial abstract neon',
-      ambient: 'ambient atmospheric soft ethereal abstract',
-      default: 'abstract digital art colorful vibrant music visualization',
-    };
-  }
-
-  /**
-   * RAG retrieval: Extract relevant themes from song context.
-   * @param {Object} songContext - { title, genre, energy, mood }
-   * @returns {string[]} Array of contextually relevant search prompts
-   */
-  retrieveThemes(songContext) {
-    const { title = '', genre = 'electronic' } = songContext;
-    const titleLower = title.toLowerCase();
-    const words = titleLower.split(/[\s\-_]+/).filter(w => w.length > 2);
-
-    const themes = new Set();
-    let hasMatch = false;
-
-    // Search knowledge base for matching themes
-    for (const word of words) {
-      for (const [key, themeList] of Object.entries(this.themeKnowledgeBase)) {
-        if (word.includes(key) || key.includes(word)) {
-          themeList.forEach(theme => themes.add(theme));
-          hasMatch = true;
-        }
-      }
-    }
-
-    // If no specific match, use default electronic themes
-    if (!hasMatch) {
-      themes.add('abstract electronic music visualization colorful neon');
-      themes.add('electronic beats abstract digital art vivid');
-      themes.add('music visualization abstract colorful energy');
-      themes.add('abstract art colorful vibrant digital painting');
-      themes.add('neon abstract digital art futuristic cyberpunk');
-    }
-
-    return Array.from(themes);
-  }
-
-  /**
-   * RAG augmentation: Generate search prompts enriched with song context.
-   * @param {Object} songContext - { title, genre, energy, mood }
-   * @returns {string[]} Array of augmented prompts for image search
-   */
-  generatePrompts(songContext) {
-    const themes = this.retrieveThemes(songContext);
-    const title = (songContext.title || '').toLowerCase();
-    const genreMod = this.genreModifiers[songContext.genre] || this.genreModifiers.default;
-
-    const prompts = [];
-
-    // Augment themes with song-specific context
-    for (const theme of themes.slice(0, 4)) {
-      prompts.push(`${theme} ${genreMod}`);
-    }
-
-    // Add title-based prompt
-    prompts.push(`${title} abstract digital art ${genreMod}`);
-
-    return prompts;
-  }
-}
 
 
 // ============================================
@@ -468,18 +357,6 @@ class ImagePoolManager {
   }
 
   /**
-   * Get the next image from the pool (cyclic).
-   */
-  getNextImage(songId) {
-    const pool = this.getPool(songId);
-    if (pool.images.length === 0) return null;
-
-    // Consuming queue: shift from front, never repeat
-    const image = pool.images.shift();
-    return image;
-  }
-
-  /**
    * Check if pool needs refilling.
    */
   needsRefill(songId) {
@@ -573,7 +450,6 @@ class ImagePoolManager {
  */
 class MCPImageOrchestrator {
   constructor() {
-    this.rag = new SongContextRAG();
     this.poolManager = new ImagePoolManager();
     this.proceduralGenerator = new ProceduralGenerator();
 
@@ -788,14 +664,6 @@ class MCPImageOrchestrator {
    */
   getActiveSongId() {
     return this._activeSongId;
-  }
-
-  /**
-   * Check if an image URL belongs to a specific song's pool.
-   */
-  isImageInPool(songId, imageUrl) {
-    const pool = this.poolManager.getPool(songId);
-    return pool.images.includes(imageUrl);
   }
 
   /**
@@ -1072,14 +940,6 @@ class MCPImageOrchestrator {
   }
 
   /**
-   * Check if pool has images ready.
-   */
-  hasPoolImages(songId) {
-    const pool = this.poolManager.getPool(songId || this.currentSongContext?.id);
-    return pool.images.length > 0;
-  }
-
-  /**
    * Fetch images from the backend proxy and populate the pool.
    * Passes audio features to backend for mood-aware prompt generation.
    * @param {Object} songContext
@@ -1266,4 +1126,4 @@ class MCPImageOrchestrator {
 const imageGenerationService = new MCPImageOrchestrator();
 
 export default imageGenerationService;
-export { SongContextRAG, ProceduralGenerator, ImagePoolManager, MCPImageOrchestrator };
+export { ProceduralGenerator, ImagePoolManager, MCPImageOrchestrator };

@@ -17,19 +17,16 @@ guitar, piano, sailboat, volcano keywords.
 Only nature, landscape, architecture, and abstract imagery.
 """
 
-from fastapi import APIRouter, Query, HTTPException, Request
-from fastapi.responses import Response, StreamingResponse
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import Response
 from typing import Optional
 import time
 import hashlib
 import random
-import re
 import importlib
 import requests
 import threading
-import shutil
 import subprocess
-import tempfile
 import os
 from urllib.parse import urlparse
 
@@ -47,12 +44,32 @@ from config import (
 )
 from s3_service import upload_bytes, get_object_stream, delete_object
 from config import executor
+from .image_generation_db import (
+    db_count_images_by_provider as _db_count_images_by_provider,
+    db_trim_song_pool_by_provider_with_keys as _db_trim_song_pool_by_provider_with_keys,
+    db_product_exists as _db_product_exists,
+    db_s3_storage_stats as _db_s3_storage_stats,
+    db_fetch_images as _db_fetch_images,
+    db_fetch_hosted_image_rows as _db_fetch_hosted_image_rows,
+    db_insert_hosted_images as _db_insert_hosted_images,
+)
+from .image_generation_cache import _image_cache, _get_cached, _set_cached
+from .image_generation_keywords import (
+    _VERIFIED_KEYWORDS,
+    _BANNED_FIGURE_TERMS,
+    _tokenize_text,
+    _contains_banned_figure_terms,
+    _safe_prompt_keywords,
+    _build_keywords_from_features,
+)
 
 router = APIRouter(prefix="/api/images", tags=["Image Generation"])
 
 # ============================================
 # BACKFILL SCHEDULING (avoid request blocking)
 # ============================================
+# This section defines lightweight scheduling helpers so expensive refill work
+# runs in the background instead of delaying HTTP responses.
 _pool_refill_lock = threading.Lock()
 _pool_refill_last_scheduled: dict[int, float] = {}
 _POOL_REFILL_MIN_INTERVAL_SECS = 60.0
@@ -76,12 +93,15 @@ def _schedule_pool_refill(
     genre: Optional[str],
 ):
     """Schedule a background refill so /pool stays fast."""
+    # Global feature switch: do nothing when external generation is disabled.
     if not _EXTERNAL_IMAGE_GENERATION_ENABLED:
         return
 
+    # Product IDs must be positive library IDs for DB-backed pool refill.
     if product_id <= 0:
         return
 
+    # Throttle refill scheduling per song to avoid repeated background jobs.
     now = time.time()
     with _pool_refill_lock:
         last = _pool_refill_last_scheduled.get(product_id)
@@ -90,6 +110,7 @@ def _schedule_pool_refill(
         _pool_refill_last_scheduled[product_id] = now
 
     def _task():
+        # Actual refill work runs in a background worker thread.
         try:
             inserted = ensure_song_image_pool(
                 product_id,
@@ -105,130 +126,29 @@ def _schedule_pool_refill(
             )
             console.log(f"🖼️ Pool refill complete ProductID={product_id} inserted={inserted}")
         except Exception as e:
+            # Keep failures non-fatal so API requests remain responsive.
             console.log(f"⚠️ Pool refill failed ProductID={product_id}: {e}")
 
     try:
+        # Submit non-blocking refill task to shared executor.
         executor.submit(_task)
     except Exception as e:
+        # Scheduler failures should be logged but never crash the caller.
         console.log(f"⚠️ Pool refill scheduling failed ProductID={product_id}: {e}")
 
 # ============================================
-# IN-MEMORY CACHE (TTL-based)
+# CACHE + KEYWORD MODULES
 # ============================================
-_image_cache = {}  # {cache_key: {"urls": [...], "timestamp": float}}
-_CACHE_TTL = 300  # 5 min TTL — short so refills get fresh images
-_CACHE_MAX_SIZE = 200
-
-
-def _cache_key(prompt: str) -> str:
-    return hashlib.md5(prompt.lower().strip().encode()).hexdigest()
-
-
-def _get_cached(prompt: str):
-    key = _cache_key(prompt)
-    if key in _image_cache:
-        entry = _image_cache[key]
-        if time.time() - entry["timestamp"] < _CACHE_TTL:
-            return entry["urls"]
-        else:
-            del _image_cache[key]
-    return None
-
-
-def _set_cached(prompt: str, urls: list):
-    if len(_image_cache) >= _CACHE_MAX_SIZE:
-        oldest_key = min(_image_cache, key=lambda k: _image_cache[k]["timestamp"])
-        del _image_cache[oldest_key]
-    key = _cache_key(prompt)
-    _image_cache[key] = {"urls": urls, "timestamp": time.time()}
-
-
-# ============================================
-# VERIFIED SAFE KEYWORDS
-# ============================================
-# All keywords individually tested against LoremFlickr at 1920x1080
-# and confirmed to return HTTP 302 (valid image redirect).
-#
-# REMOVED (people risk — street photography, tourists, divers, visitors):
-#   fire, car, motorcycle, helicopter, train, guitar, piano, sailboat, volcano,
-#   city, temple, bridge, candle, night, building, tower, lighthouse, garden,
-#   reef, cave, meadow, skyscraper
-# KEPT (pure nature/landscape/abstract — virtually zero people):
-#   landscape, abstract, ocean, forest, mountain, rain, sky, water, flower,
-#   snow, cloud, tree, river, desert, fog, aurora, rainbow, waterfall,
-#   butterfly, sunset, canyon, cliff, glacier, coral, valley, marsh, dune,
-#   prairie, creek, cavern
-# ADDED (pure nature/geology — impossible to have people):
-#   iceberg, tundra, nebula, stalactite, sandstone, lagoon, fjord, moss,
-#   icicle, pebble, fern, seashell, driftwood, geode, crystal, cactus
-#
-# Each URL uses exactly ONE keyword — no comma-separated multi-tags.
-
-_VERIFIED_KEYWORDS = frozenset([
-    # Pure nature/landscape
-    "landscape", "abstract", "ocean", "forest", "mountain", "rain",
-    "sky", "water", "flower", "snow", "cloud", "tree", "river",
-    "desert", "fog", "aurora", "rainbow", "waterfall", "butterfly",
-    "sunset", "canyon", "cliff", "glacier", "coral", "valley",
-    "marsh", "dune", "prairie", "creek", "cavern",
-    # Pure nature/geology replacements
-    "iceberg", "tundra", "nebula", "stalactite", "sandstone", "lagoon",
-    "fjord", "moss", "icicle", "pebble", "fern", "seashell",
-    "driftwood", "geode", "crystal", "cactus",
-])
-
-# Hard safety exclusion list for generated image concepts.
-# These are blocked from title/prompt parsing and DB writes.
-_BANNED_FIGURE_TERMS = frozenset([
-    # Political/public office and governance
-    "politic", "political", "politician", "politicians", "government", "governor",
-    "senate", "senator", "congress", "congressman", "congresswoman", "president",
-    "prime", "minister", "parliament", "election", "campaign", "diplomat", "leader",
-    "leaders", "rally", "protest", "state", "statesman", "stateswoman",
-    # Royal/princess archetypes
-    "princess", "queen", "king", "prince", "royal", "royalty", "monarch", "monarchy",
-    "duchess", "duke", "crown", "tiara",
-    # Child/minor figures
-    "child", "children", "kid", "kids", "minor", "minors", "toddler", "toddlers",
-    "teen", "teens", "teenager", "teenagers", "baby", "babies", "infant", "infants",
-    "girl", "girls", "boy", "boys", "schoolgirl", "schoolboy",
-])
-
-
-def _tokenize_text(value: Optional[str]) -> list[str]:
-    if not value:
-        return []
-    return [t for t in re.findall(r"[a-z0-9]+", str(value).lower()) if len(t) > 1]
-
-
-def _contains_banned_figure_terms(value: Optional[str]) -> bool:
-    if not value:
-        return False
-    tokens = _tokenize_text(value)
-    for token in tokens:
-        if token in _BANNED_FIGURE_TERMS:
-            return True
-    return False
-
-
-def _safe_prompt_keywords(prompt: Optional[str]) -> list[str]:
-    """Return verified-safe keywords only, excluding blocked figure terms."""
-    safe = []
-    seen = set()
-    for token in _tokenize_text(prompt):
-        if token in seen:
-            continue
-        if token in _BANNED_FIGURE_TERMS:
-            continue
-        if token in _VERIFIED_KEYWORDS:
-            safe.append(token)
-            seen.add(token)
-    return safe
+# Shared cache and keyword logic now lives in dedicated modules:
+# - image_generation_cache.py
+# - image_generation_keywords.py
 
 
 # ============================================
 # LOREM FLICKR PROVIDER (Single Keyword Per URL)
 # ============================================
+# Provider-facing URL builders live here. The key rule is one keyword per URL
+# to avoid unstable provider behavior from multi-tag strings.
 
 def _generate_loremflickr_urls(keywords: list, count: int = 30,
                                 width: int = 1980, height: int = 1280,
@@ -244,17 +164,31 @@ def _generate_loremflickr_urls(keywords: list, count: int = 30,
     When nocache=True, appends a random cache-buster to guarantee fresh
     URLs that the browser/CDN won't have seen before.
     """
+    # If caller sends no keywords, we fall back to a small neutral safe set so
+    # the request still returns usable images.
     if not keywords:
         keywords = ["abstract", "landscape", "sky"]
 
+    # Start from a random lock base so separate calls don't keep reusing the
+    # exact same image IDs in the same sequence.
     base_lock = random.randint(1, 900000)
     urls = []
     for i in range(count):
+        # Cycle through provided keywords (round-robin):
+        # if count > number of keywords, we reuse them in order.
         keyword = keywords[i % len(keywords)]
         lock_id = base_lock + i
+
+        # Build one provider URL per output image.
+        # Important: each URL uses ONE keyword only (no comma list), because
+        # multi-tag usage can cause provider instability/errors.
         base_url = f"https://loremflickr.com/{width}/{height}/{keyword}?lock={lock_id}"
         if nocache:
+            # Optional cache-buster for debugging/refresh scenarios where we
+            # explicitly want new URLs that bypass browser/CDN caches.
             base_url += f"&nocache={random.randint(1, 99999999)}"
+
+        # Return a normalized image descriptor object expected by frontend code.
         urls.append({
             "url": base_url,
             "urlLarge": base_url,
@@ -263,49 +197,64 @@ def _generate_loremflickr_urls(keywords: list, count: int = 30,
             "width": width,
             "height": height,
         })
+
+    # Final list contains exactly `count` descriptor objects.
     return urls
 
 
 # ============================================
 # DB-BACKED PER-SONG IMAGE POOLS
 # ============================================
+# This section contains helper functions for reading/writing persistent image
+# pools and enforcing storage limits (row count + byte budget).
 
 _DEFAULT_POOL_SIZE = max(1, int(IMAGE_POOL_DEFAULT_SIZE))
 
 
 def _safe_int(value: Optional[str]) -> Optional[int]:
+    # Preserve None as None so callers can differentiate "missing" from invalid.
     if value is None:
         return None
     try:
+        # Normalize whitespace and parse strict integer value.
         as_int = int(str(value).strip())
         return as_int
     except Exception:
+        # Non-numeric values are treated as invalid IDs.
         return None
 
 
 def _hash_url(url: str) -> str:
+    # Stable URL fingerprint used for dedupe and DB indexing.
     return hashlib.md5(url.encode("utf-8")).hexdigest()
 
 
 def _hash_bytes(data: bytes) -> str:
+    # Content-based hash used for deterministic S3 keying.
     return hashlib.md5(data).hexdigest()
 
 
 def _is_absolute_url(url: str) -> bool:
     try:
+        # Parse and accept only URLs with both scheme and host.
         parsed = urlparse(url)
         return bool(parsed.scheme) and bool(parsed.netloc)
     except Exception:
+        # Parsing failures are treated as not-absolute.
         return False
 
 
 def _absolute_url(request: Request, maybe_relative_url: str) -> str:
+    # Keep empty values unchanged for caller handling.
     if not maybe_relative_url:
         return maybe_relative_url
+    # If the URL already has scheme + host, it is complete and should be
+    # returned unchanged.
     if _is_absolute_url(maybe_relative_url):
         return maybe_relative_url
     # Ensure we generate a fully-qualified URL that matches the API host.
     base = str(request.base_url).rstrip("/")
+    # Normalize relative paths so joining is predictable.
     if not maybe_relative_url.startswith("/"):
         maybe_relative_url = "/" + maybe_relative_url
     return base + maybe_relative_url
@@ -316,11 +265,16 @@ def _download_image_bytes(source_url: str, timeout_secs: Optional[float] = None)
 
     Enforces a max download size and short timeouts to avoid tying up workers.
     """
+    # Use caller override when provided; otherwise use service default timeout.
     effective_timeout = float(timeout_secs or IMAGE_POOL_DOWNLOAD_TIMEOUT_SECS)
     timeout = (effective_timeout, effective_timeout)
     with requests.get(source_url, stream=True, timeout=timeout, allow_redirects=True) as resp:
+        # Stop immediately for HTTP 4xx/5xx responses so callers can handle
+        # failures explicitly.
         resp.raise_for_status()
         content_type = (resp.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+        # Safety check: this pipeline only accepts image MIME types.
+        # Rejecting here prevents HTML/JSON error bodies from being processed.
         if not content_type.startswith("image/"):
             raise ValueError(f"Non-image content-type: {content_type or 'unknown'}")
 
@@ -330,10 +284,12 @@ def _download_image_bytes(source_url: str, timeout_secs: Optional[float] = None)
             if not chunk:
                 continue
             size += len(chunk)
+            # Hard cap download size to protect memory and bandwidth.
             if size > IMAGE_POOL_MAX_DOWNLOAD_BYTES:
                 raise ValueError("Image too large")
             chunks.append(chunk)
         data = b"".join(chunks)
+        # Guard against empty but successful responses.
         if not data:
             raise ValueError("Empty image response")
         return data, content_type
@@ -342,15 +298,18 @@ def _download_image_bytes(source_url: str, timeout_secs: Optional[float] = None)
 def _decode_image_bgr(data: bytes):
     """Decode image bytes into OpenCV BGR ndarray (or None on failure)."""
     try:
+        # Lazy-import cv2 so module import doesn't hard-fail at startup.
         cv2 = importlib.import_module("cv2")
         import numpy as np
 
         arr = np.frombuffer(data, dtype=np.uint8)
         if arr.size == 0:
             return None
+        # Decode into BGR image matrix used by OpenCV pipelines.
         img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
         return img
     except Exception:
+        # Decoder errors should not break the ingestion flow.
         return None
 
 
@@ -366,9 +325,11 @@ def _detect_faces_in_image(data: bytes) -> bool:
     if img is None:
         return False
 
+    # Convert to grayscale because Haar detector expects single-channel input.
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     cascade_path = os.path.join(cv2.data.haarcascades, "haarcascade_frontalface_default.xml")
     detector = cv2.CascadeClassifier(cascade_path)
+    # If cascade cannot be loaded, skip rejection instead of crashing.
     if detector.empty():
         return False
 
@@ -379,6 +340,7 @@ def _detect_faces_in_image(data: bytes) -> bool:
         minSize=(24, 24),
         flags=cv2.CASCADE_SCALE_IMAGE,
     )
+    # Any detected face marks image as unsafe for this pipeline.
     return len(faces) > 0
 
 
@@ -389,6 +351,7 @@ def _detect_red_border_in_image(data: bytes) -> bool:
         return False
 
     h, w = img.shape[:2]
+    # Tiny images are too noisy for reliable border heuristics.
     if h < 20 or w < 20:
         return False
 
@@ -414,18 +377,23 @@ def _detect_red_border_in_image(data: bytes) -> bool:
     # Strong red dominance in edge pixels => likely red frame/border overlay.
     red_mask = (r > 150) & (r > (g + 45)) & (r > (b + 45))
     red_ratio = float(np.count_nonzero(red_mask)) / float(max(1, red_mask.size))
+    # Reject when most edge pixels are red-dominant (likely frame overlay).
     return red_ratio >= 0.55
 
 
 def _moderation_rejection_reason(data: bytes) -> Optional[str]:
+    # Face check runs first as the strongest disqualifier.
     if _detect_faces_in_image(data):
         return "face_detected"
+    # Secondary check rejects heavy red-border overlays.
     if _detect_red_border_in_image(data):
         return "red_border_detected"
+    # None means image passed moderation filters.
     return None
 
 
 def _ext_from_content_type(content_type: str) -> str:
+    # Map MIME type to extension for deterministic object naming.
     if content_type == "image/jpeg":
         return ".jpg"
     if content_type == "image/png":
@@ -434,68 +402,12 @@ def _ext_from_content_type(content_type: str) -> str:
         return ".webp"
     if content_type == "image/gif":
         return ".gif"
+    # Generic fallback when MIME type is unknown.
     return ".img"
 
 
-def _db_count_images(cursor, product_id: int) -> int:
-    cursor.execute("SELECT COUNT(*) AS cnt FROM ImageGeneration WHERE ProductID = %s", (product_id,))
-    row = cursor.fetchone() or {}
-    return int(row.get("cnt") or 0)
-
-
-def _db_count_images_by_provider(cursor, product_id: int, provider: str) -> int:
-    cursor.execute(
-        "SELECT COUNT(*) AS cnt FROM ImageGeneration WHERE ProductID = %s AND Provider = %s",
-        (product_id, provider),
-    )
-    row = cursor.fetchone() or {}
-    return int(row.get("cnt") or 0)
-
-
-def _db_trim_song_pool_by_provider(cursor, product_id: int, provider: str, keep_count: int) -> int:
-    """Trim older rows so a song keeps at most keep_count images for a provider."""
-    keep_n = max(0, int(keep_count))
-    cursor.execute(
-        """
-        DELETE ig
-        FROM ImageGeneration ig
-        JOIN (
-            SELECT ImageGenID
-            FROM (
-                SELECT ImageGenID,
-                       ROW_NUMBER() OVER (PARTITION BY ProductID ORDER BY ImageGenID DESC) AS rn
-                FROM ImageGeneration
-                WHERE ProductID = %s AND Provider = %s
-            ) ranked
-            WHERE rn > %s
-        ) doomed ON doomed.ImageGenID = ig.ImageGenID
-        """,
-        (product_id, provider, keep_n),
-    )
-    return int(cursor.rowcount or 0)
-
-
-def _db_trim_song_pool_by_provider_with_keys(cursor, product_id: int, provider: str, keep_count: int) -> tuple[int, list[str]]:
-    """Trim older rows so a song keeps at most keep_count images and return removed storage keys."""
-    keep_n = max(0, int(keep_count))
-    cursor.execute(
-        """
-        SELECT StorageKey
-        FROM ImageGeneration
-        WHERE ProductID = %s AND Provider = %s
-        ORDER BY ImageGenID DESC
-        LIMIT 18446744073709551615 OFFSET %s
-        """,
-        (product_id, provider, keep_n),
-    )
-    doomed_rows = cursor.fetchall() or []
-    doomed_keys = [str(r.get("StorageKey") or "").strip() for r in doomed_rows if str(r.get("StorageKey") or "").strip()]
-
-    trimmed = _db_trim_song_pool_by_provider(cursor, product_id, provider, keep_n)
-    return int(trimmed or 0), doomed_keys
-
-
 def _delete_s3_keys_best_effort(storage_keys: list[str]) -> int:
+    # No-op when S3 storage is not configured.
     if not IMAGE_POOL_S3_BUCKET:
         return 0
     deleted = 0
@@ -506,33 +418,18 @@ def _delete_s3_keys_best_effort(storage_keys: list[str]) -> int:
             if delete_object(IMAGE_POOL_S3_BUCKET, key):
                 deleted += 1
         except Exception as e:
+            # Best-effort cleanup: log and continue for remaining keys.
             console.log(f"⚠️ Failed to delete S3 object during trim: {key} ({e})")
     return deleted
 
 
-def _db_product_exists(cursor, product_id: int) -> bool:
-    cursor.execute("SELECT 1 AS ok FROM Products WHERE ProductID = %s LIMIT 1", (product_id,))
-    row = cursor.fetchone() or {}
-    return bool(row.get("ok"))
-
-
-def _db_s3_storage_stats(cursor) -> tuple[int, int]:
-    cursor.execute(
-        """
-        SELECT COALESCE(SUM(ByteSize), 0) AS total_bytes,
-               COUNT(*) AS total_images
-        FROM ImageGeneration
-        WHERE Provider = 's3'
-        """
-    )
-    row = cursor.fetchone() or {}
-    return int(row.get("total_bytes") or 0), int(row.get("total_images") or 0)
-
-
 def _allowed_images_by_budget(remaining_bytes: int, avg_image_bytes: int) -> int:
+    # Guardrail: force minimum divisor of 1 to avoid divide-by-zero when stats
+    # are missing or unexpectedly zero.
     avg = max(1, int(avg_image_bytes or 1))
     if remaining_bytes <= 0:
         return 0
+    # Integer floor gives safe number of additional images allowed.
     return max(0, int(remaining_bytes // avg))
 
 
@@ -541,74 +438,15 @@ def _is_library_product_id(product_id: int) -> bool:
     return int(product_id) > 0
 
 
-def _db_fetch_images(cursor, product_id: int, count: int) -> list:
-    """Fetch a slice of images without ORDER BY RAND() to avoid heavy scans."""
-    # Prefer hosted images first so we get stable cached URLs.
-    total = _db_count_images(cursor, product_id)
-    if total <= 0:
-        return []
-
-    # Count the number of S3 images to avoid offset issues
-    cursor.execute("SELECT COUNT(*) as s3_count FROM ImageGeneration WHERE ProductID = %s AND Provider = 's3'", (product_id,))
-    s3_count = cursor.fetchone().get("s3_count", 0)
-
-    # Only pick from S3 images to ensure they are hosted
-    pool_size = s3_count
-    if pool_size <= 0:
-        return []
-
-    limit_n = min(count, pool_size)
-    
-    if pool_size <= limit_n:
-        offset = 0
-    else:
-        offset = random.randint(0, pool_size - limit_n)
-
-    cursor.execute(
-        """
-        SELECT ImageUrl AS url, Width AS width, Height AS height, KeywordTag AS tags
-        FROM ImageGeneration
-        WHERE ProductID = %s AND Provider = 's3'
-        ORDER BY ImageGenID ASC
-        LIMIT %s OFFSET %s
-        """,
-        (product_id, limit_n, offset),
-    )
-    rows = cursor.fetchall() or []
-    return [
-        {
-            "url": r.get("url"),
-            "urlLarge": r.get("url"),
-            "tags": r.get("tags"),
-            "width": r.get("width"),
-            "height": r.get("height"),
-        }
-        for r in rows
-        if r.get("url")
-    ]
-
-
-def _db_fetch_hosted_image_rows(cursor, product_id: int) -> list:
-    """Fetch all hosted image metadata rows for a product in stable order."""
-    cursor.execute(
-        """
-        SELECT ImageGenID, StorageKey, ContentType, ImageUrl
-        FROM ImageGeneration
-        WHERE ProductID = %s AND Provider = 's3'
-        ORDER BY ImageGenID ASC
-        """,
-        (product_id,),
-    )
-    return cursor.fetchall() or []
-
-
 def _sanitize_filename(value: str, fallback: str = "image-pool") -> str:
+    # Keep only safe filename chars and normalize spaces.
     safe = "".join(ch for ch in (value or "") if ch.isalnum() or ch in ("-", "_", " ")).strip()
     safe = safe.replace(" ", "-")
     return safe[:80] or fallback
 
 
 def _concat_quote(path: str) -> str:
+    # Escape single quotes for ffmpeg concat manifest format.
     return path.replace("'", "'\\''")
 
 
@@ -616,6 +454,7 @@ def _write_ppm(path: str, rgb):
     """Write an RGB uint8 numpy array to a binary PPM file."""
     import numpy as np
 
+    # Force uint8 pixel storage and validate 3-channel RGB layout.
     arr = np.asarray(rgb, dtype=np.uint8)
     h, w, c = arr.shape
     if c != 3:
@@ -628,6 +467,7 @@ def _write_ppm(path: str, rgb):
 
 def _normalize_image_to_ppm(ffmpeg_bin: str, input_path: str, output_path: str) -> bool:
     """Convert any single image into a one-frame PPM file via ffmpeg."""
+    # Single-frame conversion ensures all sources are normalized for concat.
     cmd = [
         ffmpeg_bin,
         "-y",
@@ -641,6 +481,7 @@ def _normalize_image_to_ppm(ffmpeg_bin: str, input_path: str, output_path: str) 
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=20, check=False)
     except Exception:
         return False
+    # Success requires return code and non-empty output file.
     return proc.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 0
 
 
@@ -660,6 +501,7 @@ def _generate_procedural_frame(
     """Frontend-style procedural generator ported from imageGenerationService.js."""
     import numpy as np
 
+    # Deterministic RNG seed so repeated runs are reproducible for same interval.
     rng = np.random.default_rng(int(seed))
 
     def _hex_to_rgb(hex_color: str) -> np.ndarray:
@@ -686,6 +528,7 @@ def _generate_procedural_frame(
         ["#006466", "#065A60", "#0B525B", "#144552", "#1B3A4B"],
     ]
 
+    # Clamp canvas to sensible minimum size.
     w = max(64, int(width))
     h = max(64, int(height))
     yy, xx = np.mgrid[0:h, 0:w]
@@ -695,7 +538,7 @@ def _generate_procedural_frame(
     palette_idx = int(np.floor(float(spectral_centroid) * len(palettes))) % len(palettes)
     palette = [_hex_to_rgb(c) for c in palettes[palette_idx]]
 
-    # Background gradient
+    # Background gradient creates the base color field.
     angle = float(rng.random() * np.pi * 2.0)
     gx1 = w / 2.0 + np.cos(angle) * w / 2.0
     gy1 = h / 2.0 + np.sin(angle) * h / 2.0
@@ -746,7 +589,7 @@ def _generate_procedural_frame(
         mask = dist <= edge
         _blend(frame[y0:y1, x0:x1, :], mask, color, alpha)
 
-    # Layer 2: geometric primitives (HFC-driven count)
+    # Layer 2: geometric primitives (HFC-driven count).
     geo_count = 5 + int(np.floor(_clamp01(hfc) * 15.0))
     for _ in range(geo_count):
         alpha = 0.1 + float(rng.random()) * 0.4
@@ -804,7 +647,7 @@ def _generate_procedural_frame(
             ring2 = np.abs(dist - size * 0.6) <= line_w
             _blend(frame, ring1 | ring2, color, alpha)
 
-    # Layer 3: particles
+    # Layer 3: particles (energy controls density).
     particle_count = int(np.floor(_clamp01(energy) * 100.0))
     for _ in range(particle_count):
         alpha = 0.3 + float(rng.random()) * 0.5
@@ -815,7 +658,7 @@ def _generate_procedural_frame(
         dist = np.sqrt((xx - px) ** 2 + (yy - py) ** 2)
         _blend(frame, dist <= pr, color, alpha)
 
-    # Layer 4: kick/light flare
+    # Layer 4: kick/light flare for stronger transient emphasis.
     if onset_type in ("kick", "percussion") or _clamp01(energy) > 0.6:
         flare_x = w * (0.2 + float(rng.random()) * 0.6)
         flare_y = h * (0.2 + float(rng.random()) * 0.6)
@@ -829,7 +672,7 @@ def _generate_procedural_frame(
         frame = np.clip(frame + flare, 0.0, 255.0)
 
     if glitch:
-        # Frontend glitch detection triggers stronger visual distortion bursts.
+        # Glitch mode applies channel shifts, scanlines, and speckle artifacts.
         shift_r = int(rng.integers(-10, 11))
         shift_g = int(rng.integers(-14, 15))
         shift_b = int(rng.integers(-8, 9))
@@ -845,6 +688,7 @@ def _generate_procedural_frame(
         if speckle_count > 0:
             frame[speckle_mask] = rng.integers(0, 255, size=(speckle_count, 3), dtype=np.uint8)
 
+    # Clamp to valid RGB range and write frame to PPM file.
     frame = np.clip(frame, 0.0, 255.0).astype(np.uint8)
 
     _write_ppm(out_path, frame)
@@ -855,6 +699,7 @@ def _detect_frontend_style_events(audio_file: str) -> dict:
     import librosa
     import numpy as np
 
+    # Load mono waveform at fixed sample rate to mirror frontend analysis cadence.
     y, sr = librosa.load(audio_file, sr=22050, mono=True)
     audio_duration = float(librosa.get_duration(y=y, sr=sr) or 0.0)
     if audio_duration <= 0.0:
@@ -874,6 +719,7 @@ def _detect_frontend_style_events(audio_file: str) -> dict:
     frame_count = int(byte_spectra.shape[1]) if byte_spectra.ndim == 2 else 0
     times = (np.arange(frame_count, dtype=np.float64) * float(hop_length) / float(sr)).tolist()
 
+    # Thresholds mirror frontend onset/glitch detector behavior.
     threshold = 0.5
     min_time_between_onsets_ms = 100.0
     min_time_between_glitches_ms = 3500.0
@@ -899,13 +745,14 @@ def _detect_frontend_style_events(audio_file: str) -> dict:
         now_ms = now_sec * 1000.0
         spectrum = byte_spectra[:, i]
         if not np.any(spectrum > 0):
+            # Reset previous-state values on silent bins.
             prev_spectrum = spectrum.copy()
             previous_onset_function = 0.0
             previous_kick_score = 0.0
             previous_snare_score = 0.0
             continue
 
-        # Frontend metrics
+        # Compute low/high frequency content, flux, centroid, and energy.
         kick_bin_end = min(10, int(spectrum.shape[0]))
         lfc = 0.0
         for k in range(kick_bin_end):
@@ -928,7 +775,7 @@ def _detect_frontend_style_events(audio_file: str) -> dict:
         spectral_centroid = float(np.sum(idx * mags) / mag_sum) if mag_sum > 1e-9 else 0.0
         energy = float(np.sum(mags * mags))
 
-        # History update (same order as frontend processFrame)
+        # Maintain rolling history used by anomaly scoring.
         flux_history.append(flux)
         centroid_history.append(spectral_centroid)
         if len(flux_history) > anomaly_history_size:
@@ -983,7 +830,7 @@ def _detect_frontend_style_events(audio_file: str) -> dict:
                 }
             )
 
-        # Frontend glitch anomaly detector
+        # Glitch detector: large z-score spikes in flux/centroid.
         if (now_ms - last_glitch_ms) >= min_time_between_glitches_ms and len(flux_history) >= 30:
             flux_arr = np.array(flux_history, dtype=np.float64)
             centroid_arr = np.array(centroid_history, dtype=np.float64)
@@ -1004,6 +851,7 @@ def _detect_frontend_style_events(audio_file: str) -> dict:
         previous_kick_score = float(kick_score)
         previous_snare_score = float(snare_score)
 
+    # Return timeline data used by video manifest generation.
     return {
         "audio_duration": audio_duration,
         "onsets": onset_events,
@@ -1028,6 +876,7 @@ def _build_concat_manifest_with_onsets(
         "audio_duration": float,
       }
     """
+    # Metadata returned to caller for logging/telemetry.
     result = {
         "used_onsets": False,
         "interval_count": 0,
@@ -1037,10 +886,12 @@ def _build_concat_manifest_with_onsets(
     }
 
     if not frame_paths:
+        # No frames means no manifest work possible.
         return result
 
     if audio_file and os.path.exists(audio_file) and os.path.getsize(audio_file) > 0:
         try:
+            # Detect onset/glitch events from audio to drive variable frame timing.
             detection = _detect_frontend_style_events(audio_file)
             audio_duration = float(detection.get("audio_duration") or 0.0)
             result["audio_duration"] = max(0.0, audio_duration)
@@ -1049,6 +900,7 @@ def _build_concat_manifest_with_onsets(
             glitches = detection.get("glitches") or []
 
             if audio_duration > 0.0 and onsets:
+                # Build sorted cut points from onsets with minimum separation.
                 times: list[float] = [0.0]
                 for evt in onsets:
                     ts = float(evt.get("time") or 0.0)
@@ -1071,6 +923,7 @@ def _build_concat_manifest_with_onsets(
                     onset_idx = 0
                     glitch_idx = 0
                     for idx in range(len(times) - 1):
+                        # Each interval maps to one displayed frame (real or procedural).
                         start_t = float(times[idx])
                         end_t = float(times[idx + 1])
                         duration = max(0.02, end_t - start_t)
@@ -1092,6 +945,7 @@ def _build_concat_manifest_with_onsets(
                         needs_procedural_fallback = duration < min_real_image_interval
 
                         if has_glitch or needs_procedural_fallback:
+                            # Very short/glitchy intervals get procedural frames for continuity.
                             proc_path = os.path.join(temp_dir, f"proc_{idx:06d}.ppm")
                             _generate_procedural_frame(
                                 out_path=proc_path,
@@ -1110,11 +964,13 @@ def _build_concat_manifest_with_onsets(
                             if has_glitch:
                                 result["glitch_count"] += 1
                         else:
+                            # Normal interval consumes next real hosted image.
                             frame = frame_paths[image_idx % len(frame_paths)]
                             image_idx += 1
                             segments.append((frame, duration))
 
                     with open(manifest_path, "w", encoding="utf-8") as manifest:
+                        # ffmpeg concat requires final file line repeated at the end.
                         for frame, duration in segments:
                             manifest.write(f"file '{_concat_quote(frame)}'\n")
                             manifest.write(f"duration {max(0.02, float(duration)):.5f}\n")
@@ -1122,10 +978,12 @@ def _build_concat_manifest_with_onsets(
 
                     return result
         except Exception as e:
+            # Graceful fallback when onset detection fails.
             console.log(f"⚠️ Onset detection unavailable, using fixed frame timing: {e}")
 
     with open(manifest_path, "w", encoding="utf-8") as manifest:
-        # Fallback: fixed-duration slideshow through all pool images.
+        # Fallback mode: when onset timing is unavailable, each frame is shown
+        # for the same fixed duration to keep output stable and predictable.
         for frame in frame_paths:
             manifest.write(f"file '{_concat_quote(frame)}'\n")
             manifest.write(f"duration {float(fallback_frame_duration):.3f}\n")
@@ -1135,6 +993,7 @@ def _build_concat_manifest_with_onsets(
 
 
 def _cleanup_pool_video_cache():
+    # Drop stale in-memory video blobs older than TTL.
     now = time.time()
     with _pool_video_cache_lock:
         expired = [k for k, v in _pool_video_cache.items() if (now - float(v.get("created_at") or 0)) > _POOL_VIDEO_CACHE_TTL_SECS]
@@ -1143,6 +1002,7 @@ def _cleanup_pool_video_cache():
 
 
 def _cache_pool_video(cache_key: str, content: bytes, filename: str):
+    # Store generated video bytes for short-term repeat download acceleration.
     with _pool_video_cache_lock:
         _pool_video_cache[cache_key] = {
             "content": content,
@@ -1152,19 +1012,21 @@ def _cache_pool_video(cache_key: str, content: bytes, filename: str):
 
 
 def _get_cached_pool_video(cache_key: str) -> Optional[dict]:
+    # Purge first, then read current key.
     _cleanup_pool_video_cache()
     with _pool_video_cache_lock:
         return _pool_video_cache.get(cache_key)
 
 
 def _parse_range_header(range_header: Optional[str], total_size: int) -> Optional[tuple[int, int]]:
+    # No Range header means caller should return full content (HTTP 200).
     if not range_header:
         return None
     raw = str(range_header).strip().lower()
     if not raw.startswith("bytes="):
         return None
 
-    # Only support single ranges: bytes=start-end
+    # Only support single byte ranges: bytes=start-end.
     value = raw[len("bytes="):]
     if "," in value:
         return None
@@ -1174,7 +1036,7 @@ def _parse_range_header(range_header: Optional[str], total_size: int) -> Optiona
         return None
 
     if start_str == "":
-        # Suffix range: bytes=-N
+        # Suffix-range format (bytes=-N) requests the last N bytes.
         try:
             length = int(end_str)
         except Exception:
@@ -1207,6 +1069,7 @@ def _parse_range_header(range_header: Optional[str], total_size: int) -> Optiona
 
 
 def _pool_video_http_response(video_bytes: bytes, filename: str, range_header: Optional[str] = None) -> Response:
+    # Validate output payload before crafting HTTP response.
     total = len(video_bytes)
     if total <= 0:
         raise HTTPException(status_code=500, detail="Generated video is empty")
@@ -1217,11 +1080,13 @@ def _pool_video_http_response(video_bytes: bytes, filename: str, range_header: O
         "Accept-Ranges": "bytes",
     }
 
+    # If no valid range requested, return full file.
     selected = _parse_range_header(range_header, total)
     if not selected:
         headers = {**common_headers, "Content-Length": str(total)}
         return Response(content=video_bytes, media_type="video/mp4", headers=headers)
 
+    # Range request path: serve partial content with RFC-compliant headers.
     start, end = selected
     chunk = video_bytes[start : end + 1]
     headers = {
@@ -1230,94 +1095,6 @@ def _pool_video_http_response(video_bytes: bytes, filename: str, range_header: O
         "Content-Length": str(len(chunk)),
     }
     return Response(content=chunk, media_type="video/mp4", status_code=206, headers=headers)
-
-
-def _db_insert_images(cursor, product_id: int, images: list, provider: str = "loremflickr"):
-    if not images:
-        return 0
-
-    payload = []
-    for img in images:
-        url = (img.get("url") or "").strip()
-        if not url:
-            continue
-        tags = (img.get("tags") or "").strip()
-        if _contains_banned_figure_terms(tags) or _contains_banned_figure_terms(url):
-            continue
-        payload.append(
-            (
-                product_id,
-                provider,
-                (tags or None),
-                url,
-                _hash_url(url),
-                int(img.get("width") or 1980),
-                int(img.get("height") or 1280),
-                int(img.get("lock_id") or 0) or None,
-            )
-        )
-
-    if not payload:
-        return 0
-
-    cursor.executemany(
-        """
-        INSERT IGNORE INTO ImageGeneration
-            (ProductID, Provider, KeywordTag, ImageUrl, UrlHash, Width, Height, LockId)
-        VALUES
-            (%s, %s, %s, %s, %s, %s, %s, %s)
-        """,
-        payload,
-    )
-    return cursor.rowcount
-
-
-def _db_insert_hosted_images(cursor, product_id: int, images: list):
-    """Insert hosted images with S3 storage metadata."""
-    if not images:
-        return 0
-
-    payload = []
-    for img in images:
-        url = (img.get("url") or "").strip()
-        if not url:
-            continue
-        tags = (img.get("tags") or "").strip()
-        source_url = (img.get("sourceUrl") or "").strip()
-        if _contains_banned_figure_terms(tags) or _contains_banned_figure_terms(source_url) or _contains_banned_figure_terms(url):
-            continue
-        payload.append(
-            (
-                product_id,
-                "s3",
-                (tags or None),
-                (source_url or None),
-                (img.get("storageKey") or None),
-                (img.get("contentType") or None),
-                int(img.get("byteSize") or 0) or None,
-                url,
-                (img.get("urlHash") or _hash_url(url)),
-                int(img.get("width") or 1980),
-                int(img.get("height") or 1280),
-                int(img.get("lock_id") or 0) or None,
-            )
-        )
-
-    if not payload:
-        return 0
-
-    cursor.executemany(
-        """
-        INSERT IGNORE INTO ImageGeneration
-            (ProductID, Provider, KeywordTag, SourceUrl, StorageKey, ContentType, ByteSize,
-             ImageUrl, UrlHash, Width, Height, LockId)
-        VALUES
-            (%s, %s, %s, %s, %s, %s, %s,
-             %s, %s, %s, %s, %s)
-        """,
-        payload,
-    )
-    return cursor.rowcount
 
 
 def _host_loremflickr_images_to_s3(
@@ -1333,6 +1110,7 @@ def _host_loremflickr_images_to_s3(
 
     If S3 isn't configured, returns an empty list.
     """
+    # Without bucket config, skip hosting and report all as failed.
     if not IMAGE_POOL_S3_BUCKET:
         return [], list(images or [])
 
@@ -1349,6 +1127,7 @@ def _host_loremflickr_images_to_s3(
         success = False
         for attempt in range(max_retries):
             try:
+                # Download original image bytes with bounded timeout/size.
                 data, content_type = _download_image_bytes(source_url, timeout_secs=download_timeout_secs)
 
                 rejection = _moderation_rejection_reason(data)
@@ -1392,6 +1171,7 @@ def _host_loremflickr_images_to_s3(
                     time.sleep(per_image_delay_secs)  # Add a polite delay to respect rate limits
                 break
             except Exception as e:
+                # Retry transient failures; stop early for moderation rejects.
                 console.log(f"⚠️ Failed to host image for ProductID={product_id} (attempt {attempt + 1}/{max_retries}): {e}")
                 if "Moderation rejected image" in str(e):
                     break
@@ -1418,12 +1198,14 @@ def _quick_warmup_s3_images(
     max_images: int = 1,
 ) -> int:
     """Try a tiny synchronous warmup quickly to avoid request timeouts."""
+    # Fast-path guard when feature is disabled.
     if not _EXTERNAL_IMAGE_GENERATION_ENABLED:
         return 0
 
     if max_images <= 0:
         return 0
 
+    # Build a small candidate set and host a minimal number of images synchronously.
     keywords = _build_keywords_from_features(
         mood=mood,
         energy=energy,
@@ -1451,7 +1233,13 @@ def _quick_warmup_s3_images(
         if not conn:
             return 0
         with conn.cursor() as cursor:
-            inserted = _db_insert_hosted_images(cursor, product_id, hosted_images)
+            inserted = _db_insert_hosted_images(
+                cursor,
+                product_id,
+                hosted_images,
+                _contains_banned_figure_terms,
+                _hash_url,
+            )
             conn.commit()
             return int(inserted or 0)
 
@@ -1470,6 +1258,7 @@ def ensure_song_image_pool(
     genre: Optional[str] = None,
 ) -> int:
     """Ensure there are at least desired_size S3-hosted images stored for a song."""
+    # Global toggle and product ID guardrails.
     if not _EXTERNAL_IMAGE_GENERATION_ENABLED:
         return 0
 
@@ -1480,6 +1269,7 @@ def ensure_song_image_pool(
         if not conn:
             return 0
         with conn.cursor() as cursor:
+            # Trim excess rows first so pool size remains bounded.
             trimmed_rows, trimmed_keys = _db_trim_song_pool_by_provider_with_keys(cursor, product_id, "s3", int(desired_size))
             if trimmed_rows > 0:
                 _delete_s3_keys_best_effort(trimmed_keys)
@@ -1487,6 +1277,7 @@ def ensure_song_image_pool(
             existing = _db_count_images_by_provider(cursor, product_id, "s3")
             missing = max(0, int(desired_size) - existing)
             if missing <= 0:
+                # Nothing to add; commit trim changes and return.
                 conn.commit()
                 return 0
 
@@ -1523,7 +1314,13 @@ def ensure_song_image_pool(
             hosted_images, failed_images = _host_loremflickr_images_to_s3(product_id, images)
             inserted = 0
             if hosted_images:
-                inserted += _db_insert_hosted_images(cursor, product_id, hosted_images)
+                inserted += _db_insert_hosted_images(
+                    cursor,
+                    product_id,
+                    hosted_images,
+                    _contains_banned_figure_terms,
+                    _hash_url,
+                )
 
             if failed_images:
                 console.log(
@@ -1536,6 +1333,7 @@ def ensure_song_image_pool(
 
 def precompute_all_song_image_pools(pool_size: int = _DEFAULT_POOL_SIZE) -> dict:
     """Precompute per-song image pools so the frontend never needs placeholders."""
+    # Return structured no-op summary when generation is disabled.
     if not _EXTERNAL_IMAGE_GENERATION_ENABLED:
         return {
             "songs": 0,
@@ -1546,6 +1344,7 @@ def precompute_all_song_image_pools(pool_size: int = _DEFAULT_POOL_SIZE) -> dict
             "elapsed_seconds": 0.0,
         }
 
+    # Collect aggregate progress metrics for long-running precompute jobs.
     started = time.time()
     summary = {
         "songs": 0,
@@ -1580,6 +1379,7 @@ def precompute_all_song_image_pools(pool_size: int = _DEFAULT_POOL_SIZE) -> dict
             budget_exhausted = False
 
             for row in rows:
+                # Process one product at a time, trimming overflow first.
                 pid = int(row["ProductID"])
                 title = row.get("AlbumTitle") or ""
                 trimmed_rows, trimmed_keys = _db_trim_song_pool_by_provider_with_keys(cursor, pid, "s3", int(pool_size))
@@ -1591,6 +1391,7 @@ def precompute_all_song_image_pools(pool_size: int = _DEFAULT_POOL_SIZE) -> dict
                 if existing >= int(pool_size):
                     summary["skipped"] += 1
                 else:
+                    # Bounded retries per song prevent endless loops on bad inputs.
                     rounds = 0
                     no_progress_rounds = 0
                     max_rounds_per_song = 8
@@ -1638,7 +1439,14 @@ def precompute_all_song_image_pools(pool_size: int = _DEFAULT_POOL_SIZE) -> dict
 
                         inserted_round = 0
                         if hosted_images:
-                            inserted_round += _db_insert_hosted_images(cursor, pid, hosted_images)
+                            # Track in-memory budget counters as new hosted bytes are added.
+                            inserted_round += _db_insert_hosted_images(
+                                cursor,
+                                pid,
+                                hosted_images,
+                                _contains_banned_figure_terms,
+                                _hash_url,
+                            )
                             for hosted in hosted_images:
                                 total_s3_bytes += int(hosted.get("byteSize") or 0)
                                 total_s3_images += 1
@@ -1660,6 +1468,7 @@ def precompute_all_song_image_pools(pool_size: int = _DEFAULT_POOL_SIZE) -> dict
                             break
 
                     if existing < int(pool_size):
+                        # Mark songs that could not reach target size.
                         summary["underfilled_songs"] += 1
 
                 summary["songs"] += 1
@@ -1682,691 +1491,13 @@ def precompute_all_song_image_pools(pool_size: int = _DEFAULT_POOL_SIZE) -> dict
 
 
 # ============================================
-# AUDIO-FEATURE → VERIFIED KEYWORD MAPPING
+# API ROUTER COMPOSITION
 # ============================================
-
-# Russell's Circumplex Model moods → verified safe keywords only
-_mood_keyword_map = {
-    "energetic": ["sunset", "canyon", "aurora", "cliff", "nebula", "sandstone", "glacier"],
-    "happy":     ["flower", "rainbow", "butterfly", "fern", "lagoon", "coral", "aurora", "sky"],
-    "calm":      ["ocean", "forest", "mountain", "river", "cloud", "waterfall", "fog", "snow", "fjord"],
-    "sad":       ["rain", "fog", "tundra", "snow", "cloud", "desert", "cavern"],
-}
-
-# Song-title keywords → verified safe keywords
-_title_keyword_map = {
-    "acid":     ["abstract", "aurora"],
-    "alien":    ["sky", "desert", "nebula"],
-    "bass":     ["water", "ocean", "river"],
-    "dream":    ["cloud", "sky", "fog"],
-    "ghost":    ["fog", "tundra", "snow"],
-    "glitch":   ["abstract", "geode", "crystal"],
-    "night":    ["tundra", "nebula", "sky"],
-    "space":    ["sky", "nebula", "aurora"],
-    "dark":     ["cavern", "fog", "rain"],
-    "light":    ["sky", "aurora", "rainbow"],
-    "fire":     ["sunset", "canyon", "sandstone"],
-    "water":    ["water", "ocean", "waterfall"],
-    "electric": ["aurora", "nebula", "glacier"],
-    "cyber":    ["abstract", "crystal", "geode"],
-    "pulse":    ["water", "river", "ocean"],
-    "wave":     ["ocean", "water", "river"],
-    "zen":      ["fern", "forest", "flower"],
-    "chaos":    ["canyon", "cliff", "rain"],
-    "crystal":  ["snow", "waterfall", "crystal"],
-    "shadow":   ["cavern", "fog", "cloud"],
-    "storm":    ["rain", "cloud", "mountain"],
-    "echo":     ["mountain", "river", "fog"],
-    "drift":    ["cloud", "river", "driftwood"],
-    "void":     ["nebula", "sky", "desert"],
-    "neon":     ["aurora", "abstract", "nebula"],
-    "sun":      ["sky", "desert", "flower"],
-    "moon":     ["tundra", "sky", "fog"],
-    "rain":     ["rain", "fog", "cloud"],
-    "ocean":    ["ocean", "water", "river"],
-    "forest":   ["forest", "tree", "fern"],
-    "mountain": ["mountain", "snow", "landscape"],
-    "flower":   ["flower", "fern", "butterfly"],
-    "sky":      ["sky", "cloud", "aurora"],
-    "city":     ["abstract", "sandstone", "crystal"],
-}
-
-# Genre → verified safe keywords
-_genre_keyword_map = {
-    "electronic": ["abstract", "nebula", "aurora"],
-    "techno":     ["geode", "crystal", "stalactite"],
-    "ambient":    ["fog", "cloud", "ocean"],
-    "rock":       ["canyon", "mountain", "cliff"],
-    "pop":        ["flower", "rainbow", "butterfly"],
-    "classical":  ["fern", "forest", "river"],
-    "jazz":       ["driftwood", "sunset", "fog"],
-    "hiphop":     ["sandstone", "abstract", "canyon"],
-    "metal":      ["cavern", "stalactite", "tundra"],
-}
-
-# Energy-level intensity keywords (all verified)
-_energy_keywords = {
-    "high":   ["sunset", "canyon", "cliff", "glacier", "nebula"],
-    "medium": ["sandstone", "lagoon", "valley", "river", "mountain"],
-    "low":    ["fog", "cloud", "snow", "moss", "pebble"],
-}
-
-
-def _derive_mood(energy: float, valence: float) -> str:
-    """Derive mood from energy and valence using Russell's Circumplex Model."""
-    if energy > 0.6 and valence > 0.5:
-        return "energetic"
-    elif valence > 0.5:
-        return "happy"
-    elif energy < 0.4 and valence < 0.5:
-        return "sad"
-    else:
-        return "calm"
-
-
-def _build_keywords_from_features(
-    mood: str = None,
-    energy: float = None,
-    valence: float = None,
-    tempo: float = None,
-    danceability: float = None,
-    acousticness: float = None,
-    genre: str = None,
-    title: str = None,
-) -> list:
-    """
-    Build a list of verified safe Flickr keywords from audio features.
-    Uses song title words as primary differentiator, mood for atmosphere,
-    genre for style, and energy/tempo for intensity.
-    All output keywords are from the verified safe set only.
-    """
-    keywords = []
-    used = set()
-
-    def _add(kw_list, max_n=3):
-        added = 0
-        for kw in kw_list:
-            if kw not in used and kw in _VERIFIED_KEYWORDS:
-                keywords.append(kw)
-                used.add(kw)
-                added += 1
-                if added >= max_n:
-                    break
-
-    # 1. Title keywords (primary differentiator — makes each song unique)
-    if title:
-        title_tokens = _tokenize_text(title)
-        if not any(t in _BANNED_FIGURE_TERMS for t in title_tokens):
-            for word in title_tokens:
-                for key, kws in _title_keyword_map.items():
-                    if key in word or word in key:
-                        _add(kws, 2)
-                        break
-
-    # 2. Mood keywords (atmosphere)
-    mood_key = (mood or "").lower().strip()
-    if not mood_key or mood_key == "unknown":
-        e = energy if energy is not None else 0.5
-        v = valence if valence is not None else 0.5
-        mood_key = _derive_mood(e, v)
-    mood_kws = _mood_keyword_map.get(mood_key, _mood_keyword_map["calm"])
-    _add(mood_kws, 3)
-
-    # 3. Genre keywords
-    if genre:
-        genre_lower = genre.lower().strip()
-        for g_key, g_kws in _genre_keyword_map.items():
-            if g_key in genre_lower or genre_lower in g_key:
-                _add(g_kws, 2)
-                break
-
-    # 4. Energy/tempo intensity keywords
-    if energy is not None:
-        if energy > 0.7:
-            _add(_energy_keywords["high"], 2)
-        elif energy > 0.4:
-            _add(_energy_keywords["medium"], 2)
-        else:
-            _add(_energy_keywords["low"], 2)
-
-    # 5. Feature-specific modifiers
-    if acousticness is not None and acousticness > 0.7:
-        _add(["forest", "fern", "river"], 1)
-    if tempo is not None and tempo > 140:
-        _add(["sunset", "canyon", "glacier"], 1)
-
-    # Ensure at least 3 keywords
-    if len(keywords) < 3:
-        _add(["abstract", "landscape", "sky", "ocean", "mountain"], 3 - len(keywords))
-
-    random.shuffle(keywords)
-    return keywords
-
-
-# ============================================
-# API ENDPOINTS
-# ============================================
-
-@router.get("/search")
-async def search_images(
-    prompt: str = Query(..., description="Search keywords for image retrieval"),
-    count: int = Query(20, ge=1, le=1000, description="Number of images to return"),
-    nocache: bool = Query(False, description="Skip cache for fresh images"),
-):
-    """Search for real photographs matching keyword tags via LoremFlickr."""
-    if not _EXTERNAL_IMAGE_GENERATION_ENABLED:
-        return {
-            "images": [],
-            "source": "external_generation_disabled",
-            "prompt": prompt,
-        }
-
-    if not nocache:
-        cached = _get_cached(prompt)
-        if cached:
-            shuffled = list(cached)
-            random.shuffle(shuffled)
-            return {"images": shuffled[:count], "source": "cache", "prompt": prompt}
-
-    # Filter to only verified keywords
-    keywords = _safe_prompt_keywords(prompt)
-    if not keywords:
-        keywords = ["abstract", "landscape", "sky"]
-
-    images = _generate_loremflickr_urls(keywords, count, nocache=nocache)
-    if not nocache:
-        _set_cached(prompt, images)
-    return {"images": images, "source": "loremflickr", "prompt": prompt}
-
-
-@router.get("/pool")
-def get_image_pool(
-    request: Request,
-    song_title: str = Query(..., description="Song title for contextual image retrieval"),
-    song_id: Optional[str] = Query(None, description="Song ID for cache keying"),
-    count: int = Query(30, ge=1, le=1000, description="Number of images for the pool"),
-    nocache: bool = Query(False, description="Skip cache for fresh refill images"),
-    pad_external: bool = Query(False, description="Pad DB pools with external LoremFlickr URLs to prevent empty responses"),
-    mood: Optional[str] = Query(None, description="Song mood (energetic/happy/calm/sad)"),
-    energy: Optional[float] = Query(None, ge=0, le=1, description="Energy level 0-1"),
-    valence: Optional[float] = Query(None, ge=0, le=1, description="Valence (positivity) 0-1"),
-    tempo: Optional[float] = Query(None, description="Tempo in BPM"),
-    danceability: Optional[float] = Query(None, ge=0, le=1, description="Danceability 0-1"),
-    acousticness: Optional[float] = Query(None, ge=0, le=1, description="Acousticness 0-1"),
-    genre: Optional[str] = Query(None, description="Genre from AudioFeatures"),
-):
-    """
-    LoremFlickr Mood-Aware Image Pool Generation.
-
-    Uses ALL cached audio features to build verified Flickr keywords.
-    Each URL uses a SINGLE keyword (no comma-separated tags) to avoid HTTP 500.
-    Returns unique real photographs — one for every onset detection.
-
-    When nocache=true, bypasses cache and appends cache-busters for fresh URLs.
-    Count can go up to 1000 for infinite onset generation.
-    """
-    product_id = _safe_int(song_id)
-
-    # If there's no DB-backed ProductID, we only serve persisted hosted images.
-    if not product_id or product_id == 0:
-        return {
-            "images": [],
-            "source": "invalid_song_id",
-            "song_title": song_title,
-            "tags_used": [],
-            "mood": mood,
-        }
-
-    if not _is_library_product_id(int(product_id)):
-        return {
-            "images": [],
-            "source": "library_song_only",
-            "song_title": song_title,
-            "tags_used": [],
-            "mood": mood,
-        }
-
-    # Validate ProductID exists so refill attempts don't silently no-op.
-    try:
-        with get_db_connection() as conn:
-            if not conn:
-                raise HTTPException(status_code=503, detail="Database connection unavailable")
-            with conn.cursor() as cursor:
-                if not _db_product_exists(cursor, int(product_id)):
-                    return {
-                        "images": [],
-                        "source": "invalid_song_id_not_found",
-                        "song_title": song_title,
-                        "tags_used": [],
-                        "mood": mood,
-                    }
-    except HTTPException:
-        raise
-    except Exception as e:
-        console.log(f"❌ Product existence check failed for ProductID={product_id}: {e}")
-        return {
-            "images": [],
-            "source": "db_error",
-            "song_title": song_title,
-            "tags_used": [],
-            "mood": mood,
-        }
-
-    # External URL generation is disabled. nocache only affects clients; server still serves DB/S3 pool.
-    if nocache:
-        try:
-            with get_db_connection() as conn:
-                if not conn:
-                    raise HTTPException(status_code=503, detail="Database connection unavailable")
-                with conn.cursor() as cursor:
-                    trimmed_rows, trimmed_keys = _db_trim_song_pool_by_provider_with_keys(cursor, int(product_id), "s3", int(_DEFAULT_POOL_SIZE))
-                    if trimmed_rows > 0:
-                        _delete_s3_keys_best_effort(trimmed_keys)
-                    conn.commit()
-                    images = _db_fetch_images(cursor, product_id, count)
-            images = [
-                {**img, "url": _absolute_url(request, img.get("url")), "urlLarge": _absolute_url(request, img.get("urlLarge") or img.get("url"))}
-                for img in (images or [])
-            ]
-            return {
-                "images": images,
-                "source": "db_pool_nocache_ignored",
-                "song_title": song_title,
-                "tags_used": [],
-                "mood": mood,
-            }
-        except HTTPException:
-            raise
-        except Exception as e:
-            console.log(f"❌ Image pool DB error for ProductID={product_id}: {e}")
-            return {
-                "images": [],
-                "source": "db_error",
-                "song_title": song_title,
-                "tags_used": [],
-                "mood": mood,
-            }
-
-    # Normal path: serve from DB pool (no blocking backfill in-request).
-    try:
-        images = []
-        with get_db_connection() as conn:
-            if not conn:
-                raise HTTPException(status_code=503, detail="Database connection unavailable")
-            with conn.cursor() as cursor:
-                trimmed_rows, trimmed_keys = _db_trim_song_pool_by_provider_with_keys(cursor, int(product_id), "s3", int(_DEFAULT_POOL_SIZE))
-                if trimmed_rows > 0:
-                    _delete_s3_keys_best_effort(trimmed_keys)
-                conn.commit()
-                images = _db_fetch_images(cursor, product_id, count)
-
-        missing_target = max(0, int(_DEFAULT_POOL_SIZE) - len(images or []))
-        if missing_target > 0:
-            # Schedule a background refill so future calls return stable hosted URLs.
-            desired_size = int(_DEFAULT_POOL_SIZE)
-            _schedule_pool_refill(
-                product_id=int(product_id),
-                song_title=song_title,
-                desired_size=int(desired_size),
-                mood=mood,
-                energy=energy,
-                valence=valence,
-                tempo=tempo,
-                danceability=danceability,
-                acousticness=acousticness,
-                genre=genre,
-            )
-
-            # For tiny requests (thumbnail mode) with no hosted images yet,
-            # do a small synchronous warmup so first paint can still render.
-            if len(images or []) == 0 and int(count) <= 3:
-                try:
-                    inserted_now = _quick_warmup_s3_images(
-                        int(product_id),
-                        song_title,
-                        mood=mood,
-                        energy=energy,
-                        valence=valence,
-                        tempo=tempo,
-                        danceability=danceability,
-                        acousticness=acousticness,
-                        genre=genre,
-                        max_images=1,
-                    )
-                    if inserted_now > 0:
-                        with get_db_connection() as retry_conn:
-                            if retry_conn:
-                                with retry_conn.cursor() as retry_cursor:
-                                    trimmed_rows, trimmed_keys = _db_trim_song_pool_by_provider_with_keys(retry_cursor, int(product_id), "s3", int(_DEFAULT_POOL_SIZE))
-                                    if trimmed_rows > 0:
-                                        _delete_s3_keys_best_effort(trimmed_keys)
-                                    retry_conn.commit()
-                                    images = _db_fetch_images(retry_cursor, product_id, count)
-                    missing_target = max(0, int(_DEFAULT_POOL_SIZE) - len(images or []))
-                except Exception as warm_err:
-                    console.log(f"⚠️ S3 warmup failed for ProductID={product_id}: {warm_err}")
-
-            # External padding disabled by design; keep this endpoint S3/DB-only.
-
-        # Absolutize any relative URLs (e.g. /api/images/file/..)
-        images = [
-            {**img, "url": _absolute_url(request, img.get("url")), "urlLarge": _absolute_url(request, img.get("urlLarge") or img.get("url"))}
-            for img in (images or [])
-        ]
-
-        return {
-            "images": images,
-            "source": (
-                "db_pool"
-                if missing_target == 0
-                else "db_pool_short_external_disabled"
-                if not _EXTERNAL_IMAGE_GENERATION_ENABLED
-                else "db_pool_short_refill_scheduled"
-            ),
-            "song_title": song_title,
-            "tags_used": [],
-            "mood": mood,
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        # IMPORTANT: Don't 500 the UI when MySQL is slow/unavailable.
-        # External URL generation is disabled; return an empty set.
-        console.log(f"❌ Image pool DB error for ProductID={product_id}: {e}")
-        return {
-            "images": [],
-            "source": "db_error",
-            "song_title": song_title,
-            "tags_used": [],
-            "mood": mood,
-        }
-
-
-@router.get("/file/{product_id}/{url_hash}")
-def get_hosted_image_file(product_id: int, url_hash: str):
-    """Serve a hosted image by stable URL (browser-cacheable)."""
-    if not IMAGE_POOL_S3_BUCKET:
-        raise HTTPException(status_code=503, detail="S3 bucket not configured")
-
-    # Look up the object key from the DB when available.
-    row = {}
-    try:
-        with get_db_connection() as conn:
-            if conn:
-                with conn.cursor() as cursor:
-                    cursor.execute(
-                        """
-                        SELECT StorageKey, ContentType
-                        FROM ImageGeneration
-                        WHERE ProductID = %s AND UrlHash = %s
-                        LIMIT 1
-                        """,
-                        (int(product_id), str(url_hash)),
-                    )
-                    row = cursor.fetchone() or {}
-    except Exception as e:
-        console.log(f"⚠️ Hosted image DB lookup failed for ProductID={product_id}, UrlHash={url_hash}: {e}")
-
-    storage_key = (row or {}).get("StorageKey")
-
-    # DB-less fallback: infer the object key pattern used by hosting.
-    candidate_keys: list[str] = []
-    if storage_key:
-        candidate_keys.append(storage_key)
-    else:
-        for ext in (".jpg", ".jpeg", ".png", ".webp", ".gif", ".img"):
-            candidate_keys.append(f"{IMAGE_POOL_S3_PREFIX}/{int(product_id)}/{str(url_hash)}{ext}")
-
-    obj = None
-    for key in candidate_keys:
-        obj = get_object_stream(IMAGE_POOL_S3_BUCKET, key)
-        if obj:
-            break
-
-    if not obj:
-        raise HTTPException(status_code=404, detail="Image object missing")
-
-    body, content_type, _content_length = obj
-    headers = {
-        "Cache-Control": "public, max-age=31536000, immutable",
-        "ETag": f'"{url_hash}"',
-    }
-    return StreamingResponse(body, media_type=(content_type or row.get("ContentType") or "image/jpeg"), headers=headers)
-
-
-@router.get("/pool-video")
-def download_image_pool_video(
-    request: Request,
-    song_id: int = Query(..., gt=0, description="Song ProductID for hosted pool video export"),
-    song_title: str = Query("image-pool", description="Song title used in the downloaded filename"),
-    audio_url: Optional[str] = Query(None, description="Optional song audio URL to mux into the video"),
-    frame_duration: float = Query(0.45, ge=0.1, le=3.0, description="Seconds each image stays on screen"),
-    onset_sync: bool = Query(True, description="When true and audio is available, switch images on detected audio onsets"),
-):
-    """Create and download an MP4 slideshow containing all hosted pool images for a song.
-
-    If audio_url is provided, the visuals loop to match full audio duration.
-    Supports HTTP byte ranges for resumable downloads.
-    """
-    if not IMAGE_POOL_S3_BUCKET:
-        raise HTTPException(status_code=503, detail="S3 bucket not configured")
-
-    ffmpeg_bin = shutil.which("ffmpeg")
-    if not ffmpeg_bin:
-        raise HTTPException(status_code=503, detail="ffmpeg is not available on this server")
-
-    cache_key = hashlib.md5(
-        f"v3|{int(song_id)}|{song_title}|{audio_url or ''}|{float(frame_duration):.3f}|{bool(onset_sync)}".encode("utf-8")
-    ).hexdigest()
-    cached = _get_cached_pool_video(cache_key)
-    if cached and cached.get("content"):
-        return _pool_video_http_response(
-            cached.get("content") or b"",
-            cached.get("filename") or f"{_sanitize_filename(song_title)}-image-pool.mp4",
-            request.headers.get("range"),
-        )
-
-    rows = []
-    try:
-        with get_db_connection() as conn:
-            if not conn:
-                raise HTTPException(status_code=503, detail="Database connection unavailable")
-            with conn.cursor() as cursor:
-                rows = _db_fetch_hosted_image_rows(cursor, int(song_id))
-    except HTTPException:
-        raise
-    except Exception as e:
-        console.log(f"❌ Pool video DB lookup failed for ProductID={song_id}: {e}")
-        raise HTTPException(status_code=500, detail="Failed to load image pool metadata")
-
-    if not rows:
-        raise HTTPException(status_code=404, detail="No hosted image pool found for this song")
-
-    with tempfile.TemporaryDirectory(prefix=f"pool_video_{int(song_id)}_") as tmp_dir:
-        frame_paths: list[str] = []
-
-        for idx, row in enumerate(rows):
-            storage_key = (row or {}).get("StorageKey")
-            if not storage_key:
-                continue
-
-            obj = get_object_stream(IMAGE_POOL_S3_BUCKET, storage_key)
-            if not obj:
-                continue
-
-            body, content_type, _content_length = obj
-            try:
-                data = body.read()
-            except Exception:
-                data = None
-            finally:
-                try:
-                    body.close()
-                except Exception:
-                    pass
-
-            if not data:
-                continue
-
-            content_type = ((row or {}).get("ContentType") or "").strip().lower()
-            source_ext = _ext_from_content_type(content_type)
-            source_path = os.path.join(tmp_dir, f"source_{idx:05d}{source_ext}")
-            with open(source_path, "wb") as frame_file:
-                frame_file.write(data)
-
-            normalized_path = os.path.join(tmp_dir, f"frame_{idx:05d}.ppm")
-            if _normalize_image_to_ppm(ffmpeg_bin, source_path, normalized_path):
-                frame_paths.append(normalized_path)
-            else:
-                console.log(f"⚠️ Failed to normalize pool image frame ProductID={song_id} idx={idx}")
-
-        if not frame_paths:
-            raise HTTPException(status_code=404, detail="Hosted pool images are missing in storage")
-
-        audio_file = ""
-        if audio_url:
-            audio_file = os.path.join(tmp_dir, "song_audio.bin")
-            try:
-                timeout = (10, 60)
-                with requests.get(audio_url, stream=True, timeout=timeout, allow_redirects=True) as audio_resp:
-                    audio_resp.raise_for_status()
-                    max_audio_bytes = 150 * 1024 * 1024
-                    written = 0
-                    with open(audio_file, "wb") as out_audio:
-                        for chunk in audio_resp.iter_content(chunk_size=64 * 1024):
-                            if not chunk:
-                                continue
-                            written += len(chunk)
-                            if written > max_audio_bytes:
-                                raise ValueError("Audio file too large")
-                            out_audio.write(chunk)
-            except Exception as e:
-                console.log(f"⚠️ Pool video audio download failed ProductID={song_id}: {e}")
-                audio_file = ""
-
-        concat_file = os.path.join(tmp_dir, "frames.txt")
-        manifest_meta = {
-            "used_onsets": False,
-            "interval_count": 0,
-            "audio_duration": 0.0,
-        }
-        if onset_sync and audio_file and os.path.exists(audio_file) and os.path.getsize(audio_file) > 0:
-            manifest_meta = _build_concat_manifest_with_onsets(
-                manifest_path=concat_file,
-                temp_dir=tmp_dir,
-                frame_paths=frame_paths,
-                audio_file=audio_file,
-                fallback_frame_duration=float(frame_duration),
-            )
-        else:
-            manifest_meta = _build_concat_manifest_with_onsets(
-                manifest_path=concat_file,
-                temp_dir=tmp_dir,
-                frame_paths=frame_paths,
-                audio_file="",
-                fallback_frame_duration=float(frame_duration),
-            )
-
-        silent_video_file = os.path.join(tmp_dir, "pool_video_silent.mp4")
-        build_cmd = [
-            ffmpeg_bin,
-            "-y",
-            "-f",
-            "concat",
-            "-safe",
-            "0",
-            "-i",
-            concat_file,
-            "-vsync",
-            "vfr",
-            "-vf",
-            "scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2:black",
-            "-c:v",
-            "libx264",
-            "-pix_fmt",
-            "yuv420p",
-            "-movflags",
-            "+faststart",
-            silent_video_file,
-        ]
-
-        try:
-            proc = subprocess.run(build_cmd, capture_output=True, text=True, timeout=180, check=False)
-        except subprocess.TimeoutExpired:
-            raise HTTPException(status_code=504, detail="Video generation timed out")
-
-        if proc.returncode != 0 or not os.path.exists(silent_video_file):
-            console.log(
-                f"❌ ffmpeg pool video generation failed ProductID={song_id}: "
-                f"returncode={proc.returncode} stderr={proc.stderr[-1200:] if proc.stderr else ''}"
-            )
-            raise HTTPException(status_code=500, detail="Failed to generate image pool video")
-
-        final_video_file = silent_video_file
-
-        if audio_file and os.path.exists(audio_file) and os.path.getsize(audio_file) > 0:
-                with_audio_file = os.path.join(tmp_dir, "pool_video_with_audio.mp4")
-                mux_cmd = [
-                    ffmpeg_bin,
-                    "-y",
-                    "-stream_loop",
-                    "-1",
-                    "-i",
-                    silent_video_file,
-                    "-i",
-                    audio_file,
-                    "-map",
-                    "0:v:0",
-                    "-map",
-                    "1:a:0",
-                    "-c:v",
-                    "libx264",
-                    "-pix_fmt",
-                    "yuv420p",
-                    "-c:a",
-                    "aac",
-                    "-b:a",
-                    "192k",
-                    "-shortest",
-                    "-movflags",
-                    "+faststart",
-                    with_audio_file,
-                ]
-
-                try:
-                    mux_proc = subprocess.run(mux_cmd, capture_output=True, text=True, timeout=240, check=False)
-                    if mux_proc.returncode == 0 and os.path.exists(with_audio_file):
-                        final_video_file = with_audio_file
-                        if manifest_meta.get("used_onsets"):
-                            console.log(
-                                f"🎬 Pool video onset-sync ProductID={song_id} "
-                                f"intervals={manifest_meta.get('interval_count')} "
-                                f"audio_secs={manifest_meta.get('audio_duration'):.2f} "
-                                f"procedural={manifest_meta.get('procedural_count')} "
-                                f"glitch={manifest_meta.get('glitch_count')}"
-                            )
-                    else:
-                        console.log(
-                            f"⚠️ Pool video mux failed ProductID={song_id}: "
-                            f"returncode={mux_proc.returncode} stderr={mux_proc.stderr[-1200:] if mux_proc.stderr else ''}"
-                        )
-                except subprocess.TimeoutExpired:
-                    console.log(f"⚠️ Pool video mux timeout ProductID={song_id}")
-
-        with open(final_video_file, "rb") as video_file:
-            video_bytes = video_file.read()
-
-    filename = f"{_sanitize_filename(song_title)}-image-pool.mp4"
-    _cache_pool_video(cache_key, video_bytes, filename)
-    return _pool_video_http_response(video_bytes, filename, request.headers.get("range"))
-
-
-@router.get("/health")
-async def image_service_health():
-    """Health check for the image generation service."""
-    return {
-        "status": "ok",
-        "cache_size": len(_image_cache),
-        "providers": ["loremflickr", "s3"],
-        "verified_keywords": len(_VERIFIED_KEYWORDS),
-    }
+# Endpoints are split into dedicated modules for readability:
+# - image_generation_endpoints.py: search/pool/file/health
+# - image_generation_video.py: pool-video export
+from .image_generation_endpoints import router as endpoints_router
+from .image_generation_video import router as video_router
+
+router.include_router(endpoints_router)
+router.include_router(video_router)
