@@ -1198,28 +1198,52 @@ def _order_agreement(a: list[int], b: list[int]) -> float:
         return 0.0
     return float(in_order) / float(compared)
 
-
+# Analyzes a sequence of MIDI notes played by a user and extracts structural 
+# and musical features (like pitch, rhythm, tempo, and playing energy) to match against a library of songs.
 def _extract_played_profile(note_events: list[dict]) -> Optional[dict]:
+    
+    # Checks if the input is empty or has fewer than 4 note events. If so, it returns None, 
+    # as there isn't enough data to extract a meaningful musical profile.
     if not note_events or len(note_events) < 4:
         return None
 
+    # Initializes an empty list to store successfully parsed notes.
     notes = []
+    
+    # loops through only the last 80 note events, ensuring the profile is built on the most recently played 
+    # notes (preventing very long sessions from blurring the profile).
     for ev in note_events[-80:]:
         try:
+            # Extracts the MIDI pitch number (e.g., 60 = Middle C).
             n = int(ev.get("note"))
+            
+            # Extracts the MIDI velocity (how hard the key was struck), defaulting to 100.
             v = int(ev.get("velocity") or 100)
+            
+            # Extracts the timestamp of the event, defaulting to 0.
             ts = int(ev.get("ts") or 0)
+            
+            # Stores this clean data in the notes list.
             notes.append({"note": n, "velocity": v, "ts": ts})
         except Exception:
+            # If a key is missing or malformed, it skips it (continue).
             continue
 
+    # if after cleaning up the malformed events 
+    # we have fewer than 4 valid notes, it bails out.
     if len(notes) < 4:
         return None
 
+    # Creates a list of 12 zeroes to count occurrences of the 12 chromatic musical notes (C, C#, D, etc.).
     pitch_hist = [0.0] * 12
+    
+    # Creates a list of 12 zeroes to count the musical intervals (the distance between two consecutive notes).
     interval_hist = [0.0] * 12
+    
+    # Initializes counters for "melodic contour" — whether the next note went higher (up), lower (down), or stayed the same (rep)
     up = down = rep = 0.0
 
+    # Loops through the clean parsed notes.
     for i, n in enumerate(notes):
         pc = ((int(n["note"]) % 12) + 12) % 12
         pitch_hist[pc] += 1.0
@@ -1234,53 +1258,77 @@ def _extract_played_profile(note_events: list[dict]) -> Optional[dict]:
         else:
             rep += 1.0
 
+    # Pulls out all the velocity values and calculates their average (falling back to 90.0 if empty).
     vels = [float(n["velocity"]) for n in notes]
     avg_vel = float(np.mean(vels)) if vels else 90.0
 
+    # iois stands for "Inter-Onset Intervals" (the time between the start of one note and the next).
     iois = []
+    # Loops through the notes and calculates the time difference dt between consecutive timestamps.
     for i in range(1, len(notes)):
+        # Strictly enforces a minimum difference of 1 millisecond.
         dt = max(1, int(notes[i]["ts"]) - int(notes[i - 1]["ts"]))
         iois.append(dt)
+        
+    # Calculates the average time between notes.
     avg_ioi = float(np.mean(iois)) if iois else 250.0
+    # Converts this average millisecond gap into a 0.0 to 1.0 proxy relative to 200 BPM. 
     tempo_proxy = max(0.0, min(1.0, (60000.0 / (4.0 * avg_ioi)) / 200.0))
 
+    # Calculates the total number of melodic movements.
     contour_total = up + down + rep
     if contour_total <= 0:
+        # Uses a fallback balanced state to avoid dividing by zero if the total is 0.
         contour_vec = [0.33, 0.33, 0.34]
     else:
+        # Converts the raw up, down, rep tallies into a distribution spanning 1.0.
         contour_vec = [up / contour_total, down / contour_total, rep / contour_total]
 
+    # Passes the pitch and interval buckets into a helper function to limit their values so they sum precisely to 1.0.
     pitch_norm = _normalize_dist(pitch_hist)
     interval_norm = _normalize_dist(interval_hist)
 
+    # Returns a dictionary packing all extracted features into a normalized standard.
     return {
-        "pitch": pitch_norm,
-        "interval": interval_norm,
-        "contour": contour_vec,
-        "order": _top_indices(pitch_norm, 6),
-        "tempo": tempo_proxy,
-        "energy": max(0.0, min(1.0, avg_vel / 127.0)),
-        "note_count": len(notes),
+        "pitch": pitch_norm, # Normalized pitch distribution
+        "interval": interval_norm, # Normalized interval distribution
+        "contour": contour_vec, # Melodic contour distribution (up/down/rep)
+        "order": _top_indices(pitch_norm, 6), # Indicates which 6 pitches were played the most heavily
+        "tempo": tempo_proxy, # The estimated 0.0-1.0 rhythmic speed
+        "energy": max(0.0, min(1.0, avg_vel / 127.0)), # The average playing velocity mapped to a 0.0-1.0 score
+        "note_count": len(notes), # Total clean notes processed
     }
 
 
+# Converts a database/cached song's audio features into a comparable "proxy" format 
+# that matches the structure of the played MIDI profile.
 def _song_proxy_from_cached(data: dict) -> dict:
+    # Extracts the chroma feature (12-bucket pitch class distribution) from the cached data.
     chroma = data.get("chroma_mean")
     if isinstance(chroma, str):
+        # Parses the chroma feature if it's stored as a JSON string.
         chroma = _parse_json_list(chroma, 12)
     if not isinstance(chroma, list) or len(chroma) != 12:
+        # Falls back to an even distribution if chroma is invalid or missing.
         chroma = [1.0 / 12.0] * 12
 
+    # Normalizes the chroma pitch distribution so it adds up to 1.0.
     pitch = _normalize_dist([float(x) for x in chroma])
 
+    # Retrieves the key signature index (0-11 for C, C#, etc.).
     key_idx = KEY_NAME_TO_INDEX.get(data.get("key_signature") or "", None)
+    # Initializes a 12-element list with 0.0 for the key vector.
     key_vec = [0.0] * 12
     if key_idx is not None:
+        # Sets the specific key index to 1.0 to represent a sharp "one-hot" encoding of the key.
         key_vec[int(key_idx)] = 1.0
 
+    # Normalizes the tempo mapping it to a 0.0-1.0 range (relative to 200 BPM).
     tempo = max(0.0, min(1.0, float(data.get("tempo") or 120.0) / 200.0))
+    # Extracts the energy feature, bounding it between 0.0 and 1.0.
     energy = max(0.0, min(1.0, float(data.get("energy") or 0.5)))
 
+    # Pack and return the proxy profile.
     return {
         "pitch": pitch,
         "order": _top_indices(pitch, 6),
@@ -1291,22 +1339,47 @@ def _song_proxy_from_cached(data: dict) -> dict:
     }
 
 
+# Calculates a score measuring how well the played notes "fit inside" the base song's musical structure.
 def _score_containment(played: dict, song: dict) -> float:
+    # Computes the cosine similarity between the played pitch distribution and the song's pitch distribution.
     pitch_overlap = max(0.0, min(1.0, _cosine(played["pitch"], song["pitch"])))
+    
+    # Starts with a neutral 0.5 score for key agreement.
     key_agree = 0.5
     if song.get("key_idx") is not None:
+        # Checks how much of the played pitches fall directly into the song's root note.
         key_agree = max(0.0, min(1.0, float(played["pitch"][int(song["key_idx"])] * 2.0)))
+        
+    # Calculates how close the played tempo proxy is to the song's tempo proxy.
     tempo_agree = max(0.0, min(1.0, 1.0 - abs(float(played["tempo"]) - float(song["tempo"]))))
+    
+    # Calculates how close the played striking energy is to the song's energy.
     energy_agree = max(0.0, min(1.0, 1.0 - abs(float(played["energy"]) - float(song["energy"]))))
+    
+    # Returns a blended weighted final score favoring pitch matching the most.
     return max(0.0, min(1.0, (pitch_overlap * 0.55) + (key_agree * 0.2) + (tempo_agree * 0.15) + (energy_agree * 0.10)))
 
 
+# Re-scores a song specifically looking for whether it uses the SAME notes but in a DIFFERENT primary order.
+# This helps find good "alternative" melody matches.
 def _score_diff_order(played: dict, song: dict, seed: dict) -> float:
+    # Evaluates raw pitch overlap between the player and the evaluated song.
     overlap = max(0.0, min(1.0, _cosine(played["pitch"], song["pitch"])))
+    
+    # Checks how similar the top 6 notes of this song are to the top 6 notes of the BEST/seed match.
     seed_order_agree = max(0.0, min(1.0, _order_agreement(song["order"], seed["order"])))
+    
+    # Checks how similar the top 6 notes of this song are to the original played notes.
     played_order_agree = max(0.0, min(1.0, _order_agreement(song["order"], played["order"])))
+    
+    # Calculates an "order difference" penalty—a higher score means the order is intentionally different 
+    # from both the best sequence and the direct player sequence.
     order_diff = 1.0 - ((seed_order_agree * 0.6) + (played_order_agree * 0.4))
+    
+    # Calculates how close the played tempo proxy is to the song's tempo proxy.
     tempo_agree = max(0.0, min(1.0, 1.0 - abs(float(played["tempo"]) - float(song["tempo"]))))
+    
+    # Returns a blended weighted score encouraging pitch overlap but also different note emphasis (order_diff).
     return max(0.0, min(1.0, (overlap * 0.65) + (order_diff * 0.25) + (tempo_agree * 0.10)))
 
 

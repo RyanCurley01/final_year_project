@@ -39,8 +39,9 @@ export function ccToFeatureValue(ccValue, featureKey) {
 }
 
 /**
- * Derive a Russell's Circumplex mood quadrant from energy + valence
- * Same mapping as the audio_service feature_extraction.py
+ * Russell's Circumplex Model of Affect which
+ * maps emotions across a 2D plane using Energy 
+ * (intensity) and Valence (positivity).
  */
 export function deriveMood(energy, valence) {
   if (energy >= 0.5 && valence >= 0.5) return { mood: 'Energetic', emoji: '⚡' };

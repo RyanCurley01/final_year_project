@@ -45,9 +45,16 @@ export default function MidiExplorer() {
   });
 
   // Feature target values (0-1)
+  // The sliders on the screen natively map to the React state variable target. 
+  // Any time the user does anything, it updates this central target object with 
+  // the new 0-0.1 values and flags it as "dirty".
   const [target, setTarget] = useState(() => {
     const t = {};
+
+    // Loops through all the AUDIO_FEATURES defined in the midi mappings and sets them to their 
+    // starting .default values so the sliders don't start at zero or crash the app.
     for (const [k, v] of Object.entries(AUDIO_FEATURES)) t[k] = v.default;
+
     return t;
   });
 
@@ -126,21 +133,61 @@ export default function MidiExplorer() {
   }, [lastCC, ccValues, ccMap]);
 
   // ── Update target from note analysis (playing-driven) ─────────
+  // React state variable used by the UI to light up an indicator telling the user: 
+  // "Hey, your sliders are currently moving automatically based on the piano keys you are pressing."
   const [noteMode, setNoteMode] = useState(false); // true = deriving features from playing
+
+  // Triggers every single time a new key is pressed (which updates the noteHistory array) 
+  // or the user toggles the microphone (audioMode).
   useEffect(() => {
-    if (audioMode) return; // audio analysis takes priority when active
+
+    // Priority Guard: The app has two ways to automatically move the 
+    // sliders: playing a MIDI piano (noteMode) or playing real sound into a microphone (audioMode). 
+    // This line says: "If the microphone is turned on, ignore the MIDI piano." 
+    // It prevents the two systems from fighting over control of the sliders.
+    if (audioMode) return; 
+
+    // If the user has pressed fewer than 3 piano keys since they opened the app, 
+    // it instantly stops. You can't calculate a meaningful tempo or melody from 1 or 2 notes, 
+    // so it waits until a minimum threshold is met.
     if (noteHistory.length < 3) return;
-    // Only analyse notes from the last 10 seconds
+
+    // Only analyse notes played from the last 10 seconds
     const cutoff = Date.now() - 10000;
+
+    // Looks through the entire array of notes you've played and filters out any old ones.
     const recent = noteHistory.filter((n) => n.ts > cutoff);
+
+    // Checks the newly filtered 10-second array. If the user played 20 notes, but stopped playing for 10 seconds, 
+    // recent will be empty, and the function will stop. This ensures the sliders don't randomly jump around based on stale data.
     if (recent.length < 3) return;
 
+    // Passes the filtered, 10-second window of notes into the math brain (analyseNoteWindow from noteAnalysis.js). 
+    // This function crunches the velocities, timings, and intervals, and spits out an object containing the 0-1 values for Energy, Valence, Tempo, etc.
     const derived = analyseNoteWindow(recent);
+
+    // returns null or undefined if the math function failed to calculate something
+    // to prevent the entire webpage from crashing
     if (!derived) return;
 
+    // Flips the UI flag to true, letting the visual components know 
+    // that the piano is actively driving the app.
     setNoteMode(true);
+
+    // Takes the newly calculated math object (e.g., { energy: 0.8, valence: 0.2 ... }) and overwrites the target state. 
+    // This literally physically snaps the vertical sliders on your screen to their new calculated position
     setTarget(derived);
+
+    // Timer is looking at dirtyRef.current twice a second.
+    // When it sees that it has become true, 
+    // it knows the sliders have moved, so it fires off a 
+    // network request to the backend database to fetch new 
+    // song recommendations matching the updated sliders.
     dirtyRef.current = true;
+
+    // [noteHistory, audioMode] dictates the "dependencies" of this effect—meaning 
+    // this whole block of code will re-evaluate every single time the note history 
+    // grows handle single time a new note gets pushed into the noteHistorynoteHistory` array.
   }, [noteHistory, audioMode]);
 
   // ── Update target from live audio analysis ─────────────────────
@@ -162,50 +209,87 @@ export default function MidiExplorer() {
   }, [listening]);
 
   // Allow manual slider input (for users without hardware)
+  // Uses React useCallback hook function with an empty array to guarantee
+  // that React creates this function only once when the page loads, rather than 
+  // recreating it 60 times a second while the user is dragging the mouse, 
+  // which prevents UI lag/stuttering.
   const handleManualChange = useCallback((featureKey, val) => {
+
+    // State Merging (...prev): It takes the current slider (featureKey) and 
+    // safely updates its value (val) without erasing the values of the other sliders on the screen.
+    // Number Safety (Math.min(...Math.max)): It strictly bounds the incoming mouse value between 0.0 and 1.0. 
+    // This prevents bad coordinates from being sent to the database.
     setTarget((prev) => ({ ...prev, [featureKey]: Math.min(1, Math.max(0, val)) }));
+
     dirtyRef.current = true;
   }, []);
 
   // ── Melody Finder: backend contour matching from played notes ───────────────
   useEffect(() => {
+    // Calculates a timestamp exactly 10 seconds in the past
     const cutoff = Date.now() - 10000;
+    // Looks at the entire history of keys you've pressed and filters out anything older than 10 seconds.
+    // This creates a rolling "listen window" so it only judges what you're playing right now.
     const recent = noteHistory.filter((n) => n.ts > cutoff);
 
+    // Checks if at least 4 notes have been played in the last 10 seconds
     if (recent.length < 4) {
+      // If not, clear out any previous melody matches from the screen
       setMelodySeedMatch(null);
       setMelodyAlternatives([]);
+      // Update the UI status text. If there are songs on screen, tell the user "waiting for you to play notes". 
+      // If no songs exist yet, set to 'idle'.
       setMelodyStatus(recommendations.length ? 'waiting-notes' : 'idle');
-      return;
+      return; // Stop the function here
     }
 
+    // Checking if there are any songs actually loaded on the screen to match against
     if (!recommendations.length) {
+      // If no songs are loaded, clear the melody finder UI
       setMelodySeedMatch(null);
       setMelodyAlternatives([]);
       setMelodyStatus('idle');
-      return;
+      return; // Stop the function here
     }
 
+    // A flag used to safely ignore old network responses if the user plays a new note before the server replies
     let cancelled = false;
+    
+    // Starts a 450 millisecond timer. 
+    // This "debounce" ensures we don't send a database request for EVERY single piano key press. 
+    // It waits until you pause playing for half a second before firing the network request.
     const timeout = setTimeout(async () => {
       try {
+        // Turn on the loading spinner specifically for the melody section
         setMelodyLoading(true);
+        // Change the UI text to say "Searching for contour matches..."
         setMelodyStatus('searching');
+        
+        // Get the backend URL (e.g., http://localhost:8000)
         const apiUrl = envConfig.getApiBaseUrl();
+        // Make a POST request to the Python melody-finder endpoint
         const resp = await fetch(`${apiUrl}/api/audio/melody-finder`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
+            // Send the recent 10-seconds of notes (just the note number, how hard it was hit, and timestamp)
             notes: recent.map((n) => ({ note: n.note, velocity: n.velocity, ts: n.ts })),
+            // Pass the master list of allowed song IDs (to prevent matching against broken database entries)
             allowed_ids: allowedIdsRef.current,
+            // CRITICAL: Tells the backend to ONLY search inside the 12 songs currently visible on screen
             candidate_ids: recommendations.map((r) => Number(r.product_id)).filter((id) => Number.isFinite(id)),
+            // Request 1 exact match (Seed Match)
             limit: 1,
+            // Request up to 6 "Alternative" matches (same notes, different order)
             similar_limit: 6,
           }),
         });
 
+        // Check if the server crashed or returned a 404/500 error
         if (!resp.ok) {
+          // Check if this request was cancelled because the user played another note
           if (!cancelled) {
+            // Reset the UI and tell the user "No match found"
             setMelodySeedMatch(null);
             setMelodyAlternatives([]);
             setMelodyStatus('no-match');
@@ -213,57 +297,82 @@ export default function MidiExplorer() {
           return;
         }
 
+        // Unpack the successful JSON response from Python
         const data = await resp.json();
+        // If the user played another note while the JSON was downloading, throw away this old result.
         if (cancelled) return;
 
+        // Safely extract the exact match item and the list of alternative items
         const seed = data?.seed_match || null;
         const alts = data?.alternatives || [];
 
+        // Check if mathematical match is too poor (score is less than 48% similar)
+        // or if the backend returned no seed match at all
         if (!seed || (seed.melody_match || 0) < 0.48) {
+          // If match is too weak, reject it and clear the UI to prevent showing bad recommendations
           setMelodySeedMatch(null);
           setMelodyAlternatives([]);
           setMelodyStatus('no-match');
           return;
         }
 
+        // If we reach here, we have a strong mathematical melody match!
+        // Save the exact match (this renders the top Cyan 'Seed Match' card)
         setMelodySeedMatch(seed);
+        // Save the alternative matches (this renders the Indigo 'Alternative' tiles underneath it)
         setMelodyAlternatives(alts);
+        // Change UI state to 'ready', which tells the React HTML to reveal the cyan/indigo cards.
         setMelodyStatus('ready');
       } catch (err) {
+        // If an internet connection failure or code crash happens during the try block...
         if (!cancelled) {
+          // Clear everything out and fail gracefully to 'no-match'
           setMelodySeedMatch(null);
           setMelodyAlternatives([]);
           setMelodyStatus('no-match');
         }
       } finally {
+        // ALWAYS run this, whether it succeeded or crashed, to turn off the loading spinner
         if (!cancelled) setMelodyLoading(false);
       }
     }, 450);
 
+    // This return function runs every time you press a new key OR the component unmounts.
     return () => {
+      // 1. Flip cancelled to true, so any pending fetch responses instantly die
       cancelled = true;
+      // 2. Erase the 450ms timer so it resets to 0. 
+      // This is the core "Debounce" trick. If you hit 5 keys in a row rapidly, this ensures it only queries the database ONCE (half a second after your last keypress).
       clearTimeout(timeout);
     };
+  // The dependencies: This entire useEffect evaluates from scratch every single time 
+  // you press a new key (noteHistory changes) or the grid of songs updates (recommendations changes).
   }, [noteHistory, recommendations]);
 
   // ── Poll backend when dirty ───────────────────────────────────
   useEffect(() => {
     const interval = setInterval(async () => {
+      // 1. Check if the sliders were moved in the last 400ms. If not, do nothing.
       if (!dirtyRef.current) return;
+      
+      // 2. Shut off the flag so it doesn't query again until you move a slider again
       dirtyRef.current = false;
 
       try {
-        setLoading(true);
-        const apiUrl = envConfig.getApiBaseUrl();
+        setLoading(true); // Show a spinning loader next to "Matching Songs"
+        
+        // 3. Send the exact current slider coordinates (targetRef.current) to the backend
         const resp = await fetch(`${apiUrl}/api/audio/midi-recommendations`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            target_features: targetRef.current,
+            target_features: targetRef.current, // E.g., { energy: 0.8, valence: 0.2 ... } 
             limit: 12,
             allowed_ids: allowedIdsRef.current,
           }),
         });
+        
+        // 4. Overwrite the `recommendations` array with the 12 new songs returned
         if (resp.ok) {
           const data = await resp.json();
           setRecommendations(data.recommendations || []);
@@ -273,31 +382,45 @@ export default function MidiExplorer() {
       } finally {
         setLoading(false);
       }
-    }, POLL_MS);
+    }, POLL_MS); 
 
     return () => clearInterval(interval);
   }, []);
 
   // ── Play a recommendation ─────────────────────────────────────
   const handlePlay = (rec) => {
+    // 1. Filter out all non-music products (like ZIP files or metadata items) 
+    // from the main products list to ensure we only try to play actual audio.
     const musicProducts = products.filter(
       (p) => p.albumTitle && p.fileUrl && !p.fileUrl.toLowerCase().includes('.zip'),
     );
+    
+    // 2. Search for the recommended song in our pre-loaded Redux store catalog
     const idx = musicProducts.findIndex((p) => String(p.id) === String(rec.product_id));
+    
+    // 3. Fallback check: If the song is in our standard library (idx not -1), 
+    // we use the full high-quality object. Otherwise (like for iTunes TopCharts), 
+    // we build a temporary "mock" song object using the data provided in the recommendation.
     const song = idx !== -1
       ? musicProducts[idx]
       : {
           id: rec.product_id,
           albumTitle: fixText(rec.trackName) || `Song ${rec.product_id}`,
           albumCoverImageUrl: rec.artworkUrl100,
-          fileUrl: rec.previewUrl,
+          fileUrl: rec.previewUrl,     // Use iTunes 30s preview as the audio source
           previewUrl: rec.previewUrl,
         };
+        
+    // 4. Dispatch the selected song to the global Redux audio player. 
+    // It passes the active song, the whole queue of music, and the index to start from.
     dispatch(setActiveSong({ song, data: musicProducts.length ? musicProducts : [song], i: Math.max(idx, 0) }));
+    
+    // 5. Instantly force the music player to start playing (toggles 'isPlaying' to true)
     dispatch(playPause(true));
   };
 
-  // ── Mood derived from target ──────────────────────────────────
+  // Uses energy and valence features to create mood string 
+  // and emoji from target features
   const { mood, emoji } = deriveMood(target.energy, target.valence);
 
   // ── Feature list sorted by mapped CCs (mapped first) ─────────
@@ -660,6 +783,7 @@ export default function MidiExplorer() {
           <p className="text-sm">Notes you play, sound you make, or slider positions will find matching songs in real-time</p>
         </div>
       ) : (
+        /* AnimatePresence to make the updates look smooth instead of violently flashing */
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
           <AnimatePresence mode="popLayout">
             {recommendations.map((rec, i) => (

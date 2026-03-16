@@ -38,10 +38,15 @@ export default function useMidi() {
 
   // ── Stable MIDI message handler (no deps — uses only setters) ──
   const handleMidiMessage = useCallback((event) => {
+    // Checks for valid MIDI messages which is typically an array of 2 or 3 bytes 
+    // (numbers between 0 and 255).
     if (!event.data || event.data.length < 2) return;
 
-    // Log raw bytes for diagnostics (keep last 20)
+    // The Web MIDI API returns the data as a Uint8Array 
+    // (a typed array of raw binary bytes). 
+    // This line converts it into a standard, easier-to-manipulate JavaScript Array
     const bytes = Array.from(event.data);
+
     setRawMessages((prev) => [
       { bytes, hex: bytes.map(b => b.toString(16).padStart(2, '0')).join(' '), ts: Date.now() },
       ...prev.slice(0, 19),
@@ -52,22 +57,43 @@ export default function useMidi() {
     const msgType = status & 0xf0;
     const channel = (status & 0x0f) + 1; // 1-16
 
+    // Checks if the message type is 0xb0 (176 in decimal). This is the universal MIDI standard code for a "Control Change" (CC). 
+    // This happens when the user twists a physical knob or moves a slider on their device.
     if (msgType === 0xb0) {
-      // Control Change
+      
+      // Updates the lastCC state to notify the rest of the React app that a knob just moved.
+      // cc: data1 tells us which knob was moved (e.g., Knob #74).
+      // value: data2 tells us the new dial position (from 0 to 127
       setLastCC({ channel, cc: data1, value: data2, _ts: Date.now() });
+
+      // Updates an overarching Map state that remembers the current position of every single knob on the device.
+      // The key is a string combining the channel and knob number (e.g., "1.74"), and the value is the knob's position (data2).
       setCcValues((prev) => {
         const next = new Map(prev);
         next.set(`${channel}.${data1}`, data2);
         return next;
       });
     } else if (msgType === 0x90 && data2 > 0) {
+
+      // Updates the lastNote state to notify the app that a key was pressed.
+      // note: data1: the pitch of the key (e.g., 60 is Middle C).
+      // velocity: data2: how loudly it was played (0 to 127).
       setLastNote({ channel, note: data1, velocity: data2, type: 'on' });
-      // Track note-on events for playing analysis (keep last 50)
+      
+      // This is the exact history array used by analyseNoteWindow() 
+      // to calculate the Energy, Tempo, and Happiness sliders.
+      // .slice(-49) keeps only the most recent 49 notes, and then sticks the new 
+      // one at the end, maintaining a strict 50-note rolling window to ensure 
+      // the browser doesn't run out of memory during a long jam session.
       setNoteHistory((prev) => [
         ...prev.slice(-49),
         { note: data1, velocity: data2, ts: Date.now() },
       ]);
+
     } else if (msgType === 0x80 || (msgType === 0x90 && data2 === 0)) {
+
+      // Notifies the app that the key (data1) was let go, updating the type to 'off'. 
+      // This tells the visualizer that the piano key has bounced back up.
       setLastNote({ channel, note: data1, velocity: 0, type: 'off' });
     }
   }, []);
