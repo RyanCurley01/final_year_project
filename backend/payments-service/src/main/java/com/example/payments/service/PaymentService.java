@@ -1,10 +1,13 @@
 package com.example.payments.service;
 
+// Import the Payment model and its repository
 import com.example.payments.model.Payment;
 import com.example.payments.repository.PaymentRepository;
+// Import PayPal SDK classes for creating and capturing orders
 import com.paypal.core.PayPalHttpClient;
 import com.paypal.http.HttpResponse;
 import com.paypal.orders.*;
+// Import Lombok and SLF4J annotations
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -18,48 +21,63 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
+// Mark as a Spring Service to hold business logic
 @Service
+// Generate constructor for final fields automatically
 @RequiredArgsConstructor
+// Enable standard SLF4J logging (provides the 'log' object)
 @Slf4j
 public class PaymentService {
 
+    // Inject database repository for Payment entities
     private final PaymentRepository paymentRepository;
+    // Inject the configured PayPal HTTP Client context
     private final PayPalHttpClient payPalHttpClient;
 
+    // Fetch all payments in the database
     public List<Payment> getAllPayments() {
         return paymentRepository.findAll();
     }
 
+    // Fetch a single payment by its primary key
     public Optional<Payment> getPaymentById(Long id) {
         return paymentRepository.findById(id);
     }
 
+    // Fetch all payments tied to a specific order ID
     public List<Payment> getPaymentsByOrderId(Long orderId) {
         return paymentRepository.findByOrderId(orderId);
     }
 
+    // Fetch all payments tied to a specific account ID
     public List<Payment> getPaymentsByCustomerId(Long customerId) {
         return paymentRepository.findByAccountId(customerId);
     }
 
+    // Fetch all payments matching a specific status (e.g., PENDING, COMPLETED)
     public List<Payment> getPaymentsByStatus(String paymentStatus) {
         return paymentRepository.findByPaymentStatus(paymentStatus);
     }
 
+    // Fetch a payment specifically by its external PayPal Order ID
     public Optional<Payment> getPaymentByPaypalOrderId(String paypalOrderId) {
         return paymentRepository.findByPaypalOrderId(paypalOrderId);
     }
 
+    // Save a new payment entity. @Transactional ensures database atomicity
     @Transactional
     public Payment createPayment(Payment payment) {
         return paymentRepository.save(payment);
     }
 
+    // Update an existing payment entity fields, committing changes back to the database
     @Transactional
     public Payment updatePayment(Long id, Payment paymentDetails) {
+        // Find existing record or throw exception if not found
         Payment payment = paymentRepository.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Payment not found with id: " + id));
 
+        // Update fields only if new values are provided
         if (paymentDetails.getOrderId() != null) {
             payment.setOrderId(paymentDetails.getOrderId());
         }
@@ -82,6 +100,7 @@ public class PaymentService {
         return paymentRepository.save(payment);
     }
 
+    // Delete a payment by its database ID
     @Transactional
     public void deletePayment(Long id) {
         if (!paymentRepository.existsById(id)) {
@@ -90,10 +109,10 @@ public class PaymentService {
         paymentRepository.deleteById(id);
     }
 
-    // ===== PayPal Integration Methods =====
+    // ===== PayPal Integration Methods ===== //
 
     /**
-     * Creates a PayPal order for checkout
+     * Creates a PayPal order for checkout (simple wrapper without DB persistence)
      * @param amount The payment amount
      * @param currency Currency code (e.g., "USD", "EUR")
      * @return PayPal Order with ID and approval URL
@@ -103,7 +122,7 @@ public class PaymentService {
     }
 
     /**
-     * Creates a PayPal order for checkout and stores it in the database
+     * Creates a PayPal order for checkout and stores a pending record in the database
      * @param amount The payment amount
      * @param currency Currency code (e.g., "USD", "EUR")
      * @param orderId Internal order ID (optional)
@@ -113,37 +132,41 @@ public class PaymentService {
      */
     @Transactional
     public Order createPayPalOrder(BigDecimal amount, String currency, Long orderId, Long productId, Long accountId) throws IOException {
+        // Setup payload requesting PayPal to authorize and capture funds immediately
         OrderRequest orderRequest = new OrderRequest();
         orderRequest.checkoutPaymentIntent("CAPTURE");
 
-        // Set up purchase unit
+        // Format the purchase unit data (price and currency) required by PayPal
         List<PurchaseUnitRequest> purchaseUnits = new ArrayList<>();
         purchaseUnits.add(
             new PurchaseUnitRequest()
                 .amountWithBreakdown(
                     new AmountWithBreakdown()
                         .currencyCode(currency)
+                        // PayPal requires prices formatted correctly as strings with 2 decimal places
                         .value(amount.setScale(2, RoundingMode.HALF_UP).toString())
                 )
         );
         orderRequest.purchaseUnits(purchaseUnits);
 
+        // Provide return URLs used if the user completes or cancels the PayPal flow
         ApplicationContext applicationContext = new ApplicationContext()
             .returnUrl("https://www.example.com/payment/success")
             .cancelUrl("https://www.example.com/payment/cancel");
         orderRequest.applicationContext(applicationContext);
 
-        // Create order request
+        // Build the HTTP POST request to PayPal's API
         OrdersCreateRequest request = new OrdersCreateRequest();
         request.prefer("return=representation");
         request.requestBody(orderRequest);
 
         try {
+            // Execute request via PayPal SDK
             HttpResponse<Order> response = payPalHttpClient.execute(request);
             Order paypalOrder = response.result();
             log.info("Created PayPal order: {}", paypalOrder.id());
 
-            // Store the PayPal order in our database
+            // Initialize a local DB record to track this new transaction's status
             Payment payment = new Payment();
             payment.setPaypalOrderId(paypalOrder.id());
             payment.setPaymentAmount(amount);
@@ -152,9 +175,11 @@ public class PaymentService {
             payment.setProductId(productId);
             payment.setAccountId(accountId);
             
+            // Save the PENDING payment locally for future reconciliation
             paymentRepository.save(payment);
             log.info("Saved Payment record for PayPal order: {}", paypalOrder.id());
 
+            // Return the PayPal order details to the frontend to trigger the checkout popup
             return paypalOrder;
         } catch (IOException e) {
             log.error("Error creating PayPal order", e);
@@ -163,22 +188,25 @@ public class PaymentService {
     }
 
     /**
-     * Captures payment for a PayPal order and updates the database record
-     * @param paypalOrderId The PayPal order ID to capture
-     * @return Captured order details
+     * Sent to PayPal after the user approves payment to finalize the charge
+     * @param paypalOrderId The assigned PayPal order identifier
+     * @return Captured order details verifying the charge was successful
      */
     @Transactional
     public Order capturePayPalOrder(String paypalOrderId) throws IOException {
+        // Create request signaling to PayPal that we are ready to capture funds
         OrdersCaptureRequest request = new OrdersCaptureRequest(paypalOrderId);
         request.prefer("return=representation");
 
         try {
+            // Trigger capture
             HttpResponse<Order> response = payPalHttpClient.execute(request);
             log.info("Captured PayPal order: {}", paypalOrderId);
 
-            // Update the Payment record status to COMPLETED
+            // Locate the matching pending DB record
             Optional<Payment> paymentOpt = paymentRepository.findByPaypalOrderId(paypalOrderId);
             if (paymentOpt.isPresent()) {
+                // If found, mark the local payment record as COMPLETED
                 Payment payment = paymentOpt.get();
                 payment.setPaymentStatus("COMPLETED");
                 paymentRepository.save(payment);
@@ -195,14 +223,16 @@ public class PaymentService {
     }
 
     /**
-     * Gets details of a PayPal order
-     * @param orderId The PayPal order ID
-     * @return Order details
+     * Looks up an existing PayPal order to verify details directly from the gateway
+     * @param orderId The internal PayPal order ID
+     * @return PayPal Order details payload
      */
     public Order getPayPalOrderDetails(String orderId) throws IOException {
+        // Generate an API request to read the order data
         OrdersGetRequest request = new OrdersGetRequest(orderId);
 
         try {
+            // Execute exact status check from PayPal
             HttpResponse<Order> response = payPalHttpClient.execute(request);
             return response.result();
         } catch (IOException e) {

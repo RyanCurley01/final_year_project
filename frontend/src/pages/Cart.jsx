@@ -20,26 +20,40 @@ import { useAuth } from '../context/AuthContext';
 const Cart = () => {
   const dispatch = useDispatch();
   const navigate = useNavigate();
+  
+  // Extract real-time cart state variables from the Redux store.
   const { items, totalAmount, totalItems } = useSelector((state) => state.cart);
+  
+  // Local UI state: controls whether the PayPal buttons are currently visible.
   const [showPayPal, setShowPayPal] = useState(false);
+  
+  // Local state: tracking if a payment API transaction is currently in mid-flight to disable buttons.
   const [processingPayment, setProcessingPayment] = useState(false);
+  
+  // Local state: holds custom error messages returned from the checkout process to display to the user.
   const [paypalError, setPaypalError] = useState(null);
+  
+  // Pull the active user session from Context.
   const { currentUser } = useAuth();
   
-  // Use authenticated user
+  // Standardize the user object payload expected by backend services (gracefully handle null if logged out).
   const user = currentUser ? { 
     accountId: currentUser.id, 
     email: currentUser.email || currentUser.accountEmailAddress 
   } : null;
 
+  // Dispatches the ID to the cartSlice to remove the entire row from the array.
   const handleRemove = (productId) => {
     dispatch(removeFromCart(productId));
   };
 
+  // Dispatches the new integer amount to the cartSlice to overwrite the previous quantity.
   const handleQuantityChange = (productId, newQuantity) => {
     dispatch(updateQuantity({ productId, quantity: newQuantity }));
   };
 
+  // handleCreateOrder: Triggered automatically the moment the user clicks the black or yellow PayPal/Debit button.
+  // It handles staging the database schema *before* redirecting to the actual PayPal authorization popup.
   const handleCreateOrder = async (data, actions) => {
     if (!user?.accountId) {
       console.error("Cannot create order: User not logged in or Account ID missing");
@@ -48,38 +62,43 @@ const Cart = () => {
     }
 
     try {
-      setProcessingPayment(true);
+      setProcessingPayment(true); // Disable double-clicking.
       
-      // Step 1: Create an Order record
+      // Step 1: Create a master 'Order' record attached to the user's account with the computed total.
       const orderData = {
         accountId: user?.accountId,
         totalAmount: totalAmount,
       };
       
+      // Await backend Spring Boot orders-service.
       const order = await orderService.createOrder(orderData);
       
-      // Step 2: Create Order_Items for each cart item
+      // Step 2: Loop through every individual unique song in the Redux items array.
       for (const item of items) {
+        // Build the sub-schema for the separate OrderItems table.
         const orderItemData = {
           orderId: order.id,
           productId: item.id,
           quantity: item.quantity,
           unitPrice: item.albumPrice
         };
+        // Await backend Spring Boot orderItems-service to insert each row.
         const orderItem = await orderItemService.createOrderItem(orderItemData);
         
         // Note: Sold_Products, Purchased_Products, and CustomerSummary tables 
-        // are automatically populated by the database trigger After_Order_Item_Insert 
-        // whenever an Order_Item is created.
+        // are automatically populated by the MySQL database trigger After_Order_Item_Insert 
+        // whenever an Order_Item is created above. We do not need further API calls for them.
       }
       
-      // Step 3: Create PayPal order (use first product ID for backward compatibility)
+      // Step 3: Format the JSON strictly required by the official PayPal capture API.
       const paypalOrderData = {
         amount: totalAmount,
         currency: 'EUR',
         accountId: user?.accountId,
         orderId: order.id,
-        productId: items.length > 0 ? items[0].id : null, // First product for Payments table
+        // The payments table requires a singular productId for legacy indexing logic; we pass the ID of the first item index.
+        productId: items.length > 0 ? items[0].id : null, 
+        // Mapping Redux array items strictly into PayPal's expected Item syntax format.
         items: items.map(item => ({
           productId: item.id,
           quantity: item.quantity,
@@ -87,7 +106,10 @@ const Cart = () => {
         }))
       };
       
+      // Send formatting to custom Spring Boot payments-service which generates the official PayPal token ID.
       const response = await paymentService.createPayPalOrder(paypalOrderData);
+      
+      // This returned string ID automatically pops up the secure PayPal 3rd-party modal.
       return response.id;
     } catch (error) {
       setProcessingPayment(false);
@@ -95,11 +117,13 @@ const Cart = () => {
     }
   };
 
+  // handleApprove: This runs *only* after the user successfully enters their password and click 'Pay' INSIDE the PayPal popup.
   const handleApprove = async (data, actions) => {
     try {
+      // Step 4: Tell our backend to formally capture the pre-authorized funds and finalize the table row.
       const response = await paymentService.capturePayPalOrder(data.orderID);
       
-      // Add to purchase history
+      // Step 5: Save standard purchase details into a separate Redux slice for the "recent transactions" UI views.
       dispatch(addPurchase({
         items: [...items],
         totalAmount,
@@ -107,13 +131,13 @@ const Cart = () => {
         status: 'completed'
       }));
       
-      // Clear cart
+      // Step 6: Empty the shopping cart entirely since they have been bought. 
       dispatch(clearCart());
       
-      // Trigger automatic downloads for purchased items
+      // Step 7: Trigger automatic browser downloads for purchased digital MP3 assets.
       const filesToDownload = items
         .filter(item => {
-          // Download music files from S3
+          // Verify a direct S3 bucket URL exists on the object.
           return item.fileUrl;
         })
         .map(item => ({
@@ -121,6 +145,7 @@ const Cart = () => {
           filename: generateFilename(item, item.fileUrl)
         }));
       
+      // Utilizing utility script to batch-download multiple blobs simultaneously.
       if (filesToDownload.length > 0) {
         try {
           await downloadMultipleFiles(filesToDownload);
@@ -132,15 +157,20 @@ const Cart = () => {
         alert("Payment successful! Redirecting to purchase history.");
       }
       
+      // Cleanup visual state.
       setShowPayPal(false);
+      
+      // Reroute user to the summary page.
       navigate('/purchase-history');
     } catch (error) {
       alert("Payment failed!");
     } finally {
+      // Re-enable interactive elements whether success or fail.
       setProcessingPayment(false);
     }
   };
 
+  // Guard Clause: Render a placeholder Empty UI component if there's nothing in Redux `items`.
   if (items.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh]">
@@ -165,24 +195,31 @@ const Cart = () => {
     );
   }
 
+  // Active Cart UI returning main flexible row template
   return (
     <div className="flex flex-row gap-6">
-      {/* Cart Items */}
+      {/* Container: Left side - displaying individual list of cart items */}
       <div className="flex-1">
         <h2 className="text-white text-3xl font-bold mb-6">Shopping Cart ({totalItems} items)</h2>
         
         <div className="space-y-4">
+          {/* Dynamically building a UI card for every individual object inside the Redux items array */}
           {items.map((item) => {
             const productName = item.albumTitle;
             const price = item.albumPrice;
             const coverMedia = item.albumCoverImageUrl;
+            
+            // Evaluates string logic to determine if the media tag is a playable .mp4 or an image.
             const isVideo = coverMedia && coverMedia.toLowerCase().includes('.mp4');
             const isTeddyEmotion = productName && productName.toLowerCase().includes('teddy emotion');
+            
+            // Certain video variations use custom OnsetImageCard rendering rather than standard <video> tags.
             const useOnsetImages = isVideo && !isTeddyEmotion;
 
             return (
               <div key={item.id} className="bg-white/5 backdrop-blur-sm rounded-lg p-4 flex gap-4">
-                {/* Product Image */}
+                
+                {/* Product Image Component logic map */}
                 <div className="w-24 h-24 flex-shrink-0">
                   {useOnsetImages ? (
                     <OnsetImageCard
@@ -205,6 +242,7 @@ const Cart = () => {
                       src={coverMedia || placeholders.large}
                       alt={productName}
                       className="w-full h-full rounded-lg object-cover"
+                      // Fallback logic: if the image fails downloading from AWS, overwrite src with a local default image.
                       onError={(e) => {
                         if (e.target.src !== placeholders.large) {
                           e.target.src = placeholders.large;
@@ -214,7 +252,7 @@ const Cart = () => {
                   )}
                 </div>
 
-                {/* Product Details */}
+                {/* Product Title and Category Info */}
                 <div className="flex-1">
                   <h3 className="text-white font-semibold text-lg mb-1">{productName}</h3>
                   <p className="text-gray-400 text-sm mb-2">
@@ -223,7 +261,7 @@ const Cart = () => {
                   <p className="text-white font-bold">${price?.toFixed(2)}</p>
                 </div>
 
-                {/* Quantity Controls */}
+                {/* Product specific UI functionality mapping (remove icon, negative/positive quantity increments) */}
                 <div className="flex flex-col items-end justify-between">
                   <button
                     onClick={() => handleRemove(item.id)}
@@ -234,6 +272,7 @@ const Cart = () => {
                   </button>
 
                   <div className="flex items-center gap-2 bg-white/10 rounded-lg p-1">
+                    {/* Quantity Modifier controls containing logic logic that prevents decreasing lower than integer 1 */}
                     <button
                       onClick={() => handleQuantityChange(item.id, item.quantity - 1)}
                       className="p-2 hover:bg-white/10 rounded transition"

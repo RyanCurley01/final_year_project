@@ -22,8 +22,11 @@ const SongCard = ({ product, payment, i, data }) => {
   const price = product.albumPrice;
   const coverMedia = product.albumCoverImageUrl;
 
-  // Half-price discount: apply to every other product (by id) to test price drop notifications
+  // Checks if a product id exists and has a exactly even id
   const hasDiscount = product.id != null && product.id % 2 === 0;
+  
+  // If hasDiscount is true, discountedPrice is half of price
+  // else, no discounted price
   const discountedPrice = hasDiscount ? price / 2 : null;
 
   // Check if the cover media is a video (mp4)
@@ -117,8 +120,20 @@ const SongCard = ({ product, payment, i, data }) => {
   const handleAddToCart = () => {
     // Pass discounted price to cart if applicable
     const cartProduct = hasDiscount
+      
+      // If hasDiscount is true:
+      // A shallow copy of product is made with ...product.
+      // Then albumPrice is overridden with discountedPrice
       ? { ...product, albumPrice: discountedPrice }
+
+      // If hasDiscount is false, 
+      // cartProduct is just the original product object unchanged.
       : product;
+
+    // This sends an action to Redux.
+    // addToCart is the action creator imported from the cart slice.
+    // dispatch forwards that action to the reducer so the cart state updates 
+    // (add item or increase quantity, then recalc totals) in cartSlice.js:13.
     dispatch(addToCart(cartProduct));
   };
 
