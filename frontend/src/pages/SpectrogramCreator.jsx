@@ -998,9 +998,6 @@ const SpectrogramCreator = () => {
     const h = canvas.height;
     const cellH = h / NUM_FREQ_BINS;
 
-    // Draw playhead — only for static grid playback.
-    // During captured playback the canvas layer already draws its own scrolling
-    // playhead, so we skip the overlay one to avoid a duplicate cursor.
     const hasCapturedPlayback = capturedRecordingRef.current
       && capturedRecordingRef.current.columns.length > NUM_TIME_SLICES
       && playbackColumnRef.current >= 0;
@@ -1169,11 +1166,7 @@ const SpectrogramCreator = () => {
     lastPointRef.current = null;
   }, []);
 
-  // ── Real-Time Playback ──
-  // Instead of pre-rendering a static AudioBuffer, we use a ScriptProcessorNode
-  // that reads evolvedGridRef on every audio frame. This means slider/drawing
-  // changes are heard instantly without any stop/restart.
-  // ── Pause — suspend audio but keep position ──
+
   const handlePause = useCallback(() => {
     if (!isPlaying) return;
     const synth = synthRef.current;
@@ -1182,7 +1175,7 @@ const SpectrogramCreator = () => {
     }
     setIsPlaying(false);
     setIsPaused(true);
-    // playheadPos and realtimeSampleRef stay where they are
+
   }, [isPlaying]);
 
   // ── Stop — full teardown ──
@@ -1217,7 +1210,6 @@ const SpectrogramCreator = () => {
   }, []);
 
   const handlePlay = useCallback(async () => {
-    // If paused, just resume
     if (isPaused && realtimeProcessorRef.current) {
       const synth = synthRef.current;
       if (synth?.audioContext?.state === 'suspended') {
@@ -1226,7 +1218,6 @@ const SpectrogramCreator = () => {
       setIsPlaying(true);
       setIsPaused(false);
 
-      // Re-start the playhead animation
       const ctx = synth.audioContext;
       const captured = capturedRecordingRef.current;
       const hasCaptured = captured && captured.columns.length > 0;
@@ -1258,19 +1249,16 @@ const SpectrogramCreator = () => {
       return;
     }
 
-    // Auto-enable physics simulation whenever spectrum playback starts
     setSimulationEnabled(true);
 
     const synth = synthRef.current;
     if (!synth) return;
     const ctx = synth.audioContext;
 
-    // Resume audio context if suspended (browser autoplay policy)
     if (ctx.state === 'suspended') {
       await ctx.resume();
     }
 
-    // Precompute angular velocities (Hz → radians/sample) once
     const angularVelocities = new Float64Array(NUM_FREQ_BINS);
     for (let i = 0; i < NUM_FREQ_BINS; i++) {
       angularVelocities[i] = (2 * Math.PI * synth.frequencies[i]) / ctx.sampleRate;
@@ -1278,18 +1266,15 @@ const SpectrogramCreator = () => {
     const normFactor = synth.overallGain / Math.sqrt(NUM_FREQ_BINS);
     const fadeMs = synth.fadeMs || 10;
 
-    // Phase accumulators persist across buffers for smooth sine continuity
     const phases = new Float64Array(NUM_FREQ_BINS);
     realtimePhasesRef.current = phases;
     realtimeSampleRef.current = 0;
 
-    // Create ScriptProcessorNode (2048 samples ≈ 46ms at 44.1kHz — low latency)
     const bufferSize = 2048;
     const processor = ctx.createScriptProcessor(bufferSize, 0, 1);
     const gainNode = ctx.createGain();
     gainNode.gain.value = 1.0;
 
-    // Snapshot captured recording at play-start so it's stable during playback
     const captured = capturedRecordingRef.current;
     const hasCaptured = captured && captured.columns.length > 0;
     const capturedColumns = hasCaptured ? captured.columns : null;
@@ -1302,7 +1287,6 @@ const SpectrogramCreator = () => {
       const fadeSamples = Math.round(fadeMs * ctx.sampleRate / 1000);
       let sampleIdx = realtimeSampleRef.current;
 
-      // Determine data source and slice count
       const useCaptured = hasCaptured;
       const numSlices = useCaptured ? capturedNumSlices : NUM_TIME_SLICES;
       const currentGrid = useCaptured ? null : (simulationEnabledRef.current ? evolvedGridRef.current : gridRef.current);
@@ -1314,22 +1298,18 @@ const SpectrogramCreator = () => {
           continue;
         }
 
-        // Which time slice are we in?
         const t = Math.min(Math.floor(sampleIdx / samplesPerSlice), numSlices - 1);
-        // Position within the current slice (for fade envelope)
+
         const posInSlice = sampleIdx - Math.floor(t * samplesPerSlice);
         const sliceLen = Math.ceil(samplesPerSlice);
 
-        // Fade envelope to prevent clicks between slices
         let envelope = 1;
         if (posInSlice < fadeSamples) envelope = posInSlice / fadeSamples;
         else if (posInSlice > sliceLen - fadeSamples) envelope = (sliceLen - posInSlice) / fadeSamples;
 
-        // Read the frequency data for this time slice (reverse index when reversed)
         const sliceIdx = (useCaptured && reversedRef.current) ? (numSlices - 1 - t) : t;
         const sliceData = useCaptured ? capturedColumns[sliceIdx] : (currentGrid?.[t] || null);
 
-        // Additive synthesis — sum all active frequency bins
         let sample = 0;
         const liveIntensity = intensityRef.current;
         const liveForceGain = externalForceGainRef.current;
@@ -1338,16 +1318,11 @@ const SpectrogramCreator = () => {
         const liveRadius = Math.round(couplingRadiusRef.current);
         const simOn = simulationEnabledRef.current;
 
-        // Read raw amplitudes scaled by intensity and gain
         const amps = new Float64Array(NUM_FREQ_BINS);
         for (let i = 0; i < NUM_FREQ_BINS; i++) {
           amps[i] = (sliceData?.[i] || 0) * liveIntensity * liveForceGain;
         }
 
-        // When simulation is ON, apply multi-pass spatial coupling (same
-        // algorithm as the visual renderer) so the audio is audibly different.
-        // When OFF, skip coupling entirely — raw amplitudes go straight to
-        // synthesis so the user hears a clear before/after distinction.
         if (simOn && liveCoupling > 0.001) {
           const passes = Math.max(1, liveRadius);
           let state = amps;
@@ -1445,21 +1420,11 @@ const SpectrogramCreator = () => {
     URL.revokeObjectURL(url);
   }, [grid, evolvedGrid, duration, simulationEnabled]);
 
-  // ── Image to spectrogram grid conversion (Aphex Twin ΔMi−1 / MetaSynth style) ──
-  // ── How the faces use edge detection to represent the energy ──
-  // This takes an image (Webcam or file) and translates its pixels to frequency energy.
-  // 1. It converts the image to grayscale to focus purely on brightness/luminance.
-  // 2. It applies a mathematical Convolution Matrix (Sobel Operator / Edge Detection).
-  //    This specifically highlights the sudden changes in brightness (edges of a face, eyes, nose).
-  //    Why edges? Solid blocks of image create muddy, noisy audio. Only extracting the sharp edges
-  //    produces clean, ringing, distinct tones that sound musical when synthesized.
-  // 3. The edge brightness is normalized to 0.0-1.0 and mapped to our grid [Time][Frequency].
+
   const imageToGrid = useCallback((imageSource) => {
-    // Process at full image resolution first, then downscale.
     const srcW = imageSource.naturalWidth || imageSource.videoWidth || imageSource.width;
     const srcH = imageSource.naturalHeight || imageSource.videoHeight || imageSource.height;
 
-    // Step 1: Convert to grayscale at full resolution
     const fullCanvas = document.createElement('canvas');
     fullCanvas.width = srcW;
     fullCanvas.height = srcH;
@@ -1468,7 +1433,6 @@ const SpectrogramCreator = () => {
     fullCtx.drawImage(imageSource, 0, 0, srcW, srcH);
     fullCtx.filter = 'none';
 
-    // Step 2: Downscale to grid dimensions
     const offscreen = document.createElement('canvas');
     offscreen.width = NUM_TIME_SLICES;
     offscreen.height = NUM_FREQ_BINS;
@@ -1487,15 +1451,12 @@ const SpectrogramCreator = () => {
       }
     }
 
-    // Step 3: Sobel edge detection — extract only outlines (nose, eyes, jaw, lips).
-    // This is how the Aphex Twin ΔMi−1 face works: it's a contour map, not a photo.
     const edges = new Float64Array(totalPixels);
     let maxEdge = 0;
 
     for (let y = 1; y < NUM_FREQ_BINS - 1; y++) {
       for (let t = 1; t < NUM_TIME_SLICES - 1; t++) {
         const idx = y * NUM_TIME_SLICES + t;
-        // 3×3 Sobel kernel neighbours
         const tl = grayValues[(y - 1) * NUM_TIME_SLICES + (t - 1)];
         const tc = grayValues[(y - 1) * NUM_TIME_SLICES + t];
         const tr = grayValues[(y - 1) * NUM_TIME_SLICES + (t + 1)];
@@ -1512,14 +1473,12 @@ const SpectrogramCreator = () => {
       }
     }
 
-    // Step 4: Normalise edges to 0-1 and apply contrast boost
     if (maxEdge > 0) {
       for (let i = 0; i < totalPixels; i++) {
         edges[i] = edges[i] / maxEdge;
       }
     }
 
-    // Threshold weak edges to silence — keep only prominent contours
     const edgeThreshold = 0.06;
     for (let i = 0; i < totalPixels; i++) {
       if (edges[i] < edgeThreshold) {
@@ -1530,7 +1489,6 @@ const SpectrogramCreator = () => {
       }
     }
 
-    // Step 5: Build the grid
     const newGrid = SpectrogramSynth.createBlankGrid(NUM_TIME_SLICES, NUM_FREQ_BINS);
 
     for (let t = 0; t < NUM_TIME_SLICES; t++) {
@@ -1543,20 +1501,36 @@ const SpectrogramCreator = () => {
     return newGrid;
   }, []);
 
+
   // ── Webcam handling ──
+  // Declares the function to open the camera, wrapped in useCallback so it doesn't get recreated on every React render. 
+  // async is used because accessing hardware takes an unknown amount of time.
   const startWebcam = useCallback(async () => {
     try {
+
+      // navigator.mediaDevices.getUserMedia: The standard browser API to request hardware permissions.
+      // facingMode: 'user': Specifically asks for the front-facing "selfie" camera on mobile devices or laptops.
+      // It asks for an ideal 640x480 resolution to avoid overloading the browser with a 4K video feed, 
+      // since it will be downscaled to 200x256 anyway.
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
       });
+
+      // Saves the active video stream to a React useRef so it can be controlled or stopped later without triggering a re-render.
+      // setShowWebcam(true) updates the UI state, popping up the Modal window containing the video feed.
       webcamStreamRef.current = stream;
       setShowWebcam(true);
-      // Attach stream to video element after render
+
+      // Waits exactly one frame for React to physically render the <video> HTML element into the DOM.
+      // Once it exists, it wires the raw camera stream directly into the video element so the user can see themselves.
       requestAnimationFrame(() => {
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
         }
       });
+
+      // If the user clicks "Block" on the browser permissions popup, or has no webcam, 
+      // it catches the error and alerts them gracefully instead of crashing the app
     } catch (err) {
       console.error('Webcam access denied:', err);
       alert('Could not access webcam. Please allow camera permissions.');
@@ -1564,23 +1538,41 @@ const SpectrogramCreator = () => {
   }, []);
 
   const stopWebcam = useCallback(() => {
+    
+    // Cleanup: Checks if a camera stream is actively running.
     if (webcamStreamRef.current) {
+
+      // .getTracks().forEach(track => track.stop()): 
+      // Iterates through the video/audio streams and explicitly cuts power 
+      // to the hardware (turning off the green webcam light on your laptop).
       webcamStreamRef.current.getTracks().forEach((track) => track.stop());
       webcamStreamRef.current = null;
     }
+
+    // Deletes the reference and hides the webcam Modal window.
     setShowWebcam(false);
   }, []);
 
   // Capture the mirrored video frame to an offscreen canvas
   const captureVideoFrame = useCallback(() => {
+    
+    // Safely grabs the <video> element. If it's not ready or hasn't loaded video dimensions yet, abort.
     const video = videoRef.current;
     if (!video || !video.videoWidth) return null;
+    
+    // Creates an invisible <canvas> in the browser's memory exactly the exact size of the webcam feed.
     const offscreen = document.createElement('canvas');
     offscreen.width = video.videoWidth;
     offscreen.height = video.videoHeight;
     const ctx = offscreen.getContext('2d');
+    
+    // Mirroring logic: Webcams typically mirror you so lifting your right hand 
+    // appears on the right side of the screen. Standard video captures don't save this mirror effect.
+    // translate and scale(-1, 1) physically flip the invisible canvas completely backward.
     ctx.translate(offscreen.width, 0);
     ctx.scale(-1, 1);
+    
+    // drawImage instantly paints the current millisecond of the video onto this flipped canvas, and returns it.
     ctx.drawImage(video, 0, 0);
     return offscreen;
   }, []);
@@ -1588,8 +1580,16 @@ const SpectrogramCreator = () => {
   const captureWebcam = useCallback(() => {
     const frame = captureVideoFrame();
     if (!frame) return;
+    
+    // Takes the photo, and passes it into imageToGrid (which applies 
+    // the Aphex Twin style edge-detection and down-sizing to 200x256).
     const newGrid = imageToGrid(frame);
+    
+    // setGrid(newGrid) overwrites the current spectrogram drawing with the user's face.
     setGrid(newGrid);
+    
+    // Clears any currently playing audio recordings, 
+    // and shuts down the webcam to save battery.
     capturedRecordingRef.current = null;
     stopWebcam();
   }, [captureVideoFrame, imageToGrid, stopWebcam]);
@@ -1598,15 +1598,25 @@ const SpectrogramCreator = () => {
   const saveWebcamAsPreset = useCallback(() => {
     const frame = captureVideoFrame();
     if (!frame) return;
+    
     // Store as a compact data URL in localStorage
+    // Similar to capturing the webcam normally, but it 
+    // purposefully squashes the image down to exactly 200x256 pixels before doing anything.
     const saveCanvas = document.createElement('canvas');
     saveCanvas.width = NUM_TIME_SLICES;
     saveCanvas.height = NUM_FREQ_BINS;
     const ctx = saveCanvas.getContext('2d');
     ctx.drawImage(frame, 0, 0, NUM_TIME_SLICES, NUM_FREQ_BINS);
+    
+    // .toDataURL: Converts the tiny pixelated image into a giant string of Base64 text.
     const dataUrl = saveCanvas.toDataURL('image/png');
+    
+    // localStorage.setItem: Saves that massive text string 
+    // permanently into the browser's memory under a specific key, 
+    // so even if the user refreshes the page or closes the tab, their face is remembered.
     localStorage.setItem(SAVED_FACE_KEY, dataUrl);
     setHasSavedFace(true);
+    
     // Also apply it immediately
     const newGrid = imageToGrid(frame);
     setGrid(newGrid);
@@ -1616,6 +1626,11 @@ const SpectrogramCreator = () => {
 
   // Load saved face from localStorage into the grid
   const loadSavedFace = useCallback(() => {
+    
+    // When clicked later, it grabs that text string from the hard drive, 
+    // creates a simulated HTML <img>, and waits for the browser to decode the 
+    // Base64 string (img.onload). Once loaded, it throws it back into the 
+    // imageToGrid DSP math and paints the screen.
     const dataUrl = localStorage.getItem(SAVED_FACE_KEY);
     if (!dataUrl) return;
     const img = new Image();
@@ -1629,15 +1644,24 @@ const SpectrogramCreator = () => {
 
   // ── Upload image handler ──
   const handleImageUpload = useCallback((e) => {
+    
+    // Triggered when a user clicks a hidden <input type="file">. Grabs the physical image file they chose.
     const file = e.target.files?.[0];
     if (!file) { setPendingPresetSave(null); return; }
-    // Reset the input so the same file can be re-selected
+    
+    // e.target.value = '' un-selects the file immediately from the HTML input. 
+    // This is a common hack so the user can upload the exact same file twice if they make a mistake.
     e.target.value = '';
+    
+    // Checks if the user uploaded this image just for fun, or if they uploaded it specifically 
+    // to fulfill a "Preset" slot (like clicking "Einstein B&W"). 
     const pending = pendingPresetSave;
     const img = new Image();
     img.onload = () => {
       if (pending) {
-        // Save thumbnail to localStorage for this named preset
+        
+        // If it is a preset (pending), it draws it onto a canvas, converts it to a Base64 string, 
+        // and saves it to localStorage under the preset's exact persistent key so they never have to upload it again.
         const saveCanvas = document.createElement('canvas');
         saveCanvas.width = NUM_TIME_SLICES;
         saveCanvas.height = NUM_FREQ_BINS;
@@ -1655,6 +1679,9 @@ const SpectrogramCreator = () => {
       capturedRecordingRef.current = null;
       URL.revokeObjectURL(img.src);
     };
+    
+    // URL.createObjectURL(file): Converts the uploaded file on the hard drive into a 
+    // temporary local URL that the img element can read instantly.
     img.src = URL.createObjectURL(file);
   }, [imageToGrid, pendingPresetSave]);
 
@@ -1670,6 +1697,7 @@ const SpectrogramCreator = () => {
       };
       img.src = dataUrl;
     } else {
+      
       // First time — prompt user to upload the image, then auto-save
       setPendingPresetSave({ key: preset.persistKey });
       fileInputRef.current?.click();
@@ -1678,11 +1706,15 @@ const SpectrogramCreator = () => {
 
   // ── Load preset ──
   const handlePreset = useCallback((presetName) => {
-    // Stop any in-progress spectrum playback and reset captured recording
+    
+    // The master router for the Preset buttons. Whenever someone clicks a new preset, 
+    // we violently kill any active audio, clear anything they recorded, and dump the live audio buffers.
     handleStop();
     capturedRecordingRef.current = null;
     liveColumnsRef.current = [];
 
+    // Directs logic depending on the button clicked. Note fileInputRef.current?.click() 
+    // programmatically forces a click on the hidden HTML file <input>, prompting the OS file chooser window to open.
     if (presetName === 'Face Capture') {
       startWebcam();
       return;
@@ -1702,18 +1734,30 @@ const SpectrogramCreator = () => {
       loadImagePreset(preset);
       return;
     }
+    
+    // If the user clicked a standard mathematical preset (like standard Harmonic series or noise functions), it simply generates a new array using generatePreset and sets the canvas to it.
     const newGrid = generatePreset(presetName, synthRef.current);
     setGrid(newGrid);
   }, [handleStop, startWebcam, loadSavedFace, loadImagePreset]);
 
   // ── Clear canvas ──
   const handleClear = useCallback(() => {
+    
+    // Bound to the "Trash/Clear" button.
     handleStop();
+    
+    // Creates a massive grid populated completely with 0 (silence/black).
     setGrid(SpectrogramSynth.createBlankGrid(NUM_TIME_SLICES, NUM_FREQ_BINS));
-    liveColumnsRef.current = []; // Also clear live capture
-    capturedRecordingRef.current = null; // Discard captured recording
-    setDuration(DEFAULT_DURATION); // Reset duration to default only on explicit clear
-    setMaxDuration(15); // Reset slider max on clear
+    
+    // Also clear live capture
+    liveColumnsRef.current = [];
+    
+    // Discard captured recording
+    capturedRecordingRef.current = null; 
+    
+    // Resets the duration slider back to its default start time and its maximum cap to 15 seconds.
+    setDuration(DEFAULT_DURATION); 
+    setMaxDuration(15); 
   }, [handleStop]);
 
   // ─── Render ────────────────────────────────────────────────────────────────
