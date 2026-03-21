@@ -213,14 +213,16 @@ const generatePreset = (name, synth) => {
 // ─── Live Spectrogram Analyzer ───────────────────────────────────────────────
 
 /**
- * Hook that connects to the global audio context's media source for live
- * spectrogram data. Depends on Redux player state so it reconnects whenever
- * a song starts/stops or the audio context reinitializes (e.g. new song).
+ * Connects an AnalyserNode to the global output audio instance globalAudioContext
  */
 const useLiveSpectrogram = (isLiveMode, activeSong, isSongPlaying) => {
   const analyserRef = useRef(null);
   const dataRef = useRef(null);
-  const connectedSourceRef = useRef(null); // Track which source we're connected to
+
+  // Creates a useRef to keep track of the specific <audio> stream 
+  // (MediaElementAudioSourceNode) the analyser has been attached to
+  const connectedSourceRef = useRef(null); 
+
   const [isConnected, setIsConnected] = useState(false);
 
   // Attempt to connect (or reconnect) to the global audio context
@@ -244,6 +246,8 @@ const useLiveSpectrogram = (isLiveMode, activeSong, isSongPlaying) => {
     }
 
     try {
+      // Opens a try block for safely building the audio graph. Asks the master Audio Context to build an AnalyserNode — 
+      // a native browser feature for extracting time/frequency data from audio.
       const analyser = ctx.createAnalyser();
       analyser.fftSize = 2048;
       analyser.smoothingTimeConstant = 0.85;
@@ -344,11 +348,19 @@ const SpectrogramCreator = () => {
     return found;
   });
 
-  // Physics parameters (ΔMi−1 formula)
+  // dampingFactor: Serves as decay control. It is inverted (1 - dampingFactor)
+  // to slowly dial down the total coupling force added to the bin per loop.
   const [dampingFactor, setDampingFactor] = useState(0.15);
+
+  // couplingStrength: Mathematical friction. How severely the energy on one frequency "smears" into the frequencies around it.
   const [couplingStrength, setCouplingStrength] = useState(0.08);
+
+  // couplingRadius: How many specific bands up-or-down the "smear" is allowed to travel.
   const [couplingRadius, setCouplingRadius] = useState(3);
+
+  // externalForceGain: Directly scale the raw base float amplitude up or down.
   const [externalForceGain, setExternalForceGain] = useState(1.0);
+
   const [simulationEnabled, setSimulationEnabled] = useState(false);
   const [simulationSpeed, setSimulationSpeed] = useState(1); // steps per frame
 
@@ -388,23 +400,46 @@ const SpectrogramCreator = () => {
   const couplingStrengthRef = useRef(0.08);
   const couplingRadiusRef = useRef(3);
 
-  // ── Redux — track whether a song is actively playing ──
+
+  // useSelector(...): Taps into the global Redux store (state.player).
+  // activeSong: Grabs the currently selected track metadata.
+  // isPlaying: isSongPlaying: Grabs the boolean of whether music is currently unpaused,
+  // renaming it to isSongPlaying to avoid variable name clashes.
   const { activeSong, isPlaying: isSongPlaying } = useSelector((state) => state.player);
 
-  // ── Shared live recording state (read by Sidebar for recording indicator) ──
+  // useSpectrogramLive(): A custom React context hook.
+  // setLiveRecording: A function used to broadcast to the rest of the app (like a Sidebar pulsing red dot) 
+  // that the microphone or player is actively capturing data.
   const { setLiveRecording } = useSpectrogramLive();
 
-  // ── Live Spectrogram — passes player state so hook reconnects on song changes ──
+  // useLiveSpectrogram(...): A custom hook that manages the Web Audio API connection (MediaStream for mic or <audio> capture).
+  // It takes isLiveMode (user toggled), and the Redux song state.
+  // getFrequencyData: A function that can be called 60 times a second to get the current audio FFT byte array.
+  // isLiveConnected: A boolean confirming the audio graph is successfully wired up.
   const { getFrequencyData, isConnected: isLiveConnected } = useLiveSpectrogram(isLiveMode, activeSong, isSongPlaying);
 
-  // ── Sync live recording state to context so Sidebar can show indicator ──
+  // isActivelyRecording: A strict boolean. True only if the user wants live mode, 
+  // the hardware connected, and audio is actually playing.
   const isActivelyRecording = isLiveMode && isLiveConnected && isSongPlaying;
+
+  // useEffect: Whenever the recording state or song title changes, 
+  // it calls setLiveRecording so the rest of the UI knows what is being recorded.
   useEffect(() => {
     setLiveRecording(isActivelyRecording, activeSong?.title || activeSong?.albumTitle || null);
+
+    //The cleanup function. When the component unmounts, it safely tells the global state that recording has stopped.
     return () => setLiveRecording(false, null);
+
   }, [isActivelyRecording, activeSong?.title, activeSong?.albumTitle, setLiveRecording]);
 
-  // Keep refs in sync
+
+  // Why this is necessary: The Canvas requestAnimationFrame loop (which draws the visuals) 
+  // runs completely outside of React's state cycle. If the drawing loop used standard React state variables (like grid), 
+  // it would get trapped in a "stale closure" and always see the initial values from when the component first mounted.
+
+  // By constantly syncing standard state variables (grid) into mutable references (gridRef.current), 
+  // the ultra-fast drawing loop can check .current to instantly see user slider 
+  // adjustments without forcing the component to re-render.
   useEffect(() => { gridRef.current = grid; }, [grid]);
   useEffect(() => { evolvedGridRef.current = evolvedGrid; }, [evolvedGrid]);
   useEffect(() => { durationRef.current = duration; }, [duration]);
@@ -416,26 +451,47 @@ const SpectrogramCreator = () => {
   useEffect(() => { couplingStrengthRef.current = couplingStrength; }, [couplingStrength]);
   useEffect(() => { couplingRadiusRef.current = couplingRadius; }, [couplingRadius]);
 
+
   // ── Save live capture when recording stops ──
   useEffect(() => {
+    // Triggers when the user stops recording (!isActivelyRecording), 
+    // but only if we actually captured some audio data (liveColumnsRef.current.length > 0).
     if (!isActivelyRecording && liveColumnsRef.current.length > 0) {
+      
+      // Grabs the massive array containing all the captured 256-band audio frames.
       const columns = liveColumnsRef.current;
       const totalCols = columns.length;
 
-      // Use actual wall-clock elapsed time for accurate duration
+      // Use actual wall-clock elapsed time for accurate duration.
+      // performance.now(): Uses the browser's high-resolution microsecond clock. 
+      // It subtracts the exact start time to find out how many milliseconds the recording lasted.
       const elapsedMs = performance.now() - liveRecordStartRef.current;
+
+      // captureDuration: Converts it to seconds, ensuring it never registers as less than 1 second.
       const captureDuration = Math.max(1, elapsedMs / 1000);
+      
+      // .slice() creates a shallow copy of the recorded memory so we don't accidentally mutate or lose it later. 
+      // Saves it into a permanent playback ref.
       capturedRecordingRef.current = {
-        columns: columns.slice(), // copy array of Float64Arrays
+        // copy array of Float64Arrays
+        columns: columns.slice(), 
         duration: captureDuration,
       };
 
       // Auto-set duration to match recording length
+      // Clamps the duration to max 300 seconds (5 minutes) and 1 decimal place. 
+      // Updates the duration and sets the UI sliders' maximum bounds so the user 
+      // can seek through exactly what they recorded.
       const roundedDur = Math.min(300, Math.max(1, parseFloat(captureDuration.toFixed(1))));
       setDuration(roundedDur);
-      setMaxDuration(Math.ceil(roundedDur)); // Expand slider max to song length
+      
+      // Expand slider max to song length
+      setMaxDuration(Math.ceil(roundedDur)); 
 
       // Save last NUM_TIME_SLICES to grid for static canvas display
+      // Takes the massive recording array (which could be thousands of columns) 
+      // and visually truncates it to just the last NUM_TIME_SLICES (likely 200 screen pixels wide) 
+      // to display as a static grid on the Canvas.
       const startIdx = Math.max(0, totalCols - NUM_TIME_SLICES);
       const newGrid = SpectrogramSynth.createBlankGrid(NUM_TIME_SLICES, NUM_FREQ_BINS);
       for (let col = 0; col < NUM_TIME_SLICES; col++) {
@@ -446,14 +502,21 @@ const SpectrogramCreator = () => {
           }
         }
       }
+      
+      // setGrid(newGrid) saves it to state, and liveColumnsRef.current = [] 
+      // deletes the live RAM buffer to prevent memory leaks and prepare for the next recording.
       setGrid(newGrid);
       liveColumnsRef.current = []; // Clear live buffer after saving
     }
   }, [isActivelyRecording]);
 
   // ── Initialize Synth (once — AudioContext is expensive to recreate) ──
+  // Mounts once on component load ([] dependency array).
   useEffect(() => {
+    // Creates a standalone Web Audio API context standard to Chromium and Safari (webkitAudioContext).
     const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    
+    // Initializes the custom SpectrogramSynth class which generates audio from pixels.
     synthRef.current = new SpectrogramSynth(ctx, {
       numFreqBins: NUM_FREQ_BINS,
       dampingFactor,
@@ -461,15 +524,14 @@ const SpectrogramCreator = () => {
       couplingRadius,
       externalForceGain,
     });
+    
+    // return () => ctx.close() immediately kills the hardware audio pipeline 
+    // if the user navigates away from the page, freeing up the soundcard.
     return () => ctx.close();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Only on mount — params are patched in-place below
+  }, []); 
 
-  // ── Patch synth parameters in-place so AudioContext stays alive ──
-  // IMPORTANT: This block grabs values immediately from the sliders (dampingFactor, couplingStrength, etc.)
-  // and injects them directly into the live synthesizer instance `synthRef.current`. 
-  // Because it happens "in-place", we don't have to restart the audio or rebuild the AudioContext.
-  // This is what allows users to drag sliders and hear the synthesizer's output warp in real-time.
+  // Whenever a user touches one of the physics sliders, this instantly updates 
+  // the internal variables of the audio synthesis engine so the sound mutates in real-time.
   useEffect(() => {
     const synth = synthRef.current;
     if (!synth) return;
@@ -479,107 +541,173 @@ const SpectrogramCreator = () => {
     synth.externalForceGain = externalForceGain;
   }, [dampingFactor, couplingStrength, couplingRadius, externalForceGain]);
 
-  // ── Physics simulation — runs the ΔMi−1 formula to evolve the grid ──
-  // This block makes the Visual representation on the Canvas respond to the sliders.
-  // It completely recalculates the grid of colors ("energy") based on the math formula `ΔMi−1 = −∂Σ...`.
-  // It uses `couplingStrength` to smear energy to neighboring frequencies, and `dampingFactor` to let energy decay over time.
-  // Whenever the sliders move, this re-runs across all time slices to produce `evolvedGrid`, which is then drawn to the screen.
+
   useEffect(() => {
+    // If the user turns "Enable Simulation" off, it just copies the raw drawn grid 
+    // directly to the screen (setEvolvedGrid) and aborts processing.
     if (!simulationEnabled) {
-      // When simulation is off, display the raw drawn grid
       setEvolvedGrid(grid);
       simulationStateRef.current = null;
       return;
     }
 
-    // Run the full interaction simulation across all time slices.
-    // Uses multi-pass spatial coupling per column (same approach as the per-frame
-    // renderer) so recorded audio data doesn't get the warmup dimming that
-    // inter-column accumulation causes on dense spectra.
+    // Deep clones the 2D grid using typed Float64Arrays for extremely fast mathematical computation.
     const evolved = grid.map((slice) => Float64Array.from(slice));
+    
+    // passes: Dictates how many times the blur/smoothing loop will run. A larger radius forces more mathematical passes.
     const passes = Math.max(1, Math.round(couplingRadius));
 
+    // Iterates column by column globally across the screen (NUM_TIME_SLICES).
     for (let t = 0; t < NUM_TIME_SLICES; t++) {
+      
       // Scale source data by gain and intensity
+      // Scales the starting raw pixel brightness/audio energy 
+      // by the user's externalForceGain and overall intensity.
       let state = new Float64Array(NUM_FREQ_BINS);
       for (let i = 0; i < NUM_FREQ_BINS; i++) {
         state[i] = (grid[t]?.[i] || 0) * externalForceGain * intensity;
       }
 
       // Multi-pass spatial coupling (frequency-domain smoothing)
+      // Begins the spatial smoothing loop (acting similar to physical heat dissipation).
       for (let p = 0; p < passes; p++) {
         const next = new Float64Array(NUM_FREQ_BINS);
+        
+        // For every single pixel (i), it looks at its neighboring pixels above 
+        // and below it up to the limit of couplingRadius (r).
         for (let i = 0; i < NUM_FREQ_BINS; i++) {
+          
+          // Aggregates the net energy pushing in or out of this bin from all neighbors.
           let couplingForce = 0;
           for (let r = -couplingRadius; r <= couplingRadius; r++) {
+            
+            // It skips itself (r === 0), and aborts if it hits the top or bottom of the screen (j < 0, etc).
             if (r === 0) continue;
             const j = i + r;
             if (j < 0 || j >= NUM_FREQ_BINS) continue;
+            
+            // Fji: Evaluates the force (friction). Frequencies further away 
+            // (higher absolute r value) have a mathematically weaker influence than immediate neighbors.
             const Fji = couplingStrength / Math.abs(r);
             couplingForce += Fji * (state[j] - state[i]);
           }
+          
+          // Calculates the final pixel value: Takes its previous state, 
+          // adds the massive couplingForce modified by the inverse dampingFactor.
+          // .max(0, .min(1, ...)) locks the amplitude perfectly between 
+          // 0.0 (Absolute silence/black) and 1.0 (Maximum volume/brightest color).
           next[i] = Math.max(0, Math.min(1, state[i] + (1 - dampingFactor) * couplingForce));
         }
+        
+        // Replaces the active state with this new processed array and loops again if passes requires it.
         state = next;
       }
 
       // Write evolved amplitudes back
+      // Saves that single column back into the 2D evolved grid matrix.
       for (let i = 0; i < NUM_FREQ_BINS; i++) {
         evolved[t][i] = state[i];
       }
     }
 
+    // Once all 200 time slices are fully processed, it calls 
+    // setEvolvedGrid to pass the result over to the Canvas loop so the 
+    // user finally sees the physical smearing effect on screen.
     simulationStateRef.current = null;
     setEvolvedGrid(evolved);
   }, [grid, dampingFactor, couplingStrength, couplingRadius, externalForceGain, simulationEnabled, intensity]);
 
+
   // ── Render canvas ──
+  // Declares the drawing loop wrapped in a useCallback to prevent unnecessary component re-render
   const renderCanvas = useCallback(() => {
+
+    // Grabs the HTML <canvas> element from its React useRef. 
+    // If it hasn't rendered yet in the DOM (e.g., component is mounting), exit early to avoid fatal crashes.
     const canvas = canvasRef.current;
     if (!canvas) return;
+
+    // Gets the 2D rendering context ctx which allows drawing commands.
+    // Gets the raw pixel width (w) and height (h) of the canvas element.
     const ctx = canvas.getContext('2d');
     const w = canvas.width;
     const h = canvas.height;
 
-    // Create ImageData for fast pixel manipulation
+    // ctx.createImageData generates a massive one-dimensional 
+    // array representing every single pixel on the canvas.
     const imageData = ctx.createImageData(w, h);
+
+    // imageData.data is a Uint8ClampedArray (Values clamped 0-255). 
+    // Every 4 indices represent a single pixel's Red, Green, Blue, and Alpha 
+    // (opacity) channels. Manipulating this direct array is exponentially faster 
+    // than using ctx.fillRect() thousands of times a second for spectrograms.
     const data = imageData.data;
 
+    // Calculates the exact pixel width (cellW) and height (cellH) that a single "block" of spectrogram 
+    // data should take up on the physical screen. E.g., if canvas is 800px wide and we have 200 
+    // time slices, each block is 4 pixels wide.
     const cellW = w / NUM_TIME_SLICES;
     const cellH = h / NUM_FREQ_BINS;
 
-    // Use the physics-evolved grid for rendering (shows the ΔMi−1 result)
+    // Checks the simulation state reference boolean.
+    // If the user has toggled "Enable Simulation", grab the evolvedGridRef 
+    // (the 2D array that has had the physics engine applied to it).
+    // If toggled off, grab the raw, normal gridRef (the raw mouse paintings or photo).
     const displayGrid = simulationEnabledRef.current ? evolvedGridRef.current : gridRef.current;
-    // Live intensity multiplier for real-time visual feedback
+
+    // Grabs the current value of the Intensity slider so pixels can be instantly scaled brighter or 
+    // dimmer visually without needing to wait for the physics engine to calculate
     const liveIntensity = intensityRef.current;
 
-    // ── How audio is recorded to create the energy ──
-    // This captures the live playing song's frequencies (FFT) and stores them in memory.
-    // If the user has "Live Capture" toggled on, it runs roughly every 40ms (`MS_PER_LIVE_COLUMN`).
-    // `getFrequencyData()` returns a 0-255 byte array from the Web Audio AnalyserNode.
-    // It scales those bytes to 0.0 - 1.0 (float) representing "energy" at that frequency,
-    // and pushes the entire vertical slice (column) into `liveColumnsRef.current` to form the grid over time.
+    // Determines if audio should be captured right now. Checks three state booleans: 
+    // Did the user click the "Live" button? 
+    // Are we successfully connected to the audio context? 
+    // Is a song currently playing?
     const isRecording = isLiveMode && isLiveConnected && isSongPlaying;
+
     if (isRecording) {
-      // Mark start time on the very first capture frame
+      // If the condition is met, and the buffer memory (liveColumnsRef) is perfectly empty, we set a timestamp (performance.now())
+      // to track exactly how many seconds the user has been recording for the UI label.
       if (liveColumnsRef.current.length === 0) {
         liveRecordStartRef.current = performance.now();
       }
+
+      // Calls the hook function to get an array of raw frequency magnitudes 
+      // (0-255) of the audio frame at this exact millisecond.
       const freqData = getFrequencyData();
+
+      // If data came back successfully, we check the clock. We only grab a new "column" of audio every 
+      // MS_PER_LIVE_COLUMN (e.g., 40 milliseconds). If less time has passed, we deliberately skip capturing 
+      // this frame so the spectrogram doesn't scroll at the speed of light.
       if (freqData) {
         const now = performance.now();
         if (now - lastLiveWriteTimeRef.current >= MS_PER_LIVE_COLUMN) {
+
+          // We create a fresh empty float array to hold exactly NUM_FREQ_BINS (256) data points because that's our screen resolution.
+          // We check how many raw data points the audio analyzer gave us (totalBins, usually 1024).
           const column = new Float64Array(NUM_FREQ_BINS);
           const totalBins = freqData.length; // e.g. 1024 for fftSize=2048
+
+          // Edge-case handling: If the browser for some odd reason returns a tiny audio buffer, just copy it exactly 1 to 1, 
+          // and divide by 255 to scale it to a clean float between 0.0 and 1.0.
           if (totalBins <= NUM_FREQ_BINS) {
             // 1:1 or fewer bins — copy directly
             for (let i = 0; i < totalBins; i++) column[i] = freqData[i] / 255;
           } else {
-            // Downsample: map full FFT range to NUM_FREQ_BINS using peak (max) binning
+
+            // Compression math: Since we have 1024 points of data but only 256 graphical slots, 
+            // we find out how many audio bins fit into one graphical bin (1024 / 256 = 4).
             const binsPerCell = totalBins / NUM_FREQ_BINS;
+
+            // Iterates over the 256 graphical slots. Calculates the exact start (lo) and end (hi) 
+            // index markers for the 4 raw audio bins that belong in this visual slot.
             for (let i = 0; i < NUM_FREQ_BINS; i++) {
               const lo = Math.floor(i * binsPerCell);
               const hi = Math.floor((i + 1) * binsPerCell);
+
+              // A loop checks the audio chunk and extracts the highest/loudest magnitude (peak) 
+              // found within those 4 bins (Peak Binning strategy).
+              // It sets that loudest volume divided by 255 into our neat 0.0 - 1.0 column array
               let peak = 0;
               for (let j = lo; j < hi; j++) {
                 if (freqData[j] > peak) peak = freqData[j];
@@ -587,6 +715,9 @@ const SpectrogramCreator = () => {
               column[i] = peak / 255;
             }
           }
+
+          // Pushes the finalized memory column to the end of the giant liveColumnsRef history array. 
+          // Updates the throttle clock lastLiveWriteTimeRef to prevent capturing again for another 40ms
           liveColumnsRef.current.push(column);
           lastLiveWriteTimeRef.current = now;
         }
@@ -594,6 +725,8 @@ const SpectrogramCreator = () => {
     }
 
     // ── Determine data source (live scrolling buffer, captured playback, or static grid) ──
+    // ── 3. Display Logic Routing ──
+    // Makes a fast local reference to the massive history array.
     const liveColumns = liveColumnsRef.current;
 
     // Captured recording playback — scroll through ALL captured columns as audio plays.
@@ -602,14 +735,25 @@ const SpectrogramCreator = () => {
     // even if new live data is also arriving from an ongoing song.
     const captured = capturedRecordingRef.current;
     const pbCol = playbackColumnRef.current;
+    
+    // Checking for scenario A: Did the user completely stop recording, save the recording (captured), 
+    // and press "Play" to listen back (isCapturedPlayback)?
     const isCapturedPlayback = captured && captured.columns.length > NUM_TIME_SLICES && pbCol >= 0;
+    
+    // If we are playing back a saved recording, calculate which chunk of the massive memory array
+    // we should be looking at. It keeps the playhead mathematically bound roughly 80% to the 
+    // right side of the screen (NUM_TIME_SLICES * 0.8), scrolling the canvas past the cursor.
     const capturedViewStart = isCapturedPlayback
       ? Math.max(0, Math.min(pbCol - Math.floor(NUM_TIME_SLICES * 0.8), captured.columns.length - NUM_TIME_SLICES))
       : 0;
 
     // Live scrolling waterfall — only when NOT doing captured playback.
     // This keeps the waterfall visible during brief pauses or audio glitches.
+    // Checking for scenario B: Are we actively recording a live waterfall right now (hasLiveData)?
     const hasLiveData = !isCapturedPlayback && liveColumns.length > 0 && (isRecording || isLiveMode);
+    
+    // If yes, liveStartIdx grabs the *last* 200 frames from the array so the newest audio 
+    // is always drawn on the right side of the screen.
     const liveStartIdx = hasLiveData ? Math.max(0, liveColumns.length - NUM_TIME_SLICES) : 0;
 
     // ── Apply ΔMi−1 physics simulation to live/captured columns ──
@@ -617,95 +761,164 @@ const SpectrogramCreator = () => {
     // (no inter-column accumulation) so there is no warmup dimming on dense
     // audio data. Multiple passes of neighbour-coupling are applied to spread
     // energy between frequency bins — the more passes, the wider the spread.
+    // ── 4. Real-time Physics Engine Simulation ──
     let simulatedColumns = null;
+    
+    // If the User toggled the Physics Engine ON *and* there is actually live flowing data to process...
     if (simulationEnabledRef.current && (hasLiveData || isCapturedPlayback)) {
+      
+      // Grabs the correct dataset (live microphone vs a saved playback clip). 
+      // Sets up an empty simulatedColumns list to hold the end-result of our physics math. 
+      // Checks if the user toggled the "Reverse" switch.
       const sourceColumns = hasLiveData ? liveColumns : captured.columns;
       const viewStart = hasLiveData ? liveStartIdx : capturedViewStart;
       const viewCount = NUM_TIME_SLICES;
       const isReversed = reversedRef.current;
       simulatedColumns = new Array(viewCount);
+
+      // Pulls all 5 physics slider variables from the UI instantly.
       const damp = dampingFactorRef.current;
       const coupling = couplingStrengthRef.current;
       const radius = couplingRadiusRef.current;
       const extGain = externalForceGainRef.current;
       const liveInt = intensityRef.current;
+      
       // Number of spatial smoothing passes — more passes = wider spread
+      // Calculates passes: The larger the coupling "radius", the more smoothing loops the engine runs.
       const passes = Math.max(1, Math.round(radius));
 
+      // Begins the loop to process the 200 Time frames visible on screen. 
+      // Handles reversing the visual index (outIdx) if the reverse toggle is enabled.
       for (let col = 0; col < viewCount; col++) {
         const outIdx = isReversed ? (viewCount - 1 - col) : col;
         const srcIdx = viewStart + outIdx;
         const srcCol = sourceColumns[srcIdx];
+        
+        // Safety check: If the array returned undefined, make a default column of pure silence (0.0s) and skip this loop.
         if (!srcCol) {
           simulatedColumns[outIdx] = new Float64Array(NUM_FREQ_BINS);
           continue;
         }
 
         // Start with scaled source data
+        // Takes the raw audio volume floats (srcCol[i]) and multiplies them by the user's two global gain/intensity sliders.
         let state = new Float64Array(NUM_FREQ_BINS);
         for (let i = 0; i < NUM_FREQ_BINS; i++) {
           state[i] = (srcCol[i] || 0) * extGain * liveInt;
         }
 
         // Apply spatial coupling passes (frequency-domain smoothing)
+        // Starts the multi-pass simulation loop.
         for (let p = 0; p < passes; p++) {
           const next = new Float64Array(NUM_FREQ_BINS);
+          
+          // Loops vertically through all 256 graphical bins. 
+          // Sets an empty variable coupForce to measure how much energy 
+          // from surrounding bins is bleeding into this current bin.
           for (let i = 0; i < NUM_FREQ_BINS; i++) {
             let coupForce = 0;
+            
+            // An inner loop checking the frequencies physically above 
+            // and below this one within the user's radius. 
+            // Bypasses r === 0 (looking at itself) and avoids checking out-of-bounds arrays.
             for (let r = -radius; r <= radius; r++) {
               if (r === 0) continue;
               const j = i + r;
               if (j < 0 || j >= NUM_FREQ_BINS) continue;
+              
+              // The Physics Math: The bleed force is calculated by subtracting difference
+              //  between the neighbor's volume and its volume (state[j] - state[i]). 
+              // It is multiplied by the users coupling slider limit, 
+              // which is inversely divided by the physical distance of the neighbor (Math.abs(r)). 
+              // E.g., bins directly next door smear heavily, bins 4 slots away smear weakly.
               coupForce += (coupling / Math.abs(r)) * (state[j] - state[i]);
             }
+            
             // Damping controls how strongly the coupling modifies amplitudes
+            // Calculates the final new energy for this pixel by injecting 
+            // the smearing friction coupForce, while turning it down slightly via the user's decay slider (1 - damp).
+            // Math.max(0, Math.min(1... completely clamps the number so energy never glitches over 1.0 or drops below 0.0.
             next[i] = Math.max(0, Math.min(1, state[i] + (1 - damp) * coupForce));
           }
           state = next;
         }
+        
+        // Assigns the final calculated column back into simulatedColumns[outIdx].
         simulatedColumns[outIdx] = state;
       }
     }
 
     // ── How the energy is drawn (Render spectrogram pixels) ──
+    // ── 5. Drawing to the Physical Image Pixel Loop ──
     // This loop iterates over every "cell" of the logical matrix grid
+    // Nested loop traversing every single cell in the 200x256 grid from left-to-right, bottom-to-top. 
+    // Defining a blank amp variable for the volume of the cell.
     for (let t = 0; t < NUM_TIME_SLICES; t++) {
       for (let f = 0; f < NUM_FREQ_BINS; f++) {
         let amp;
 
         if (hasLiveData) {
+          
+          // Routing logic A (Live Flow): Grab pixel data from our physics output simulatedColumns 
+          // if available, or just the raw liveColumns if physics is turned off.
           if (simulatedColumns) {
             amp = t < simulatedColumns.length ? simulatedColumns[t][f] : 0;
           } else {
+            
             // Render from continuously accumulated live columns (scrolling waterfall)
             const dataIdx = liveStartIdx + t;
             amp = dataIdx < liveColumns.length ? liveColumns[dataIdx][f] : 0;
           }
         } else if (isCapturedPlayback) {
+          
+          // Routing logic B (Scrolling Clip Playback): Behaves identically 
+          // to the live branch but pulls from the saved audio clip's memory.
           if (simulatedColumns) {
             amp = t < simulatedColumns.length ? simulatedColumns[t][f] : 0;
           } else {
+            
             // Scroll through full captured recording during playback
             const dataIdx = capturedViewStart + t;
             amp = dataIdx < captured.columns.length ? captured.columns[dataIdx][f] : 0;
           }
         } else {
+          
           // Normal grid render
+          // Routing logic C (Static Canvas Mode): If no audio scrolling is happening, 
+          // grab the pixel data right off the canvas (mouse drawings or photos) via displayGrid.
           const rawAmp = displayGrid[t]?.[f] || 0;
           amp = simulationEnabledRef.current ? rawAmp : Math.min(1, rawAmp * liveIntensity);
         }
 
+        // Passes the finalized 0.0 - 1.0 volume energy into a helper function 
+        // that returns an exact RGB color scheme array (e.g. [100, 12, 120, 255]).
         const [r, g, b, a] = amplitudeToRGB(amp);
 
         // Map to canvas coordinates (y is inverted — high freq at top)
+        // px calculates the literal physical X-axis pixel coordinate on the screen.
+        // py calculates the physical Y-axis on the screen. Crucially, it uses (NUM_FREQ_BINS - 1 - f). 
+        // Canvas Y axis goes down, but human eyes expect high-frequencies at the top of a graph. 
+        // This mathematically flips the rendering upside down graphically. 
+        // pw and ph calculate how wide and thick a single "block" square should be painted on the screen.
         const px = Math.floor(t * cellW);
         const py = Math.floor((NUM_FREQ_BINS - 1 - f) * cellH);
         const pw = Math.max(1, Math.ceil(cellW));
         const ph = Math.max(1, Math.ceil(cellH));
 
+        // Because a data "block" might be 4x2 actual monitor pixels in size, 
+        // this sweeps a tiny inner-loop across that exact dimension block. 
+        // Overflows off the right/bottom limits of the screen are blocked (< w, < h).
         for (let dx = 0; dx < pw && px + dx < w; dx++) {
           for (let dy = 0; dy < ph && py + dy < h; dy++) {
+            
+            // The Master ImageData Array Algorithm. This converts a simple (X, Y) coordinate 
+            // into its literal position in a flat 1-Dimensional Array containing millions of numbers. 
+            // Since every pixel takes up exactly 4 slots (R, G, B, A), modifying the index by * 4 is required.
             const idx = ((py + dy) * w + (px + dx)) * 4;
+            
+            // Injects the exact Red, Green, Blue, and fully opaque Alpha channel integers 
+            // into the 1D Image Data block for rendering the massive single data array exactly 
+            // where the pixel lives on the screen. Loops close.
             data[idx] = r;
             data[idx + 1] = g;
             data[idx + 2] = b;
