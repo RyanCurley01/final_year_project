@@ -928,21 +928,40 @@ const SpectrogramCreator = () => {
       }
     }
 
+    // Flush the constructed pixel data array back to the visible canvas, completely replacing its contents.
     ctx.putImageData(imageData, 0, 0);
 
     // ── Recording indicator ──
+    // If the system is actively recording from the microphone and has captured at least one slice of data.
     if (isRecording && liveColumns.length > 0) {
+      
       // Leading/right edge indicator — fills left to right, then stays at right edge
+      // Calculate how many columns have been filled physically on the canvas grid (up to the maximum width).
       const filledCols = Math.min(liveColumns.length, NUM_TIME_SLICES);
+      
+      // Determine the precise horizontal X coordinate of the leading recording edge.
       const edgeX = (filledCols / NUM_TIME_SLICES) * w;
 
+      // Set the line color to a bold, semi-transparent red to indicate active recording.
       ctx.strokeStyle = 'rgba(255, 60, 60, 0.8)';
+      
+      // Set the width of the recording indicator line.
       ctx.lineWidth = 2;
+      
+      // Begin a new path for the recording edge line.
       ctx.beginPath();
+      
+      // Start the line just to the left of the edge to ensure visibility.
       ctx.moveTo(edgeX - 1, 0);
+      
+      // Draw the line straight down to the bottom of the canvas.
       ctx.lineTo(edgeX - 1, h);
+      
+      // Execute the stroke to render the line.
       ctx.stroke();
+
       // Red glow
+      // Swap to a much wider, more transparent red to create a neon glowing effect around the hard edge.
       ctx.strokeStyle = 'rgba(255, 60, 60, 0.15)';
       ctx.lineWidth = 8;
       ctx.beginPath();
@@ -951,25 +970,45 @@ const SpectrogramCreator = () => {
       ctx.stroke();
 
       // Recording time label — use actual wall-clock elapsed time
+      // Calculate the total elapsed seconds since recording began using the high-resolution performance timer.
       const elapsedSec = (performance.now() - liveRecordStartRef.current) / 1000;
+      
+      // Set the text color to matching red for the active recording timestamp.
       ctx.fillStyle = 'rgba(255, 60, 60, 0.9)';
+      
+      // Use a monospace font to prevent the text width from jittering as numbers change.
       ctx.font = '11px monospace';
+      
+      // Align the text to draw from left to right.
       ctx.textAlign = 'left';
+      
+      // Render the recording dot and the elapsed seconds at the bottom left.
       ctx.fillText(`● REC ${Math.max(0, elapsedSec).toFixed(1)}s`, 8, h - 8);
     }
 
     // ── Captured playback scrolling playhead ──
+    // If the canvas is currently scrolling through a previously captured mic recording.
     if (isCapturedPlayback) {
+      
       // Show playhead line at the position within the current viewport
+      // Calculate where the current playback column sits relative to the current viewing window.
       const playheadViewCol = pbCol - capturedViewStart;
+      
+      // Translate that column index into a physical horizontal X coordinate.
       const playheadX = (playheadViewCol / NUM_TIME_SLICES) * w;
+      
+      // Set the playhead color to a bright, semi-transparent green.
       ctx.strokeStyle = 'rgba(0, 255, 150, 0.9)';
       ctx.lineWidth = 2;
       ctx.beginPath();
+      
+      // Draw a vertical line from the top to the bottom of the screen at the playhead position.
       ctx.moveTo(playheadX, 0);
       ctx.lineTo(playheadX, h);
       ctx.stroke();
+      
       // Glow
+      // Duplicate the stroke with a wider, faint green to create a glowing effect.
       ctx.strokeStyle = 'rgba(0, 255, 150, 0.2)';
       ctx.lineWidth = 8;
       ctx.beginPath();
@@ -978,39 +1017,68 @@ const SpectrogramCreator = () => {
       ctx.stroke();
 
       // Progress label
+      // Retrieve the total duration of the recorded audio capture.
       const totalSec = captured.duration;
+      
+      // Calculate the current timestamp in seconds based on the column progress ratio.
       const currentSec = (pbCol / captured.columns.length) * totalSec;
+      
+      // Configure the font style and alignment for the playback HUD.
       ctx.fillStyle = 'rgba(0, 255, 150, 0.9)';
       ctx.font = '11px monospace';
       ctx.textAlign = 'left';
+      
+      // Render the current time vs total duration at the bottom left of the overlay.
       ctx.fillText(`▶ ${currentSec.toFixed(1)}s / ${totalSec.toFixed(1)}s`, 8, h - 8);
     }
   }, [isLiveMode, isLiveConnected, isSongPlaying, getFrequencyData, simulationEnabled]);
 
   // ── Render overlay (playhead, frequency guide) ──
+  // useCallback hooks a separate rendering loop specifically for UI elements overlaid on the core canvas.
   const renderOverlay = useCallback(() => {
+    
+    // Attempt to retrieve the overlay canvas DOM element reference.
     const canvas = overlayCanvasRef.current;
+    
+    // Bail out immediately if the canvas hasn't mounted yet.
     if (!canvas) return;
+    
+    // Acquire the 2D drawing context for the overlay layer.
     const ctx = canvas.getContext('2d');
+    
+    // Wipe the entire overlay canvas entirely clean before drawing the new frame.
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+    // Cache the absolute width and height of the canvas.
     const w = canvas.width;
     const h = canvas.height;
+    
+    // Calculate the physical height of each individual frequency bin in pixels.
     const cellH = h / NUM_FREQ_BINS;
 
+    // Check if the system currently holds an actively playing recorded buffer longer than the screen space.
     const hasCapturedPlayback = capturedRecordingRef.current
       && capturedRecordingRef.current.columns.length > NUM_TIME_SLICES
       && playbackColumnRef.current >= 0;
+      
+    // If not doing captured playback, but a valid playhead exists, draw the generic green play line.
     if (!hasCapturedPlayback && playheadPos >= 0 && playheadPos < NUM_TIME_SLICES) {
+      
+      // Translate the playhead index (0-128) to an actual X pixel value.
       const x = (playheadPos / NUM_TIME_SLICES) * w;
+      
+      // Prepare the hard green core stroke.
       ctx.strokeStyle = 'rgba(0, 255, 150, 0.9)';
       ctx.lineWidth = 2;
       ctx.beginPath();
+      
+      // Slash vertically across the entire canvas height.
       ctx.moveTo(x, 0);
       ctx.lineTo(x, h);
       ctx.stroke();
 
       // Glow effect
+      // Add a fading, wider transparent neon glow overlay for aesthetics.
       ctx.strokeStyle = 'rgba(0, 255, 150, 0.2)';
       ctx.lineWidth = 8;
       ctx.beginPath();
@@ -1020,21 +1088,45 @@ const SpectrogramCreator = () => {
     }
 
     // Draw frequency labels on right edge
+    // Configure text styling for the grid labels showing frequency demarcations.
     ctx.font = '10px monospace';
+    
+    // Use a faint purple-white color for the frequency text.
     ctx.fillStyle = 'rgba(200, 200, 255, 0.5)';
+    
+    // Anchor text rendering from the right side.
     ctx.textAlign = 'right';
+    
+    // Define the specific Hz values to explicitly mark on the Y-Axis graph.
     const freqLabels = [20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 16000];
 
+    // Check if the synthesizer backend is actively spun up.
     if (synthRef.current) {
+      
+      // Iterate through every defined label frequency.
       freqLabels.forEach((freq) => {
+        
+        // Query the synth to determine which array bin contains this specific frequency.
         const bin = synthRef.current.getBinForFrequency(freq);
+        
+        // Calculate the physical Y coordinate, inverting because array index 0 is at the bottom.
         const y = (NUM_FREQ_BINS - 1 - bin) * cellH;
+        
+        // Ensure the label falls within a safe rendering zone, avoiding clipping at the edges.
         if (y > 10 && y < h - 10) {
+          
+          // If the frequency hits kiloHertz bounds, format it with a 'k' suffix.
           ctx.fillText(freq >= 1000 ? `${freq / 1000}k` : `${freq}`, w - 4, y + 3);
+          
+          // Set a very faint, highly transparent line color for the actual grid line.
           ctx.strokeStyle = 'rgba(200, 200, 255, 0.1)';
           ctx.lineWidth = 1;
           ctx.beginPath();
+          
+          // Draw the horizontal separator line originating from the left.
           ctx.moveTo(0, y);
+          
+          // Stop drawing the line slightly before the right edge to leave room for the text.
           ctx.lineTo(w - 30, y);
           ctx.stroke();
         }
@@ -1042,275 +1134,525 @@ const SpectrogramCreator = () => {
     }
 
     // Hover frequency indicator
+    // Check if the user's mouse pointer is actively resting on the canvas grid.
     if (hoveredFreq !== null) {
+      
+      // Select a bright green text color for the dynamic HUD.
       ctx.fillStyle = 'rgba(0, 255, 150, 0.8)';
       ctx.font = '12px monospace';
       ctx.textAlign = 'left';
+      
+      // Format the active hovered Hz value, swapping to kHz if it crosses the 1000 margin.
       const freqText = hoveredFreq >= 1000
         ? `${(hoveredFreq / 1000).toFixed(1)}kHz`
         : `${Math.round(hoveredFreq)}Hz`;
+      
+        // Render the dynamic reading in the upper left corner.
       ctx.fillText(freqText, 8, 16);
     }
   }, [playheadPos, hoveredFreq]);
 
   // ── Animation loop ──
+  // A master orchestration hook that binds the dual-canvas rendering logic directly to browser refresh frames.
   useEffect(() => {
+    
+    // Define the recursive heart of the animation loop.
     const animate = () => {
+      
+      // Trigger the complex math evaluating WebGL array generation.
       renderCanvas();
+      
+      // Render the lightweight UI element lines and text.
       renderOverlay();
+      
+      // Re-register the animate function to run on the next hardware vertical sync.
       animFrameRef.current = requestAnimationFrame(animate);
     };
+    
+    // Kickstart the rendering loop for the first time immediately upon mount.
     animFrameRef.current = requestAnimationFrame(animate);
+    
+    // Return a standard React cleanup unmount function.
     return () => {
+      // If an animation frame was ever scheduled, securely cancel it before tearing down.
       if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
     };
   }, [renderCanvas, renderOverlay]);
 
   // ── Canvas coordinate helpers ──
+  // useCallback caches a helper function translating arbitrary browser mouse clicks into discrete math array indexes.
   const canvasToGrid = useCallback((e) => {
+    
+    // Attempt to target the active overlay canvas instance handling user UI.
     const canvas = overlayCanvasRef.current;
+    
+    // Fast-fail if the DOM element isn't actively painted.
     if (!canvas) return null;
+    
+    // Request the explicit viewport location parameters (padding, scroll offset) from the browser window.
     const rect = canvas.getBoundingClientRect();
+    
+    // Neutralize standard browser document-flow X coordinates into a canvas-internal relative position.
     const x = e.clientX - rect.left;
+    
+    // Neutralize standard browser document-flow Y coordinates into a canvas-internal relative position.
     const y = e.clientY - rect.top;
+    
+    // Take the relative horizontal position, find the percentage ratio, and multiply by integer array columns (Time Slice).
     const t = Math.floor((x / rect.width) * NUM_TIME_SLICES);
+    
+    // Take the relative vertical position, map ratio to frequency array indexing, and invert (bottom-up canvas rendering).
     const f = NUM_FREQ_BINS - 1 - Math.floor((y / rect.height) * NUM_FREQ_BINS);
+    
+    // Rigorously enforce boundary clamps, ensuring no math errors occur when rapidly dragging the mouse past edges.
     return { t: Math.max(0, Math.min(NUM_TIME_SLICES - 1, t)), f: Math.max(0, Math.min(NUM_FREQ_BINS - 1, f)) };
   }, []);
 
   // ── Paint on grid ──
+  // Core user painting algorithm that actually mutates the deeply stored Float64 matrix states based on brushes.
   const paintOnGrid = useCallback((t, f) => {
+    
+    // Enter into the React state-setting queue for the absolute base data array.
     setGrid((prev) => {
+      
+      // Clone the entire massive 2D array, ensuring we don't accidentally mutate state directly outside React rules.
       const next = prev.map((slice) => Float64Array.from(slice));
+      
+      // Calculate a variable integer padding zone based on the active GUI slider.
       const halfBrush = Math.floor(brushSize / 2);
 
+      // Construct a two-dimensional X sweep loop to check all adjoining pixel pixels.
       for (let dt = -halfBrush; dt <= halfBrush; dt++) {
+        
+        // Construct the inner Y sweep loop.
         for (let df = -halfBrush; df <= halfBrush; df++) {
+          
+          // Add the original root center to the sweep offsets.
           const tt = t + dt;
           const ff = f + df;
+          
+          // Discard the specific sub-pixel iteration if it exceeds math boundaries to prevent hard crashes.
           if (tt < 0 || tt >= NUM_TIME_SLICES || ff < 0 || ff >= NUM_FREQ_BINS) continue;
 
           // Circular brush with falloff
+          // Resolve standard Pythagorean distance equations indicating how far the current sweep dot is from the click origin.
           const dist = Math.sqrt(dt * dt + df * df);
+          
+          // If the pixel resides entirely outside the designated radius of the circular footprint, stop evaluating.
           if (dist > halfBrush + 0.5) continue;
+          
+          // Generate a smooth interpolation curve determining how 'alpha' or strong the brush stamp gets based on range.
           const falloff = 1 - (dist / (halfBrush + 1));
 
+          // Branching logic determining if the left-menu UI option is currently toggled onto "Erase Mode".
           if (tool === TOOLS.ERASER) {
+            
+            // Drop power towards absolute zero in a smooth manner instead of hard-clipping.
             next[tt][ff] = Math.max(0, next[tt][ff] - falloff * 0.3);
           } else if (tool === TOOLS.HARMONIC && synthRef.current) {
+            
             // Paint with harmonics
+            // Declare six octaves or "mirror points" for harmonic overtone mathematical rendering.
             const numHarmonics = 6;
+            
+            // Iterate down through the fundamental sequence of harmonics.
             for (let h = 1; h <= numHarmonics; h++) {
+              
+              // Calculate specific overtone bins by directly multiplying raw bin indexes rather than converting back to Hz.
               const harmonicBin = Math.round(ff * h);
+              
+              // Safe-brake if the overtone sequence calculates an infinite tone.
               if (harmonicBin >= NUM_FREQ_BINS) break;
+              
+              // Scale down amplitude exponentially to make secondary waves perceptually "soft".
               const harmonicAmp = intensity * falloff / h;
+              
+              // Securely inject the bounded power rating directly into the cloned `next` state.
               next[tt][harmonicBin] = Math.min(1, Math.max(next[tt][harmonicBin], harmonicAmp));
             }
           } else {
+            
+            // Apply standard flat-power addition to raw arrays.
             next[tt][ff] = Math.min(1, Math.max(next[tt][ff], intensity * falloff));
           }
         }
       }
+      
+      // Publish the heavily mutated structural changes back up into global React contexts via `setGrid`.
       return next;
     });
   }, [tool, brushSize, intensity]);
 
   // ── Bresenham line interpolation for smooth strokes ──
+  // A traditional algorithm determining the straightest pixel-perfect path bridging point A to point B.
   const paintLine = useCallback((x0, y0, x1, y1) => {
+    
+    // Generate absolute ranges between start points and finish coordinates on X fields.
     const dx = Math.abs(x1 - x0);
+    
+    // Generate absolute ranges between start points and finish coordinates on Y fields.
     const dy = Math.abs(y1 - y0);
+    
+    // Determine mathematical polarity of travel—are we going Left/Right or Down/Up.
     const sx = x0 < x1 ? 1 : -1;
     const sy = y0 < y1 ? 1 : -1;
+    
+    // Set a rolling error tracking metric to measure line aliasing drift over iteration cycles.
     let err = dx - dy;
 
+    // Trigger an indefinite loop tracking drawing vectors.
     while (true) {
+      
+      // Actively run the paint/modify operations at the precise line origin.
       paintOnGrid(x0, y0);
+      
+      // Hard break statement safely breaking out of the infinite evaluation loop when goal met.
       if (x0 === x1 && y0 === y1) break;
+      
+      // Perform rolling margin mathematics to measure integer step requirements avoiding subpixel smearing.
       const e2 = 2 * err;
+      
+      // Inject error compensation if leaning off vertical trajectories.
       if (e2 > -dy) { err -= dy; x0 += sx; }
+      
+      // Inject error compensation if drifting off absolute horizontal tracking paths.
       if (e2 < dx) { err += dx; y0 += sy; }
     }
   }, [paintOnGrid]);
 
   // ── Mouse handlers ──
+  // Hook tracking standard left-mouse-click initiations to begin user-driven canvas mutation interactions.
   const handlePointerDown = useCallback((e) => {
+    
+    // Interrupt standard browser interactions preventing highlight dragging errors over dynamic canvas fields.
     e.preventDefault();
+    
+    // Cache the actively down state to block unintentional drag smudging while hovering.
     isDrawingRef.current = true;
+    
+    // Calculate the array bin under the cursor root location using the pre-built DOM translator method.
     const pt = canvasToGrid(e);
+    
+    // Safety check confirming that calculation returned a valid structural address format.
     if (pt) {
+      
+      // Update global pointer memory registering where the track path originated.
       lastPointRef.current = pt;
+      
+      // Enact standard painting behaviors rendering instantaneous dots into array targets.
       paintOnGrid(pt.t, pt.f);
     }
   }, [canvasToGrid, paintOnGrid]);
 
+  // A constantly-triggering event listener observing granular real-time sub-pixel pointer drift routines.
   const handlePointerMove = useCallback((e) => {
+    
+    // Process current cursor viewport position and translate back to rigid internal system blocks immediately.
     const pt = canvasToGrid(e);
+    
+    // Perform an independent safety scan verifying a valid location combined with an available synth architecture reference.
     if (pt && synthRef.current) {
+      
+      // Decode absolute index addresses back to acoustic properties pushing updates to local GUI overlay panels.
       setHoveredFreq(synthRef.current.getFrequencyForBin(pt.f));
     }
 
+    // Fail rapidly leaving standard behaviors intact if a dragged move wasn't explicitly started with a full-press initialization.
     if (!isDrawingRef.current || !pt) return;
+    
+    // Disable any inherent OS-level interactions while engaging in complex line drawing vector processing modes.
     e.preventDefault();
 
+    // Query the global memory bank searching for the absolute prior frame’s recorded mouse axis target points.
     const last = lastPointRef.current;
     if (last) {
+      
+      // Execute the Bresenham physics operation dynamically smoothing sweeping brush cuts.
       paintLine(last.t, last.f, pt.t, pt.f);
     } else {
+      
+      // Revert to raw single-action inputs should the timeline buffer inexplicably fail line bridging mechanics.
       paintOnGrid(pt.t, pt.f);
     }
+    
+    // Set the state system ready to evaluate against future timeline positions during rolling processing scans.
     lastPointRef.current = pt;
   }, [canvasToGrid, paintOnGrid, paintLine]);
 
+  // A basic cleanup operation ending tracking strings automatically as system hardware interrupts finger/mouse pressures.
   const handlePointerUp = useCallback(() => {
+    
+    // Erase the background flag tracking boolean allowing standard UI interactions anew alongside non-modifying pointer tracking.
     isDrawingRef.current = false;
+    
+    // Scrub the global tracking variables guaranteeing subsequent cursor interactions remain disjointed and clear from history.
     lastPointRef.current = null;
   }, []);
 
 
+  // A simple pause command that freezes the browser's global AudioContext hardware loop while maintaining memory.
   const handlePause = useCallback(() => {
+    
+    // Escape immediately if the state indicates we're already locked into a stationary timeline cycle.
     if (!isPlaying) return;
+    
+    // Extract the active synth core from the universal memory reference block.
     const synth = synthRef.current;
+    
+    // Safely interrogate the global AudioContext tracking system evaluating its internal hardware flow state.
     if (synth?.audioContext?.state === 'running') {
+      
+      // Hard stop the audio engine at a hardware level stopping buffer drains or processor calculations abruptly.
       synth.audioContext.suspend();
     }
+    
+    // Set the overall boolean states modifying the active React component views showing UI paused configurations.
     setIsPlaying(false);
     setIsPaused(true);
 
   }, [isPlaying]);
 
   // ── Stop — full teardown ──
+  // A comprehensive nuke command that wipes processing arrays securely preventing orphaned runaway logic threads.
   const handleStop = useCallback(() => {
+    
+    // Specifically target the low-level Javascript AudioNode currently calculating sound values.
     if (realtimeProcessorRef.current) {
+      
+      // Sever the hardware node connection instantly severing processing capabilities.
       realtimeProcessorRef.current.disconnect();
+      
+      // Drop the active evaluation hook tracking audio stream buffer loops.
       realtimeProcessorRef.current.onaudioprocess = null;
+      
+      // Overwrite the core reference object explicitly eliminating zombie processes triggering memory errors.
       realtimeProcessorRef.current = null;
     }
+    
+    // Cleanly untangle the intermediary gain node acting as a volume control layer before output routing.
     if (playbackRef.current) {
       playbackRef.current.disconnect();
       playbackRef.current = null;
     }
+    
+    // Hard refresh root global tracking properties initializing sound loops back to a blank start line state.
     realtimePhasesRef.current = null;
     realtimeSampleRef.current = 0;
+    
+    // Ensure the external webcam snapshot recording cursor returns cleanly to resting default variables.
     playbackColumnRef.current = -1;
+    
+    // Command the broad logic environment out of active streaming states and zero the internal timelines.
     setIsPlaying(false);
     setIsPaused(false);
     setPlayheadPos(-1);
     setPlaybackProgress(0);
   }, []);
 
+
   // ── Seek — jump to a position (0-1) ──
+  // Allow direct manipulation overriding default continuous time algorithms by skipping to absolute points.
   const handleSeek = useCallback((progress) => {
+    
+    // Acquire the foundational synth framework for safe interactions and calculation references.
     const synth = synthRef.current;
     if (!synth) return;
+    
+    // Extract local timeline constraints to accurately execute progress mathematics algorithms.
     const dur = durationRef.current;
+    
+    // Multiply global active limits against sample rate to identify absolute max ceiling thresholds.
     const totalSamples = Math.ceil(dur * synth.audioContext.sampleRate);
+    
+    // Explicitly modify the deep processing sample iterator to leap instantly ignoring preceding samples.
     realtimeSampleRef.current = Math.floor(progress * totalSamples);
+    
+    // Propagate the identical spatial skip math back into horizontal coordinate data for overlay redraw pipelines.
     setPlayheadPos(Math.floor(progress * NUM_TIME_SLICES));
     setPlaybackProgress(progress);
   }, []);
 
+  
+  // ── Play — build audio graphs and run buffers ──
+  // Main orchestrator instantiating dynamic playback buffers converting drawn graphs into raw physical sound outputs.
   const handlePlay = useCallback(async () => {
+    
+    // Early exit determining if the node graph is merely paused rather than functionally stopped.
     if (isPaused && realtimeProcessorRef.current) {
+      
+      // Connect to the deep Web Audio context architecture validating active node graphs.
       const synth = synthRef.current;
       if (synth?.audioContext?.state === 'suspended') {
+        
+        // Use an asynchronous await pattern explicitly reviving suspended Audio Nodes sequentially.
         await synth.audioContext.resume();
       }
+      
+      // Re-trigger the active display flags flipping rendering logic pipelines to streaming visuals.
       setIsPlaying(true);
       setIsPaused(false);
 
+      // Cache a local reference to the active hardware sound environment bypassing subsequent lookup loops.
       const ctx = synth.audioContext;
       const captured = capturedRecordingRef.current;
+      
+      // Configure local booleans establishing whether playback logic feeds from drawn models or recorded video files.
       const hasCaptured = captured && captured.columns.length > 0;
       const capturedNumSlices = hasCaptured ? captured.columns.length : 0;
+      
+      // Establish the cyclic internal animation worker exclusively executing playback visualization redraws.
       const animatePlayhead = () => {
+        
+        // Terminate immediately should the core processor terminate ungracefully dropping references mid-loop.
         if (!realtimeProcessorRef.current) return;
         const dur = durationRef.current;
+        
+        // Extract precisely scaled max boundary markers evaluating global run lengths against processing metrics.
         const totalSamples = Math.ceil(dur * ctx.sampleRate);
+        
+        // Deduce a clean 0.0 to 1.0 fraction marking total system playback propagation depth.
         const progress = realtimeSampleRef.current / totalSamples;
+        
+        // Invoke standard stop lifecycle routines assuming natural playback bounds have been completely processed.
         if (progress >= 1) {
           handleStop();
           return;
         }
+        
+        // Handle explicit rendering path behaviors when playing back previously encoded video audio conversions.
         if (hasCaptured) {
           playbackColumnRef.current = Math.floor(progress * capturedNumSlices);
         } else {
           playbackColumnRef.current = -1;
         }
+        
+        // Publish integer results forcing redraw behaviors in horizontal UI components tracking line progress.
         setPlayheadPos(Math.floor(progress * NUM_TIME_SLICES));
         setPlaybackProgress(progress);
+        
+        // Cycle the command sequence registering directly on the next hardware timing heartbeat refresh pass.
         requestAnimationFrame(animatePlayhead);
       };
       requestAnimationFrame(animatePlayhead);
       return;
     }
 
+    // Toggle logic path handling button behaviors assuming active playback demands a sudden system pause instead.
     if (isPlaying) {
       handlePause();
       return;
     }
 
+    // Default configuration force-enables basic physical ripple dynamics automatically when audio streams initialize.
     setSimulationEnabled(true);
 
     const synth = synthRef.current;
     if (!synth) return;
     const ctx = synth.audioContext;
 
+    // Reactivate sleeping AudioContext environments assuring silent browsers do not drop initial output blocks.
     if (ctx.state === 'suspended') {
       await ctx.resume();
     }
 
+    // Build massive parallel sine-wave calculation matrices calculating frequency-domain oscillator speed.
     const angularVelocities = new Float64Array(NUM_FREQ_BINS);
     for (let i = 0; i < NUM_FREQ_BINS; i++) {
+      
+      // Map arbitrary frequency indexes explicitly to pure 2*PI mathematical radial rotation speeds.
       angularVelocities[i] = (2 * Math.PI * synth.frequencies[i]) / ctx.sampleRate;
     }
+    
+    // Calculate an empirical scaling modifier normalizing raw summations preventing clipping distortion behaviors.
     const normFactor = synth.overallGain / Math.sqrt(NUM_FREQ_BINS);
+    
+    // Grab soft-fade values protecting abrupt volume transitions preventing sharp speaker pops/clicks.
     const fadeMs = synth.fadeMs || 10;
 
+    // Establish memory arrays explicitly caching rotation phases avoiding arbitrary sine-wave alignment resetting frames.
     const phases = new Float64Array(NUM_FREQ_BINS);
     realtimePhasesRef.current = phases;
     realtimeSampleRef.current = 0;
 
+    // Calculate generic frame boundaries demanding audio buffer generation (2048 handles latency vs glitching).
     const bufferSize = 2048;
+    
+    // Instantiate raw javascript execution pathways explicitly bypassing default audio algorithms in favor of direct DSP.
     const processor = ctx.createScriptProcessor(bufferSize, 0, 1);
+    
+    // Wire up standard volume controllers intercepting raw float data prior to hitting destination DAC hardware.
     const gainNode = ctx.createGain();
     gainNode.gain.value = 1.0;
 
+    // Resolve global system properties verifying if playback explicitly streams real-time capture matrices versus drawings.
     const captured = capturedRecordingRef.current;
     const hasCaptured = captured && captured.columns.length > 0;
     const capturedColumns = hasCaptured ? captured.columns : null;
     const capturedNumSlices = hasCaptured ? captured.columns.length : 0;
 
+    // Override the core audio processing engine attaching direct Javascript memory-chunk computation passes continuously.
     processor.onaudioprocess = (e) => {
+      
+      // Secure a direct memory pointer allowing modifications to physical DAC output buffer streams dynamically.
       const output = e.outputBuffer.getChannelData(0);
       const dur = durationRef.current;
+      
+      // Expand raw time scales back to explicit maximum buffer bounds establishing global track length constraints.
       const totalSamples = Math.ceil(dur * ctx.sampleRate);
+      
+      // Construct fade windows determining precise frame counts calculating initial / terminating volume drops.
       const fadeSamples = Math.round(fadeMs * ctx.sampleRate / 1000);
+      
+      // Access the mutable memory store registering where the global time cycle currently exists inside processing.
       let sampleIdx = realtimeSampleRef.current;
 
+      // Select branching internal reference boundaries depending on capturing mode versus generative mode variables.
       const useCaptured = hasCaptured;
       const numSlices = useCaptured ? capturedNumSlices : NUM_TIME_SLICES;
+      
+      // Pre-select direct multi-dimensional float arrays resolving complex data stores prior to loop execution cycles.
       const currentGrid = useCaptured ? null : (simulationEnabledRef.current ? evolvedGridRef.current : gridRef.current);
+      
+      // Map arbitrary duration intervals precisely into raw sample window intervals allocating drawing resolutions.
       const samplesPerSlice = totalSamples / numSlices;
 
+      // Instantiate dense calculation blocks processing sound frames sequentially across hardware buffer window lengths.
       for (let s = 0; s < output.length; s++) {
+        
+        // Graceful termination handling nullifying output streams identically avoiding clicking when boundary edges violated.
         if (sampleIdx >= totalSamples) {
           output[s] = 0;
           continue;
         }
 
+        // Divide current sample counts determining implicit drawing matrix targets avoiding out-of-range slice indexes.
         const t = Math.min(Math.floor(sampleIdx / samplesPerSlice), numSlices - 1);
 
+        // Derive sub-pixel positional timing metrics relative specifically to active grid divisions currently calculating.
         const posInSlice = sampleIdx - Math.floor(t * samplesPerSlice);
+        
+        // Explicitly calculate boundary ceilings protecting specific float interpolations rounding slice intervals up.
         const sliceLen = Math.ceil(samplesPerSlice);
 
+        // Initialize pure mathematical multiplier variable managing active sound envelope modulators.
         let envelope = 1;
+        
+        // Implement initial zero-bound fade trajectories if current progress remains within calculated boundary padding.
         if (posInSlice < fadeSamples) envelope = posInSlice / fadeSamples;
+        
+        // Mirror fading behaviors handling inverse volume reductions identically across trailing boundary edges.
         else if (posInSlice > sliceLen - fadeSamples) envelope = (sliceLen - posInSlice) / fadeSamples;
 
+        // Perform complex logic checks reversing output timelines flipping explicit playbacks generating "rewind" functionality.
         const sliceIdx = (useCaptured && reversedRef.current) ? (numSlices - 1 - t) : t;
+        
+        // Dynamically shift targeted data pools pointing specifically to internal snapshot columns vs active realtime grids.
         const sliceData = useCaptured ? capturedColumns[sliceIdx] : (currentGrid?.[t] || null);
 
+        // Blank pure wave accumulators avoiding residual mathematical clipping overlaps destroying sine calculation results.
         let sample = 0;
+        
+        // Stream direct hardware control readings dynamically manipulating final envelope variables mid-calculation blocks.
         const liveIntensity = intensityRef.current;
         const liveForceGain = externalForceGainRef.current;
         const liveDamping = dampingFactorRef.current;
@@ -1318,145 +1660,236 @@ const SpectrogramCreator = () => {
         const liveRadius = Math.round(couplingRadiusRef.current);
         const simOn = simulationEnabledRef.current;
 
+        // Preallocate static memory banks guaranteeing Javascript Garbage Collectors remain untouched generating frames rapidly.
         const amps = new Float64Array(NUM_FREQ_BINS);
         for (let i = 0; i < NUM_FREQ_BINS; i++) {
+          
+          // Flatten visual representation scales specifically manipulating mathematical node powers instantly into matrices.
           amps[i] = (sliceData?.[i] || 0) * liveIntensity * liveForceGain;
         }
 
+        // Process conditional branching paths specifically triggering explicit physics ripple solvers.
         if (simOn && liveCoupling > 0.001) {
+          
+          // Evaluate minimum mathematical cycle executions forcing propagation rendering effects smoothing frequency borders.
           const passes = Math.max(1, liveRadius);
           let state = amps;
           for (let p = 0; p < passes; p++) {
+            
+            // Allocate mutable temporary arrays caching modified properties during current internal evaluation sweeps.
             const next = new Float64Array(NUM_FREQ_BINS);
             for (let i = 0; i < NUM_FREQ_BINS; i++) {
               let coupForce = 0;
+              
+              // Iterate internal loops identifying exact cross-talk interactions pushing adjacent nodes vertically scaling values.
               for (let r = -liveRadius; r <= liveRadius; r++) {
                 if (r === 0) continue;
                 const j = i + r;
                 if (j < 0 || j >= NUM_FREQ_BINS) continue;
+                
+                // Add positive coupling bias dragging current cell dynamics explicitly towards parallel target differences precisely.
                 coupForce += (liveCoupling / Math.abs(r)) * (state[j] - state[i]);
               }
+              
+              // Enforce rigid [0,1] normalization matrices stopping aggressive cascade interactions mathematically scaling into oblivion.
               next[i] = Math.max(0, Math.min(1, state[i] + (1 - liveDamping) * coupForce));
             }
             state = next;
           }
+          
+          // Clone complete final generation block properties directly back into standard amplitude processing vectors sequentially.
           for (let i = 0; i < NUM_FREQ_BINS; i++) amps[i] = state[i];
         }
 
+        // Conclude final raw algorithm sequences resolving independent frequency cycles linearly aggregating ultimate output floats.
         for (let i = 0; i < NUM_FREQ_BINS; i++) {
+          
+          // Implement physical damping variables manipulating raw sound pressures overriding external simulation constraints seamlessly.
           const amp = simOn ? amps[i] : amps[i] * (1 - liveDamping);
+          
+          // Exit early skipping silent frequency blocks optimizing global frame-times avoiding meaningless multiplying iterations entirely.
           if (amp < 0.001) {
             phases[i] += angularVelocities[i]; // keep phase moving
             continue;
           }
+          
+          // Add the discrete wave fragment into the master output mixing bus applying full volume envelope mapping.
           sample += amp * Math.sin(phases[i]) * envelope;
+          
+          // Step the mathematical angle forward preparing for the precise calculation required natively next frame.
           phases[i] += angularVelocities[i];
         }
 
+        // Output raw audio data down to hardware smoothing peaks avoiding audio clipping using uniform dampeners.
         output[s] = sample * normFactor;
         sampleIdx++;
       }
 
+      // Restore the internal cursor state into the react environment safely completing the Javascript iteration cycle.
       realtimeSampleRef.current = sampleIdx;
 
       // Keep phases in [0, 2π] every buffer to avoid float drift
       for (let i = 0; i < NUM_FREQ_BINS; i++) {
+        
+        // Run modulo wrapping operations to guarantee float parameters remain precise against standard JavaScript max decimal lengths.
         phases[i] %= (2 * Math.PI);
       }
     };
 
+    // Route explicit Javascript audio manipulation pipeline nodes directly into standard WebAudio Graph flow paths.
     processor.connect(gainNode);
+    
+    // Connect output chain definitively back into physical device speaker outputs bridging math to sound.
     gainNode.connect(ctx.destination);
+    
+    // Store exact memory addresses for the currently streaming processor so teardown systems have an anchor.
     realtimeProcessorRef.current = processor;
     playbackRef.current = gainNode;
 
+    // Transition React state views turning local playback components ON unlocking scrubbers/stoppers.
     setIsPlaying(true);
     setIsPaused(false);
     setPlaybackProgress(0);
+    
+    // Grab the exact internal Web Audio Context clock marking specifically when this specific iteration originated.
     playbackStartTimeRef.current = ctx.currentTime;
 
     // Playhead animation driven by the sample counter
+    // Spin up an explicit graphical UI worker evaluating audio sync timing pushing UI playhead markers across canvas headers.
     const animatePlayhead = () => {
+      
+      // Sever the redraw process instantly if external state toggles cancel the active stream processor.
       if (!realtimeProcessorRef.current) return;
+      
       const dur = durationRef.current;
+      
+      // Convert abstract temporal lengths dynamically against precise audio stream rates standardizing progress calculations.
       const totalSamples = Math.ceil(dur * ctx.sampleRate);
       const progress = realtimeSampleRef.current / totalSamples;
+      
+      // Assume stream generation completely concluded if internal cursor eclipses defined absolute boundary dimensions.
       if (progress >= 1) {
         handleStop();
         return;
       }
+      
       // For captured recordings, map progress to full columns range for canvas scrolling
       if (hasCaptured) {
+        
+        // Track the current scrolling edge exactly to the active buffer offset.
         const currentCol = Math.floor(progress * capturedNumSlices);
         playbackColumnRef.current = currentCol;
       } else {
         playbackColumnRef.current = -1;
       }
+      
+      // Convert 0...1 percentage floats accurately into static geometric grid blocks highlighting vertical line traces.
       setPlayheadPos(Math.floor(progress * NUM_TIME_SLICES));
       setPlaybackProgress(progress);
+      
+      // Re-issue a callback requesting fresh cycle execution identically aligned to precise hardware screen refreshes.
       requestAnimationFrame(animatePlayhead);
     };
     requestAnimationFrame(animatePlayhead);
   }, [isPlaying, isPaused, handlePause, handleStop]);
 
   // ── Export WAV ──
+  // Process the entire spatial grid immediately executing pure mathematical generation producing static offline WAV files.
   const handleExport = useCallback(async () => {
     const synth = synthRef.current;
     if (!synth) return;
+    
     // Use full captured recording if available, otherwise use the grid
     const captured = capturedRecordingRef.current;
+    
+    // Toggle whether to process pure math generation or extract existing camera arrays.
     const exportGrid = captured && captured.columns.length > 0
       ? captured.columns
       : (simulationEnabled ? evolvedGrid : grid);
+      
+    // Set appropriate export length scales matching data bounds dynamically.
     const exportDuration = captured && captured.columns.length > 0
       ? captured.duration
       : duration;
+      
+    // Await the heavy generation resolving a standard Browser Blob packaging explicit WAV binary payload data.
     const blob = await synth.renderToWav(exportGrid, exportDuration);
+    
+    // Create an ephemeral virtual URL explicitly mapped to the system RAM storing the Blob content.
     const url = URL.createObjectURL(blob);
+    
+    // Instantiate a temporary, invisible DOM hyperlink precisely formatted to trigger standard browser download handlers.
     const a = document.createElement('a');
     a.href = url;
+    
+    // Assign a dynamic datetime namespace explicitly formatting the output payload file header nomenclature.
     a.download = `spectrogram-synth-${Date.now()}.wav`;
+    
+    // Simulate user interaction firing the click algorithm against the ephemeral HTML anchor.
     a.click();
+    
+    // Drop the strict DOM memory reference clearing RAM blocks preserving system stability post download.
     URL.revokeObjectURL(url);
   }, [grid, evolvedGrid, duration, simulationEnabled]);
 
 
+  // Complete offline processor reading webcam feeds flattening data arrays building matrix geometries evaluating bounds.
   const imageToGrid = useCallback((imageSource) => {
+    
+    // Resolve precise physical input stream sizes verifying height and width independent of input format objects natively.
     const srcW = imageSource.naturalWidth || imageSource.videoWidth || imageSource.width;
     const srcH = imageSource.naturalHeight || imageSource.videoHeight || imageSource.height;
 
+    // Stand up a complex hidden Canvas DOM object serving exclusively as an initial manipulation cache.
     const fullCanvas = document.createElement('canvas');
     fullCanvas.width = srcW;
     fullCanvas.height = srcH;
     const fullCtx = fullCanvas.getContext('2d');
+    
+    // Strip pure RGB data channels pushing everything strictly into a normalized Grayscale 0 to 255 buffer map.
     fullCtx.filter = 'grayscale(1)';
     fullCtx.drawImage(imageSource, 0, 0, srcW, srcH);
     fullCtx.filter = 'none';
 
+    // Construct secondary scaled DOM node specifically matching global grid requirements formatting.
     const offscreen = document.createElement('canvas');
     offscreen.width = NUM_TIME_SLICES;
     offscreen.height = NUM_FREQ_BINS;
     const ctx = offscreen.getContext('2d');
+    
+    // Draw the massive primary canvas feed directly into the miniaturized structure performing raw compression interpolation.
     ctx.drawImage(fullCanvas, 0, 0, NUM_TIME_SLICES, NUM_FREQ_BINS);
+    
+    // Pull the raw clamped float arrays holding discrete pixel data out of browser rendering blocks explicitly.
     const imgData = ctx.getImageData(0, 0, NUM_TIME_SLICES, NUM_FREQ_BINS);
     const pixels = imgData.data;
 
+    // Define memory footprint limits allocating Float64 resources tracking structural limits smoothly.
     const totalPixels = NUM_TIME_SLICES * NUM_FREQ_BINS;
     const grayValues = new Float64Array(totalPixels);
 
+    // Iterating specifically through 2D vectors converting flat integer buffers into dimensional mapping models mapping grid spaces.
     for (let y = 0; y < NUM_FREQ_BINS; y++) {
       for (let t = 0; t < NUM_TIME_SLICES; t++) {
         const i = y * NUM_TIME_SLICES + t;
+        
+        // Divide original RGB integer spaces transforming 0-255 arrays down into normalized pure float scales [0-1].
         grayValues[i] = pixels[i * 4] / 255;
       }
     }
 
+    // Allocate an empty framework preparing space explicitly recording specific high-contrast feature edges evaluating math differences.
     const edges = new Float64Array(totalPixels);
     let maxEdge = 0;
 
+    // Begin standard Sobel Operator matrix loops evaluating gradients bypassing standard border pixels securely reducing crashes.
     for (let y = 1; y < NUM_FREQ_BINS - 1; y++) {
       for (let t = 1; t < NUM_TIME_SLICES - 1; t++) {
+        
+        // Map direct internal tracking matrix referencing where the current pixel lives sequentially.
         const idx = y * NUM_TIME_SLICES + t;
+        
+        // Target specifically independent pixels surrounding active evaluation centers acquiring local gradients mapped properly.
         const tl = grayValues[(y - 1) * NUM_TIME_SLICES + (t - 1)];
         const tc = grayValues[(y - 1) * NUM_TIME_SLICES + t];
         const tr = grayValues[(y - 1) * NUM_TIME_SLICES + (t + 1)];
@@ -1466,38 +1899,54 @@ const SpectrogramCreator = () => {
         const bc = grayValues[(y + 1) * NUM_TIME_SLICES + t];
         const br = grayValues[(y + 1) * NUM_TIME_SLICES + (t + 1)];
 
+        // Compute horizontal (X) and vertical (Y) intensity changes using standard mathematical edge approximation variables natively.
         const gx = -tl + tr - 2 * ml + 2 * mr - bl + br;
         const gy = -tl - 2 * tc - tr + bl + 2 * bc + br;
+        
+        // Set resulting absolute magnitudes executing standard distance formulations solving final vector length matrices dynamically.
         edges[idx] = Math.sqrt(gx * gx + gy * gy);
+        
+        // Track the single highest recorded contrast value allowing later mathematical pass normalization against max potential limits.
         if (edges[idx] > maxEdge) maxEdge = edges[idx];
       }
     }
 
+    // Execute standard linear division forcing absolute data sets definitively between 0.0 and 1.0 based mathematically on largest found peak.
     if (maxEdge > 0) {
       for (let i = 0; i < totalPixels; i++) {
         edges[i] = edges[i] / maxEdge;
       }
     }
 
+    // Assign a manual cutoff threshold explicitly removing generic camera noise static protecting generated audio tracks clearly.
     const edgeThreshold = 0.06;
     for (let i = 0; i < totalPixels; i++) {
       if (edges[i] < edgeThreshold) {
+        
+        // Immediately zero weak nodes creating clean empty spaces for clear sine waves rather than dirty static output frequencies.
         edges[i] = 0;
       } else {
+        
         // Re-scale surviving edges to 0-1 and boost brightness aggressively
+        // Run exponential curves compressing final ranges boosting low-contrast surviving lines brightly creating bold visuals instantly.
         edges[i] = Math.pow((edges[i] - edgeThreshold) / (1 - edgeThreshold), 0.35);
       }
     }
 
+    // Generate entirely fresh multidimensional matrices formatted properly using the static initialisation toolkit completely anew.
     const newGrid = SpectrogramSynth.createBlankGrid(NUM_TIME_SLICES, NUM_FREQ_BINS);
 
+    // Transplant computed single-array variables cleanly back into full 2D spaces respecting grid sizes actively rendering matrices.
     for (let t = 0; t < NUM_TIME_SLICES; t++) {
       for (let y = 0; y < NUM_FREQ_BINS; y++) {
+        
+        // Invert Y mapping ensuring internal rendering places highest audio frequencies consistently matching vertical spatial tracking arrays correctly.
         const f = NUM_FREQ_BINS - 1 - y;
         newGrid[t][f] = edges[y * NUM_TIME_SLICES + t];
       }
     }
 
+    // Distribute final clean data representations back up to standard execution handlers ready to stream into DSP immediately seamlessly.
     return newGrid;
   }, []);
 
