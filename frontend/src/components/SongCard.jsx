@@ -15,11 +15,6 @@ import { auth as firebaseAuth } from '../firebase';
 import placeholders from '../utils/placeholderImage';
 import envConfig from '../config/environment';
 
-const VIDEO_EXPORT_USER = {
-  firebaseUid: 'AHxuyzhNGddZ3bCJOHTqpULp1My2',
-  email: 'ryancurley21@gmail.com',
-};
-
 const SongCard = ({ product, payment, i, data }) => {
   const isPaid = payment !== null && payment !== undefined;
 
@@ -34,7 +29,7 @@ const SongCard = ({ product, payment, i, data }) => {
   // Check if the cover media is a video (mp4)
   const isVideo = coverMedia && coverMedia.toLowerCase().includes('.mp4');
   
-  // Teddy Emotion keeps the sky video; all other songs use AI-generated onset images
+  // Teddy Emotion keeps the sky video; all other songs use onset images
   const isTeddyEmotion = productName && productName.toLowerCase().includes('teddy emotion');
   const useOnsetImages = isVideo && !isTeddyEmotion;
   
@@ -62,10 +57,11 @@ const SongCard = ({ product, payment, i, data }) => {
   const { currentUser } = useAuth();
   const currentUserEmail = (currentUser?.email || currentUser?.accountEmailAddress || '').toLowerCase();
   const currentUserUid = currentUser?.firebaseUid || currentUser?.uid || '';
+  const videoExportUser = envConfig.getPoolVideoExportUser();
   const canDownloadPoolVideo =
     useOnsetImages &&
-    currentUserEmail === VIDEO_EXPORT_USER.email &&
-    currentUserUid === VIDEO_EXPORT_USER.firebaseUid;
+    currentUserEmail === videoExportUser.email &&
+    currentUserUid === videoExportUser.firebaseUid;
 
   const canStopDownload = isDownloadingPoolVideo && (downloadStatus === 'downloading' || downloadStatus === 'resuming');
   const canResumeDownload = downloadStatus === 'paused';

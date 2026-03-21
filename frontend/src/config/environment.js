@@ -123,6 +123,21 @@ class EnvironmentConfig {
                         runtimeEnv.VITE_ENVIRONMENT || 
                         config.environment;
 
+    // Optional allowlist identity for pool-video export controls
+    config.poolVideoExportUserEmail = (
+      runtimeEnv.VITE_POOL_VIDEO_EXPORT_USER_EMAIL ||
+      viteEnv.VITE_POOL_VIDEO_EXPORT_USER_EMAIL ||
+      ''
+    )
+      .trim()
+      .toLowerCase();
+    config.poolVideoExportUserFirebaseUid = (
+      runtimeEnv.VITE_POOL_VIDEO_EXPORT_USER_FIREBASE_UID ||
+      viteEnv.VITE_POOL_VIDEO_EXPORT_USER_FIREBASE_UID ||
+      ''
+    )
+      .trim();
+
     return config;
   }
 
@@ -156,6 +171,13 @@ class EnvironmentConfig {
 
   getEnvironment() {
     return this.config.environment;
+  }
+
+  getPoolVideoExportUser() {
+    return {
+      email: this.config.poolVideoExportUserEmail,
+      firebaseUid: this.config.poolVideoExportUserFirebaseUid,
+    };
   }
 
   isCodespaces() {
@@ -199,6 +221,7 @@ export const {
   getApiBaseUrl,
   getBackendApiUrl,
   getProductsApiUrl,
+  getPoolVideoExportUser,
   getEnvironment,
   isCodespaces,
   isLocalhost,
