@@ -277,8 +277,12 @@ const WishlistPage = () => {
   }, [wishlistItems, allProducts]);
 
   // ─── Price drop detection ─────────────────────────────────────────
-  // Seed an initial price snapshot when a product is first wishlisted,
-  // then fire an alert whenever the current (discounted) price diverges.
+  // PRICE ALERT DETECTOR LOGIC:
+  // Scans the active Redux `wishlistProducts` array on every render.
+  // Calculates an `effectivePrice` (e.g., assessing discounts).
+  // Looks inside `state.priceAlerts[product.id]` to compare the newly calculated price
+  // against the historical tracked price. If it is lower, it dispatches `updatePriceAlert`
+  // mapping local saving diffs and triggering the green UI card without ever hitting the backend.
   useEffect(() => {
     wishlistProducts.forEach((product) => {
       // Compute the effective price the customer sees (mirrors SongCard discount logic)
@@ -363,6 +367,9 @@ const WishlistPage = () => {
     dispatch(clearPriceAlert(productId));
   };
 
+  // UI RENDER FILTER: Extracts active price alerts from the Redux cache.
+  // Filters out items where `alert.dropped === false` to ensure we only
+  // map the PriceDropCard to items currently cheaper than their saved snapshot.
   const activeAlerts = Object.entries(priceAlerts).filter(
     ([, alert]) => alert.dropped
   );

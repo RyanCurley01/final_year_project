@@ -218,6 +218,12 @@ class GlobalAudioContext {
    * Uses quantum-inspired probability amplitudes where each state
    * has equal probability (|α|² = |β|² = 0.25 for each basis state)
    */
+  // QUBIT PANNING MATHEMATICS:
+  // Uses two simulated binary states (qubits collapsing) upon Audio transient hits 
+  // rather than a basic continuous LR sweep. By mapping a 50/50 Math.random() twice,
+  // we derive exactly 1 of 4 quantum basis states (|00>, |01>, |10>, |11>).
+  // These uniquely push the HTML5 StereoPannerNode strictly to either `Hard Left (-1.0)`, 
+  // `Hard Right (+1.0)`, `Soft Left (-0.4)`, or `Soft Right (+0.4)`, instantly spatializing the drum hit.
   measureQubit() {
     // Generate two "qubit" measurements (each 0 or 1 with equal probability)
     // This gives us 4 basis states: |00⟩, |01⟩, |10⟩, |11⟩
@@ -238,6 +244,9 @@ class GlobalAudioContext {
    * Apply quantum state to audio on transient hit
    * Called from the onset callback when quantum mode is active
    */
+  // APPLES QUBIT TO AUDIO:
+  // Triggered directly by the OnsetDetector when a kick/snare frequency transient strikes.
+  // Overrides any currently playing scheduled Pan node smoothly via `setTargetAtTime`, completing the audio illusion.
   applyQuantumState(onset) {
     if (!this.quantumMode || !this.audioContext) return;
     

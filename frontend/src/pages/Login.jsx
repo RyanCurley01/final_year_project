@@ -4,31 +4,40 @@ import { Link, useNavigate } from 'react-router-dom';
 import { accountService } from '../redux/services';
 import { FcGoogle } from "react-icons/fc";
 
+// Main Login component executing dual-mode authentication resolving standard DB forms and Firebase SSO popups.
 export default function Login() {
+  // Binds generic variable hooks bridging direct HTML input nodes cleanly, avoiding unnecessary re-renders.
   const emailRef = useRef();
   const passwordRef = useRef();
+  
+  // Extracts context functions responsible for talking natively with Firebase APIs directly from global Auth state.
   const { login, loginWithGoogle, syncWithBackend, setUser } = useAuth();
+  
+  // Stores error strings indicating to the user why the login execution pipeline failed locally.
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
+  // Asynchronous wrapper calling Firebase's specialized logic initializing secure external Google authentication loops.
   async function handleGoogleLogin() {
     try {
       setError("");
       setLoading(true);
       
       console.log("DEBUG: Starting Google Popup Login...");
+      // Pauses execution while the Firebase SDK loads the Google Auth popup window. Returns user object if successful.
       const result = await loginWithGoogle();
       console.log("DEBUG: Popup finished, user:", result?.user?.email);
       
       if (result && result.user) {
+          // Relays the secure Firebase user data against the Spring Boot API, associating external tokens with internal MySQL IDs.
           await syncWithBackend(result.user);
           console.log("DEBUG: Backend sync complete, navigating to home");
           navigate("/");
       }
     } catch (err) {
       console.error("Google login failed", err);
-      // Suppress the COOP error which is often benign in dev
+      // Suppresses native Cross-Origin browser UI bugs blocking Firebase execution loops visually.
       if (err.code === 'auth/popup-closed-by-user') {
           setError("Sign in cancelled");
       } else if (err.message && err.message.includes("Cross-Origin-Opener-Policy")) {
@@ -45,6 +54,7 @@ export default function Login() {
     }
   }
 
+  // Orchestrates standard non-SSO logins executing fallback logic validating raw user-entered text locally against systems.
   async function handleSubmit(e) {
     e.preventDefault();
     setLoading(true);
@@ -55,17 +65,21 @@ export default function Login() {
 
     try {
       // 1. Try Firebase Login
+      // Invokes Firebase with the typed credentials, throwing an error if the user isn't found in their remote auth registry.
       const userCredential = await login(email, password);
       const user = userCredential.user;
+      
+      // Pulls the verifiable JSON Web Token assigned by Firebase ensuring Spring Boot accepts the session state.
       const token = await user.getIdToken();
       console.log("DEBUG (Login): Obtained Firebase Token:", token ? `${token.substring(0, 20)}...[truncated]` : "null");
 
       // 2. Sync/Login with backend
+      // Transmits the token payload matching the confirmed Firebase session to our Account Service retrieving Account types (Admin vs User).
       console.log("DEBUG (Login): Calling accountService.firebaseLogin");
       const backendUser = await accountService.firebaseLogin(token, user.email, user.uid);
       
       // 3. Store user details
-      // Combine backend data with Firebase UID for consistent identity checks
+      // Combines the local DB payload structure and the external Firebase user UID safely caching values inside context.
       setUser({
         ...backendUser,
         firebaseUid: user.uid,
@@ -78,9 +92,11 @@ export default function Login() {
       
       try {
         // 4. Fallback to Legacy Backend Login
+        // Executes standard web REST logic hitting the legacy backend endpoint skipping Firebase entirely if old rows exist.
         const response = await accountService.login(email, password);
         
         if (response.success) {
+          // Re-maps explicit primitive properties bridging structural legacy Account payloads correctly for modern application states.
           const legacyUser = {
             id: response.accountId,
             accountName: response.accountName,
@@ -92,7 +108,7 @@ export default function Login() {
           setUser(legacyUser);
           navigate('/');
         } else if (response.message === 'FIREBASE_ACCOUNT') {
-          // Account is linked to Google/Firebase — password login won't work
+          // Catches specific fail codes preventing valid linked SSO users from using legacy text password overrides explicitly.
           setError('Email already associated with a Google account. Please login with your Google account.');
         } else {
           setError(response.message || 'Failed to log in');

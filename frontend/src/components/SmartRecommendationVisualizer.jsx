@@ -54,6 +54,10 @@ const SmartRecommendationVisualizer = ({
   // Get current song ID for comparison
   const currentSongId = activeSong?.id || activeSong?.productId || activeSong?.trackId;
 
+  // RECOMMENDATION VISUALIZER LOGIC:
+  // Subscribes directly to `activeSong` Redux pointer. Whenever the user clicks a
+  // new song across the app, this hook fires. It drops stale recommendations, shows the
+  // Loader `loading: true`, and prepares to call the Audio Features context to map a radar cluster.
   // Reset state when active song changes (including from other pages)
   useEffect(() => {
     // Only reset if song actually changed
