@@ -86,28 +86,47 @@ const SmartRecommendationVisualizer = ({
       }
       // Don't reset noMatchFound here - wait for response
       
-      // Include playback rate for tempo-adjusted recommendations
+      // Constructs a sanitized dictionary of the live-extracted client-side audio features ensuring strict numeric types
       const adjustedFeatures = {
          tempo: Number(features.tempo),
          energy: Number(features.energy),
          valence: Number(features.valence),
          danceability: Number(features.danceability),
          acousticness: Number(features.acousticness),
+         // Pre-computes the perceived "effective" tempo by directly multiplying base BPM by the UI playback rate slider
          effective_tempo: features.tempo ? (Number(features.tempo) * rate) : null,
+         // Sends the exact playback rate to the server so it can track user interaction states
          playback_rate: rate
       };
       
-      // Determine source based on location
-      let source = 'discover_page'; // Default for Home/CustomerScreen
+
+      // Initializes a default context flag routing recommendations against the entire user library
+      let source = 'discover_page'; 
+      
+      // Evaluates current browser URL path. If in Top Charts, switches flag to enforce iTunes-only matching rules on backend
       if (location.pathname.includes('/top-charts')) source = 'top_charts';
+      
+      // Evaluates if user is specifically traversing the Similar Songs specific component route
       else if (location.pathname.includes('/similar-songs')) source = 'similar_songs';
+      
+      // Evaluates if user triggered recommendations via global Search component, keeping search-bounded context
       else if (location.pathname.includes('/search')) source = 'search_component';
       
+      // Packages the structured REST payload required by the unified-recommendations FastAPI endpoint
       const payload = {
+        // Injects the context flag (e.g. 'discover_page' or 'top_charts') for the strict backend evaluator loop
         source: source,
+        
+        // Safely converts whatever ID is playing into a guaranteed string representing the current Target 
         current_product_id: String(productId),
+        
+        // Chains safe fallbacks to extract the audio preview snippet URL from various possible source schemas
         preview_url: String(product.previewUrl || product.fileUrl || product.hub?.actions?.[1]?.uri || ''),
-        audio_features: adjustedFeatures, // Already sanitized with Number() above
+        
+        // Passes the fully numerical, rate-adjusted property object for Priority 2 live-extraction fallback
+        audio_features: adjustedFeatures, 
+        
+        // Requests exactly 5 responses to cap network payload sizes and prevent UI visual clutter
         limit: 5
       };
 
@@ -121,23 +140,46 @@ const SmartRecommendationVisualizer = ({
         console.log("🧪 Model Selection Scores:", response.data.model_metrics);
       }
 
+      // Grabs the array of recommended songs from the backend's JSON response
       const recs = response.data.recommendations || [];
       
-        // Update displayed features to match exactly what the backend used (Source of Truth)
-        // Backend currently returns `target_features`; keep `source_features` for backward compatibility.
-        const backendFeatures = response.data.target_features || response.data.source_features;
+        // Reads the exact audio feature mathematical values (Tempo, Energy, etc.) 
+        // the backend used as its "Target".
+        const backendFeatures = response.data.target_features;
+
+        // Checks if backend returned actually valid feature objects
         if (backendFeatures) {
-         setDisplayedFeatures(prev => ({
-           ...backendFeatures,
-             // Map backend names to frontend expected names
-           using_cached: backendFeatures.using_cached_features
-         }));
+          // Calls the React hook to update the displayedFeatures state 
+          // (which powers the four visual badges showing Tempo/Energy/Mood/Dance 
+          setDisplayedFeatures(prev => ({
+
+            // Uses the JavaScript spread operator (...) to instantly copy every 
+            // single property and value from the backendFeatures object directly into this new 
+            // React state object, saving time from having 
+            // to map them manually (e.g. tempo: backendFeatures.tempo, etc).
+            ...backendFeatures,
+
+            // A boolean dictating whether the UI should show a green "✓ Verified" badge 
+            // (meaning the math came from the high-quality database) or a "Live Analysis" pulsing dot.
+            using_cached: backendFeatures.using_cached_features
+          }));
       }
 
+      // Overwrites the main React state recommendations with the fresh extracted recommendations array.
+      // Forces React to repaint the screen and draw the new recommendation cards.
       setRecommendations(recs);
+
+      // If the backend returned 0 tracks, this resolves to true, switching the 
+      // noMatchFound state to true and causing the UI to bring up the red 
+      // "🎵❌ No Match Found" error box. If there are tracks, it resolves to false, 
+      // hiding the error box.
       setNoMatchFound(recs.length === 0);
       
+      // Next time the 3-second background polling interval happens, the app remembers 
+      // this isn't the first load, preventing the massive screen-blocking loading spinner 
+      // from interrupting the user's experience.
       isInitialLoad.current = false;
+
     } catch (error) {
       setNoMatchFound(true);
     } finally {
@@ -280,13 +322,19 @@ const SmartRecommendationVisualizer = ({
         intervalRef.current = null;
       }
     };
-  }, [currentProduct, sessionId, currentSongId, location.pathname, cachedAudioFeatures]); // Add cachedAudioFeatures to deps
+  }, [currentProduct, sessionId, currentSongId, location.pathname, cachedAudioFeatures]); 
 
-  // Calculate real-time match values based on current audio features
+  
+  // Helper function: Calculates visually responsive, live match percentages that instantly update 
+  // without needing a backend refresh when the user drags the playback speed slider.
   const calculateLiveMatch = (rec) => {
-    // If no features available, return existing match data
+    
+    // Determines if we should use the confirmed backend features (displayedFeatures)
+    // or fall back to the raw client-side extracted features (audioFeatures)
     const featuresToUse = displayedFeatures || audioFeatures;
 
+    // Failsafe: If absolutely no math features are available locally, simply return 
+    // the static, pre-calculated match arrays that were originally sent by the backend.
     if (!featuresToUse) {
        return {
          tempo_match: rec.tempo_match,
@@ -297,29 +345,41 @@ const SmartRecommendationVisualizer = ({
        };
     }
 
+    // Fetches the current playback rate multiplier from the audio state (e.g. 1.25x speed)
     const rateToUse = displayedPlaybackRate || 1;
     
-    // 1. Get Current Features
+    // Initializes the user's current perceived tempo, defaulting to a standard 120 BPM
     let currentTempo = 120;
+    // Checks if the backend explicitly computed and provided an "effective tempo" already factored for playback rate
     if (featuresToUse.effective_tempo) {
+        // Locks in the backend's effective tempo
         currentTempo = featuresToUse.effective_tempo;
     } else if (featuresToUse.tempo) {
+        // If no pre-computed effective tempo, mathematically scales the base tempo by the slider's multiplier in real-time
         currentTempo = Number(featuresToUse.tempo) * rateToUse;
     }
     
-    // 2. Get Target Features (from rec)
+    
+    // Grabs the original tempo of the recommended candidate track, falling back to 120 BPM if missing
     const targetTempo = Number(rec.tempo) || 120;
     
-    // 3. Compute Matches (Replicate audioSimilarity.js logic)
+    // Calculates Absolute Difference: Finds exactly how many BPM apart the two tracks are currently playing
     const tempoDiff = Math.abs(targetTempo - currentTempo);
+    
+    // Scales the difference out of 100 BPM max, subtracts from 1.0 to formulate a match percentage, bounding at minimum 0
     const tempoMatch = Math.max(0, 1 - Math.min(tempoDiff / 100.0, 1.0));
     
+    // Real-Time Energy Math: Normalizes client-side extraction energy, gets distance from candidate energy, bounding 0 to 1
     const energyMatch = Math.max(0, 1 - Math.abs((Number(featuresToUse.energy) || 0.5) - (Number(rec.energy) || 0.5)));
+    
+    // Real-Time Mood Math: Normalizes client-side valence, calculates difference from candidate valence target
     const moodMatch = Math.max(0, 1 - Math.abs((Number(featuresToUse.valence) || 0.5) - (Number(rec.valence) || 0.5)));
+    
+    // Real-Time Danceability Math: Calculates difference between current active rhythm constraints and candidate track groove
     const danceabilityMatch = Math.max(0, 1 - Math.abs((Number(featuresToUse.danceability) || 0.5) - (Number(rec.danceability) || 0.5)));
 
-    // 4. Weighted Score
-    // Tempo (25%) + Energy (30%) + Mood (20%) + Danceability (25%)
+    // Reconstructs the master linear scoring algorithm identically to the backend service calculation weighting
+    // Tempo (25%), Energy (30%), Mood (20%), Danceability (25%) representing human-audible importance
     let score = (
       tempoMatch * 0.25 +
       energyMatch * 0.30 +
@@ -327,9 +387,10 @@ const SmartRecommendationVisualizer = ({
       danceabilityMatch * 0.25
     );
     
-    // Cap at 99%
+    // Caps the visual UI meter at a strict 99% max to prevent mathematical float overflow rendering errors
     if (score > 0.99) score = 0.99;
     
+    // Returns a re-calculated metrics block that immediately overrides the React component's UI radar bars
     return {
       tempo_match: tempoMatch,
       energy_match: energyMatch,
@@ -339,15 +400,19 @@ const SmartRecommendationVisualizer = ({
     };
   };
 
+  // Lookup Mapping Function: Acts as the primary bridge connecting the raw mathematical IDs returned by the backend 
+  // to the rich, fully-hydrated playable song objects loaded globally in the frontend's Redux "products" store.
   const getRecommendedProduct = (productId) => {
-    // Products might use 'id' or 'productId' depending on source
-    // Also try matching as string in case of type mismatch
+    // Scans through the massive frontend Redux array (products) attempting to locate the matching song.
+    // Handles database architectural inconsistencies by checking multiple potential ID property locations 
+    // and forcefully casting variables to Strings to prevent strict-equivalence (===) failures across types.
     const product = products?.find(p => 
       p.id === productId || 
       p.productId === productId ||
       p.id === String(productId) ||
       String(p.id) === String(productId)
     );
+    // Returns the matched master React object containing audio URLs, images, titles, etc. (or undefined if missing).
     return product;
   };
 
@@ -522,13 +587,22 @@ const SmartRecommendationVisualizer = ({
               };
             })
             .sort((a, b) => b.similarity_score - a.similarity_score)
+            // 2nd Map: The actual visual rendering loop for the UI cards mapping backend IDs to frontend components
             .map((rec, index) => {
+              
+              // 1. EXECUTE MAPPING: Feeds the backend math ID (rec.product_id) into our specific lookup function
               const product = getRecommendedProduct(rec.product_id);
-              // Show recommendation even if product not found locally - use rec data as fallback
+              
+              // 2. FALLBACK RESOLUTION: 
+              // If the frontend store found the song, grab its rich title.
+              // If it could not find it (maybe an iTunes track not loaded), gracefully fallback to the ID string.
               const displayTitle = product?.albumTitle || `Track ID: ${rec.product_id}`;
+              
+              // Attempts to grab the local high-res image if the mapping successfully returned a product
               const displayUrl = product?.albumCoverImageUrl || null;
 
               return (
+                // 3. APPLY TO UI: Generates the actual visual Framer Motion card wrapper
                 <motion.div
                   key={rec.product_id}
                   initial={{ opacity: 0, x: -20 }}
@@ -536,6 +610,8 @@ const SmartRecommendationVisualizer = ({
                   transition={{ delay: index * 0.1 }}
                   onMouseEnter={() => setHoveredRec(rec.product_id)}
                   onMouseLeave={() => setHoveredRec(null)}
+                  // INTERACTION TRIGGER: Checks if the product mapping was actually successful (product &&). 
+                  // If true, passes the full, rich frontend object up to the parent component to command the Redux audio player.
                   onClick={() => product && onRecommendationClick?.(product)}
                   className="relative p-2 bg-gray-800/70 hover:bg-gray-700/70 rounded-lg border border-gray-700 hover:border-cyan-500 transition-all cursor-pointer group"
                 >

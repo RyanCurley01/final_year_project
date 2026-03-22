@@ -241,14 +241,17 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
     Handles feature extraction from S3 or iTunes depending on the source.
     """
     try:
-        # Startup warms this in the background; if it isn't ready yet (or failed),
-        # recover on-demand so visualizer requests don't end up with empty pools.
+        # Cache Check: Before doing anything, it checks if the machine learning audio_features_cache 
+        # is loaded into memory. If it isn't (e.g., if the server just restarted), it attempts to 
+        # warm up the cache "lazy-loaded" style. This cache stores pre-calculated features of all 
+        # known songs so the database doesn't need to be queried constantly
         if not ml_service.cache_loaded or not ml_service.audio_features_cache:
             try:
                 await ml_service.startup_cache()
             except Exception as cache_err:
                 console.log(f"⚠️ Lazy cache warmup failed in unified recommendations: {cache_err}")
 
+        # Converts the incoming current_product_id to an integer safely
         current_id_str = str(request.current_product_id)
         current_id_int = 0
         try:
@@ -256,7 +259,9 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
         except:
              pass
 
-        # Discover/library songs must resolve to positive ProductID for proper matching.
+        # Discover Fallback: If the request came from the "Discover" page and the ID is
+        # missing/invalid, it calls a helper function _resolve_discover_product_id() that 
+        # searches the database for a song ID matching the preview_url.
         source_lower = (request.source or "").lower()
         if "discover" in source_lower and current_id_int <= 0:
             resolved_pid = _resolve_discover_product_id(current_id_str, request.preview_url)
@@ -271,52 +276,74 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
         target_features = None
         cached_features = None
         
+        
+        # Cascading fallback system to get the audio features (tempo, energy, etc.) 
+        # of the song you are currently playing.
+
         # PRIORITY 1: Check Cache (High Quality ML Features)
-        if current_id_int != 0:
-            # Check negative ID (artist songs stored as negative in DB)
+        if current_id_int != 0:          
+            # Checks negative (iTunes) variants of the ID in the cache.
             neg_id = -abs(current_id_int)
             if neg_id in ml_service.audio_features_cache:
+                
+                # If negative id is found, it makes a copy of those features.
                 cached_features = ml_service.audio_features_cache[neg_id]
-            # Check positive ID
+            
+            # Checks positive (local library) variants of the ID in the cache.
             elif abs(current_id_int) in ml_service.audio_features_cache:
+                
+                # If positive id is found, it makes a copy of those features.
                 cached_features = ml_service.audio_features_cache[abs(current_id_int)]
-        
+             
+             
+        # Checks if the cached_features variable holds any data.
         if cached_features:
-             target_features = cached_features.copy()
-             console.log(f"✅ Using CACHED audio features for {clean_current_id} as BASE")
-             
-             # IGNORE live energy/valence/etc as Cached ML features are ground truth for SELECTION.
-             # We use Live features only for Display/Match calculation later.
-             
-             if request.audio_features:
-                  req_f = request.audio_features
-                  # Tempo scale check
-                  rate = req_f.playback_rate if req_f.playback_rate else 1.0
-                  if rate != 1.0:
-                       target_features['tempo'] = target_features.get('tempo', 120) * rate
-                  
-        # PRIORITY 3: Request Features ONLY (if no cache)
-        elif request.audio_features:
-             # Convert request.audio_features to dict format used by cache
-             target_features = request.audio_features.dict() 
-             # Ensure required keys exist with defaults if missing
-             target_features.setdefault('tempo', 120)
-             target_features.setdefault('energy', 0.5)
-             target_features.setdefault('valence', 0.5)
-             target_features.setdefault('danceability', 0.5)
-             target_features.setdefault('acousticness', 0.5)
-             console.log(f"⚠️ Using LIVE audio features from request for {clean_current_id} (No Cache Found)")
+            
+            # To avoid mutating the original data source 
+            # (the application's global cache). .copy() is used to creates a new,
+            # independent dictionary for  target_features so any modifications 
+            # made later in this request don't corrupt the actual cached data for future users.
+            target_features = cached_features.copy()
+            console.log(f"✅ Using CACHED audio features for {clean_current_id} as BASE")
+            
+            # Checks whether the client frontend sent any real-time audio features 
+            # (request.audio_features) inside the API request payload.
+            if request.audio_features:
+                # assigns request.audio_features to a shorter, more convenient variable name 
+                # req_f to make the next few lines cleaner.
+                req_f = request.audio_features
+                
+                # Gets the playback_rate from the live frontend features.
+                # But, if playback_rate is missing or None, default to 1.0 (normal speed).
+                rate = req_f.playback_rate if req_f.playback_rate else 1.0
+                
+                # This checks if the song is being played at a modified speed. 
+                # If the rate is exactly 1.0, nothing needs to change. 
+                # If it's anything else (e.g., 1.5 for 50% faster, or 0.8 for 20% slower), 
+                # you enter the block.
+                if rate != 1.0:
+                    
+                    # Gets the tempo inside target_features (falling back to a default 120 BPM if it happens to be missing). 
+                    # It then multiplies that base tempo by the rate to update the target song's tempo.
+                    target_features['tempo'] = target_features.get('tempo', 120) * rate
 
-        # PRIORITY 4: Live Extraction from Preview URL (Fallback)
-        # If still not found and preview_url provided, extract features
+
+        # PRIORITY 2: Live Extraction from Preview URL (Fallback)
+        # If Priorities 1 fails to find features but a URL was provided, download and extract live.
         if not target_features and request.preview_url:
             console.log(f"🔍 Extracting features for {request.source} from {request.preview_url}")
             
+            # String check: If it contains "apple.com", it's an iTunes preview snippet.
             is_itunes = 'apple.com' in request.preview_url
             
+            # If the snippet is from Apple, or we're in an iTunes-centric view, use synchronous threaded worker.
             if is_itunes or request.source in ['top_charts', 'similar_songs']:
-                # Synchronous extraction (run in executor)
+                
+                # Grabs the fastAPI async event loop to manage background tasks.
                 loop = asyncio.get_event_loop()
+                
+                # Because librosa is a heavy, synchronous CPU task, offload it to a thread pool (executor) 
+                # so the entire Python server doesn't freeze for other users during extraction.
                 target_features = await loop.run_in_executor(
                     executor,
                     extract_audio_features_from_preview,
@@ -324,100 +351,94 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
                     current_id_int
                 )
             else:
-                # S3 / Discover extraction
+                # S3 / Discover extraction: If it's a native DB song, use the specialized async generator.
                 target_features = await extract_features_for_product_async(current_id_int, request.preview_url)
-
-        if not target_features:
-             # Fallback default features
-             target_features = {
-                 'tempo': 120, 'energy': 0.5, 'valence': 0.5, 
-                 'danceability': 0.5, 'acousticness': 0.5,
-                 'spectral_centroid': 1500, 'spectral_rolloff': 3000,
-                 'zero_crossing_rate': 0.05, 'instrumentalness': 0.5,
-                 'loudness': -60, 'speechiness': 0.1
-             }
-
-        # Ensure all keys exist
-        target_features.setdefault('tempo', 120)
-        target_features.setdefault('energy', 0.5)
-        target_features.setdefault('valence', 0.5)
-        target_features.setdefault('danceability', 0.5)
-        target_features.setdefault('acousticness', 0.5)
         
-        # 2. Select Candidates based on Source and Request Data
+        
+        # 3. Select Candidates based on Source and Request Data
         candidates = []
-        
-        # LOGGING: Data for debugging
-        console.log(f"🧠 Unified Recs: Source={request.source}, LiveFeatures={bool(request.audio_features)}, CacheSize={len(ml_service.audio_features_cache)}")
-        if target_features:
-            console.log(f"🎯 Target Vector: Tempo={target_features.get('tempo')}, Energy={target_features.get('energy')}")
 
-        # If the request provides explicit candidates (e.g. Search), use them
+        # Explicit Candidates Condition: If the frontend sends an array of specific songs 
+        # (e.g., the user searched for "Drake" and we only want to rank those 10 results).
         if request.candidates and len(request.candidates) > 0:
             console.log(f"✅ Using {len(request.candidates)} provided comparison songs")
             
-            # Limit to 20 max to prevent timeout during feature extraction
+            # Limit to 20 max: Processing audio takes ~2 seconds per song. Even multithreaded, 
+            # allowing the user to send 500 songs would cause the server request to timeout.
             songs_to_process = request.candidates[:20]
+            
+            # This list will hold the asynchronous execution tasks.
             tasks = []
             
-            for song in songs_to_process:
-                 # Check if live audio features provided for this song
-                 if song.audio_features:
-                      # Use live features directly from the song
-                      live_song_features = song.audio_features.dict()
-                      safe_features = {
-                          'tempo': live_song_features.get('tempo', 120),
-                          'energy': live_song_features.get('energy', 0.5),
-                          'valence': live_song_features.get('valence', 0.5),
-                          'danceability': live_song_features.get('danceability', 0.5),
-                      }
-                      tasks.append(asyncio.sleep(0, result=safe_features))
-                      continue
+            for song in songs_to_process:                                                     
+                # Check 1: Try to find this explicit candidate in the pre-computed Cache.
+                # First, we need its tracking ID.
+                tid_raw = song.trackId
+                tid_res = None
+                try:
+                    # Safely attempt to convert string IDs like "1050" to integer 1050.
+                    tid_res = int(tid_raw)
+                except:
+                    pass
+                
+                found_features = None
+                if tid_res is not None:
+                    # Check Negative ID: iTunes/Apple Music tracks are stored as negatives.
+                    if -abs(tid_res) in ml_service.audio_features_cache:
+                        found_features = ml_service.audio_features_cache[-abs(tid_res)]
+                    
+                    # Check Positive ID: User-uploaded DB library tracks are stored as positives.
+                    elif abs(tid_res) in ml_service.audio_features_cache:
+                        found_features = ml_service.audio_features_cache[abs(tid_res)]
+                        
+                if found_features:
+                    # Cache Hit: Copy the dictionary to prevent mutating the global store.
+                    safe_features = found_features.copy()
+                    
+                    # Wrap it as a unified dummy async task, just like we did with frontend features.
+                    tasks.append(asyncio.sleep(0, result=safe_features))
+                
+                
+                # Check 3: Not provided by frontend, and not in the cache. 
+                # We must download and analyze the candidate song on-the-fly.
+                elif song.previewUrl:
+                    loop = asyncio.get_event_loop()
+                    
+                    # Queue the CPU-bound extraction into a background thread executor so it doesn't block.
+                    # We append this heavy operation to our `tasks` list.
+                    tasks.append(loop.run_in_executor(
+                        executor, extract_audio_features_from_preview, song.previewUrl, tid_raw
+                    ))
+                else:
+                    # If it has no features, no cache, and no usable URL, it's impossible to grade.
+                    # Return a dead payload (None) so we don't crash the asyncio gatherer.
+                    tasks.append(asyncio.sleep(0, result=None))
                  
-                 # Check if features are already cached
-                 tid_raw = song.trackId
-                 tid_res = None
-                 try:
-                     tid_res = int(tid_raw)
-                 except:
-                     pass
-                 
-                 found_features = None
-                 if tid_res is not None:
-                      # Check Negative ID (Artist)
-                      if -abs(tid_res) in ml_service.audio_features_cache:
-                           found_features = ml_service.audio_features_cache[-abs(tid_res)]
-                      # Check Positive ID
-                      elif abs(tid_res) in ml_service.audio_features_cache:
-                           found_features = ml_service.audio_features_cache[abs(tid_res)]
-                           
-                 if found_features:
-                      # Use ALL cached features to ensure similarity calculation is accurate
-                      safe_features = found_features.copy()
-                      tasks.append(asyncio.sleep(0, result=safe_features))
-                 elif song.previewUrl:
-                      loop = asyncio.get_event_loop()
-                      tasks.append(loop.run_in_executor(
-                          executor, extract_audio_features_from_preview, song.previewUrl, tid_raw
-                      ))
-                 else:
-                      tasks.append(asyncio.sleep(0, result=None))
                       
+            # Execution Block: This single line runs all tasks in parallel simultaneously.
             if tasks:
-                 results = await asyncio.gather(*tasks, return_exceptions=True)
+                # return_exceptions=True means if one song fails to download, it returns the Exception string instead 
+                # of throwing it and crashing the whole list of 20 successful songs.
+                results = await asyncio.gather(*tasks, return_exceptions=True)
             else:
-                 results = []
+                results = []
                  
+            # Iterate through the parallel task results mapped 1-to-1 with the original requested songs.
             for i, res in enumerate(results):
                  song = songs_to_process[i]
-                 # Skip if self (Double check string conversion for safety)
+                 
+                 # Self-exclusion: If the candidate song equals the song we are currently playing, skip it.
+                 # The exception is 'search_component', where self-matching is perfectly fine.
                  if str(song.trackId) == clean_current_id and request.source != 'search_component':
                       continue
                       
+                 # Error Handling: Check if the background task returned actual dictionary data, 
+                 # or if it returned a raw Python Exception (e.g. from a 404 URL).
                  features = None
                  if isinstance(res, dict):
                       features = res
                       
+                 # If extraction was successful, append the flattened normalized data to our `candidates` array.
                  if features:
                       candidates.append({
                            'id': song.trackId,
@@ -439,176 +460,268 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
                            'harmonic_ratio': features.get('harmonic_ratio', 0.5),
                            'percussive_ratio': features.get('percussive_ratio', 0.5),
                            'genre_cluster': features.get('genre_cluster', ''),
+                           # The `_meta` field passes along UI info (title, image) so we don't have to hit iTunes later.
                            '_meta': song 
                       })
             
         else:
-            # Fallback to pure cache iteration
+            # Fallback to pure cache iteration: If no specific candidates were passed by the frontend, 
+            # the engine will mathematically evaluate the target against EVERY single song loaded in the global cache.
             all_cached = ml_service.audio_features_cache.items()
             
-            # Candidate filtering logic
+            # Candidate Context Filtering Logic: We want to restrict the pool of songs based on where 
+            # the user currently is in the app to avoid mixing "pro" Apple songs and user-uploaded library songs.
             if request.source in ['top_charts', 'similar_songs', 'search_component']:
-                # Recommend from ALL cached content (Artist Songs AND Library Songs)
+                # The user is in an "Artist" or "Global" context. We build a fresh candidate list.
                 candidates = []
                 for pid, p in all_cached:
-                     # For TopCharts and SimilarSongs, ONLY include Artist Songs (Negative IDs)
+                     # For purely commercial views (TopCharts, SimilarSongs), ONLY allow Artist/iTunes Songs.
+                     # Since Library songs are stored as positive DB IDs, if `pid >= 0`, we skip them.
                      if request.source in ['top_charts', 'similar_songs'] and pid >= 0:
                          continue
 
-                     # Strict filtering of current song
+                     # Strict self-exclusion #1: String comparison to prevent recommending the track you are already playing.
                      if str(pid) == clean_current_id or pid == current_id_int:
                           continue
                      
-                     # Extra safety check for integer equality
+                     # Strict self-exclusion #2: Handle accidental string/integer typing mismatches safely.
                      try:
                           if int(pid) == int(clean_current_id) or int(pid) == current_id_int:
                                continue
                      except: pass
 
-                     # Check against negative/positive variants just in case
+                     # Strict self-exclusion #3: Handle negative/positive mapping collisions.
+                     # If the DB song (ID 5) somehow shares traits with the iTunes song mapped to ID -5, skip it.
                      try:
                          if abs(int(pid)) == abs(int(clean_current_id)):
                              continue
                      except: pass
 
+                     # If it passes all exclusions, add it to the valid pool.
                      candidates.append(p)
                      
                 console.log(f"🔎 Filtered Candidates: {len(candidates)} from {len(all_cached)} cached items")
 
             elif request.source == 'discover_page':
-                # Recommend Discover Songs (Positive IDs)
+                # The user is heavily browsing the user-uploaded Portfolio/Library "Discover" feed.
                 candidates = []
                 for pid, p in all_cached:
+                    # Positive IDs ONLY: Completely block all iTunes/Apple tracks natively (pid < 0).
                     if pid > 0:
+                         # Apply basic self-exclusion so the same playing track doesn't show up.
                          if str(pid) == clean_current_id or pid == current_id_int:
                               continue
                          try:
                              if int(pid) == int(clean_current_id): continue
                          except: pass
+                         # Add valid Library DB tracks.
                          candidates.append(p)
 
-                # Keep discover matching strict to library songs only.
-                # Returning artist/iTunes candidates here causes repeated unrelated top results.
+                # Diagnostic alert: If the discover match pool yielded absolutely nothing.
                 if not candidates:
                     console.log("⚠️ Discover candidate pool is empty (positive ProductIDs only)")
                          
             else:
+                 # Catch-all: For unknown app views (e.g. Visualizers or raw debug hits), 
+                 # accept both Apple & Library tracks freely, just doing a flat string self-exclusion removal.
                  candidates = [p for pid, p in all_cached if str(pid) != clean_current_id]
 
         console.log(f"🔎 Candidate Pool Size: {len(candidates)}")
 
+
         # 3. Calculate Similarity
         if not candidates:
+             # Fast fail: If there are absolutely zero candidate tracks to process, return empty array immediately.
              return {"status": "success", "recommendations": []}
 
-        # ENFORCE CANDIDATE FILTERING (Self & Source Type)
-        # This creates a 'clean' candidate list before we do any math.
+        # Initialize an empty array to track the fully validated and sanitized pool of candidate tracks.
         filtered_candidates = []
+        
+        # Loop through every collected candidate track from step 2 for final strict evaluation.
         for c in candidates:
             # A. Robust Self-Filtering
-            cid_raw = c.get('id')
+            # Get the candidate's ID directly from its dictionary payload.
+            candidate_id_raw = c.get('id')
+            
+            # Initialize a flag defaulted to False indicating if the track matches the currently playing song
             is_self = False
             
-            # String comparison (strip whitespace)
-            clean_cid = str(cid_raw).strip() if cid_raw is not None else ""
-            if clean_cid and clean_cid == clean_current_id:
+            # Extract out any potential whitespace around the string ID for safe direct text comparison
+            clean_candidate_id = str(candidate_id_raw).strip() if candidate_id_raw is not None else ""
+            
+            # String matching check: evaluate if the trimmed candidate ID matches the trimmed target ID
+            if clean_candidate_id and clean_candidate_id == clean_current_id:
                 is_self = True
             
-            # Integer comparison (handle mismatch types & negative/positive variants)
-            if not is_self and cid_raw is not None:
+            # Integer matching check: If string matching fails, we try mathematical ID comparisons
+            if not is_self and candidate_id_raw is not None:
                 try:
-                    cid_int = int(cid_raw)
-                    # Direct match
-                    if cid_int == current_id_int:
+                    # Attempt to parse the raw candidate ID string into an integer format.
+                    candidate_id_int = int(candidate_id_raw)
+                    
+                    # If integer parsing succeeded, check if the two numerical IDs match exactly.
+                    if candidate_id_int == current_id_int:
                         is_self = True
-                    # Abs match (handles negative IDs representing same song in different contexts)
-                    elif current_id_int != 0 and abs(cid_int) == abs(current_id_int):
+                        
+                    # Absolute match check: iTunes songs use negative IDs (-100), if the target is 
+                    # library (100) mathematically match their absolute sizes as they refer to the same song
+                    elif current_id_int != 0 and abs(candidate_id_int) == abs(current_id_int):
                          is_self = True
                 except:
+                    # If conversion to int fails entirely (UUID string like "absc123"), do nothing and keep is_self untouched
                     pass
             
+            # If the candidate song was successfully flagged as matching the target song, don't grade it.
             if is_self:
                 continue
 
-            # B. Source Filtering (Artist Only)
-            # We strictly enforce that "Artist" contexts should NEVER show "Library" songs.
-            # Sources: 'top_charts', 'similar_songs', 'visualiser', 'visualizer', 'sidebar', 'search_component'
-            # We treat any request that isn't explicitly 'discover_page' or 'library' as potentially needing filtering if it behaves like an artist view
-            
-            # Robust source checking (substring match)
+            # B. Source Context Enforcement
+
+            # We need to know where the recommendation request is coming from (Sidebar, Discover etc).
+            # Convert the source to pure lowercase characters for consistent substring matching.
             source_lower = (request.source or '').lower()
+            
+            # Define words that indicate the user expects to see professional iTunes music
             artist_context_keywords = ['chart', 'similar', 'visual', 'side', 'search']
+            
+            # Cross-reference the user's current request location against the list to toggle artist mode True/False
             is_artist_context = any(kw in source_lower for kw in artist_context_keywords)
             
-            # Explicitly allow discover/library matches
+            # Explicit Override: If the request originated from the User portfolio views, firmly disable artist mode.
             if 'discover' in source_lower or 'library' in source_lower:
                 is_artist_context = False
 
+            # If the user is currently looking at an Artist view (e.g., Top Charts list).
             if is_artist_context:
                 try:
-                    cid_int = int(cid_raw)
-                    # Library songs in our DB are small positive IDs (1-1000). 
-                    # Cached Artist songs use Negative IDs.
-                    # Live Artist songs (iTunes) use large positive IDs (>1,000,000).
+                    # Retrieve the candidate track's integer ID
+                    candidate_id_int = int(candidate_id_raw)
                     
-                    if cid_int > 0 and cid_int < 1000000:
-                        # Only skip library songs if requesting song is NOT a discovery/library song
-                        # If current song (target) is from library (positive < 1M), we should show library matches
+                    # Positive IDs under 1,000,000 belong to User Library songs, not iTunes tracks.
+                    if candidate_id_int > 0 and candidate_id_int < 1000000:
+                        
+                        # However, check if the song we are currently playing is ALSO a User Library song.
                         is_current_library = current_id_int > 0 and current_id_int < 1000000
+                        
+                        # If the currently playing song is NOT from a user library, drop the user library candidate track.
                         if not is_current_library:
                             continue # Skip Library Song
                 except:
-                    pass # Keep if ID is weird (e.g. uuid string or something else)
+                    # UUIDs are permitted to bypass
+                    pass 
 
+            # Only candidates that have passed the is_self and source-context checks make it to the final array
             filtered_candidates.append(c)
         
+        
+        # Replaces the original, unfiltered list of potential matching songs with the new list 
+        # (filtered_candidates) that just successfully passed the rigorous context filtering 
+        # (like removing the target song itself and keeping user/iTunes boundaries where applicable)
         candidates = filtered_candidates
         console.log(f"🔎 Final Filtered Candidates: {len(candidates)} (Artist Only Filter: {is_artist_context})")
 
-        # Final safety net for non-discover contexts only.
+        # Checks if the strict filtering accidently removed every single candidate song. 
+        # This acts as a failsafe so the server doesn't return an empty list entirely. 
+        # It only triggers if the user isn't in the strict 'Discover' view
         if not candidates and request.source != 'discover_page':
+            # temporary empty list to hold the fallback candidates.
             relaxed_candidates = []
+            
+            # Loops through the entirety of the global machine-learning cache again.
             for pid, p in ml_service.audio_features_cache.items():
+                
+                # Compares the sanitized ID of the current loop iteration against the target song.
                 if str(pid).strip() == clean_current_id:
+                    # If the track is the target song, it skips it to prevent self-recommendation.
                     continue
+                
+                # Adds the track to the relaxed pool. This essentially ignores all source context rules, 
+                # keeping only the "do not recommend the current song" rule.
                 relaxed_candidates.append(p)
+                
+            # Overwrites the candidates variable with this emergency backup list of songs.
             candidates = relaxed_candidates
             console.log(f"⚠️ Relaxed fallback candidate pool: {len(candidates)}")
+  
         
-        if not candidates:
-             return {"status": "success", "recommendations": []}
+        # A final circuit breaker if even the relaxed fallback found absolutely nothing 
+        # (e.g., the cache is completely empty minus the target song).
+        if not candidates:         
+            # Instantly exits the endpoint, returning a valid JSON success payload but with an empty recommendations array.
+            return {"status": "success", "recommendations": []}
 
+
+        # Vectorization: Passes the target song's raw properties dictionary into a helper. 
+        # The helper flattens all properties (tempo, energy, MFCCs, Chroma) 
+        # into a single straight line array composed of 51 floating-point numbers where 
+        # all ranges are scaled down strictly between 0 and 1.
         target_vector = _build_similarity_vector(target_features)
         
+        # An array to hold the mathematically flattened arrays of 51 floats for the candidate songs.
         candidate_vectors = []
+        
+        # Parallel array to hold the full Python dictionary objects for those candidate songs
         candidate_objs = []
         
+        # Iterates through the finalized pool of candidate tracks.
         for p in candidates:
-             vec = _build_similarity_vector(p)
-             candidate_vectors.append(vec)
-             candidate_objs.append(p)
+            # Converts the current candidate's properties into the flattened 51-float math array.
+            vec = _build_similarity_vector(p)
+            
+            # Stores the math array
+            candidate_vectors.append(vec)
+            
+            # Stores the raw dictionary in exactly the same index position as the math array
+            candidate_objs.append(p)
              
         if not candidate_vectors:
             return {"status": "success", "recommendations": []}
 
         # 4. Pure cosine similarity on manually-normalized vectors
+        # Converts the target's standard Python list into a high-performance C-based NumPy matrix. 
+        # The .reshape(1, -1) forces it into a 2D matrix representing 1 row and 51 columns, 
+        # a strict requirement for the sklearn Cosine calculation.
         target_arr = np.array(target_vector).reshape(1, -1)
+        
+        # Converts the entire list of candidate arrays into a massive 2D NumPy matrix where rows are 
+        # songs and columns are the 51 features.
         candidates_arr = np.array(candidate_vectors)
         
+        # Uses scikit-learn to calculate the mathematical angle distance (cosine similarity)
+        # between the 1 target row and all the candidate rows simultaneously. 
+        # It results in a matrix of scores ranging from -1.0 (opposites) to 1.0 (identical). 
+        # The [0] accesses the first (and only) row of the returned 2D calculation 
+        # matrix to give us a simple 1D array of scores.
         sims = cosine_similarity(target_arr, candidates_arr)[0]
         
+        
+        # Prepares an empty list to assemble the final response objects
         recommendations = []
+        
+        # Loops through the list of raw cosine similarity scores calculated by the ML engine
         for i, score in enumerate(sims):
+            
+            # Uses the index i to grab the original un-flattened dictionary data for that specific candidate song
             p = candidate_objs[i]
             
+            # Calculates absolute difference in BPM, caps it at 100, scales to percentage and subtracts from 1.0
             tempo_match=1.0 - min(abs(target_features.get('tempo',120) - (p.get('tempo') or 120)), 100)/100
+            
+            # Calculates absolute mathematical distance between target's energy and candidate's energy
             energy_match=1.0 - abs(target_features.get('energy',0.5) - (p.get('energy') or 0.5))
+            
+            # Calculates mood match using standard valence mapping (0.0 sad, 1.0 happy)
             mood_match=1.0 - abs(target_features.get('valence',0.5) - (p.get('valence') or 0.5))
+            
+            # Calculates danceability match, defaulting to 0.5 if keys are missing
             dance_match=1.0 - abs(target_features.get('danceability',0.5) - (p.get('danceability') or 0.5))
 
-            # Normalize cosine [-1, 1] -> [0, 1], then blend with core musical matches.
-            # This avoids "same top 5" artifacts when high-dimensional defaults dominate cosine.
+            # Compresses the cosine similarity score from [-1, 1] into a strict [0, 1] percentage band
             cosine_norm = max(0.0, min(1.0, (float(score) + 1.0) / 2.0))
+            
+            # Sums the 4 human-audible traits using set perceptual weights (e.g. Energy 30%, Tempo 25%)
+            # This ensures high-dimensional abstract AI matches (Cosine) don't override the 
+            # fact that a user just wants a musically-similar Tempo and Energy.
             core_match = (
                 tempo_match * 0.25
                 + energy_match * 0.30
@@ -616,33 +729,54 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
                 + dance_match * 0.25
             )
             
+            # Creates an array of tuples holding Identifier, Match Score, and Contextual String tag
             matches = [
                 ('tempo', tempo_match, f"Matching rhythm ({p.get('tempo', 0):.0f} BPM)"),
                 ('energy', energy_match, f"Similar intensity ({p.get('energy', 0):.0%})"),
                 ('mood', mood_match, f"Similar mood"),
                 ('dance', dance_match, f"Comparable groove")
             ]
+            
+            # Scans array and targets the tuple possessing the highest Match Score for the output reason
             best_match = max(matches, key=lambda x: x[1])
             
+            # Attempts to grab textual metadata if pre-resolved and embedded in cache dictionary
             meta = p.get('_meta') 
             
-            # Check genre cluster match to prevent cross-genre recommendations
+            
+            # Extracts string representations describing the song's categorized genre cluster
             target_cluster = target_features.get('genre_cluster', '')
             candidate_cluster = p.get('genre_cluster', '')
+            
+            # Validates that both have strings and evaluates if they are an exact match
             genre_cluster_match = bool(target_cluster and candidate_cluster and target_cluster == candidate_cluster)
 
+            # Initializes a variable to hold mathematical score inflation/deflation
             genre_adjust = 0.0
+            
+            # If both tracks have a defined string genre cluster
             if target_cluster and candidate_cluster:
-                genre_adjust = 0.05 if genre_cluster_match else -0.03
+                # Applies +10% to final score if genres match, or -5% penalty deduction if dissimilar
+                genre_adjust = 0.10 if genre_cluster_match else -0.05
 
+
+            # Master algorithm: merges AI space match (45%), linear human-audible traits (55%), and genre adjustment
             blended_score = (cosine_norm * 0.45) + (core_match * 0.55) + genre_adjust
+            
+            # Locks the final score into a ceiling of 0.999 and floor 0.0 to prevent glitch overflows
             blended_score = max(0.0, min(0.999, blended_score))
 
-            # Tiny deterministic jitter for near-ties prevents static repeated top-5 ordering.
+            # Concatenates target song id and candidate song id to create a predictable unique string
             seed_str = f"{clean_current_id}:{p.get('id', '')}"
+            
+            # Uses standard string hashing to generate a sub-decimal value for tie-breaking
             tie_jitter = (abs(hash(seed_str)) % 1000) / 1_000_000.0
+            
+            # Adds jitter bit forcing absolute math ties to have arbitrary differences so sorting isn't pure random
             blended_score = max(0.0, min(0.999, blended_score + tie_jitter))
             
+            
+            # Instantiates response model mapping calculation values to 3 decimal places out for readability
             result = AudioSimilarityResult(
                 product_id=p['id'],
                 similarity_score=round(float(blended_score), 3),
@@ -654,7 +788,7 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
                 genre_match=genre_cluster_match, 
                 reason=best_match[2],
                 
-                # Populate raw features
+                # Populates the raw attributes back out so front-end debug visualizers can display them
                 tempo=p.get('tempo'),
                 energy=p.get('energy'),
                 valence=p.get('valence'),
@@ -663,6 +797,7 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
                 instrumentalness=p.get('instrumentalness'),
                 speechiness=p.get('speechiness'),
                 
+                # Hydrates textual names and image metadata strings if available from cache obj
                 trackName=meta.trackName if meta else None,
                 artistName=meta.artistName if meta else None,
                 albumTitle=meta.collectionName if meta else None,
@@ -670,26 +805,34 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
                 artworkUrl100=meta.artworkUrl100 if meta else None,
                 previewUrl=meta.previewUrl if meta else None
             )
+            # Stores the fully calculated candidate into the list ready to ship to the user
             recommendations.append(result)
             
-        # Filter: Only > 0% similarity
+        # List comprehension completely deleting any tracks that mathematically dropped to 0.0 or less
         recommendations = [r for r in recommendations if r.similarity_score > 0]
             
+        # Executes an in-place sort using the blended score with reverse=True pushing highest matches to index 0
         recommendations.sort(key=lambda x: x.similarity_score, reverse=True)
         
-        # Limit to max 20, or lower if requester set a lower limit
+        
+        # Hardcodes default recommendation payout list limit to 20 tracks
         limit_count = 20
+        
+        # If the frontend REST request passed a limit flag (e.g. limit=5), overwrite the variable
         if request.limit and request.limit < 20:
              limit_count = request.limit
         
+        # Slices array cutting off the tail end to retain only the highest matches relative to the boundary limit
         top_recommendations = recommendations[:limit_count]
         
         # 5. Hydrate Data from Database and iTunes for Cached Items
+        # Tracks pulled from cache only contain math stats. We need text names and image URLs.
+        # Scans tracks and aggregates ones missing a trackName into this new array for dynamic hydration
         missing_meta_ids = [r for r in top_recommendations if not r.trackName]
         
         if missing_meta_ids:
              try:
-                 # Split IDs into DB (positive) and iTunes (negative)
+                 # Split IDs into local DB queries (positive indices) and iTunes queries (negative)
                  db_ids = []
                  itunes_ids = []
                  
@@ -703,13 +846,13 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
                       except:
                            pass
                            
-                 # A. Hydrate DB Songs
+                 # A. Hydrate DB Songs: Run a Postgres SELECT to get user-uploaded library fields.
                  if db_ids:
                      id_string = ",".join(str(i) for i in db_ids)
                      with get_db_connection() as conn:
                          if conn:
                              with conn.cursor() as cursor:
-                                 # Fetch standard columns (ArtistName not in DB)
+                                 # Fetch standard columns (ArtistName not natively in DB Products schema here)
                                  sql = f"""
                                     SELECT ProductID, AlbumTitle, albumCoverImageUrl, preview_url
                                     FROM Products 
@@ -736,23 +879,28 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
                                              r.artistName = "Library Artist"
 
                  # B. Hydrate iTunes Songs via Lookup API
+                 # iTunes data isn't in our DB, so we reach out to Apple's HTTP API.
                  if itunes_ids:
-                     # Limit lookup batch size
+                     # Limit lookup batch size to prevent hitting Apple's rate limits
                      lookup_ids = ",".join(str(i) for i in itunes_ids[:50])
                      itunes_map = {}
                      
                      try:
+                         # Send a non-blocking asynchronous HTTP GET request to Apple to map the IDs
                          async with httpx.AsyncClient(timeout=5.0) as client:
-                             # Lookup original metadata including Artist
+                             
+                             # Lookup original metadata including real Artist Names and high-res Album Art
                              resp = await client.get(f"{ITUNES_API_BASE_URL}/lookup", params={"id": lookup_ids})
                              if resp.status_code == 200:
                                  results = resp.json().get('results', [])
                                  for item in results:
-                                     # Map by negative ID (our internal ID)
+                                     
+                                     # Map by negative ID (our internal schema standard for iTunes IDs)
                                      itunes_map[-item['trackId']] = item
                      except Exception as ex:
                          console.log(f"iTunes hydration failed: {ex}")
 
+                     # Apply the downloaded Apple metadata to the actual result objects
                      for r in top_recommendations:
                          try: pid_int = int(r.product_id)
                          except: continue
@@ -768,17 +916,20 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
              except Exception as rx:
                  console.log(f"Error hydrating metadata: {rx}")
         
-        # Prepare "Live" features for the frontend visualizer (so it updates)
-        # But we used the High-Quality Cache features for the actual math above.
+        # Output generation: Prepare "Live" extraction features for the frontend visualizer.
+        # This allows the frontend web-audio canvas to jump and react even if the actual math 
+        # used High-Quality cached features.
         response_features = target_features
         if request.audio_features:
-             # If we have live data, return it for display purposes
+             # If we have live data from the frontend, use that as the base format for displaying
              response_features = request.audio_features.dict()
-             # Fill gaps with our calculation features (defaults or cache)
+             
+             # Fill any missing gaps with our calculation features (defaults or cache)
              for k, v in target_features.items():
                   if k not in response_features or response_features[k] is None:
                        response_features[k] = v
         
+        # Return a final dictionary response to FastAPI representing our success JSON payload.
         return {
             "status": "success", 
             "recommendations": top_recommendations,
@@ -786,6 +937,7 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
         }
             
     except Exception as e:
+        # Logs fatal errors to prevent blind server crashes and issues an HTTP 500 alert.
         console.log(f"Error in unified recommendations: {e}")
         import traceback
         traceback.print_exc()
@@ -794,6 +946,7 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
 def clean_id_str(s: str) -> str:
     """Helper to handle IDs like '-123' vs '123' matching strings"""
     return s.strip()
+
 
 # ============================================
 # LIBRARY MATCH ENDPOINT (Reverse Search)
