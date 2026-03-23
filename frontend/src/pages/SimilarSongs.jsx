@@ -43,6 +43,17 @@ const normalizeTrackId = (value) => {
   return String(value ?? '');
 };
 
+const isPlaceholderArtist = (name) => {
+  const n = String(name || '').trim().toLowerCase();
+  return !n || n === 'unknown artist' || n === 'library artist';
+};
+
+const isPlaceholderTrack = (name) => {
+  const n = String(name || '').trim();
+  if (!n) return true;
+  return /^track\s*-?\d+$/i.test(n);
+};
+
 // Helper function for mood-based colors - same as SmartRecommendationVisualizer
 const getFeatureColor = (label, value) => {
   const numericValue = parseInt(value);
@@ -920,28 +931,44 @@ const SimilarSongs = () => {
                   .map(rec => {
                       const liveMatch = calculateLiveMatch(rec);
                     const recNormId = normalizeTrackId(rec.product_id || rec.id || rec.trackId);
-                    const fallbackSong = songs.find((s) => normalizeTrackId(s.trackId || s.id) === recNormId);
+                    const recTitleHint = String(rec.trackName || rec.albumTitle || rec.collectionName || '').trim().toLowerCase();
+                    const fallbackSongById = songs.find((s) => normalizeTrackId(s.trackId || s.id) === recNormId);
+                    const fallbackSongByTitle = recTitleHint
+                      ? songs.find((s) => String(s.trackName || s.albumTitle || '').trim().toLowerCase() === recTitleHint)
+                      : null;
+                    const fallbackSong = fallbackSongById || fallbackSongByTitle;
+
+                    const resolvedTrackName = !isPlaceholderTrack(rec.trackName)
+                      ? rec.trackName
+                      : (fallbackSong?.trackName || fallbackSong?.albumTitle || rec.albumTitle || rec.collectionName);
+                    const resolvedArtistName = !isPlaceholderArtist(rec.artistName)
+                      ? rec.artistName
+                      : (fallbackSong?.artistName || 'Unknown Artist');
+
                       return {
                           ...rec,
-                      trackName: rec.trackName || fallbackSong?.trackName || fallbackSong?.albumTitle,
-                      artistName: rec.artistName || fallbackSong?.artistName,
+                      trackName: resolvedTrackName,
+                      artistName: resolvedArtistName,
                       collectionName: rec.collectionName || fallbackSong?.collectionName,
                       artworkUrl100: rec.artworkUrl100 || fallbackSong?.artworkUrl100 || fallbackSong?.albumCoverImageUrl,
                       albumCoverImageUrl: rec.albumCoverImageUrl || fallbackSong?.albumCoverImageUrl || fallbackSong?.artworkUrl100,
                       previewUrl: rec.previewUrl || fallbackSong?.previewUrl || fallbackSong?.fileUrl,
                           // Keep backend cosine score stable for ranking and top-5 selection.
                           similarity_score: rec.similarity_score,
+                          live_similarity_score: liveMatch ? liveMatch.similarity_score : rec.similarity_score,
                           tempo_match: liveMatch ? liveMatch.tempo_match : rec.tempo_match,
                           energy_match: liveMatch ? liveMatch.energy_match : rec.energy_match,
                           mood_match: liveMatch ? liveMatch.mood_match : rec.mood_match,
                           danceability_match: liveMatch ? liveMatch.danceability_match : (rec.danceability_match || rec.dance_match)
                       };
                   })
-                  .sort((a, b) => b.similarity_score - a.similarity_score)
+                  .sort((a, b) => (b.similarity_score ?? 0) - (a.similarity_score ?? 0))
                   .slice(0, 5)
+                  .sort((a, b) => (b.live_similarity_score ?? b.similarity_score ?? 0) - (a.live_similarity_score ?? a.similarity_score ?? 0))
                   .map((rec, idx) => {
                   const recTitle = rec.trackName || rec.albumTitle || rec.collectionName || `Track ${rec.product_id || rec.id || idx + 1}`;
                   const recArtist = rec.artistName || 'Unknown Artist';
+                  const scoreForDisplay = rec.live_similarity_score ?? rec.similarity_score ?? 0;
                   return (
                   <div 
                     key={String(rec.product_id || rec.id || rec.trackId || `${recTitle}-${idx}`)}
@@ -966,11 +993,11 @@ const SimilarSongs = () => {
                             {recTitle}
                           </h4>
                           <span className={`px-1.5 py-0.5 rounded-full text-xs font-bold text-white flex-shrink-0 ${
-                            rec.similarity_score >= 0.7 ? 'bg-green-500' : 
-                            rec.similarity_score >= 0.5 ? 'bg-yellow-500' : 
+                            scoreForDisplay >= 0.7 ? 'bg-green-500' : 
+                            scoreForDisplay >= 0.5 ? 'bg-yellow-500' : 
                             'bg-red-500'
                           }`}>
-                            {Math.round(rec.similarity_score * 100)}%
+                            {Math.round(scoreForDisplay * 100)}%
                           </span>
                         </div>
                         <p className="text-xs text-gray-300 truncate font-medium">{recArtist}</p>
