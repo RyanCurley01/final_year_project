@@ -389,42 +389,46 @@ const SimilarSongs = () => {
       try {
         const apiBaseUrl = envConfig.getApiBaseUrl();
 
-        // Construct live features but merge with cache if available for stability
+        // Keep the UI badges live-updating every poll tick.
+        const live = audioFeaturesRef.current;
+        const liveRate = Number(playbackRateRef.current || 1);
+        setDisplayedPlaybackRate(liveRate);
+        if (live) {
+          setDisplayedFeatures({
+            tempo: live.tempo ? Number(live.tempo) : null,
+            energy: live.energy ? Number(live.energy) : null,
+            valence: live.valence ? Number(live.valence) : null,
+            danceability: live.danceability ? Number(live.danceability) : null,
+          });
+        }
+
+        // For SimilarSongs, always prefer deterministic cache features for the selected track.
+        // This prevents stale/live analyzer drift from producing the same recommendation list.
         let featuresToSend = null;
-        if (activeSong && audioFeaturesRef.current) {
-            featuresToSend = {
-                 tempo: audioFeaturesRef.current.tempo ? parseFloat(audioFeaturesRef.current.tempo) : null,
-                 energy: audioFeaturesRef.current.energy ? parseFloat(audioFeaturesRef.current.energy) : null,
-                 valence: audioFeaturesRef.current.valence ? parseFloat(audioFeaturesRef.current.valence) : null,
-                 danceability: audioFeaturesRef.current.danceability ? parseFloat(audioFeaturesRef.current.danceability) : null,
-                 acousticness: audioFeaturesRef.current.acousticness ? parseFloat(audioFeaturesRef.current.acousticness) : null,
-                 effective_tempo: audioFeaturesRef.current.tempo ? (parseFloat(audioFeaturesRef.current.tempo) * parseFloat(playbackRateRef.current || 1)) : null,
-                 playback_rate: parseFloat(playbackRateRef.current || 1)
-            };
-            
-            // Merge with cache if available for current song
-            const songIdStr = String(targetSong.trackId || targetSong.id);
-            const cached = cachedAudioFeatures[songIdStr] || cachedAudioFeatures[String(-Math.abs(Number(songIdStr)))];
-            
-            if (cached) {
-                // Lock stable features to cache
-                featuresToSend.tempo = Number(cached.tempo) || featuresToSend.tempo;
-                featuresToSend.acousticness = Number(cached.acousticness);
-                // Keep energy/valence live for pulse
-            }
-        } else {
-             // Try to use cache if no live features or no active song
-             const songIdStr = String(targetSong.trackId || targetSong.id);
-             const cached = cachedAudioFeatures[songIdStr] || cachedAudioFeatures[String(-Math.abs(Number(songIdStr)))];
-             if (cached) {
-                 featuresToSend = {
-                    ...cached,
-                    tempo: Number(cached.tempo),
-                    energy: Number(cached.energy),
-                    valence: Number(cached.valence),
-                    playback_rate: 1
-                 };
-             }
+        const songIdStr = String(targetSong.trackId || targetSong.id);
+        const cached = cachedAudioFeatures[songIdStr] || cachedAudioFeatures[String(-Math.abs(Number(songIdStr)))];
+
+        if (cached) {
+          featuresToSend = {
+            ...cached,
+            tempo: Number(cached.tempo),
+            energy: Number(cached.energy),
+            valence: Number(cached.valence),
+            danceability: Number(cached.danceability),
+            acousticness: Number(cached.acousticness),
+            playback_rate: 1,
+          };
+        } else if (activeSong && audioFeaturesRef.current) {
+          // Fallback only when cache is unavailable.
+          featuresToSend = {
+            tempo: audioFeaturesRef.current.tempo ? parseFloat(audioFeaturesRef.current.tempo) : null,
+            energy: audioFeaturesRef.current.energy ? parseFloat(audioFeaturesRef.current.energy) : null,
+            valence: audioFeaturesRef.current.valence ? parseFloat(audioFeaturesRef.current.valence) : null,
+            danceability: audioFeaturesRef.current.danceability ? parseFloat(audioFeaturesRef.current.danceability) : null,
+            acousticness: audioFeaturesRef.current.acousticness ? parseFloat(audioFeaturesRef.current.acousticness) : null,
+            effective_tempo: audioFeaturesRef.current.tempo ? (parseFloat(audioFeaturesRef.current.tempo) * parseFloat(playbackRateRef.current || 1)) : null,
+            playback_rate: parseFloat(playbackRateRef.current || 1),
+          };
         }
 
         const payload = {
@@ -483,7 +487,8 @@ const SimilarSongs = () => {
                  });
                });
            }
-           if (data.target_features) {
+             // Backend target features are a fallback when live analyzer values are unavailable.
+             if (data.target_features && !live) {
                setDisplayedFeatures({
                    tempo: data.target_features.tempo,
                    energy: data.target_features.energy,
@@ -924,7 +929,8 @@ const SimilarSongs = () => {
                       artworkUrl100: rec.artworkUrl100 || fallbackSong?.artworkUrl100 || fallbackSong?.albumCoverImageUrl,
                       albumCoverImageUrl: rec.albumCoverImageUrl || fallbackSong?.albumCoverImageUrl || fallbackSong?.artworkUrl100,
                       previewUrl: rec.previewUrl || fallbackSong?.previewUrl || fallbackSong?.fileUrl,
-                          similarity_score: liveMatch ? liveMatch.similarity_score : rec.similarity_score,
+                          // Keep backend cosine score stable for ranking and top-5 selection.
+                          similarity_score: rec.similarity_score,
                           tempo_match: liveMatch ? liveMatch.tempo_match : rec.tempo_match,
                           energy_match: liveMatch ? liveMatch.energy_match : rec.energy_match,
                           mood_match: liveMatch ? liveMatch.mood_match : rec.mood_match,
