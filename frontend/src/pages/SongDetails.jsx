@@ -390,9 +390,28 @@ const SongDetails = () => {
   const [targetSong, setTargetSong] = useState(null);
   const [artistSongs, setArtistSongs] = useState([]);
   const [similarSongs, setSimilarSongs] = useState([]);
+  const [cachedAudioFeatures, setCachedAudioFeatures] = useState({});
   const [targetFeatures, setTargetFeatures] = useState(null);
   const [mlInfo, setMlInfo] = useState(null);
   const [isHeaderHovered, setIsHeaderHovered] = useState(false);
+
+  // Use deterministic cached features so SongDetails ranking matches SimilarSongs/TopCharts.
+  useEffect(() => {
+    const fetchCachedFeatures = async () => {
+      try {
+        const audioApiUrl = envConfig.getApiBaseUrl();
+        const response = await fetch(`${audioApiUrl}/api/audio/cached-features?artist_only=false`);
+        if (response.ok) {
+          const data = fixTextDeep(await response.json());
+          setCachedAudioFeatures(data.features || {});
+        }
+      } catch (err) {
+        console.warn('[SongDetails] Could not fetch cached audio features:', err.message);
+      }
+    };
+
+    fetchCachedFeatures();
+  }, []);
 
   // Parse song data from URL state or fetch it
   useEffect(() => {
@@ -542,20 +561,54 @@ const SongDetails = () => {
     try {
       const liveFeatures = overrideFeatures || audioFeaturesRef.current;
       const isDiscoverRequest = isLibraryContextSong(targetSong);
-      const featuresToSend = liveFeatures ? {
-        tempo: Number(liveFeatures.tempo) || null,
-        energy: Number(liveFeatures.energy) || null,
-        valence: Number(liveFeatures.valence) || null,
-        danceability: Number(liveFeatures.danceability) || null,
-        acousticness: Number(liveFeatures.acousticness) || null,
-        playback_rate: Number(playbackRate || 1)
-      } : null;
+      const songIdStr = String(targetSong.trackId || targetSong.id);
+      let cached =
+        cachedAudioFeatures[songIdStr] ||
+        cachedAudioFeatures[String(-Math.abs(Number(songIdStr)))];
+
+      if (!cached) {
+        try {
+          const audioApiUrl = envConfig.getApiBaseUrl();
+          const cacheResp = await fetch(`${audioApiUrl}/api/audio/cached-features?artist_only=false`);
+          if (cacheResp.ok) {
+            const cacheData = fixTextDeep(await cacheResp.json());
+            const features = cacheData.features || {};
+            cached = features[songIdStr] || features[String(-Math.abs(Number(songIdStr)))];
+            setCachedAudioFeatures(features);
+          }
+        } catch {
+          // Non-fatal: fall back to live features below.
+        }
+      }
+
+      let featuresToSend = null;
+      if (cached) {
+        featuresToSend = {
+          ...cached,
+          tempo: Number(cached.tempo),
+          energy: Number(cached.energy),
+          valence: Number(cached.valence),
+          danceability: Number(cached.danceability),
+          acousticness: Number(cached.acousticness),
+          playback_rate: 1,
+        };
+      } else if (liveFeatures) {
+        featuresToSend = {
+          tempo: Number(liveFeatures.tempo) || null,
+          energy: Number(liveFeatures.energy) || null,
+          valence: Number(liveFeatures.valence) || null,
+          danceability: Number(liveFeatures.danceability) || null,
+          acousticness: Number(liveFeatures.acousticness) || null,
+          playback_rate: Number(playbackRate || 1),
+        };
+      }
 
       const payload = {
           source: isDiscoverRequest ? 'discover_page' : 'similar_songs',
           current_product_id: String(targetSong.trackId || targetSong.id),
           preview_url: String(targetSong.previewUrl || targetSong.fileUrl || ''),
-          limit: 20,
+            // Request the same pool size as SimilarSongs, then SongDetails renders top 20.
+            limit: 150,
           audio_features: featuresToSend
       };
 
@@ -702,7 +755,11 @@ const SongDetails = () => {
           }
         }
 
-        setSimilarSongs(hydratedRecommendations);
+        const rankedRecommendations = [...hydratedRecommendations].sort(
+          (a, b) => (b.similarity_score ?? 0) - (a.similarity_score ?? 0)
+        );
+
+        setSimilarSongs(rankedRecommendations.slice(0, 20));
         
         if (data.target_features) {
           setTargetFeatures(data.target_features);
