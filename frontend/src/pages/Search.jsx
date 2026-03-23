@@ -30,32 +30,6 @@ const getArtistBadgeColor = (artist) => {
 
 const fallbackImage = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="250" height="250" viewBox="0 0 250 250"><rect width="250" height="250" fill="#374151"/><circle cx="125" cy="125" r="80" fill="#4B5563"/><circle cx="125" cy="125" r="30" fill="#374151"/><circle cx="125" cy="125" r="10" fill="#6B7280"/></svg>');
 
-// Helper function for mood-based colors - same as SmartRecommendationVisualizer
-const getFeatureColor = (label, value) => {
-  const numericValue = parseInt(value);
-  
-  if (label === 'Tempo') {
-    if (numericValue < 90) return { bg: 'bg-blue-900/50', text: 'text-blue-300', border: 'border-blue-500/50' };
-    if (numericValue < 130) return { bg: 'bg-green-900/50', text: 'text-green-300', border: 'border-green-500/50' };
-    return { bg: 'bg-red-900/50', text: 'text-red-300', border: 'border-red-500/50' };
-  }
-  
-  if (numericValue >= 70) return { bg: 'bg-green-900/50', text: 'text-green-300', border: 'border-green-500/50' };
-  if (numericValue >= 50) return { bg: 'bg-yellow-900/50', text: 'text-yellow-300', border: 'border-yellow-500/50' };
-  return { bg: 'bg-red-900/50', text: 'text-red-300', border: 'border-red-500/50' };
-};
-
-// Feature Badge Component - with dynamic colors (compact)
-const FeatureBadge = ({ label, value }) => {
-  const colors = getFeatureColor(label, value);
-  return (
-    <div className={`rounded-md px-1 py-1 text-center border ${colors.bg} ${colors.border}`}>
-      <div className="text-[12px] text-gray-400 leading-tight">{label}</div>
-      <div className={`text-[12px] font-bold leading-tight ${colors.text}`}>{value}</div>
-    </div>
-  );
-};
-
 const SongCard = ({ song, isPlaying, activeSong, onPlay, onPause, index, onSongNameClick, onArtistClick, onAlbumClick, playbackRate }) => {
   const dispatch = useDispatch();
   const isThisSongActive = activeSong?.id === song.id;
@@ -207,20 +181,6 @@ const SongCard = ({ song, isPlaying, activeSong, onPlay, onPause, index, onSongN
                 className="text-white drop-shadow-lg cursor-pointer hover:scale-110 transition-transform"
               />
             )}
-          </div>
-        )}
-
-        {/* Artist Badge - only show for songs with valid artist names (not database songs) */}
-        {song.artistName && song.artistName !== 'Unknown Artist' && song.source !== 'database' && (
-          <div className={`absolute top-2 left-2 px-2 py-1 ${getArtistBadgeColor(song.artistName)} rounded-full text-[12px] font-bold text-white shadow-lg max-w-[calc(100%-5rem)] truncate`}>
-            {song.artistName}
-          </div>
-        )}
-
-        {/* Similarity Badge - for artist songs with similarity score */}
-        {song.similarity && song.source !== 'database' && (
-          <div className="absolute top-2 right-2 px-2 py-1 bg-cyan-500/90 rounded-full text-[12px] font-bold text-white shadow-lg">
-            {(song.similarity * 100).toFixed(0)}%
           </div>
         )}
 
@@ -916,7 +876,7 @@ const Search = () => {
         </div>
       </div>
 
-      {/* Right Sidebar - Real-time Recommendations with Audio Feature Badges */}
+      {/* Right Sidebar - Real-time Recommendations */}
       {false && (
       <div className={`w-full ${filter === 'visualizer' ? 'lg:w-full lg:max-w-full' : 'lg:w-[330px] lg:min-w-[330px]'}`}>
         {/* Back button when in visualizer mode */}
@@ -931,7 +891,7 @@ const Search = () => {
         {/* Single Song Mode - when only 1 song found, show its analysis only */}
         {songs.length === 1 && activeSong && Object.keys(activeSong).length > 0 && (
           <div className="bg-gradient-to-br from-gray-900 to-black p-4 rounded-lg border border-gray-800 overflow-x-hidden">
-            <h3 className="text-sm font-bold text-white mb-1">Now Playing - Audio Analysis</h3>
+            <h3 className="text-sm font-bold text-white mb-1">Now Playing</h3>
             <p className="text-[12px] text-gray-400 leading-tight mb-3">
               Analyzing <span className="text-cyan-400 font-semibold truncate">{activeSong.trackName || activeSong.albumTitle}</span>
             </p>
@@ -987,41 +947,17 @@ const Search = () => {
                 )}
               </div>
               
-              {/* Audio Feature Badges - Larger for single song view */}
-              {displayedFeatures && (
-                <div className="grid grid-cols-2 gap-2">
-                  <div className="bg-gray-700/50 rounded-lg p-2 border border-gray-600">
-                    <div className="text-xs text-gray-400">Tempo</div>
-                    <div className="text-xl font-bold text-cyan-400">{Math.round((displayedFeatures.tempo || 0) * (displayedPlaybackRate || 1))} BPM</div>
-                  </div>
-                  <div className="bg-gray-700/50 rounded-lg p-2 border border-gray-600">
-                    <div className="text-xs text-gray-400">Energy</div>
-                    <div className="text-xl font-bold text-green-400">{Math.round((displayedFeatures.energy || 0) * 100)}%</div>
-                  </div>
-                  <div className="bg-gray-700/50 rounded-lg p-2 border border-gray-600">
-                    <div className="text-xs text-gray-400">Mood</div>
-                    <div className="text-xl font-bold text-yellow-400">{Math.round((displayedFeatures.valence || 0) * 100)}%</div>
-                  </div>
-                  <div className="bg-gray-700/50 rounded-lg p-2 border border-gray-600">
-                    <div className="text-xs text-gray-400">Danceability</div>
-                    <div className="text-xl font-bold text-purple-400">{Math.round((displayedFeatures.danceability || 0) * 100)}%</div>
-                  </div>
-                </div>
-              )}
-              
-              {!displayedFeatures && (
-                <p className="text-sm text-gray-500 text-center py-4">Analyzing audio features...</p>
-              )}
+              <p className="text-sm text-gray-500 text-center py-4">Similarity updates automatically while playing.</p>
             </div>
             
-            <p className="text-xs text-gray-500 mt-3 text-center">Only one result found - showing audio analysis only</p>
+            <p className="text-xs text-gray-500 mt-3 text-center">Only one result found.</p>
           </div>
         )}
         
         {/* Empty State - when no song is playing */}
         {(!activeSong || Object.keys(activeSong).length === 0) && (
           <div className="bg-gradient-to-br from-gray-900 to-black p-4 rounded-lg border border-gray-800">
-            <p className="text-gray-400 text-center text-sm">Play a song to see {songs.length === 1 ? 'audio analysis' : 'recommendations'}</p>
+            <p className="text-gray-400 text-center text-sm">Play a song to see recommendations</p>
           </div>
         )}
 
@@ -1086,19 +1022,7 @@ const Search = () => {
                 )}
               </div>
               
-              {/* Audio Feature Badges */}
-              {displayedFeatures && (
-                <div className="grid grid-cols-4 gap-1">
-                  <FeatureBadge label="Tempo" value={`${Math.round((displayedFeatures.tempo || 0) * (displayedPlaybackRate || 1))}`} />
-                  <FeatureBadge label="Energy" value={`${Math.round((displayedFeatures.energy || 0) * 100)}%`} />
-                  <FeatureBadge label="Mood" value={`${Math.round((displayedFeatures.valence || 0) * 100)}%`} />
-                  <FeatureBadge label="Dance" value={`${Math.round((displayedFeatures.danceability || 0) * 100)}%`} />
-                </div>
-              )}
-              
-              {!displayedFeatures && (
-                <p className="text-[17px] text-gray-500 text-center">Analyzing audio features...</p>
-              )}
+              <p className="text-[12px] text-gray-500 text-center">Similarity updates automatically while playing.</p>
             </div>
 
           {/* Recommendations List */}
@@ -1165,39 +1089,7 @@ const Search = () => {
                             {Math.round(rec.similarity_score * 100)}%
                           </span>
                         </div>
-                        <p className="text-[12px] text-gray-400 truncate">{rec.match_reason}</p>
-                        
-                        {/* Feature Matches */}
-                        <div className="flex gap-1 mt-1 flex-wrap">
-                          <span className={`px-1 py-0.5 rounded text-[12px] ${
-                            rec.tempo_match >= 0.7 ? 'bg-green-500/30 text-green-300' : 
-                            rec.tempo_match >= 0.5 ? 'bg-yellow-500/30 text-yellow-300' : 
-                            'bg-red-500/30 text-red-300'
-                          }`}>
-                            Tempo:{Math.round(rec.tempo_match * 100)}%
-                          </span>
-                          <span className={`px-1 py-0.5 rounded text-[12px] ${
-                            rec.energy_match >= 0.7 ? 'bg-green-500/30 text-green-300' : 
-                            rec.energy_match >= 0.5 ? 'bg-yellow-500/30 text-yellow-300' : 
-                            'bg-red-500/30 text-red-300'
-                          }`}>
-                            Energy:{Math.round(rec.energy_match * 100)}%
-                          </span>
-                          <span className={`px-1 py-0.5 rounded text-[12px] ${
-                            rec.mood_match >= 0.7 ? 'bg-green-500/30 text-green-300' : 
-                            rec.mood_match >= 0.5 ? 'bg-yellow-500/30 text-yellow-300' : 
-                            'bg-red-500/30 text-red-300'
-                          }`}>
-                            Mood:{Math.round(rec.mood_match * 100)}%
-                          </span>
-                          <span className={`px-1 py-0.5 rounded text-[12px] ${
-                            rec.dance_match >= 0.7 ? 'bg-green-500/30 text-green-300' : 
-                            rec.dance_match >= 0.5 ? 'bg-yellow-500/30 text-yellow-300' : 
-                            'bg-red-500/30 text-red-300'
-                          }`}>
-                            Dance:{Math.round(rec.dance_match * 100)}%
-                          </span>
-                        </div>
+                        <p className="text-[12px] text-gray-400 truncate">{rec.collectionName || rec.albumTitle || 'Unknown Album'}</p>
                       </div>
                     </div>
                   </div>
@@ -1211,7 +1103,7 @@ const Search = () => {
           {!recLoading && recommendations.length === 0 && (
             <div className="text-center py-6">
               <p className="text-gray-400 text-sm">Finding similar artist tracks...</p>
-              <p className="text-xs text-gray-500 mt-2">Analyzing audio features</p>
+              <p className="text-xs text-gray-500 mt-2">Preparing recommendations</p>
             </div>
           )}
         </div>

@@ -158,13 +158,6 @@ const SongCard = ({ song, isPlaying, activeSong, onPlay, onPause, index, allSong
           {song.artistName}
         </div>
 
-        {/* Always show similarity badge if property exists (even if 0) */}
-        {song.similarity !== undefined && song.similarity !== null && (
-          <div className="absolute top-2 right-2 px-2 py-1 bg-cyan-500/90 rounded-full text-[12px] font-bold text-white shadow-lg">
-            {(song.similarity * 100).toFixed(0)}%
-          </div>
-        )}
-
         {isThisSongActive && isPlaying && (
           <div className="absolute bottom-2 right-2 flex items-center gap-1 bg-green-500/90 px-2 py-1 rounded-full">
             <div className="flex gap-0.5">
@@ -464,10 +457,60 @@ const SimilarSongs = () => {
         if (response.ok) {
            const data = fixTextDeep(await response.json());
            if (data.recommendations) {
-               setRecommendations(data.recommendations);
+               let enrichedRecommendations = data.recommendations;
+
+               // When backend returns placeholder artists, hydrate from iTunes lookup by track ID.
+               const unresolvedArtistRecs = (data.recommendations || []).filter((rec) =>
+                 isPlaceholderArtist(rec.artistName)
+               );
+               if (unresolvedArtistRecs.length > 0) {
+                 try {
+                   const lookupIds = Array.from(
+                     new Set(
+                       unresolvedArtistRecs
+                         .map((rec) => Number(rec.product_id || rec.id || rec.trackId))
+                         .filter((id) => Number.isFinite(id) && Math.abs(id) >= 1000000)
+                         .map((id) => Math.abs(id))
+                     )
+                   ).slice(0, 50);
+
+                   if (lookupIds.length > 0) {
+                     const lookupResp = await fetch(
+                       `https://itunes.apple.com/lookup?id=${lookupIds.join(',')}`,
+                       { signal: AbortSignal.timeout(5000) }
+                     );
+                     if (lookupResp.ok) {
+                       const lookupData = fixTextDeep(await lookupResp.json());
+                       const itunesMap = new Map(
+                         (lookupData.results || [])
+                           .filter((item) => item.trackId)
+                           .map((item) => [Math.abs(Number(item.trackId)), item])
+                       );
+
+                       enrichedRecommendations = data.recommendations.map((rec) => {
+                         const rawId = Number(rec.product_id || rec.id || rec.trackId);
+                         const lookup = Number.isFinite(rawId) ? itunesMap.get(Math.abs(rawId)) : null;
+                         if (!lookup) return rec;
+                         return {
+                           ...rec,
+                           artistName: isPlaceholderArtist(rec.artistName) ? (lookup.artistName || rec.artistName) : rec.artistName,
+                           trackName: isPlaceholderTrack(rec.trackName) ? (lookup.trackName || rec.trackName) : rec.trackName,
+                           collectionName: rec.collectionName || lookup.collectionName,
+                           artworkUrl100: rec.artworkUrl100 || lookup.artworkUrl100,
+                           previewUrl: rec.previewUrl || lookup.previewUrl,
+                         };
+                       });
+                     }
+                   }
+                 } catch {
+                   // Keep original recommendations if lookup fails.
+                 }
+               }
+
+               setRecommendations(enrichedRecommendations);
                setSongs((currentSongs) => {
                  const recMap = new Map(
-                   data.recommendations.map((rec) => [normalizeTrackId(rec.product_id || rec.id), rec])
+                   enrichedRecommendations.map((rec) => [normalizeTrackId(rec.product_id || rec.id), rec])
                  );
 
                  return currentSongs.map((song) => {
@@ -658,7 +701,7 @@ const SimilarSongs = () => {
       filtered = songs.filter(song => song.artistName?.toLowerCase().includes(filter.toLowerCase()));
     }
 
-    return filtered.sort((a, b) => (b.similarity_score || 0) - (a.similarity_score || 0));
+    return filtered;
   }, [songs, filter]);
 
   const handlePlay = (song, index) => {
@@ -865,7 +908,7 @@ const SimilarSongs = () => {
         {/* Empty State - when no song is playing */}
         {!currentTargetContext && (
           <div className="bg-gradient-to-br from-gray-900 to-black p-4 rounded-lg border border-gray-800">
-            <p className="text-gray-400 text-center text-sm">Loading library match...</p>
+            <p className="text-gray-400 text-center text-sm">Play a song to see recommendations</p>
           </div>
         )}
 
@@ -931,19 +974,15 @@ const SimilarSongs = () => {
                   .map(rec => {
                       const liveMatch = calculateLiveMatch(rec);
                     const recNormId = normalizeTrackId(rec.product_id || rec.id || rec.trackId);
-                    const recTitleHint = String(rec.trackName || rec.albumTitle || rec.collectionName || '').trim().toLowerCase();
                     const fallbackSongById = songs.find((s) => normalizeTrackId(s.trackId || s.id) === recNormId);
-                    const fallbackSongByTitle = recTitleHint
-                      ? songs.find((s) => String(s.trackName || s.albumTitle || '').trim().toLowerCase() === recTitleHint)
-                      : null;
-                    const fallbackSong = fallbackSongById || fallbackSongByTitle;
+                    const fallbackSong = fallbackSongById;
 
                     const resolvedTrackName = !isPlaceholderTrack(rec.trackName)
                       ? rec.trackName
                       : (fallbackSong?.trackName || fallbackSong?.albumTitle || rec.albumTitle || rec.collectionName);
                     const resolvedArtistName = !isPlaceholderArtist(rec.artistName)
                       ? rec.artistName
-                      : (fallbackSong?.artistName || 'Unknown Artist');
+                      : 'Unknown Artist';
 
                       return {
                           ...rec,

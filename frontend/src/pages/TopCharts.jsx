@@ -36,6 +36,19 @@ const getSafeCoverUrl = (song, size = '600x600') => {
   return artwork || albumCover || imageUrl || image || fallbackImage;
 };
 
+const normalizeTrackId = (value) => {
+  const numeric = Number(value);
+  if (Number.isFinite(numeric) && numeric !== 0) {
+    return String(Math.abs(numeric));
+  }
+  return String(value ?? '');
+};
+
+const isPlaceholderArtist = (name) => {
+  const n = String(name || '').trim().toLowerCase();
+  return !n || n === 'unknown artist' || n === 'library artist';
+};
+
 // Shuffle array helper
 const shuffleArray = (array) => {
   const shuffled = [...array];
@@ -435,7 +448,72 @@ const TopCharts = () => {
         if (response.ok) {
            const data = fixTextDeep(await response.json());
            if (data.recommendations) {
-               setRecommendations(data.recommendations);
+               let enrichedRecommendations = data.recommendations;
+
+               // Recover real iTunes metadata for recommendations with placeholder artists.
+               const unresolvedArtistRecs = (data.recommendations || []).filter((rec) =>
+                 isPlaceholderArtist(rec.artistName)
+               );
+               if (unresolvedArtistRecs.length > 0) {
+                 try {
+                   const lookupIds = Array.from(
+                     new Set(
+                       unresolvedArtistRecs
+                         .map((rec) => Number(rec.product_id || rec.id || rec.trackId))
+                         .filter((id) => Number.isFinite(id) && Math.abs(id) >= 1000000)
+                         .map((id) => Math.abs(id))
+                     )
+                   ).slice(0, 50);
+
+                   if (lookupIds.length > 0) {
+                     const lookupResp = await fetch(
+                       `https://itunes.apple.com/lookup?id=${lookupIds.join(',')}`,
+                       { signal: AbortSignal.timeout(5000) }
+                     );
+                     if (lookupResp.ok) {
+                       const lookupData = fixTextDeep(await lookupResp.json());
+                       const itunesMap = new Map(
+                         (lookupData.results || [])
+                           .filter((item) => item.trackId)
+                           .map((item) => [Math.abs(Number(item.trackId)), item])
+                       );
+
+                       enrichedRecommendations = data.recommendations.map((rec) => {
+                         const rawId = Number(rec.product_id || rec.id || rec.trackId);
+                         const lookup = Number.isFinite(rawId) ? itunesMap.get(Math.abs(rawId)) : null;
+                         if (!lookup) return rec;
+                         return {
+                           ...rec,
+                           artistName: isPlaceholderArtist(rec.artistName) ? (lookup.artistName || rec.artistName) : rec.artistName,
+                           trackName: rec.trackName || lookup.trackName,
+                           collectionName: rec.collectionName || lookup.collectionName,
+                           artworkUrl100: rec.artworkUrl100 || lookup.artworkUrl100,
+                           previewUrl: rec.previewUrl || lookup.previewUrl,
+                         };
+                       });
+                     }
+                   }
+                 } catch {
+                   // Keep original recommendations if iTunes lookup fails.
+                 }
+               }
+
+               // Also fallback from loaded chart songs by normalized ID to avoid placeholder artists.
+               const songsById = new Map(songs.map((s) => [normalizeTrackId(s.trackId || s.id), s]));
+               enrichedRecommendations = enrichedRecommendations.map((rec) => {
+                 if (!isPlaceholderArtist(rec.artistName)) return rec;
+                 const fallback = songsById.get(normalizeTrackId(rec.product_id || rec.id || rec.trackId));
+                 if (!fallback) return rec;
+                 return {
+                   ...rec,
+                   artistName: fallback.artistName || rec.artistName,
+                   trackName: rec.trackName || fallback.trackName || fallback.albumTitle,
+                   collectionName: rec.collectionName || fallback.collectionName,
+                   artworkUrl100: rec.artworkUrl100 || fallback.artworkUrl100 || fallback.albumCoverImageUrl,
+                 };
+               });
+
+               setRecommendations(enrichedRecommendations);
            }
            if (data.target_features) {
                setDisplayedFeatures({

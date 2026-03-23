@@ -44,38 +44,28 @@ const getArtistBadgeColor = (artist) => {
   return 'bg-gray-500';
 };
 
-// Feature color based on value
-const getFeatureColor = (label, value) => {
-  const numericValue = parseInt(value);
-  
-  if (label === 'Tempo') {
-    if (numericValue < 90) return { bg: 'bg-blue-900/50', text: 'text-blue-300', border: 'border-blue-500/50' };
-    if (numericValue < 130) return { bg: 'bg-green-900/50', text: 'text-green-300', border: 'border-green-500/50' };
-    return { bg: 'bg-red-900/50', text: 'text-red-300', border: 'border-red-500/50' };
-  }
-  
-  if (numericValue >= 70) return { bg: 'bg-green-900/50', text: 'text-green-300', border: 'border-green-500/50' };
-  if (numericValue >= 50) return { bg: 'bg-yellow-900/50', text: 'text-yellow-300', border: 'border-yellow-500/50' };
-  return { bg: 'bg-red-900/50', text: 'text-red-300', border: 'border-red-500/50' };
-};
-
-// Feature Badge Component
-const FeatureBadge = ({ label, value }) => {
-  const colors = getFeatureColor(label, value);
-  return (
-    <div className={`rounded-md px-1 py-1 text-center border ${colors.bg} ${colors.border}`}>
-      <div className="text-[12px] text-gray-400 leading-tight">{label}</div>
-      <div className={`text-[12px] font-bold leading-tight ${colors.text}`}>{value}</div>
-    </div>
-  );
-};
-
 const isLibraryContextSong = (song) => {
   if (!song) return false;
   if (song.source === 'database') return true;
   const numericId = Number(song.trackId || song.id);
   // Library DB IDs are small positive sequences. iTunes IDs are > 1,000,000
   return Number.isFinite(numericId) && numericId > 0 && numericId < 1000000;
+};
+
+const normalizeArtistName = (artistName) => {
+  const name = String(artistName || '').trim();
+  if (!name) return '';
+  const lower = name.toLowerCase();
+  if (lower === 'unknown artist' || lower === 'library artist') return '';
+  return name;
+};
+
+const firstRealArtistName = (...values) => {
+  for (const value of values) {
+    const normalized = normalizeArtistName(value);
+    if (normalized) return normalized;
+  }
+  return '';
 };
 
 // Similar Song Card Component
@@ -220,7 +210,7 @@ const SimilarSongCard = ({ song, isPlaying, activeSong, onPlay, onPause, rank, p
         {isLibrarySong && (
           <button
             onClick={handleToggleWishlist}
-            className={`absolute ${(isVideo || useOnsetImages) ? 'top-10' : 'top-2'} right-2 z-20 p-1.5 rounded-full bg-black/50 backdrop-blur-sm hover:bg-black/70 transition-all hover:scale-110`}
+            className={`absolute ${(isVideo || simUseOnsetImages) ? 'top-2' : 'top-2'} right-2 z-20 p-1.5 rounded-full bg-black/50 backdrop-blur-sm hover:bg-black/70 transition-all hover:scale-110`}
             title={isWishlisted ? 'Remove from Wishlist' : 'Add to Wishlist'}
           >
             {isWishlisted ? (
@@ -230,15 +220,6 @@ const SimilarSongCard = ({ song, isPlaying, activeSong, onPlay, onPause, rank, p
             )}
           </button>
         )}
-
-        {/* Similarity score */}
-        <div className={`absolute top-2 right-2 px-2 py-1 rounded-full text-[12px] font-bold text-white shadow-lg ${
-          song.similarity_score >= 0.8 ? 'bg-green-500' : 
-          song.similarity_score >= 0.6 ? 'bg-yellow-500' : 
-          'bg-orange-500'
-        }`}>
-          {(song.similarity_score * 100).toFixed(0)}%
-        </div>
 
         {/* Playing indicator */}
         {isThisSongActive && isPlaying && (
@@ -298,7 +279,7 @@ const SimilarSongCard = ({ song, isPlaying, activeSong, onPlay, onPause, rank, p
             {simUseOnsetImages ? (
               <OnsetImageCard songTitle={simSongTitle} songId={song.trackId || song.id} className="w-full h-full object-contain" isPlaying={isPlaying && isThisSongActive} isActive={isThisSongActive} />
             ) : (
-              <AudioReactiveVideo src={albumArt} alt={song.trackName} className="w-full h-full object-contain" isPlaying={isPlaying && isThisSongActive} isActive={isThisSongActive} playbackRate={isThisSongActive ? (playbackRate || 1.0) : 1.0} />
+              <AudioReactiveVideo src={coverMedia || albumArt} alt={song.trackName} className="w-full h-full object-contain" isPlaying={isPlaying && isThisSongActive} isActive={isThisSongActive} playbackRate={isThisSongActive ? (playbackRate || 1.0) : 1.0} />
             )}
           </div>
         </div>,
@@ -335,12 +316,12 @@ const SimilarSongCard = ({ song, isPlaying, activeSong, onPlay, onPause, rank, p
             {song.artistName}
           </p>
         )}
-        {!isLibrarySong && song.collectionName && (
+        {!isLibrarySong && (song.collectionName || song.albumTitle) && (
           <p
             className="text-xs text-gray-500 truncate hover:text-cyan-400 transition-colors cursor-pointer"
             onClick={(e) => {
               e.stopPropagation();
-              navigate(`/albums/${encodeURIComponent(song.collectionName)}`, {
+              navigate(`/albums/${encodeURIComponent(song.collectionName || song.albumTitle)}`, {
                 state: {
                   song,
                   albumArtwork: (song.artworkUrl100 || song.albumCoverImageUrl || '').replace('100x100', '600x600'),
@@ -349,7 +330,7 @@ const SimilarSongCard = ({ song, isPlaying, activeSong, onPlay, onPause, rank, p
             }}
             title="Click to view album details"
           >
-            {song.collectionName}
+            {song.collectionName || song.albumTitle}
           </p>
         )}
         <p className="text-xs text-cyan-400 truncate">{song.match_reason}</p>
@@ -390,37 +371,6 @@ const SimilarSongCard = ({ song, isPlaying, activeSong, onPlay, onPause, rank, p
         </div>
       )}
 
-      {/* Feature match badges */}
-      <div className="mt-2 grid grid-cols-2 sm:grid-cols-4 gap-1">
-        <div className={`px-1 py-1 rounded text-[12px] text-center leading-tight truncate ${
-          song.tempo_match >= 0.7 ? 'bg-green-500/30 text-green-300' : 
-          song.tempo_match >= 0.5 ? 'bg-yellow-500/30 text-yellow-300' : 
-          'bg-red-500/30 text-red-300'
-        }`}>
-          Tempo: {Math.round(song.tempo_match * 100)}%
-        </div>
-        <div className={`px-1 py-1 rounded text-[12px] text-center leading-tight truncate ${
-          song.energy_match >= 0.7 ? 'bg-green-500/30 text-green-300' : 
-          song.energy_match >= 0.5 ? 'bg-yellow-500/30 text-yellow-300' : 
-          'bg-red-500/30 text-red-300'
-        }`}>
-          Energy: {Math.round(song.energy_match * 100)}%
-        </div>
-        <div className={`px-1 py-1 rounded text-[12px] text-center leading-tight truncate ${
-          song.mood_match >= 0.7 ? 'bg-green-500/30 text-green-300' : 
-          song.mood_match >= 0.5 ? 'bg-yellow-500/30 text-yellow-300' : 
-          'bg-red-500/30 text-red-300'
-        }`}>
-          Mood: {Math.round(song.mood_match * 100)}%
-        </div>
-        <div className={`px-1 py-1 rounded text-[12px] text-center leading-tight truncate ${
-          song.dance_match >= 0.7 ? 'bg-green-500/30 text-green-300' : 
-          song.dance_match >= 0.5 ? 'bg-yellow-500/30 text-yellow-300' : 
-          'bg-red-500/30 text-red-300'
-        }`}>
-          Dance: {Math.round(song.dance_match * 100)}%
-        </div>
-      </div>
     </div>
   );
 };
@@ -591,6 +541,7 @@ const SongDetails = () => {
     
     try {
       const liveFeatures = overrideFeatures || audioFeaturesRef.current;
+      const isDiscoverRequest = isLibraryContextSong(targetSong);
       const featuresToSend = liveFeatures ? {
         tempo: Number(liveFeatures.tempo) || null,
         energy: Number(liveFeatures.energy) || null,
@@ -601,7 +552,7 @@ const SongDetails = () => {
       } : null;
 
       const payload = {
-          source: isLibraryContextSong(targetSong) ? 'discover_page' : 'similar_songs',
+          source: isDiscoverRequest ? 'discover_page' : 'similar_songs',
           current_product_id: String(targetSong.trackId || targetSong.id),
           preview_url: String(targetSong.previewUrl || targetSong.fileUrl || ''),
           limit: 20,
@@ -628,16 +579,130 @@ const SongDetails = () => {
       const data = fixTextDeep(await response.json());
       
       if (data.status === 'success') {
+        const comparisonMetaById = new Map();
+        (comparisonSongs || []).forEach((s) => {
+          const rawId = s.trackId || s.id;
+          const key = String(rawId ?? '');
+          if (key) comparisonMetaById.set(key, s);
+          const numeric = Number(rawId);
+          if (Number.isFinite(numeric)) {
+            comparisonMetaById.set(String(Math.abs(numeric)), s);
+          }
+        });
+
         const validRecommendations = (data.recommendations || [])
             .filter(song => song.similarity_score > 0)
             .map(song => {
+                const recId = String(song.product_id ?? song.trackId ?? song.id ?? '');
+                const recNumeric = Number(song.product_id ?? song.trackId ?? song.id);
+                const comparisonMeta =
+                  comparisonMetaById.get(recId) ||
+                  (Number.isFinite(recNumeric) ? comparisonMetaById.get(String(Math.abs(recNumeric))) : null) ||
+                  {};
+                const numericProductId = Number(song.product_id);
+                const isLibraryRecommendation =
+                  String(song.source || '').toLowerCase() === 'database' ||
+                  String(comparisonMeta.source || '').toLowerCase() === 'database' ||
+                  (isDiscoverRequest && Number.isFinite(numericProductId) && numericProductId > 0 && numericProductId < 1000000);
+
+                const normalizedArtwork =
+                  song.artworkUrl100 ||
+                  song.albumCoverImageUrl ||
+                  song.album_cover_image_url ||
+                  comparisonMeta.artworkUrl100 ||
+                  comparisonMeta.albumCoverImageUrl ||
+                  comparisonMeta.imageUrl ||
+                  comparisonMeta.image ||
+                  song.imageUrl ||
+                  song.image ||
+                  null;
+
+                const normalizedPreview =
+                  song.previewUrl ||
+                  song.fileUrl ||
+                  song.preview_url ||
+                  song.file_url ||
+                  comparisonMeta.previewUrl ||
+                  comparisonMeta.fileUrl ||
+                  null;
+
                 return {
                     ...song,
                     trackId: song.product_id,
                     id: song.product_id,
+                    isLibrary: isLibraryRecommendation,
+                    trackName: song.trackName || comparisonMeta.trackName || song.albumTitle || comparisonMeta.albumTitle || song.productName || `Track ${song.product_id}`,
+                    artistName: isLibraryRecommendation
+                      ? ''
+                      : firstRealArtistName(song.artistName, comparisonMeta.artistName),
+                    collectionName: comparisonMeta.collectionName || song.collectionName || song.albumTitle || comparisonMeta.albumTitle || '',
+                    albumTitle: song.albumTitle || comparisonMeta.albumTitle || song.collectionName || comparisonMeta.collectionName || song.trackName || comparisonMeta.trackName || '',
+                    primaryGenreName: song.primaryGenreName || comparisonMeta.primaryGenreName || null,
+                    trackTimeMillis: song.trackTimeMillis || comparisonMeta.trackTimeMillis || null,
+                    artworkUrl100: normalizedArtwork,
+                    albumCoverImageUrl: song.albumCoverImageUrl || normalizedArtwork,
+                    previewUrl: normalizedPreview,
+                    fileUrl: song.fileUrl || normalizedPreview,
+                    source: song.source || (isLibraryRecommendation ? 'database' : 'itunes'),
                 };
             });
-        setSimilarSongs(validRecommendations);
+
+        let hydratedRecommendations = validRecommendations;
+        const needsLibraryArtworkHydration = isDiscoverRequest && validRecommendations.some((song) => {
+          const pid = Number(song.trackId || song.id);
+          const hasArtwork = !!(song.artworkUrl100 || song.albumCoverImageUrl || song.imageUrl || song.image);
+          return Number.isFinite(pid) && pid > 0 && !hasArtwork;
+        });
+
+        if (needsLibraryArtworkHydration) {
+          try {
+            const products = await productService.getAllProducts();
+            const productsById = new Map(
+              (products || []).map((p) => [Number(p.id || p.productId), p])
+            );
+
+            hydratedRecommendations = validRecommendations.map((song) => {
+              const pid = Number(song.trackId || song.id);
+              const isLibrarySongById = Number.isFinite(pid) && pid > 0 && pid < 1000000;
+              if (!isLibrarySongById) {
+                return song;
+              }
+
+              const hasArtwork = !!(song.artworkUrl100 || song.albumCoverImageUrl || song.imageUrl || song.image);
+              if (hasArtwork) {
+                return song;
+              }
+
+              const product = productsById.get(pid);
+              if (!product) {
+                return song;
+              }
+
+              const productArtwork =
+                product.albumCoverImageUrl ||
+                product.imageUrl ||
+                product.image ||
+                null;
+              const productMedia = product.fileUrl || song.previewUrl || song.fileUrl || null;
+
+              return {
+                ...song,
+                trackName: song.trackName || product.albumTitle || product.productName || song.trackName,
+                artistName: '',
+                collectionName: song.collectionName || product.albumTitle || song.collectionName,
+                albumTitle: song.albumTitle || product.albumTitle || song.albumTitle,
+                artworkUrl100: song.artworkUrl100 || productArtwork,
+                albumCoverImageUrl: song.albumCoverImageUrl || productArtwork,
+                previewUrl: song.previewUrl || productMedia,
+                fileUrl: song.fileUrl || productMedia,
+              };
+            });
+          } catch (hydrateErr) {
+            console.warn('[SongDetails] Failed to hydrate library artwork from products API:', hydrateErr);
+          }
+        }
+
+        setSimilarSongs(hydratedRecommendations);
         
         if (data.target_features) {
           setTargetFeatures(data.target_features);
