@@ -27,7 +27,9 @@ REFRESH_INTERVAL = int(os.getenv("TOPCHARTS_REFRESH_INTERVAL", 60 * 60))
 
 # Weekly catalog composition targets
 TOPCHARTS_TARGET_COUNT = 150
-ITUNES_SEARCH_TARGET_COUNT = 100
+ITUNES_SEARCH_TARGET_COUNT = 75
+LIBRARY_TARGET_COUNT = 47
+ITUNES_SEARCH_TERMS = ["pop", "electronic", "dance", "house", "techno", "indie"]
 
 # Track the background task so we can cancel it on shutdown
 _refresh_task: asyncio.Task | None = None
@@ -336,30 +338,32 @@ async def import_top_songs(limit: int = 150):
 
 
 @router.post("/api/itunes/import-to-database")
-async def import_itunes_songs_to_database(limit: int = 100, genre: str = "electronic"):
+async def import_itunes_songs_to_database(limit: int = 50, genre: str = "pop"):
     """
     Import iTunes songs into the database to increase dataset size for better similarity scores.
     
     Steps:
-    1. Search iTunes for songs (default: electronic genre)
+    1. Search iTunes for songs (pop only)
     2. Extract audio features from preview URLs
     3. Insert into Products table (with negative ProductIDs to avoid conflicts)
     4. Insert features into AudioFeatures table
     5. Reload cache
     
     Args:
-        limit: Number of songs to import (default 100)
-        genre: Genre to search for (default "electronic")
+        limit: Number of songs to import (max 50)
+        genre: Requested genre (ignored; pop is enforced)
     
     Returns:
         Summary of imported songs
     """
     try:
-        console.log(f"🎵 Starting iTunes import: {limit} {genre} songs...")
+        enforced_limit = max(1, min(int(limit or ITUNES_SEARCH_TARGET_COUNT), ITUNES_SEARCH_TARGET_COUNT))
+        enforced_genre = "pop"
+        console.log(f"🎵 Starting iTunes import: {enforced_limit} {enforced_genre} songs...")
         
         # 1. Search iTunes API
         itunes_url = f"{ITUNES_API_BASE_URL}/search"
-        params = {"term": genre, "limit": limit, "media": "music", "entity": "song"}
+        params = {"term": enforced_genre, "limit": enforced_limit, "media": "music", "entity": "song"}
         
         async with httpx.AsyncClient(timeout=15.0) as client:
             response = await client.get(itunes_url, params=params)
@@ -680,9 +684,8 @@ def _prune_imported_audiofeatures(max_imported_rows: int) -> dict:
     Keep imported iTunes songs (negative ProductIDs) bounded by deleting
     low-priority rows first: unavailable songs first, then oldest updated rows.
     """
-    # Hard ceiling: imported AudioFeatures should never exceed 300 rows
-    # (150 top charts + 150 iTunes artist songs).
-    target_cap = min(300, int(max_imported_rows))
+    # Cap comes from config so composition changes take effect without code edits.
+    target_cap = int(max_imported_rows)
 
     if target_cap <= 0:
         return {"pruned": 0, "before": 0, "after": 0}
@@ -992,8 +995,8 @@ def _insert_song_row(cursor, song: dict):
 
 async def _fetch_current_chart_ids() -> tuple[dict[int, dict], dict[int, dict]]:
     """
-    Fetch the current iTunes Top Pop songs (RSS) and a capped set of iTunes
-    electronic artist songs, returning two dicts mapping negative product_id → entry/track
+    Fetch the current iTunes Top songs (RSS) and a capped set of iTunes search songs,
+    returning two dicts mapping negative product_id → entry/track
     for RSS and Search results respectively.
     """
     rss_entries: dict[int, dict] = {}
@@ -1013,13 +1016,12 @@ async def _fetch_current_chart_ids() -> tuple[dict[int, dict], dict[int, dict]]:
         except Exception as e:
             console.log(f"   ⚠️ RSS fetch failed: {e}")
 
-        # --- Electronic artists via Search API ---
-        artists = ["Aphex Twin", "Boards of Canada", "Squarepusher"]
-        for artist in artists:
+        # --- Search API fallback pool (multiple terms) ---
+        for term in ITUNES_SEARCH_TERMS:
             if len(search_tracks) >= ITUNES_SEARCH_TARGET_COUNT:
                 break
             try:
-                params = {"term": artist, "limit": 50, "media": "music", "entity": "song"}
+                params = {"term": term, "limit": 200, "media": "music", "entity": "song"}
                 resp = await client.get(f"{ITUNES_API_BASE_URL}/search", params=params)
                 if resp.status_code == 200:
                     for track in resp.json().get('results', []):
@@ -1035,7 +1037,7 @@ async def _fetch_current_chart_ids() -> tuple[dict[int, dict], dict[int, dict]]:
                             if len(search_tracks) >= ITUNES_SEARCH_TARGET_COUNT:
                                 break
             except Exception as e:
-                console.log(f"   ⚠️ Search fetch for {artist} failed: {e}")
+                console.log(f"   ⚠️ Search fetch failed for term '{term}': {e}")
 
     return rss_entries, search_tracks
 
@@ -1045,14 +1047,14 @@ async def refresh_topcharts():
     """
     Live differential sync of the entire store catalogue (every 1 hour).
 
-    iTunes songs (ProductID < 0):
-      1. Fetch the current Top 150 Pop songs (RSS) + 3 electronic artist searches.
+        iTunes songs (ProductID < 0):
+            1. Fetch the current Top 150 chart songs (RSS) + 75 search songs.
       2. Songs that dropped off the charts → mark unavailable in Stock (kept for history).
       3. New chart entries → import Products + AudioFeatures + Stock.
       4. Existing chart songs → ensure Stock is available.
 
-    Library songs (ProductID > 0):
-      5. Validate each library song still has a reachable file_url (S3) and AudioFeatures.
+        Library songs (ProductID > 0):
+            5. Validate the fixed 47-song library set has a reachable file_url (S3) and AudioFeatures.
       6. Mark unavailable if the file is gone; mark available if it came back.
 
     Finally reload the ML cache so recommendations reflect the latest state.
@@ -1072,7 +1074,7 @@ async def refresh_topcharts():
         # 1. Fetch live chart IDs from iTunes
         rss_entries, search_tracks = await _fetch_current_chart_ids()
         live_ids: set[int] = set(rss_entries.keys()) | set(search_tracks.keys())
-        console.log(f"   📡 Live charts: {len(rss_entries)} pop + {len(search_tracks)} electronic = {len(live_ids)} unique songs")
+        console.log(f"   📡 Live charts: {len(rss_entries)} top-chart + {len(search_tracks)} pop = {len(live_ids)} unique songs")
 
         # 2. Get existing iTunes product IDs from DB
         existing_itunes_ids: set[int] = set()
@@ -1110,9 +1112,9 @@ async def refresh_topcharts():
                             _upsert_stock(cursor, int(pid), 1)
                         conn.commit()
 
-        # 6. Import new chart songs (capped per cycle to avoid OOM / timeouts)
-        #    Remaining songs will be imported in the next scheduled cycle.
-        MAX_IMPORTS_PER_CYCLE = int(os.getenv("MAX_IMPORTS_PER_CYCLE", 25))
+        # 6. Import new chart/search songs.
+        # Default allows filling up to configured imported capacity in one run.
+        MAX_IMPORTS_PER_CYCLE = int(os.getenv("MAX_IMPORTS_PER_CYCLE", str(AUDIO_FEATURES_MAX_IMPORTED_ROWS)))
         imported_count = 0
         error_count = 0
         skipped_for_next_cycle = 0
@@ -1156,13 +1158,15 @@ async def refresh_topcharts():
         with get_db_connection() as conn:
             if conn:
                 with conn.cursor() as cursor:
-                    # Fetch all library products with their file_url and feature status
+                    # Validate only the fixed library target set to keep runtime/data expectations stable.
                     cursor.execute("""
                         SELECT p.ProductID, p.file_url, af.FeatureID
                         FROM Products p
                         LEFT JOIN AudioFeatures af ON af.ProductID = p.ProductID
                         WHERE p.ProductID > 0
-                    """)
+                        ORDER BY p.ProductID ASC
+                        LIMIT %s
+                    """, (LIBRARY_TARGET_COUNT,))
                     library_rows = cursor.fetchall()
 
                     for row in library_rows:

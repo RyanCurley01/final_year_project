@@ -58,8 +58,9 @@ EXTERNAL_IMAGE_GENERATION_ENABLED = _env_bool("EXTERNAL_IMAGE_GENERATION_ENABLED
 
 # Imported iTunes AudioFeatures retention controls.
 # Keep this bounded so historical chart churn does not degrade ML clustering and similarity quality.
-# Target composition: 150 top-chart songs + 100 iTunes artist songs = 250 imported rows.
-AUDIO_FEATURES_MAX_IMPORTED_ROWS = 250
+# Target composition: 150 top-chart songs + 75 iTunes search songs = 225 imported rows.
+# With 47 library rows this yields a 272 total AudioFeatures target pool.
+AUDIO_FEATURES_MAX_IMPORTED_ROWS = 225
 AUDIO_FEATURES_PRUNE_ENABLED = _env_bool("AUDIO_FEATURES_PRUNE_ENABLED", default=True)
 
 # Keep unavailable iTunes songs in Stock for a short retention window,
