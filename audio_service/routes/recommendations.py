@@ -739,29 +739,18 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
             
             # Scans array and targets the tuple possessing the highest Match Score for the output reason
             best_match = max(matches, key=lambda x: x[1])
+
+            # Ensure Pydantic receives a strict bool for genre_match.
+            target_genre = str(target_features.get('genre') or '').strip().lower()
+            cand_genre = str(p.get('genre') or '').strip().lower()
+            genre_match = bool(target_genre and cand_genre and target_genre == cand_genre)
             
             # Attempts to grab textual metadata if pre-resolved and embedded in cache dictionary
             meta = p.get('_meta') 
             
-            
-            # Extracts string representations describing the song's categorized genre cluster
-            target_cluster = target_features.get('genre_cluster', '')
-            candidate_cluster = p.get('genre_cluster', '')
-            
-            # Validates that both have strings and evaluates if they are an exact match
-            genre_cluster_match = bool(target_cluster and candidate_cluster and target_cluster == candidate_cluster)
-
-            # Initializes a variable to hold mathematical score inflation/deflation
-            genre_adjust = 0.0
-            
-            # If both tracks have a defined string genre cluster
-            if target_cluster and candidate_cluster:
-                # Applies +10% to final score if genres match, or -5% penalty deduction if dissimilar
-                genre_adjust = 0.10 if genre_cluster_match else -0.05
-
 
             # Master algorithm: merges AI space match (45%), linear human-audible traits (55%), and genre adjustment
-            blended_score = (cosine_norm * 0.45) + (core_match * 0.55) + genre_adjust
+            blended_score = (cosine_norm * 0.45) + (core_match * 0.55) 
             
             # Locks the final score into a ceiling of 0.999 and floor 0.0 to prevent glitch overflows
             blended_score = max(0.0, min(0.999, blended_score))
@@ -785,7 +774,7 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
                 mood_match=round(mood_match, 3),
                 danceability_match=round(dance_match, 3),
                 dance_match=round(dance_match, 3), 
-                genre_match=genre_cluster_match, 
+                genre_match=genre_match,
                 reason=best_match[2],
                 
                 # Populates the raw attributes back out so front-end debug visualizers can display them

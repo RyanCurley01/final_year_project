@@ -7,6 +7,8 @@ import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.time.LocalDateTime;
+
 @Entity
 @Table(name = "Stock")
 @Data
@@ -27,4 +29,12 @@ public class Stock {
     @Column(name = "IsAvailable", nullable = false)
     @JsonProperty("isAvailable")
     private Boolean isAvailable = true;
+
+    @Column(name = "UnavailableSince")
+    @JsonProperty("unavailableSince")
+    private LocalDateTime unavailableSince;
+
+    @Column(name = "AvailableSince")
+    @JsonProperty("availableSince")
+    private LocalDateTime availableSince;
 }

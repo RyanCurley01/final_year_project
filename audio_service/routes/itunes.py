@@ -7,7 +7,13 @@ import os
 from datetime import datetime
 
 from utils import console
-from config import executor, ITUNES_API_BASE_URL
+from config import (
+    executor,
+    ITUNES_API_BASE_URL,
+    AUDIO_FEATURES_MAX_IMPORTED_ROWS,
+    AUDIO_FEATURES_PRUNE_ENABLED,
+    STOCK_UNAVAILABLE_RETENTION_DAYS,
+)
 from database import get_db_connection
 from feature_extraction import extract_audio_features_from_preview, derive_mood
 from ml_service import _parse_json_list
@@ -18,6 +24,10 @@ router = APIRouter()
 # Interval (in seconds) between automatic top-chart refreshes.
 # Default: 1 hour.  Override with env var TOPCHARTS_REFRESH_INTERVAL.
 REFRESH_INTERVAL = int(os.getenv("TOPCHARTS_REFRESH_INTERVAL", 60 * 60))
+
+# Weekly catalog composition targets
+TOPCHARTS_TARGET_COUNT = 150
+ITUNES_SEARCH_TARGET_COUNT = 100
 
 # Track the background task so we can cancel it on shutdown
 _refresh_task: asyncio.Task | None = None
@@ -298,6 +308,15 @@ async def import_top_songs(limit: int = 150):
                 error_count += 1
                 console.log(f"   ❌ Error processing entry {entry.get('im:name', {}).get('label')}: {e}")
         
+        prune_result = {"pruned": 0, "before": 0, "after": 0}
+        if AUDIO_FEATURES_PRUNE_ENABLED:
+            prune_result = _prune_imported_audiofeatures(AUDIO_FEATURES_MAX_IMPORTED_ROWS)
+            if prune_result["pruned"] > 0:
+                console.log(
+                    f"   🧹 Pruned imported AudioFeatures: {prune_result['before']} -> {prune_result['after']} "
+                    f"(removed {prune_result['pruned']})"
+                )
+
         # 3. Reload Cache
         await ml_service.startup_cache()
         
@@ -305,7 +324,10 @@ async def import_top_songs(limit: int = 150):
             "status": "success",
             "imported": imported_count,
             "skipped": skipped_count,
-            "errors": error_count
+            "errors": error_count,
+            "pruned_imported": prune_result["pruned"],
+            "imported_before_prune": prune_result["before"],
+            "imported_after_prune": prune_result["after"],
         }
 
     except Exception as e:
@@ -500,6 +522,15 @@ async def import_itunes_songs_to_database(limit: int = 100, genre: str = "electr
                 error_count += 1
                 console.log(f"   ❌ Error importing track {track_id}: {e}")
         
+        prune_result = {"pruned": 0, "before": 0, "after": 0}
+        if AUDIO_FEATURES_PRUNE_ENABLED:
+            prune_result = _prune_imported_audiofeatures(AUDIO_FEATURES_MAX_IMPORTED_ROWS)
+            if prune_result["pruned"] > 0:
+                console.log(
+                    f"   🧹 Pruned imported AudioFeatures: {prune_result['before']} -> {prune_result['after']} "
+                    f"(removed {prune_result['pruned']})"
+                )
+
         # 3. Reload cache to include new songs
         console.log("   🔄 Reloading cache with new songs...")
         
@@ -559,6 +590,9 @@ async def import_itunes_songs_to_database(limit: int = 100, genre: str = "electr
             "skipped": skipped_count,
             "errors": error_count,
             "total_in_db": len(ml_service.audio_features_cache),
+            "pruned_imported": prune_result["pruned"],
+            "imported_before_prune": prune_result["before"],
+            "imported_after_prune": prune_result["after"],
             "sample_imported": imported_songs[:5]
         }
     except Exception as e:
@@ -580,28 +614,131 @@ def _mark_products_unavailable(cursor, product_ids: list[int]):
     if not product_ids:
         return
 
-    fmt = ",".join(["%s"] * len(product_ids))
-
-    # Ensure every product has a Stock row first
     for pid in product_ids:
-        cursor.execute(
-            "INSERT IGNORE INTO Stock (IsAvailable, ProductID) VALUES (0, %s)", (pid,)
-        )
-    # Then mark them all unavailable
-    cursor.execute(
-        f"UPDATE Stock SET IsAvailable = 0 WHERE ProductID IN ({fmt})", product_ids
-    )
+        _upsert_stock(cursor, int(pid), 0)
 
 
 def _safe_execute(cursor, sql: str, params=None):
-    """Execute a statement, silently skipping if the table doesn't exist (error 1146)."""
+    """Execute a statement, silently skipping expected idempotency errors."""
     try:
         cursor.execute(sql, params)
     except Exception as e:
-        if "1146" in str(e):
-            pass
-        else:
-            raise
+        msg = str(e)
+        # 1146: table doesn't exist
+        # 1060: duplicate column name
+        # 1061: duplicate key name
+        if "1146" in msg or "1060" in msg or "1061" in msg:
+            return
+        raise
+
+
+def _ensure_stock_schema(cursor):
+    """Best-effort schema hardening for stock retention behavior."""
+    _safe_execute(cursor, "ALTER TABLE Stock ADD COLUMN IsAvailable TINYINT(1) NOT NULL DEFAULT 1")
+    _safe_execute(cursor, "ALTER TABLE Stock ADD COLUMN UnavailableSince DATETIME NULL")
+    _safe_execute(cursor, "ALTER TABLE Stock ADD COLUMN AvailableSince DATETIME NULL")
+
+
+def _purge_stale_unavailable_imports(cursor, retention_days: int) -> int:
+    """
+    Delete imported songs (negative ProductIDs) that have stayed unavailable
+    for at least retention_days.
+    """
+    keep_days = max(1, int(retention_days))
+    cursor.execute(
+        """
+        SELECT DISTINCT ProductID
+        FROM Stock
+        WHERE ProductID < 0
+          AND COALESCE(IsAvailable, 1) = 0
+          AND UnavailableSince IS NOT NULL
+          AND UnavailableSince <= DATE_SUB(NOW(), INTERVAL %s DAY)
+        """,
+        (keep_days,)
+    )
+    stale_ids = [int(r["ProductID"]) for r in cursor.fetchall()]
+    if not stale_ids:
+        return 0
+
+    fmt = ",".join(["%s"] * len(stale_ids))
+    _safe_execute(cursor, f"DELETE FROM UserInteractions WHERE ProductID IN ({fmt})", stale_ids)
+    _safe_execute(cursor, f"DELETE FROM UserRecommendations WHERE ProductID IN ({fmt})", stale_ids)
+    _safe_execute(cursor, f"DELETE FROM Wishlist WHERE ProductID IN ({fmt})", stale_ids)
+    _safe_execute(cursor, f"DELETE FROM Sold_Products WHERE ProductID IN ({fmt})", stale_ids)
+    _safe_execute(cursor, f"DELETE FROM Purchased_Products WHERE ProductID IN ({fmt})", stale_ids)
+    _safe_execute(cursor, f"DELETE FROM CustomerSummary WHERE ProductID IN ({fmt})", stale_ids)
+    _safe_execute(cursor, f"DELETE FROM Payments WHERE ProductID IN ({fmt})", stale_ids)
+    _safe_execute(cursor, f"DELETE FROM Order_Items WHERE ProductID IN ({fmt})", stale_ids)
+    _safe_execute(cursor, f"DELETE FROM Stock WHERE ProductID IN ({fmt})", stale_ids)
+    _safe_execute(cursor, f"DELETE FROM AudioFeatures WHERE ProductID IN ({fmt})", stale_ids)
+    _safe_execute(cursor, f"DELETE FROM Products WHERE ProductID IN ({fmt})", stale_ids)
+    return len(stale_ids)
+
+
+def _prune_imported_audiofeatures(max_imported_rows: int) -> dict:
+    """
+    Keep imported iTunes songs (negative ProductIDs) bounded by deleting
+    low-priority rows first: unavailable songs first, then oldest updated rows.
+    """
+    # Hard ceiling: imported AudioFeatures should never exceed 300 rows
+    # (150 top charts + 150 iTunes artist songs).
+    target_cap = min(300, int(max_imported_rows))
+
+    if target_cap <= 0:
+        return {"pruned": 0, "before": 0, "after": 0}
+
+    with get_db_connection() as conn:
+        if not conn:
+            return {"pruned": 0, "before": 0, "after": 0}
+
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT COUNT(*) AS c FROM AudioFeatures WHERE ProductID < 0")
+            before = int((cursor.fetchone() or {}).get("c") or 0)
+            if before <= target_cap:
+                return {"pruned": 0, "before": before, "after": before}
+
+            # Prune in rounds and re-check count each round to guarantee we hit cap.
+            while True:
+                cursor.execute("SELECT COUNT(*) AS c FROM AudioFeatures WHERE ProductID < 0")
+                current = int((cursor.fetchone() or {}).get("c") or 0)
+                overflow = max(0, current - target_cap)
+                if overflow <= 0:
+                    break
+
+                cursor.execute(
+                    """
+                    SELECT af.ProductID
+                    FROM AudioFeatures af
+                    LEFT JOIN Stock s ON s.ProductID = af.ProductID
+                    WHERE af.ProductID < 0
+                    ORDER BY COALESCE(s.IsAvailable, 0) ASC, af.UpdatedAt ASC, af.FeatureID ASC
+                    LIMIT %s
+                    """,
+                    (overflow,)
+                )
+                to_prune = [int(r["ProductID"]) for r in cursor.fetchall()]
+                if not to_prune:
+                    break
+
+                fmt = ",".join(["%s"] * len(to_prune))
+
+                # Remove dependent rows first to satisfy FK constraints.
+                _safe_execute(cursor, f"DELETE FROM UserInteractions WHERE ProductID IN ({fmt})", to_prune)
+                _safe_execute(cursor, f"DELETE FROM UserRecommendations WHERE ProductID IN ({fmt})", to_prune)
+                _safe_execute(cursor, f"DELETE FROM Wishlist WHERE ProductID IN ({fmt})", to_prune)
+                _safe_execute(cursor, f"DELETE FROM Sold_Products WHERE ProductID IN ({fmt})", to_prune)
+                _safe_execute(cursor, f"DELETE FROM Purchased_Products WHERE ProductID IN ({fmt})", to_prune)
+                _safe_execute(cursor, f"DELETE FROM CustomerSummary WHERE ProductID IN ({fmt})", to_prune)
+                _safe_execute(cursor, f"DELETE FROM Payments WHERE ProductID IN ({fmt})", to_prune)
+                _safe_execute(cursor, f"DELETE FROM Order_Items WHERE ProductID IN ({fmt})", to_prune)
+                _safe_execute(cursor, f"DELETE FROM Stock WHERE ProductID IN ({fmt})", to_prune)
+                _safe_execute(cursor, f"DELETE FROM AudioFeatures WHERE ProductID IN ({fmt})", to_prune)
+                _safe_execute(cursor, f"DELETE FROM Products WHERE ProductID IN ({fmt})", to_prune)
+                conn.commit()
+
+            cursor.execute("SELECT COUNT(*) AS c FROM AudioFeatures WHERE ProductID < 0")
+            after = int((cursor.fetchone() or {}).get("c") or 0)
+            return {"pruned": max(0, before - after), "before": before, "after": after}
 
 
 def _upsert_stock(cursor, product_id: int, is_available: int):
@@ -611,22 +748,59 @@ def _upsert_stock(cursor, product_id: int, is_available: int):
       - With the index: ON DUPLICATE KEY UPDATE fires on the unique ProductID.
       - Without the index: falls back to check-then-insert/update.
     """
+    available_flag = 1 if int(is_available) == 1 else 0
     try:
-        cursor.execute(
-            "INSERT INTO Stock (IsAvailable, ProductID) VALUES (%s, %s) "
-            "ON DUPLICATE KEY UPDATE IsAvailable = VALUES(IsAvailable)",
-            (is_available, product_id)
-        )
-    except Exception:
-        # Fallback: unique index may not exist yet
-        cursor.execute("SELECT StockID FROM Stock WHERE ProductID = %s", (product_id,))
-        row = cursor.fetchone()
-        if row:
-            cursor.execute("UPDATE Stock SET IsAvailable = %s WHERE ProductID = %s",
-                           (is_available, product_id))
+        if available_flag == 1:
+            cursor.execute(
+                "INSERT INTO Stock (IsAvailable, ProductID, UnavailableSince, AvailableSince) VALUES (1, %s, NULL, NOW()) "
+                "ON DUPLICATE KEY UPDATE IsAvailable = 1, UnavailableSince = NULL, AvailableSince = COALESCE(AvailableSince, NOW())",
+                (product_id,)
+            )
         else:
-            cursor.execute("INSERT INTO Stock (IsAvailable, ProductID) VALUES (%s, %s)",
-                           (is_available, product_id))
+            cursor.execute(
+                "INSERT INTO Stock (IsAvailable, ProductID, UnavailableSince, AvailableSince) VALUES (0, %s, NOW(), NULL) "
+                "ON DUPLICATE KEY UPDATE IsAvailable = 0, UnavailableSince = COALESCE(UnavailableSince, NOW())",
+                (product_id,)
+            )
+        return
+    except Exception:
+        pass
+
+    # Fallback for schemas without unique key or UnavailableSince support.
+    cursor.execute("SELECT StockID FROM Stock WHERE ProductID = %s ORDER BY StockID DESC LIMIT 1", (product_id,))
+    row = cursor.fetchone()
+    if row:
+        sid = int(row["StockID"])
+        if available_flag == 1:
+            try:
+                cursor.execute(
+                    "UPDATE Stock SET IsAvailable = 1, UnavailableSince = NULL, AvailableSince = COALESCE(AvailableSince, NOW()) WHERE StockID = %s",
+                    (sid,)
+                )
+            except Exception:
+                cursor.execute("UPDATE Stock SET IsAvailable = 1 WHERE StockID = %s", (sid,))
+        else:
+            try:
+                cursor.execute(
+                    "UPDATE Stock SET IsAvailable = 0, UnavailableSince = COALESCE(UnavailableSince, NOW()) WHERE StockID = %s",
+                    (sid,)
+                )
+            except Exception:
+                cursor.execute("UPDATE Stock SET IsAvailable = 0 WHERE StockID = %s", (sid,))
+    else:
+        if available_flag == 1:
+            try:
+                cursor.execute(
+                    "INSERT INTO Stock (IsAvailable, ProductID, UnavailableSince, AvailableSince) VALUES (1, %s, NULL, NOW())",
+                    (product_id,)
+                )
+            except Exception:
+                cursor.execute("INSERT INTO Stock (IsAvailable, ProductID) VALUES (1, %s)", (product_id,))
+        else:
+            try:
+                cursor.execute("INSERT INTO Stock (IsAvailable, ProductID, UnavailableSince) VALUES (0, %s, NOW())", (product_id,))
+            except Exception:
+                cursor.execute("INSERT INTO Stock (IsAvailable, ProductID) VALUES (0, %s)", (product_id,))
 
 
 async def _import_single_song_rss(entry, loop) -> dict | None:
@@ -813,15 +987,13 @@ def _insert_song_row(cursor, song: dict):
         f.get('key_signature'), f.get('time_signature'), f.get('duration')
     ))
     # Also ensure a Stock row exists (available since we just imported it)
-    cursor.execute("""
-        INSERT IGNORE INTO Stock (IsAvailable, ProductID) VALUES (1, %s)
-    """, (song["product_id"],))
+    _upsert_stock(cursor, int(song["product_id"]), 1)
 
 
 async def _fetch_current_chart_ids() -> tuple[dict[int, dict], dict[int, dict]]:
     """
-    Fetch the current iTunes Top Pop songs (RSS) and the 3 electronic artist
-    searches, returning two dicts mapping negative product_id → entry/track
+    Fetch the current iTunes Top Pop songs (RSS) and a capped set of iTunes
+    electronic artist songs, returning two dicts mapping negative product_id → entry/track
     for RSS and Search results respectively.
     """
     rss_entries: dict[int, dict] = {}
@@ -830,7 +1002,7 @@ async def _fetch_current_chart_ids() -> tuple[dict[int, dict], dict[int, dict]]:
     async with httpx.AsyncClient(timeout=30.0) as client:
         # --- Pop top songs via RSS ---
         try:
-            rss_url = "https://itunes.apple.com/us/rss/topsongs/limit=150/json"
+            rss_url = f"https://itunes.apple.com/us/rss/topsongs/limit={TOPCHARTS_TARGET_COUNT}/json"
             resp = await client.get(rss_url)
             if resp.status_code == 200:
                 entries = resp.json().get('feed', {}).get('entry', [])
@@ -844,14 +1016,24 @@ async def _fetch_current_chart_ids() -> tuple[dict[int, dict], dict[int, dict]]:
         # --- Electronic artists via Search API ---
         artists = ["Aphex Twin", "Boards of Canada", "Squarepusher"]
         for artist in artists:
+            if len(search_tracks) >= ITUNES_SEARCH_TARGET_COUNT:
+                break
             try:
                 params = {"term": artist, "limit": 50, "media": "music", "entity": "song"}
                 resp = await client.get(f"{ITUNES_API_BASE_URL}/search", params=params)
                 if resp.status_code == 200:
                     for track in resp.json().get('results', []):
                         tid = track.get('trackId')
-                        if tid and track.get('previewUrl'):
-                            search_tracks[-tid] = track
+                        pid = -int(tid) if tid else None
+                        if (
+                            pid
+                            and track.get('previewUrl')
+                            and pid not in rss_entries
+                            and pid not in search_tracks
+                        ):
+                            search_tracks[pid] = track
+                            if len(search_tracks) >= ITUNES_SEARCH_TARGET_COUNT:
+                                break
             except Exception as e:
                 console.log(f"   ⚠️ Search fetch for {artist} failed: {e}")
 
@@ -878,6 +1060,13 @@ async def refresh_topcharts():
     try:
         console.log("🔄 Starting live store refresh (iTunes + library)...")
         start_ts = datetime.utcnow()
+
+        # Ensure stock schema has columns needed for retention handling.
+        with get_db_connection() as conn:
+            if conn:
+                with conn.cursor() as cursor:
+                    _ensure_stock_schema(cursor)
+                    conn.commit()
 
         # ── ITUNES SONGS ──────────────────────────────────────────────
         # 1. Fetch live chart IDs from iTunes
@@ -917,16 +1106,8 @@ async def refresh_topcharts():
             with get_db_connection() as conn:
                 if conn:
                     with conn.cursor() as cursor:
-                        fmt = ",".join(["%s"] * len(ids_kept))
-                        kept_list = list(ids_kept)
-                        # Ensure stock rows exist
-                        for pid in kept_list:
-                            cursor.execute(
-                                "INSERT IGNORE INTO Stock (IsAvailable, ProductID) VALUES (1, %s)", (pid,)
-                            )
-                        cursor.execute(
-                            f"UPDATE Stock SET IsAvailable = 1 WHERE ProductID IN ({fmt})", kept_list
-                        )
+                        for pid in ids_kept:
+                            _upsert_stock(cursor, int(pid), 1)
                         conn.commit()
 
         # 6. Import new chart songs (capped per cycle to avoid OOM / timeouts)
@@ -1001,6 +1182,29 @@ async def refresh_topcharts():
                     conn.commit()
         console.log(f"   📚 Library songs: {library_available} available, {library_unavailable} unavailable")
 
+        purged_unavailable_count = 0
+        with get_db_connection() as conn:
+            if conn:
+                with conn.cursor() as cursor:
+                    purged_unavailable_count = _purge_stale_unavailable_imports(
+                        cursor,
+                        STOCK_UNAVAILABLE_RETENTION_DAYS,
+                    )
+                    conn.commit()
+        if purged_unavailable_count > 0:
+            console.log(
+                f"   🗑️ Removed {purged_unavailable_count} imported songs unavailable for >= {STOCK_UNAVAILABLE_RETENTION_DAYS} days"
+            )
+
+        prune_result = {"pruned": 0, "before": 0, "after": 0}
+        if AUDIO_FEATURES_PRUNE_ENABLED:
+            prune_result = _prune_imported_audiofeatures(AUDIO_FEATURES_MAX_IMPORTED_ROWS)
+            if prune_result["pruned"] > 0:
+                console.log(
+                    f"   🧹 Pruned imported AudioFeatures: {prune_result['before']} -> {prune_result['after']} "
+                    f"(removed {prune_result['pruned']})"
+                )
+
         # ── RELOAD ────────────────────────────────────────────────────
         # 8. Reload ML cache
         await ml_service.startup_cache()
@@ -1015,6 +1219,10 @@ async def refresh_topcharts():
             "library_available": library_available,
             "library_unavailable": library_unavailable,
             "errors": error_count,
+            "purged_unavailable_week": purged_unavailable_count,
+            "pruned_imported": prune_result["pruned"],
+            "imported_before_prune": prune_result["before"],
+            "imported_after_prune": prune_result["after"],
             "total_in_cache": len(ml_service.audio_features_cache),
             "elapsed_seconds": round(elapsed, 1),
         }

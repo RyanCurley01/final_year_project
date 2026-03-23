@@ -96,13 +96,18 @@ CREATE TABLE IF NOT EXISTS Purchased_Products (
     FOREIGN KEY(ProductID) REFERENCES Products(ProductID)
 );
 
--- Stock Table
+-- Stock Table (binary availability + weekly lifecycle timestamps)
 CREATE TABLE IF NOT EXISTS Stock (
     StockID INT AUTO_INCREMENT PRIMARY KEY,
-    StockQuantity INT,
+    IsAvailable BOOLEAN NOT NULL DEFAULT 1,
+    UnavailableSince DATETIME NULL,
+    AvailableSince DATETIME NULL,
     ProductID INT,
     FOREIGN KEY(ProductID) REFERENCES Products(ProductID),
-    UNIQUE KEY idx_stock_product (ProductID)
+    UNIQUE KEY idx_stock_product (ProductID),
+    INDEX idx_stock_is_available (IsAvailable),
+    INDEX idx_stock_unavailable_since (UnavailableSince),
+    INDEX idx_stock_available_since (AvailableSince)
 );
 
 -- Wishlist Table

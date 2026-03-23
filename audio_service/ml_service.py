@@ -86,35 +86,40 @@ async def startup_cache():
                     with conn.cursor() as cursor:
                         sql = """
                             SELECT 
-                                ProductID,
-                                Tempo,
-                                Energy,
-                                Valence,
-                                Danceability,
-                                Acousticness,
-                                Genre,
-                                GenreCluster,
-                                Mood,
-                                SpectralCentroid,
-                                SpectralRolloff,
-                                ZeroCrossingRate,
-                                Instrumentalness,
-                                Loudness,
-                                Speechiness,
-                                Key_Signature,
-                                TimeSignature,
-                                Duration,
-                                SpectralBandwidth,
-                                SpectralContrast,
-                                RmsEnergy,
-                                OnsetRate,
-                                HarmonicRatio,
-                                PercussiveRatio,
-                                MfccMean,
-                                ChromaMean
-                            FROM AudioFeatures
-                            WHERE Tempo IS NOT NULL
-                            AND Energy IS NOT NULL
+                                af.ProductID,
+                                af.Tempo,
+                                af.Energy,
+                                af.Valence,
+                                af.Danceability,
+                                af.Acousticness,
+                                af.Genre,
+                                af.GenreCluster,
+                                af.Mood,
+                                af.SpectralCentroid,
+                                af.SpectralRolloff,
+                                af.ZeroCrossingRate,
+                                af.Instrumentalness,
+                                af.Loudness,
+                                af.Speechiness,
+                                af.Key_Signature,
+                                af.TimeSignature,
+                                af.Duration,
+                                af.SpectralBandwidth,
+                                af.SpectralContrast,
+                                af.RmsEnergy,
+                                af.OnsetRate,
+                                af.HarmonicRatio,
+                                af.PercussiveRatio,
+                                af.MfccMean,
+                                af.ChromaMean
+                            FROM AudioFeatures af
+                            LEFT JOIN Stock s ON s.ProductID = af.ProductID
+                            WHERE af.Tempo IS NOT NULL
+                              AND af.Energy IS NOT NULL
+                              AND (
+                                    af.ProductID > 0
+                                    OR COALESCE(s.IsAvailable, 1) = 1
+                              )
                         """
                         cursor.execute(sql)
                         results = cursor.fetchall()
@@ -311,7 +316,7 @@ async def startup_cache():
                                 
                                 # Support Vector Machine (RBF kernel for non-linear boundaries)
                                 grid_svm = GridSearchCV(
-                                    SVC(kernel='rbf'),
+                                    SVC(kernel='rbf', probability=True),
                                     {'C': [0.01, 0.1, 1, 10, 100], 'gamma': ['scale', 'auto', 0.1, 1]},
                                     cv=5, scoring='accuracy'
                                 )
@@ -396,7 +401,7 @@ async def startup_cache():
                                         ('svm', best_model_svm),
                                         ('lr', best_model_lr),
                                     ],
-                                    voting='hard'
+                                    voting='soft'
                                 )
                                 ens_val_model.fit(X_train, y_train)
                                 ens_train_sc = round(float(ens_val_model.score(X_train, y_train)), 4)
@@ -410,7 +415,7 @@ async def startup_cache():
                                         ('svm', clone(best_model_svm)),
                                         ('lr', clone(best_model_lr)),
                                     ],
-                                    voting='hard'
+                                    voting='soft'
                                 )
                                 ensemble_classifier.fit(X_train_final, y_train_final)
                                 individual_full_models['Ensemble'] = ensemble_classifier
@@ -428,20 +433,22 @@ async def startup_cache():
                                 }
                                 console.log(f"   Ensemble: val={ens_val_sc}, test={per_model_metrics['Ensemble']['test_acc']}")
                                 
-                                # 8. Select best model by validation score
-                                # On ties, prefer Ensemble > individual models (it combines all models' knowledge)
-                                best_val = -1
-                                best_model_name = 'Ensemble'
-                                for mname, m in per_model_metrics.items():
-                                    val = m['val_score']
-                                    if val > best_val or (val == best_val and mname == 'Ensemble'):
-                                        best_val = val
-                                        best_model_name = mname
-                                
+                                # 8. Select production classifier by highest validation score.
+                                # Tie-breakers use test accuracy then precision for deterministic selection.
+                                best_model_name, best_stats = max(
+                                    per_model_metrics.items(),
+                                    key=lambda kv: (
+                                        float(kv[1].get('val_score', 0.0)),
+                                        float(kv[1].get('test_acc', 0.0)),
+                                        float(kv[1].get('precision', 0.0)),
+                                    ),
+                                )
+                                best_val = float(best_stats.get('val_score', 0.0))
+
                                 best_classifier = individual_full_models[best_model_name]
                                 knn_classifier = individual_full_models.get('KNN')
                                 model_performance_metrics['best_model'] = best_model_name
-                                console.log(f"   ★ Best model: {best_model_name} (val={best_val:.4f})")
+                                console.log(f"   ★ Selected model: {best_model_name} (val={best_val:.4f})")
                                 
                                 # 9. Decision boundary grids for each model
                                 # Map 2D grid back to 51D via PCA inverse_transform, then predict

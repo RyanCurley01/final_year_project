@@ -12,8 +12,8 @@
 -- Clear any existing stock data
 DELETE FROM Stock;
 
--- Insert availability for every product based on real status data
-INSERT INTO Stock (IsAvailable, ProductID)
+-- Insert availability + lifecycle timestamps for every product based on real status data
+INSERT INTO Stock (IsAvailable, UnavailableSince, AvailableSince, ProductID)
 SELECT
     CASE
         -- iTunes songs: available if preview_url exists and audio features were extracted
@@ -35,6 +35,24 @@ SELECT
                 ELSE 0
             END
     END AS IsAvailable,
+    CASE
+        -- Unavailable now
+        WHEN (
+            (p.ProductID < 0 AND (p.preview_url IS NULL OR TRIM(p.preview_url) = '' OR af.FeatureID IS NULL))
+            OR
+            (p.ProductID >= 0 AND (p.file_url IS NULL OR TRIM(p.file_url) = '' OR af.FeatureID IS NULL))
+        ) THEN NOW()
+        ELSE NULL
+    END AS UnavailableSince,
+    CASE
+        -- Available now
+        WHEN (
+            (p.ProductID < 0 AND p.preview_url IS NOT NULL AND TRIM(p.preview_url) != '' AND af.FeatureID IS NOT NULL)
+            OR
+            (p.ProductID >= 0 AND p.file_url IS NOT NULL AND TRIM(p.file_url) != '' AND af.FeatureID IS NOT NULL)
+        ) THEN NOW()
+        ELSE NULL
+    END AS AvailableSince,
     p.ProductID
 FROM Products p
 LEFT JOIN AudioFeatures af ON af.ProductID = p.ProductID;

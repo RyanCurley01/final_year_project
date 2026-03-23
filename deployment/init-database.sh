@@ -99,12 +99,18 @@ USE Game_Store_System;
         FOREIGN KEY(ProductID) REFERENCES Products(ProductID)
     );
 
-    -- Stock Table (binary availability: 1 = available, 0 = delisted/unavailable)
+    -- Stock Table (binary availability + weekly lifecycle timestamps)
     CREATE TABLE IF NOT EXISTS Stock (
         StockID INT AUTO_INCREMENT PRIMARY KEY,
         IsAvailable BOOLEAN NOT NULL DEFAULT 1,
+        UnavailableSince DATETIME NULL,
+        AvailableSince DATETIME NULL,
         ProductID INT,
-        FOREIGN KEY(ProductID) REFERENCES Products(ProductID)
+        FOREIGN KEY(ProductID) REFERENCES Products(ProductID),
+        UNIQUE KEY idx_stock_product (ProductID),
+        INDEX idx_stock_is_available (IsAvailable),
+        INDEX idx_stock_unavailable_since (UnavailableSince),
+        INDEX idx_stock_available_since (AvailableSince)
     );
 
     -- Wishlist Table

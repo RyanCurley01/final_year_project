@@ -7,6 +7,21 @@ import { FaWarehouse } from "react-icons/fa";
 import OnsetImageCard from './OnsetImageCard';
 import SidebarSearchFilter from './SidebarSearchFilter';
 
+const startOfIsoWeek = (date) => {
+  const d = new Date(date);
+  const day = (d.getDay() + 6) % 7; // Monday=0..Sunday=6
+  d.setDate(d.getDate() - day);
+  d.setHours(0, 0, 0, 0);
+  return d;
+};
+
+const inRange = (value, start, end) => {
+  if (!value) return false;
+  const ts = new Date(value);
+  if (Number.isNaN(ts.getTime())) return false;
+  return ts >= start && ts < end;
+};
+
 const StockSidebar = () => {
   const { currentUser } = useAuth();
   const [isOpen, setIsOpen] = useState(false);
@@ -118,6 +133,81 @@ const StockSidebar = () => {
     );
   };
 
+  const renderSection = (title, rows, productMap, options = {}) => (
+    <div className="mb-6">
+      <h3 className="text-md font-semibold text-white mb-2">{title} ({rows.length})</h3>
+      {rows.length === 0 ? (
+        <p className="text-gray-500 text-sm">No songs in this section.</p>
+      ) : (
+        <table className="w-full text-left text-sm text-gray-300 whitespace-nowrap">
+          <thead className="text-xs uppercase bg-[#333] text-gray-300">
+            <tr>
+              <th className="px-4 py-2">#</th>
+              <th className="px-4 py-2">Product Name</th>
+              <th className="px-4 py-2">Cover</th>
+              <th className="px-4 py-2">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((item, i) => {
+              const product = productMap[item.productId];
+              const defaultAvailable = item.isAvailable !== undefined ? item.isAvailable : item.available;
+              const sectionAvailable = options.statusResolver
+                ? options.statusResolver(item, defaultAvailable)
+                : defaultAvailable;
+              return (
+                <tr
+                  key={`${title}-${item.productId}-${i}`}
+                  className="border-b border-gray-700 hover:bg-gray-800"
+                >
+                  <td className="px-4 py-2">{i + 1}</td>
+                  <td className="px-4 py-2">{product?.albumTitle || "—"}</td>
+                  <td className="px-4 py-2">
+                    {product?.albumCoverImageUrl ? (
+                      (() => {
+                        const coverUrl = product.albumCoverImageUrl;
+                        const isVideo = coverUrl && coverUrl.toLowerCase().includes('.mp4');
+                        const isTeddyEmotion = product.albumTitle?.toLowerCase().includes('teddy emotion');
+                        const useOnsetImages = isVideo && !isTeddyEmotion;
+
+                        if (useOnsetImages) {
+                          return (
+                            <div className="w-10 h-10">
+                              <OnsetImageCard
+                                songTitle={product.albumTitle}
+                                songId={item.productId}
+                                className="w-full h-full rounded object-cover"
+                                isPlaying={false}
+                                isActive={false}
+                              />
+                            </div>
+                          );
+                        }
+                        return (
+                          <img
+                            src={isVideo ? '/cloud-cover.webp' : coverUrl}
+                            alt={product.albumTitle}
+                            className="w-10 h-10 rounded object-cover"
+                            onError={(e) => { e.target.onerror = null; e.target.src = '/cloud-cover.webp'; }}
+                          />
+                        );
+                      })()
+                    ) : (
+                      "—"
+                    )}
+                  </td>
+                  <td className="px-4 py-2">
+                    {getStockBadge(sectionAvailable)}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+
   return (
     <div className="my-8">
       <button
@@ -131,7 +221,7 @@ const StockSidebar = () => {
       </button>
 
       {isOpen && createPortal(
-        <div className="fixed inset-0 z-[100] bg-black bg-opacity-70 flex justify-center items-center p-4">
+        <div className="fixed inset-0 z-100 bg-black bg-opacity-70 flex justify-center items-center p-4">
           <div className="bg-[#2a2a2a] p-6 rounded-lg max-w-6xl w-full max-h-[80vh] overflow-hidden flex flex-col relative">
             <button
               onClick={() => setIsOpen(false)}
@@ -143,8 +233,8 @@ const StockSidebar = () => {
               Stock Availability
             </h2>
             <p className="text-gray-400 text-sm mb-4">
-              Library songs are available for purchase or unavailable (removed by store) or
-              artist songs are available or unavailable (delisted, license expired, removed by artist).
+              Weekly stock summary with no capped range: unavailable songs from last week,
+              unavailable songs from this week, and newly added songs this week.
             </p>
 
             <div className="overflow-auto bg-[#1a1a1a] p-2 rounded w-full">
@@ -164,71 +254,43 @@ const StockSidebar = () => {
                   placeholder="Filter by song name…"
                 >
                   {(filteredData) => (
-                <table className="w-full text-left text-sm text-gray-300 whitespace-nowrap">
-                  <thead className="text-xs uppercase bg-[#333] text-gray-300">
-                    <tr>
-                      <th className="px-4 py-2">#</th>
-                      <th className="px-4 py-2">Product Name</th>
-                      <th className="px-4 py-2">Cover</th>
-                      <th className="px-4 py-2">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredData.map((item, i) => {
-                      const product = productMap[item.productId];
-                      return (
-                        <tr
-                          key={i}
-                          className="border-b border-gray-700 hover:bg-gray-800"
-                        >
-                          <td className="px-4 py-2">
-                            {i + 1}
-                          </td>
-                          <td className="px-4 py-2">
-                            {product?.albumTitle || "—"}
-                          </td>
-                          <td className="px-4 py-2">
-                            {product?.albumCoverImageUrl ? (
-                              (() => {
-                                const coverUrl = product.albumCoverImageUrl;
-                                const isVideo = coverUrl && coverUrl.toLowerCase().includes('.mp4');
-                                const isTeddyEmotion = product.albumTitle?.toLowerCase().includes('teddy emotion');
-                                const useOnsetImages = isVideo && !isTeddyEmotion;
+                    (() => {
+                      const now = new Date();
+                      const thisWeekStart = startOfIsoWeek(now);
+                      const nextWeekStart = new Date(thisWeekStart);
+                      nextWeekStart.setDate(nextWeekStart.getDate() + 7);
+                      const lastWeekStart = new Date(thisWeekStart);
+                      lastWeekStart.setDate(lastWeekStart.getDate() - 7);
 
-                                if (useOnsetImages) {
-                                  return (
-                                    <div className="w-10 h-10">
-                                      <OnsetImageCard
-                                        songTitle={product.albumTitle}
-                                        songId={item.productId}
-                                        className="w-full h-full rounded object-cover"
-                                        isPlaying={false}
-                                        isActive={false}
-                                      />
-                                    </div>
-                                  );
-                                }
-                                return (
-                                  <img
-                                    src={isVideo ? '/cloud-cover.webp' : coverUrl}
-                                    alt={product.albumTitle}
-                                    className="w-10 h-10 rounded object-cover"
-                                    onError={(e) => { e.target.onerror = null; e.target.src = '/cloud-cover.webp'; }}
-                                  />
-                                );
-                              })()
-                            ) : (
-                              "—"
-                            )}
-                          </td>
-                          <td className="px-4 py-2">
-                            {getStockBadge(item.isAvailable !== undefined ? item.isAvailable : item.available)}
-                          </td>
-                        </tr>
+                      const unavailableLastWeek = filteredData.filter((item) => {
+                        const available = item.isAvailable !== undefined ? item.isAvailable : item.available;
+                        return !available && inRange(item.unavailableSince, lastWeekStart, thisWeekStart);
+                      });
+
+                      const unavailableThisWeek = filteredData.filter((item) => {
+                        const available = item.isAvailable !== undefined ? item.isAvailable : item.available;
+                        return !available && inRange(item.unavailableSince, thisWeekStart, nextWeekStart);
+                      });
+
+                      const newThisWeek = filteredData.filter((item) => {
+                        const available = item.isAvailable !== undefined ? item.isAvailable : item.available;
+                        return !!available && inRange(item.availableSince, thisWeekStart, nextWeekStart);
+                      });
+
+                      // Match DB stock exactly: use full deduped Stock dataset.
+                      const songsThisWeek = filteredData;
+
+                      return (
+                        <>
+                          {renderSection("Songs This Week", songsThisWeek, productMap, {
+                            statusResolver: () => true,
+                          })}
+                          {renderSection("New Songs Added (This Week)", newThisWeek, productMap)}
+                          {renderSection("Unavailable Songs (Last Week)", unavailableLastWeek, productMap)}
+                          {renderSection("Unavailable Songs (This Week)", unavailableThisWeek, productMap)}
+                        </>
                       );
-                    })}
-                  </tbody>
-                </table>
+                    })()
                   )}
                 </SidebarSearchFilter>
               )}

@@ -56,6 +56,16 @@ def _env_bool(name: str, default: bool = False) -> bool:
 
 EXTERNAL_IMAGE_GENERATION_ENABLED = _env_bool("EXTERNAL_IMAGE_GENERATION_ENABLED", default=False)
 
+# Imported iTunes AudioFeatures retention controls.
+# Keep this bounded so historical chart churn does not degrade ML clustering and similarity quality.
+# Target composition: 150 top-chart songs + 100 iTunes artist songs = 250 imported rows.
+AUDIO_FEATURES_MAX_IMPORTED_ROWS = 250
+AUDIO_FEATURES_PRUNE_ENABLED = _env_bool("AUDIO_FEATURES_PRUNE_ENABLED", default=True)
+
+# Keep unavailable iTunes songs in Stock for a short retention window,
+# then delete them from Stock/Products/AudioFeatures and related rows.
+STOCK_UNAVAILABLE_RETENTION_DAYS = int(os.getenv("STOCK_UNAVAILABLE_RETENTION_DAYS", "14"))
+
 # iTunes API configuration from environment
 # EXECUTION ORDER: Run on module import.
 ITUNES_API_BASE_URL = os.getenv('ITUNES_API_BASE_URL', 'https://itunes.apple.com')
