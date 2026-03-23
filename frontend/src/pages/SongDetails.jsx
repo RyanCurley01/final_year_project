@@ -22,6 +22,20 @@ import { fixTextDeep } from '../utils/fixText';
 // Fallback image for missing album art
 const fallbackImage = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="250" height="250" viewBox="0 0 250 250"><rect width="250" height="250" fill="#374151"/><circle cx="125" cy="125" r="80" fill="#4B5563"/><circle cx="125" cy="125" r="30" fill="#374151"/><circle cx="125" cy="125" r="10" fill="#6B7280"/></svg>');
 
+const isBadImageUrl = (url) => /\.(mp4|m4v|mov|webm|wmv|wav|mp3|flac|ogg)(\?|$)/i.test(String(url || ''));
+
+const getSafeCoverUrl = (song, size = '600x600') => {
+  const artwork = song?.artworkUrl100 && !isBadImageUrl(song.artworkUrl100)
+    ? String(song.artworkUrl100).replace('100x100', size)
+    : null;
+  const albumCover = song?.albumCoverImageUrl && !isBadImageUrl(song.albumCoverImageUrl)
+    ? song.albumCoverImageUrl
+    : null;
+  const imageUrl = song?.imageUrl && !isBadImageUrl(song.imageUrl) ? song.imageUrl : null;
+  const image = song?.image && !isBadImageUrl(song.image) ? song.image : null;
+  return artwork || albumCover || imageUrl || image || fallbackImage;
+};
+
 // Artist badge colors
 const getArtistBadgeColor = (artist) => {
   if (artist?.toLowerCase().includes('aphex')) return 'bg-purple-500';
@@ -56,23 +70,31 @@ const FeatureBadge = ({ label, value }) => {
   );
 };
 
+const isLibraryContextSong = (song) => {
+  if (!song) return false;
+  if (song.source === 'database') return true;
+  const numericId = Number(song.trackId || song.id);
+  // Library DB IDs are small positive sequences. iTunes IDs are > 1,000,000
+  return Number.isFinite(numericId) && numericId > 0 && numericId < 1000000;
+};
+
 // Similar Song Card Component
 const SimilarSongCard = ({ song, isPlaying, activeSong, onPlay, onPause, rank, playbackRate, allSimilarSongs }) => {
   const dispatch = useDispatch();
   const navigate = useNavigate();
   const isThisSongActive = (activeSong?.trackId && String(activeSong.trackId) === String(song.trackId)) || 
                            (activeSong?.id && String(activeSong.id) === String(song.trackId));
-  const albumArt = song.artworkUrl100?.replace('100x100', '600x600') || song.albumCoverImageUrl || fallbackImage;
+  const albumArt = getSafeCoverUrl(song, '600x600');
+  const coverMedia = song.albumCoverImageUrl || song.artworkUrl100 || '';
   const [isHovered, setIsHovered] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   
   // Check if the cover media is a video
-  const isVideo = albumArt && albumArt.toLowerCase().includes('.mp4');
+  const isVideo = coverMedia && coverMedia.toLowerCase().includes('.mp4');
   const simSongTitle = song.trackName || song.albumTitle || '';
   const simIsTeddyEmotion = simSongTitle.toLowerCase().includes('teddy emotion');
   const simUseOnsetImages = isVideo && !simIsTeddyEmotion;
-  // Library songs have a fileUrl from our DB (S3) - NOT just previewUrl/artworkUrl100 which iTunes songs also have
-  const isLibrarySong = !!(song.fileUrl && song.fileUrl.includes('amazonaws.com'));
+  const isLibrarySong = isLibraryContextSong(song);
 
   // Discount logic matching CustomerScreen SongCard (even IDs get 50% off)
   const songPrice = song.price || song.albumPrice || 0;
@@ -139,7 +161,7 @@ const SimilarSongCard = ({ song, isPlaying, activeSong, onPlay, onPause, rank, p
           />
         ) : isVideo ? (
           <AudioReactiveVideo
-            src={albumArt}
+            src={coverMedia}
             alt={song.trackName}
             className="w-full h-full object-cover"
             isPlaying={isPlaying && isThisSongActive}
@@ -187,7 +209,7 @@ const SimilarSongCard = ({ song, isPlaying, activeSong, onPlay, onPause, rank, p
         {isVideo && (
           <button
             onClick={(e) => { e.stopPropagation(); setIsFullscreen(true); }}
-            className="absolute top-2 right-10 z-20 p-1.5 rounded-full bg-black/50 backdrop-blur-sm hover:bg-black/70 transition-all hover:scale-110"
+            className="absolute top-2 right-13 z-20 p-1.5 rounded-full bg-black/50 backdrop-blur-sm hover:bg-black/70 transition-all hover:scale-110"
             title="Maximise video"
           >
             <FiMaximize2 className="w-5 h-5 text-white/80 hover:text-white drop-shadow-lg transition-colors" />
@@ -198,7 +220,7 @@ const SimilarSongCard = ({ song, isPlaying, activeSong, onPlay, onPause, rank, p
         {isLibrarySong && (
           <button
             onClick={handleToggleWishlist}
-            className="absolute top-2 right-2 z-20 p-1.5 rounded-full bg-black/50 backdrop-blur-sm hover:bg-black/70 transition-all hover:scale-110"
+            className={`absolute ${(isVideo || useOnsetImages) ? 'top-10' : 'top-2'} right-2 z-20 p-1.5 rounded-full bg-black/50 backdrop-blur-sm hover:bg-black/70 transition-all hover:scale-110`}
             title={isWishlisted ? 'Remove from Wishlist' : 'Add to Wishlist'}
           >
             {isWishlisted ? (
@@ -209,8 +231,8 @@ const SimilarSongCard = ({ song, isPlaying, activeSong, onPlay, onPause, rank, p
           </button>
         )}
 
-        {/* Similarity score - top-right for artist songs, below buttons for library songs */}
-        <div className={`absolute ${isLibrarySong ? 'top-10' : 'top-2'} right-2 px-2 py-1 rounded-full text-[12px] font-bold text-white shadow-lg ${
+        {/* Similarity score */}
+        <div className={`absolute top-2 right-2 px-2 py-1 rounded-full text-[12px] font-bold text-white shadow-lg ${
           song.similarity_score >= 0.8 ? 'bg-green-500' : 
           song.similarity_score >= 0.6 ? 'bg-yellow-500' : 
           'bg-orange-500'
@@ -568,23 +590,22 @@ const SongDetails = () => {
     const apiBaseUrl = envConfig.getApiBaseUrl();
     
     try {
-      // Use Unified Endpoint instead of legacy search-similarity
-      
+      const liveFeatures = overrideFeatures || audioFeaturesRef.current;
+      const featuresToSend = liveFeatures ? {
+        tempo: Number(liveFeatures.tempo) || null,
+        energy: Number(liveFeatures.energy) || null,
+        valence: Number(liveFeatures.valence) || null,
+        danceability: Number(liveFeatures.danceability) || null,
+        acousticness: Number(liveFeatures.acousticness) || null,
+        playback_rate: Number(playbackRate || 1)
+      } : null;
+
       const payload = {
-          source: 'search_component', // Use search mode to enable candidates comparison
+          source: isLibraryContextSong(targetSong) ? 'discover_page' : 'similar_songs',
           current_product_id: String(targetSong.trackId || targetSong.id),
           preview_url: String(targetSong.previewUrl || targetSong.fileUrl || ''),
-          limit: 50,
-          audio_features: overrideFeatures, // Pass live features if available
-          // Map comparison songs to 'candidates'
-          candidates: comparisonSongs.map(song => ({
-            trackId: String(song.trackId || song.id || 0),
-            trackName: String(song.trackName || song.albumTitle || 'Unknown Track'),
-            artistName: String(song.artistName || 'Unknown Artist'),
-            collectionName: song.collectionName || song.albumTitle ? String(song.collectionName || song.albumTitle) : null,
-            artworkUrl100: song.artworkUrl100 || song.albumCoverImageUrl ? String(song.artworkUrl100 || song.albumCoverImageUrl) : null,
-            previewUrl: song.previewUrl || song.fileUrl ? String(song.previewUrl || song.fileUrl) : null
-          }))
+          limit: 20,
+          audio_features: featuresToSend
       };
 
       // Only log if not an update loop to avoid spam
@@ -607,38 +628,24 @@ const SongDetails = () => {
       const data = fixTextDeep(await response.json());
       
       if (data.status === 'success') {
-        // Backend returns "recommendations" which are the scored candidates
-        // Filter out songs with 0 or negative similarity scores and map product_id to trackId
-        // Build a lookup from original candidates by trackId to preserve price and other fields
-        const candidateLookup = {};
-        comparisonSongs.forEach(c => {
-            const cid = String(c.trackId || c.id || 0);
-            candidateLookup[cid] = c;
-        });
         const validRecommendations = (data.recommendations || [])
             .filter(song => song.similarity_score > 0)
             .map(song => {
-                const original = candidateLookup[String(song.product_id)] || {};
                 return {
-                    ...original,
                     ...song,
                     trackId: song.product_id,
                     id: song.product_id,
-                    // Preserve price from original candidate data
-                    price: original.price || original.albumPrice || song.price || 0,
-                    albumPrice: original.albumPrice || original.price || song.albumPrice || 0,
                 };
             });
         setSimilarSongs(validRecommendations);
         
-        // It also returns "target_features" (or source_features)
-        if (data.source_features) {
-            setTargetFeatures(data.source_features);
+        if (data.target_features) {
+          setTargetFeatures(data.target_features);
             
             // Construct ML info for display
             setMlInfo({
                 algorithm: "Hybrid Audio Analysis",
-                features: data.source_features
+            features: data.target_features
             });
         }
       } else {
@@ -762,7 +769,8 @@ const SongDetails = () => {
               onMouseLeave={() => setIsHeaderHovered(false)}
             >
               {(() => {
-                const coverMedia = targetSong?.albumCoverImageUrl || targetSong?.artworkUrl100?.replace('100x100', '600x600') || fallbackImage;
+                const coverMedia = targetSong?.albumCoverImageUrl || targetSong?.artworkUrl100 || '';
+                const albumArtSafe = getSafeCoverUrl(targetSong, '600x600');
                 const isVideo = coverMedia && coverMedia.toLowerCase().includes('.mp4');
                 const detailTitle = targetSong?.trackName || targetSong?.albumTitle || '';
                 const detailIsTeddy = detailTitle.toLowerCase().includes('teddy emotion');
@@ -787,7 +795,7 @@ const SongDetails = () => {
                   />
                 ) : (
                   <img 
-                    src={coverMedia}
+                    src={albumArtSafe}
                     alt={targetSong?.trackName}
                     className="w-full h-full rounded-lg object-cover shadow-xl"
                     onError={(e) => { e.target.src = fallbackImage; }}

@@ -20,16 +20,14 @@ from models import (
     SearchSimilarSong,
     SearchSong,
     UnifiedRecommendationRequest,
-    LibraryMatchRequest,
-    LibraryMatchResult,
     MidiTargetRequest,
     MelodyFinderRequest,
 )
 from feature_extraction import (
     extract_audio_features_from_preview,
     extract_features_for_product_async,
-    extract_audio_features_from_preview_async
 )
+from s3_service import generate_presigned_url
 import ml_service
 from ml_service import KEY_NAME_TO_INDEX, TIME_SIG_TO_BEATS, _parse_json_list
 
@@ -843,7 +841,7 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
                              with conn.cursor() as cursor:
                                  # Fetch standard columns (ArtistName not natively in DB Products schema here)
                                  sql = f"""
-                                    SELECT ProductID, AlbumTitle, albumCoverImageUrl, preview_url
+                                    SELECT ProductID, AlbumTitle, AlbumPrice, albumCoverImageUrl, preview_url, file_url
                                     FROM Products 
                                     WHERE ProductID IN ({id_string})
                                  """
@@ -862,10 +860,16 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
                                          data = meta_map[pid_int]
                                          # Prefer AlbumTitle, fallback to ID if completely missing
                                          r.trackName = data.get('AlbumTitle') or f"Track {r.product_id}"
-                                         r.artworkUrl100 = data.get('albumCoverImageUrl')
-                                         r.previewUrl = data.get('preview_url')
-                                         if not r.artistName or r.artistName == "Artist":
-                                             r.artistName = "Library Artist"
+                                         r.albumTitle = data.get('AlbumTitle')
+                                         r.artistName = "Library Artist" # Fallback since DB has no isolated artist name
+                                         r.artworkUrl100 = generate_presigned_url(data.get('albumCoverImageUrl'))
+                                         r.albumCoverImageUrl = r.artworkUrl100
+                                         # Library songs should play from S3 file_url; fallback to preview_url if present.
+                                         raw_preview = data.get('file_url') or data.get('preview_url')
+                                         r.previewUrl = generate_presigned_url(raw_preview) if raw_preview else None
+                                         r.fileUrl = r.previewUrl
+                                         r.price = float(data.get('AlbumPrice') or 0.0)
+                                         r.albumPrice = r.price
 
                  # B. Hydrate iTunes Songs via Lookup API
                  # iTunes data isn't in our DB, so we reach out to Apple's HTTP API.
@@ -897,8 +901,9 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
                          if pid_int < 0 and pid_int in itunes_map:
                              data = itunes_map[pid_int]
                              r.trackName = data.get('trackName')
-                             r.artistName = data.get('artistName') # Correct artist name from iTunes
+                             r.artistName = data.get('artistName')
                              r.albumTitle = data.get('collectionName')
+                             r.collectionName = data.get('collectionName')
                              r.artworkUrl100 = data.get('artworkUrl100')
                              r.previewUrl = data.get('previewUrl')
 
@@ -935,201 +940,6 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
 def clean_id_str(s: str) -> str:
     """Helper to handle IDs like '-123' vs '123' matching strings"""
     return s.strip()
-
-
-# ============================================
-# LIBRARY MATCH ENDPOINT (Reverse Search)
-# ============================================
-
-@router.post("/api/audio/match-library", response_model=Dict)
-async def match_library_songs(request: LibraryMatchRequest):
-    """
-    Match external comparison songs against the ENTIRE internal library (cached products).
-    Used by SimilarSongs page to find which library track each artist song is most similar to.
-    
-    This is effectively a 'Reverse Search':
-    - Input: List of Artist Songs
-    - Target: All 47 cached library songs
-    - Output: For each input song, the best matching library song and score.
-    """
-    try:
-        if not ml_service.cache_loaded or not ml_service.audio_features_cache:
-            # Try to trigger load if empty
-            await ml_service.startup_cache()
-            
-        # 1. Get Cached Library Songs (positive IDs)
-        # If target_ids provided in request, filter by them. Otherwise take all.
-        
-        target_set = set(request.target_ids) if request.target_ids else None
-        
-        library_songs = []
-        for pid, features in ml_service.audio_features_cache.items():
-            try: 
-                pid_int = int(pid)
-                if pid_int > 0: # Positive IDs are library songs
-                    if target_set and pid_int not in target_set:
-                        continue
-                        
-                    # Add ID to features for easier access
-                    f = features.copy()
-                    f['id'] = pid
-                    library_songs.append(f)
-            except: pass
-            
-        if not library_songs:
-            # If we requested specific targets but none were found in cache, that's an issue
-            if target_set:
-                console.log(f"Warning: None of the {len(target_set)} target IDs were found in cache.")
-            return {"status": "error", "message": "No matching library songs found in cache"}
-
-        # Limit library songs to standard set if needed (e.g. 47) 
-        # but we scan all available positive IDs
-        
-        results = []
-        
-        # 2. For each input candidate, find best library match
-        for candidate in request.candidates[:request.limit]:
-            
-            # Extract features for candidate (or get from cache if exists)
-            # Check if this external song happens to be in our cache (e.g. by name match or ID)
-            # For now, we assume we need to extract from preview URL or we can't score it
-            # BUT, to save time, similar songs usually sends features or we rely on 'unified' style
-            # Actually, most efficiency is gained if we already have features. 
-            
-            # Since generating features for 50 input songs is slow, 
-            # we check if we have cached features for these 'external' songs (negative IDs)
-            
-            candidate_features = None
-            try:
-                # Try lookup by ID (negative ID for artist songs)
-                cid = str(candidate.trackId)
-                if cid in ml_service.audio_features_cache:
-                    candidate_features = ml_service.audio_features_cache[cid]
-                else:
-                    # Try negative version
-                    try:
-                        neg_id = str(-abs(int(cid)))
-                        if neg_id in ml_service.audio_features_cache:
-                             candidate_features = ml_service.audio_features_cache[neg_id]
-                    except: pass
-            except: pass
-            
-            if not candidate_features and candidate.previewUrl:
-                 # Real-time extraction for uncached songs
-                 try:
-                     # Use the async wrapper
-                     cid_int = 0
-                     try: cid_int = int(candidate.trackId)
-                     except: pass
-                     
-                     # Wait for extraction (this might be slow, but necessary for first load)
-                     extracted = await extract_audio_features_from_preview_async(candidate.previewUrl, cid_int)
-                     
-                     if extracted:
-                         candidate_features = extracted
-                         # Optional: Cache it logic here if desired
-                 except Exception as ex:
-                     console.log(f"Extraction failed for {candidate.trackName}: {ex}")
-                 
-            if not candidate_features:
-                continue
-
-            # Create vector for candidate
-            c_vec = [
-                float(candidate_features.get('tempo', 120) or 120) / 200.0,
-                float(candidate_features.get('energy', 0.5) or 0.5),
-                float(candidate_features.get('valence', 0.5) or 0.5),
-                float(candidate_features.get('danceability', 0.5) or 0.5),
-                float(candidate_features.get('acousticness', 0.5) or 0.5),
-                float(candidate_features.get('spectral_centroid', 1500.0) / 5000.0),
-                float(candidate_features.get('spectral_rolloff', 3000.0) / 10000.0),
-                float(candidate_features.get('zero_crossing_rate', 0.05) * 10.0),
-                float(candidate_features.get('instrumentalness', 0.5)),
-                float((candidate_features.get('loudness', -60.0) + 60.0) / 60.0),
-                float(candidate_features.get('speechiness', 0.1))
-            ]
-            
-            best_match = None
-            best_score = -1.0
-            
-            # Compare against all library songs
-            for lib_song in library_songs:
-                l_vec = [
-                    float(lib_song.get('tempo', 120) or 120) / 200.0,
-                    float(lib_song.get('energy', 0.5) or 0.5),
-                    float(lib_song.get('valence', 0.5) or 0.5),
-                    float(lib_song.get('danceability', 0.5) or 0.5),
-                    float(lib_song.get('acousticness', 0.5) or 0.5),
-                    float(lib_song.get('spectral_centroid', 1500.0) / 5000.0),
-                    float(lib_song.get('spectral_rolloff', 3000.0) / 10000.0),
-                    float(lib_song.get('zero_crossing_rate', 0.05) * 10.0),
-                    float(lib_song.get('instrumentalness', 0.5)),
-                    float((lib_song.get('loudness', -60.0) + 60.0) / 60.0),
-                    float(lib_song.get('speechiness', 0.1))
-                ]
-                
-                # Manual Dot Product for speed (Cosine Sim)
-                # Vectors are not normalised here, so using sklearn is better usually
-                # But for 1 vs 47, loop is fine. 
-                # Let's use sklearn for batch if possible, but 1-to-many loop is okay here
-                
-                score = cosine_similarity([c_vec], [l_vec])[0][0]
-                
-                if score > best_score:
-                    best_score = score
-                    best_match = lib_song
-
-            if best_match:
-                 # Match Reason
-                tempo_match=1.0 - min(abs(candidate_features.get('tempo',120) - best_match.get('tempo',120)), 100)/100
-                energy_match=1.0 - abs(candidate_features.get('energy',0.5) - best_match.get('energy',0.5))
-                mood_match=1.0 - abs(candidate_features.get('valence',0.5) - best_match.get('valence',0.5))
-                dance_match=1.0 - abs(candidate_features.get('danceability',0.5) - best_match.get('danceability',0.5))
-            
-                reason_list = [
-                    ('tempo', tempo_match, f"Matching rhythm ({best_match.get('tempo', 0):.0f} BPM)"),
-                    ('energy', energy_match, f"Similar intensity ({best_match.get('energy', 0):.0%})"),
-                    ('mood', mood_match, f"Similar mood"),
-                    ('dance', dance_match, f"Comparable groove")
-                ]
-                text_reason = max(reason_list, key=lambda x: x[1])[2]
-
-                res = LibraryMatchResult(
-                    input_track_id=candidate.trackId,
-                    matched_product_id=best_match['id'],
-                    similarity_score=float(best_score),
-                    match_reason=text_reason,
-                    tempo_match=round(tempo_match, 3),
-                    energy_match=round(energy_match, 3),
-                    mood_match=round(mood_match, 3),
-                    dance_match=round(dance_match, 3)
-                )
-                results.append(res)
-                
-        # Hydrate library names
-        if results:
-             ids = {r.matched_product_id for r in results}
-             if ids:
-                 id_string = ",".join(str(i) for i in ids)
-                 with get_db_connection() as conn:
-                     if conn:
-                         with conn.cursor() as cursor:
-                             sql = f"SELECT ProductID, AlbumTitle FROM Products WHERE ProductID IN ({id_string})"
-                             cursor.execute(sql)
-                             rows = cursor.fetchall()
-                             name_map = {str(row['ProductID']): row['AlbumTitle'] for row in rows}
-                             
-                             for r in results:
-                                 r.matched_product_name = name_map.get(str(r.matched_product_id))
-
-        return {
-            "status": "success",
-            "matches": results
-        }
-
-    except Exception as e:
-        console.log(f"Error in match library: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ============================================
@@ -1276,10 +1086,11 @@ async def get_midi_recommendations(request: MidiTargetRequest):
                 meta = name_map.get(s['product_id'])
                 if meta:
                     s['trackName'] = meta.get('AlbumTitle')
-                    s['artworkUrl100'] = meta.get('albumCoverImageUrl')
-                    s['previewUrl'] = meta.get('preview_url')
+                    s['artworkUrl100'] = generate_presigned_url(meta.get('albumCoverImageUrl'))
+                    raw_prev = meta.get('preview_url')
+                    s['previewUrl'] = generate_presigned_url(raw_prev) if raw_prev else None
                     if meta.get('file_url'):
-                        s['fileUrl'] = meta.get('file_url')
+                        s['fileUrl'] = generate_presigned_url(meta.get('file_url'))
                     s['isLibrary'] = s['product_id'] > 0
 
         console.log(f"🎛️ MIDI recs: {len(top)} results for target {tf}")
@@ -1552,10 +1363,13 @@ def _hydrate_song_metadata(rows: list[dict]):
         if not m:
             continue
         item["trackName"] = m.get("AlbumTitle")
-        item["artworkUrl100"] = m.get("albumCoverImageUrl")
-        item["previewUrl"] = m.get("preview_url")
+        item["artworkUrl100"] = generate_presigned_url(m.get("albumCoverImageUrl"))
+        
+        raw_preview = m.get("preview_url")
+        item["previewUrl"] = generate_presigned_url(raw_preview) if raw_preview else None
+        
         if m.get("file_url"):
-            item["fileUrl"] = m.get("file_url")
+            item["fileUrl"] = generate_presigned_url(m.get("file_url"))
 
 
 @router.post("/api/audio/melody-finder")

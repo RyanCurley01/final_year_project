@@ -416,7 +416,6 @@ const Search = () => {
   const [displayedPlaybackRate, setDisplayedPlaybackRate] = useState(1);
   const [cachedAudioFeatures, setCachedAudioFeatures] = useState({}); // Real features from DB
   const [analyzing, setAnalyzing] = useState(false);
-  const matchStartedRef = useRef(false);
   
   const intervalRef = useRef(null);
   const dispatch = useDispatch();
@@ -431,11 +430,6 @@ const Search = () => {
   audioFeaturesRef.current = audioFeatures;
   const playbackRateRef = useRef(playbackRate);
   playbackRateRef.current = playbackRate;
-
-  // Reset match flag when search term changes
-  useEffect(() => {
-    matchStartedRef.current = false;
-  }, [searchTerm]);
 
   // Initial data fetch - searches database songs and iTunes artist songs based on searchTerm
   useEffect(() => {
@@ -633,120 +627,6 @@ const Search = () => {
 
     fetchCachedFeatures();
   }, []); // Fetch once on mount
-
-  // Match iTunes songs to Library songs using New Bulk Endpoint
-  useEffect(() => {
-    // Need songs and dbSongs to proceed
-    if (loading || songs.length === 0 || dbSongs.length === 0) return;
-    
-    // Check if we already started matching to avoid infinite loop
-    if (matchStartedRef.current) return;
-
-    // Check if there are any candidate songs (non-database songs that haven't been matched yet)
-    // We filter for songs that are NOT from database.
-    const candidates = songs.filter(s => s.source !== 'database' && !s.matchedDbSong);
-    
-    if (candidates.length === 0) {
-        // Nothing to match
-        return; 
-    }
-
-    matchStartedRef.current = true;
-    setAnalyzing(true);
-
-    const matchSongsUsingBulkEndpoint = async () => {
-        const apiBaseUrl = envConfig.getApiBaseUrl();
-        // console.log(`[Search] Matching ${candidates.length} iTunes songs to Library using Bulk Match...`);
-        
-        // Split songs into smaller batches to allow for on-the-fly feature extraction
-        const BATCH_SIZE = 10; 
-        const batches = [];
-        for (let i = 0; i < candidates.length; i += BATCH_SIZE) {
-            batches.push(candidates.slice(i, i + BATCH_SIZE));
-        }
-
-        // Limit DB songs IDs to send to backend (ensure we compare against exactly these 47)
-        const targetIds = dbSongs.map(s => s.id);
-
-        for (const batch of batches) {
-             const payload = {
-                candidates: batch.map(s => ({
-                    trackId: String(s.trackId || s.id),
-                    trackName: String(s.trackName || s.albumTitle || 'Unknown'),
-                    artistName: String(s.artistName),
-                    previewUrl: String(s.previewUrl || s.fileUrl || '')
-                })),
-                target_ids: targetIds,
-                limit: BATCH_SIZE
-             };
-             
-             try {
-                const response = await fetch(`${apiBaseUrl}/api/audio/match-library`, {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify(payload)
-                });
-                
-                if (response.ok) {
-                    const data = fixTextDeep(await response.json());
-                    const matches = data.matches || [];
-                    
-                    if (matches.length > 0) {
-                        setSongs(currentSongs => {
-                            const newSongs = [...currentSongs];
-                            let updated = false;
-                            
-                            matches.forEach(match => {
-                                const index = newSongs.findIndex(s => String(s.trackId || s.id) === String(match.input_track_id));
-                                if (index !== -1) {
-                                    newSongs[index] = {
-                                        ...newSongs[index],
-                                        similarity: match.similarity_score,
-                                        similarity_score: match.similarity_score,
-                                        match_reason: match.match_reason,
-                                        tempo_match: match.tempo_match,
-                                        energy_match: match.energy_match,
-                                        mood_match: match.mood_match,
-                                        dance_match: match.dance_match,
-                                        matchedDbSong: {
-                                            id: match.matched_product_id,
-                                            albumTitle: match.matched_product_name || `Track ${match.matched_product_id}`,
-                                            // Add extra fields if necessary (price, etc. if available from DB list)
-                                            ...dbSongs.find(d => String(d.id) === String(match.matched_product_id))
-                                        }
-                                    };
-                                    updated = true;
-                                }
-                            });
-
-                            if (updated) {
-                                // Sort by Relevance (Primary) then Similarity (Secondary)
-                                // This ensures songs "stay in place" (relevance) but are ordered by score where relevance is equal
-                                newSongs.sort((a, b) => {
-                                    const relA = a.relevance || 0;
-                                    const relB = b.relevance || 0;
-                                    if (Math.abs(relB - relA) > 0.05) return relB - relA;
-                                    return (b.similarity_score || 0) - (a.similarity_score || 0);
-                                });
-                            }
-                            
-                            return updated ? newSongs : currentSongs;
-                        });
-                    }
-                }
-             } catch (e) {
-                 console.warn("Bulk match failed", e);
-             }
-             
-             // Tiny delay
-             await new Promise(r => setTimeout(r, 50));
-        }
-        
-        setAnalyzing(false);
-    };
-
-    matchSongsUsingBulkEndpoint();
-  }, [loading, dbSongs, songs]); // React to changes in songs list (e.g. from new search)
 
   // Single useEffect to handle all recommendation updates (Visualizer logic commented out)
   /*

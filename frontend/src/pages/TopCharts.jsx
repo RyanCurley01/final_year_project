@@ -22,6 +22,20 @@ const getArtistBadgeColor = (artist) => {
 
 const fallbackImage = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="250" height="250" viewBox="0 0 250 250"><rect width="250" height="250" fill="#374151"/><circle cx="125" cy="125" r="80" fill="#4B5563"/><circle cx="125" cy="125" r="30" fill="#374151"/><circle cx="125" cy="125" r="10" fill="#6B7280"/></svg>');
 
+const isBadImageUrl = (url) => /\.(mp4|m4v|mov|webm|wmv|wav|mp3|flac|ogg)(\?|$)/i.test(String(url || ''));
+
+const getSafeCoverUrl = (song, size = '600x600') => {
+  const artwork = song?.artworkUrl100 && !isBadImageUrl(song.artworkUrl100)
+    ? String(song.artworkUrl100).replace('100x100', size)
+    : null;
+  const albumCover = song?.albumCoverImageUrl && !isBadImageUrl(song.albumCoverImageUrl)
+    ? song.albumCoverImageUrl
+    : null;
+  const imageUrl = song?.imageUrl && !isBadImageUrl(song.imageUrl) ? song.imageUrl : null;
+  const image = song?.image && !isBadImageUrl(song.image) ? song.image : null;
+  return artwork || albumCover || imageUrl || image || fallbackImage;
+};
+
 // Shuffle array helper
 const shuffleArray = (array) => {
   const shuffled = [...array];
@@ -60,7 +74,7 @@ const FeatureBadge = ({ label, value }) => {
 
 const SongCard = ({ song, isPlaying, activeSong, onPlay, onPause, index, onSongNameClick, onArtistClick, onAlbumClick }) => {
   const isThisSongActive = activeSong?.id === song.id;
-  const albumArt = song.artworkUrl100?.replace('100x100', '600x600') || fallbackImage;
+  const albumArt = getSafeCoverUrl(song, '600x600');
   const coverMedia = song.albumCoverImageUrl || song.artworkUrl100;
   const isVideo = coverMedia && coverMedia.toLowerCase().includes('.mp4');
   const isTeddyEmotion = (song.trackName || song.albumTitle || '').toLowerCase().includes('teddy emotion');
@@ -349,7 +363,7 @@ const TopCharts = () => {
       intervalRef.current = null;
     }
 
-    if (!activeSong || songs.length === 0) {
+    if (!activeSong || (!activeSong.trackId && !activeSong.id) || songs.length === 0) {
       setRecommendations([]);
       return;
     }
@@ -492,7 +506,7 @@ const TopCharts = () => {
     navigate(`/albums/${encodeURIComponent(albumName)}`, {
       state: {
         song: song,
-        albumArtwork: song.artworkUrl100?.replace('100x100', '600x600')
+        albumArtwork: getSafeCoverUrl(song, '600x600')
       }
     });
   };
@@ -689,7 +703,7 @@ const TopCharts = () => {
                     return (
                       <img 
                         key={activeSong?.albumCoverImageUrl || activeSong?.artworkUrl100 || 'no-cover'}
-                        src={activeSong?.albumCoverImageUrl || activeSong?.artworkUrl100?.replace('100x100', '200x200') || fallbackImage}
+                        src={getSafeCoverUrl(activeSong, '200x200')}
                         alt={activeSong.trackName || activeSong.albumTitle}
                         className={`w-12 h-12 rounded-full object-cover border-2 border-cyan-500/50 ${isPlaying ? 'animate-spin' : ''}`}
                         style={{ animationDuration: '3s' }}
@@ -767,7 +781,7 @@ const TopCharts = () => {
                           }
                           return (
                             <img 
-                              src={rec.albumCoverImageUrl || rec.artworkUrl100?.replace('100x100', '200x200') || fallbackImage}
+                              src={getSafeCoverUrl(rec, '200x200')}
                               alt={rec.trackName}
                               className="w-full h-full object-cover"
                               onError={(e) => { e.target.src = fallbackImage; }}

@@ -21,14 +21,34 @@ const getArtistBadgeColor = (artist) => {
 
 const fallbackImage = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="250" height="250" viewBox="0 0 250 250"><rect width="250" height="250" fill="#374151"/><circle cx="125" cy="125" r="80" fill="#4B5563"/><circle cx="125" cy="125" r="30" fill="#374151"/><circle cx="125" cy="125" r="10" fill="#6B7280"/></svg>');
 
-// Shuffle array helper
-const shuffleArray = (array) => {
-  const shuffled = [...array];
-  for (let i = shuffled.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+const isVideoLikeUrl = (url) => /\.(mp4|m4v|mov|webm|wmv)(\?|$)/i.test(String(url || ''));
+
+const getSafeCoverUrl = (song, size = '600x600') => {
+  const artwork = song?.artworkUrl100 && !isVideoLikeUrl(song.artworkUrl100)
+    ? String(song.artworkUrl100).replace('100x100', size)
+    : null;
+  const albumCover = song?.albumCoverImageUrl && !isVideoLikeUrl(song.albumCoverImageUrl)
+    ? song.albumCoverImageUrl
+    : null;
+  const imageUrl = song?.imageUrl && !isVideoLikeUrl(song.imageUrl) ? song.imageUrl : null;
+  const image = song?.image && !isVideoLikeUrl(song.image) ? song.image : null;
+  return artwork || albumCover || imageUrl || image || fallbackImage;
+};
+
+const normalizeTrackId = (value) => {
+  const numeric = Number(value);
+  if (Number.isFinite(numeric) && numeric !== 0) {
+    return String(Math.abs(numeric));
   }
-  return shuffled;
+  return String(value ?? '');
+};
+
+const isLibraryContextSong = (song) => {
+  if (!song) return false;
+  if (song.source === 'database') return true;
+  const numericId = Number(song.trackId || song.id);
+  // Library DB IDs are small positive sequences. iTunes IDs are > 1,000,000
+  return Number.isFinite(numericId) && numericId > 0 && numericId < 1000000;
 };
 
 // Helper function for mood-based colors - same as SmartRecommendationVisualizer
@@ -59,7 +79,7 @@ const FeatureBadge = ({ label, value }) => {
 
 const SongCard = ({ song, isPlaying, activeSong, onPlay, onPause, index, allSongs, onSongNameClick, onArtistClick, onAlbumClick }) => {
   const isThisSongActive = activeSong?.id === song.id;
-  const albumArt = song.artworkUrl100?.replace('100x100', '600x600') || fallbackImage;
+  const albumArt = getSafeCoverUrl(song, '600x600');
 
   const [isHovered, setIsHovered] = useState(false);
   
@@ -201,7 +221,6 @@ const SimilarSongs = () => {
   const [cachedAudioFeatures, setCachedAudioFeatures] = useState({});
   
   const intervalRef = useRef(null);
-  const matchStartedRef = useRef(false);
   const dispatch = useDispatch();
   const navigate = useNavigate();
   const { activeSong, isPlaying, playbackRate } = useSelector((state) => state.player);
@@ -397,7 +416,7 @@ const SimilarSongs = () => {
         }
 
         const payload = {
-            source: 'similar_songs',
+          source: isLibraryContextSong(activeSong) ? 'discover_page' : 'similar_songs',
             current_product_id: String(activeSong.trackId || activeSong.id),
             preview_url: String(activeSong.previewUrl || activeSong.fileUrl || ''),
             audio_features: featuresToSend,
@@ -419,6 +438,38 @@ const SimilarSongs = () => {
            const data = fixTextDeep(await response.json());
            if (data.recommendations) {
                setRecommendations(data.recommendations);
+               setSongs((currentSongs) => {
+                 const recMap = new Map(
+                   data.recommendations.map((rec) => [normalizeTrackId(rec.product_id || rec.id), rec])
+                 );
+
+                 return currentSongs.map((song) => {
+                   const matchedRec = recMap.get(normalizeTrackId(song.trackId || song.id));
+                   if (!matchedRec) {
+                     return {
+                       ...song,
+                       similarity: null,
+                       similarity_score: null,
+                       match_reason: null,
+                       tempo_match: null,
+                       energy_match: null,
+                       mood_match: null,
+                       dance_match: null,
+                     };
+                   }
+
+                   return {
+                     ...song,
+                     similarity: matchedRec.similarity_score,
+                     similarity_score: matchedRec.similarity_score,
+                     match_reason: matchedRec.reason || matchedRec.match_reason,
+                     tempo_match: matchedRec.tempo_match,
+                     energy_match: matchedRec.energy_match,
+                     mood_match: matchedRec.mood_match,
+                     dance_match: matchedRec.danceability_match || matchedRec.dance_match,
+                   };
+                 });
+               });
            }
            if (data.target_features) {
                setDisplayedFeatures({
@@ -451,99 +502,7 @@ const SimilarSongs = () => {
     };
   }, [activeSong?.trackId || activeSong?.id, songs]);
 
-  // Match iTunes songs to Library songs using New Bulk Endpoint
-  useEffect(() => {
-    // Need songs and dbSongs to proceed
-    if (loading || songs.length === 0 || dbSongs.length === 0) return;
-    
-    // Check if we already started matching to avoid infinite loop
-    if (matchStartedRef.current) return;
-
-    matchStartedRef.current = true;
-    setAnalyzing(true);
-
-    const matchSongsUsingBulkEndpoint = async () => {
-        const apiBaseUrl = envConfig.getApiBaseUrl();
-        console.log(`[SimilarSongs] Matching ${songs.length} iTunes songs to Library using Bulk Match...`);
-        
-        // Split songs into smaller batches to allow for on-the-fly feature extraction
-        const BATCH_SIZE = 10; 
-        const batches = [];
-        for (let i = 0; i < songs.length; i += BATCH_SIZE) {
-            batches.push(songs.slice(i, i + BATCH_SIZE));
-        }
-
-        // Limit DB songs IDs to send to backend (ensure we compare against exactly these 47)
-        const targetIds = dbSongs.map(s => s.id);
-
-        for (const batch of batches) {
-             const payload = {
-                candidates: batch.map(s => ({
-                    trackId: String(s.trackId || s.id),
-                    trackName: String(s.trackName || s.albumTitle || 'Unknown'),
-                    artistName: String(s.artistName),
-                    previewUrl: String(s.previewUrl || s.fileUrl || '')
-                })),
-                target_ids: targetIds,
-                limit: BATCH_SIZE
-             };
-             
-             try {
-                const response = await fetch(`${apiBaseUrl}/api/audio/match-library`, {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify(payload)
-                });
-                
-                if (response.ok) {
-                    const data = fixTextDeep(await response.json());
-                    const matches = data.matches || [];
-                    
-                    if (matches.length > 0) {
-                        setSongs(currentSongs => {
-                            const newSongs = [...currentSongs];
-                            let updated = false;
-                            
-                            matches.forEach(match => {
-                                const index = newSongs.findIndex(s => String(s.trackId || s.id) === String(match.input_track_id));
-                                if (index !== -1) {
-                                    newSongs[index] = {
-                                        ...newSongs[index],
-                                        similarity: match.similarity_score,
-                                        similarity_score: match.similarity_score,
-                                        match_reason: match.match_reason,
-                                        tempo_match: match.tempo_match,
-                                        energy_match: match.energy_match,
-                                        mood_match: match.mood_match,
-                                        dance_match: match.dance_match,
-                                        matchedDbSong: {
-                                            id: match.matched_product_id,
-                                            albumTitle: match.matched_product_name || `Track ${match.matched_product_id}`
-                                        }
-                                    };
-                                    updated = true;
-                                }
-                            });
-                            
-                            return updated ? newSongs : currentSongs;
-                        });
-                    }
-                }
-             } catch (e) {
-                 console.warn("Bulk match failed", e);
-             }
-             
-             // Tiny delay
-             await new Promise(r => setTimeout(r, 50));
-        }
-        
-        setAnalyzing(false);
-    };
-
-    matchSongsUsingBulkEndpoint();
-  }, [loading, dbSongs.length, songs.length]);
-
-  // Filter songs and shuffle selection for variety, then sort by similarity
+    // Filter songs and sort by the same unified score used by the visualizer.
   const filteredSongs = useMemo(() => {
     let filtered;
     if (filter === 'all') {
@@ -551,13 +510,8 @@ const SimilarSongs = () => {
     } else {
       filtered = songs.filter(song => song.artistName?.toLowerCase().includes(filter.toLowerCase()));
     }
-    
-    // Shuffle to randomize which songs appear, then take first N songs
-    const shuffled = shuffleArray(filtered);
-    const selected = shuffled.slice(0, Math.min(100, filtered.length));
-    
-    // Sort selected songs by similarity (highest first) for display
-    return selected.sort((a, b) => (b.similarity || 0) - (a.similarity || 0));
+
+    return filtered.sort((a, b) => (b.similarity_score || 0) - (a.similarity_score || 0));
   }, [songs, filter]);
 
   const handlePlay = (song, index) => {
@@ -707,7 +661,7 @@ const SimilarSongs = () => {
       <div className={`flex-1 min-w-0 ${filter === 'visualizer' ? 'hidden' : ''}`}>
         <div className="mb-4 sm:mb-6">
           <h1 className="font-bold text-xl sm:text-2xl md:text-3xl text-white mb-2">Similar Track Information</h1>
-          <p className="text-gray-400">Aphex Twin, Squarepusher and Boards of Canada songs matched to the {dbSongs.length} library tracks using ML-based cosine similarity on audio features (tempo, energy, valence, danceability)</p>
+          <p className="text-gray-400">Aphex Twin, Squarepusher and Boards of Canada songs ranked by unified ML similarity using the same scoring path as the visualiser.</p>
           <div className="flex flex-col sm:flex-row gap-2 mt-1">
             <p className="text-xs text-cyan-400">Powered by ML Audio Similarity • {songs.length} artist tracks with 30s previews • Industry-standard feature extraction</p>
             {analyzing && (
@@ -783,7 +737,7 @@ const SimilarSongs = () => {
                 <div className="relative w-12 h-16 flex-shrink-0">
                   <img 
                     key={activeSong?.albumCoverImageUrl || activeSong?.artworkUrl100 || 'no-cover'}
-                    src={activeSong?.albumCoverImageUrl || activeSong?.artworkUrl100?.replace('100x100', '200x200') || activeSong?.imageUrl || activeSong?.image || fallbackImage}
+                    src={getSafeCoverUrl(activeSong, '200x200')}
                     alt={activeSong.trackName || activeSong.albumTitle}
                     className={`w-12 h-12 rounded-full object-cover border-2 border-cyan-500/50 ${isPlaying ? 'animate-spin' : ''}`}
                     style={{ animationDuration: '3s' }}
@@ -850,7 +804,7 @@ const SimilarSongs = () => {
                       {/* Album Cover - Support both URL formats */}
                       <div className="w-12 h-12 rounded-md overflow-hidden flex-shrink-0 border border-gray-600 group-hover:border-cyan-500 transition-colors">
                         <img 
-                          src={rec.albumCoverImageUrl || rec.artworkUrl100?.replace('100x100', '200x200') || rec.imageUrl || rec.image || fallbackImage}
+                          src={getSafeCoverUrl(rec, '200x200')}
                           alt={rec.trackName}
                           className="w-full h-full object-cover"
                           onError={(e) => { e.target.src = fallbackImage; }}

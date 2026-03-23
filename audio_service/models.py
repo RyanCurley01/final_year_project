@@ -71,6 +71,10 @@ class AudioSimilarityResult(BaseModel):
     collectionName: Optional[str] = None
     artworkUrl100: Optional[str] = None
     previewUrl: Optional[str] = None
+    fileUrl: Optional[str] = None
+    albumCoverImageUrl: Optional[str] = None
+    price: Optional[float] = None
+    albumPrice: Optional[float] = None
 
 class ITunesSong(BaseModel):
     """iTunes song with extracted features"""
