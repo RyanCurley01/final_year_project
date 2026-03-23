@@ -48,10 +48,29 @@ def generate_presigned_url(s3_url: str) -> str:
         return s3_url
     
     try:
-        # Extract the S3 key from the URL
-        # Format: https://bucket.s3.region.amazonaws.com/path/to/file
-        parsed = urlparse(s3_url)
-        key = parsed.path.lstrip('/')
+        raw = str(s3_url).strip()
+        if not raw:
+            return s3_url
+
+        # Only presign real S3 locations. Keep external CDN URLs (e.g. iTunes artwork) unchanged.
+        if raw.startswith('http://') or raw.startswith('https://'):
+            parsed = urlparse(raw)
+            host = (parsed.netloc or '').lower()
+            bucket = (S3_CONFIG.get('bucket_name') or '').lower()
+            looks_like_s3 = (
+                ('amazonaws.com' in host)
+                or ('s3.' in host)
+                or (bucket and bucket in host)
+            )
+            if not looks_like_s3:
+                return s3_url
+            key = parsed.path.lstrip('/')
+        else:
+            # Support raw object keys stored in DB.
+            key = raw.lstrip('/')
+
+        if not key:
+            return s3_url
         
         # URL decode the key (database has URL-encoded paths, S3 keys have literal characters)
         key = unquote(key)

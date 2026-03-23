@@ -914,8 +914,16 @@ const SimilarSongs = () => {
                 {recommendations
                   .map(rec => {
                       const liveMatch = calculateLiveMatch(rec);
+                    const recNormId = normalizeTrackId(rec.product_id || rec.id || rec.trackId);
+                    const fallbackSong = songs.find((s) => normalizeTrackId(s.trackId || s.id) === recNormId);
                       return {
                           ...rec,
+                      trackName: rec.trackName || fallbackSong?.trackName || fallbackSong?.albumTitle,
+                      artistName: rec.artistName || fallbackSong?.artistName,
+                      collectionName: rec.collectionName || fallbackSong?.collectionName,
+                      artworkUrl100: rec.artworkUrl100 || fallbackSong?.artworkUrl100 || fallbackSong?.albumCoverImageUrl,
+                      albumCoverImageUrl: rec.albumCoverImageUrl || fallbackSong?.albumCoverImageUrl || fallbackSong?.artworkUrl100,
+                      previewUrl: rec.previewUrl || fallbackSong?.previewUrl || fallbackSong?.fileUrl,
                           similarity_score: liveMatch ? liveMatch.similarity_score : rec.similarity_score,
                           tempo_match: liveMatch ? liveMatch.tempo_match : rec.tempo_match,
                           energy_match: liveMatch ? liveMatch.energy_match : rec.energy_match,
@@ -926,9 +934,11 @@ const SimilarSongs = () => {
                   .sort((a, b) => b.similarity_score - a.similarity_score)
                   .slice(0, 5)
                   .map((rec, idx) => {
+                  const recTitle = rec.trackName || rec.albumTitle || rec.collectionName || `Track ${rec.product_id || rec.id || idx + 1}`;
+                  const recArtist = rec.artistName || 'Unknown Artist';
                   return (
                   <div 
-                    key={String(rec.product_id || rec.id || rec.trackId || `${rec.trackName || 'rec'}-${idx}`)}
+                    key={String(rec.product_id || rec.id || rec.trackId || `${recTitle}-${idx}`)}
                     onClick={() => handleRecommendationClick(rec)}
                     className="relative p-2 bg-gray-800/70 hover:bg-gray-700/70 rounded-lg border border-gray-700 hover:border-cyan-500 transition-all cursor-pointer group"
                   >
@@ -937,7 +947,7 @@ const SimilarSongs = () => {
                       <div className="w-12 h-12 rounded-md overflow-hidden flex-shrink-0 border border-gray-600 group-hover:border-cyan-500 transition-colors">
                         <img 
                           src={getSafeCoverUrl(rec, '200x200')}
-                          alt={rec.trackName}
+                          alt={recTitle}
                           className="w-full h-full object-cover"
                           onError={(e) => { e.target.src = fallbackImage; }}
                         />
@@ -947,7 +957,7 @@ const SimilarSongs = () => {
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center justify-between gap-1">
                           <h4 className="text-white font-semibold truncate group-hover:text-cyan-400 transition-colors text-sm leading-tight flex-1">
-                            {rec.trackName}
+                            {recTitle}
                           </h4>
                           <span className={`px-1.5 py-0.5 rounded-full text-xs font-bold text-white flex-shrink-0 ${
                             rec.similarity_score >= 0.7 ? 'bg-green-500' : 
@@ -957,7 +967,7 @@ const SimilarSongs = () => {
                             {Math.round(rec.similarity_score * 100)}%
                           </span>
                         </div>
-                        <p className="text-xs text-gray-300 truncate font-medium">{rec.artistName}</p>
+                        <p className="text-xs text-gray-300 truncate font-medium">{recArtist}</p>
                         <p className="text-xs text-gray-400 truncate">{rec.reason || rec.match_reason}</p>
                         
                         {/* Feature Matches */}

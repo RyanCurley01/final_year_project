@@ -818,85 +818,88 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
         
         if missing_meta_ids:
              try:
-                 # Split IDs into local DB queries (positive indices) and iTunes queries (negative)
-                 db_ids = []
-                 itunes_ids = []
-                 
+                 all_ids = []
                  for r in missing_meta_ids:
                       try:
-                           pid_int = int(r.product_id)
-                           if pid_int > 0:
-                               db_ids.append(pid_int)
-                           elif pid_int < 0:
-                               itunes_ids.append(abs(pid_int))
+                           all_ids.append(int(r.product_id))
                       except:
                            pass
-                           
-                 # A. Hydrate DB Songs: Run a Postgres SELECT to get user-uploaded library fields.
-                 if db_ids:
-                     id_string = ",".join(str(i) for i in db_ids)
+
+                 # A. Hydrate from Products table for BOTH positive and negative cached IDs.
+                 db_meta_map = {}
+                 if all_ids:
+                     unique_ids = list(dict.fromkeys(all_ids))
+                     placeholders = ",".join(["%s"] * len(unique_ids))
                      with get_db_connection() as conn:
                          if conn:
                              with conn.cursor() as cursor:
-                                 # Fetch standard columns (ArtistName not natively in DB Products schema here)
                                  sql = f"""
                                     SELECT ProductID, AlbumTitle, AlbumPrice, albumCoverImageUrl, preview_url, file_url
-                                    FROM Products 
-                                    WHERE ProductID IN ({id_string})
+                                    FROM Products
+                                    WHERE ProductID IN ({placeholders})
                                  """
-                                 cursor.execute(sql)
-                                 rows = cursor.fetchall()
-                                 
-                                 meta_map = {row['ProductID']: row for row in rows}
-                                 
-                                 for r in top_recommendations:
-                                     # Try int conversion for lookup
-                                     pid_int = 0
-                                     try: pid_int = int(r.product_id)
-                                     except: pass
-                                     
-                                     if pid_int > 0 and pid_int in meta_map:
-                                         data = meta_map[pid_int]
-                                         # Prefer AlbumTitle, fallback to ID if completely missing
-                                         r.trackName = data.get('AlbumTitle') or f"Track {r.product_id}"
-                                         r.albumTitle = data.get('AlbumTitle')
-                                         r.artistName = "Library Artist" # Fallback since DB has no isolated artist name
-                                         r.artworkUrl100 = generate_presigned_url(data.get('albumCoverImageUrl'))
-                                         r.albumCoverImageUrl = r.artworkUrl100
-                                         # Library songs should play from S3 file_url; fallback to preview_url if present.
-                                         raw_preview = data.get('file_url') or data.get('preview_url')
-                                         r.previewUrl = generate_presigned_url(raw_preview) if raw_preview else None
-                                         r.fileUrl = r.previewUrl
-                                         r.price = float(data.get('AlbumPrice') or 0.0)
-                                         r.albumPrice = r.price
+                                 cursor.execute(sql, unique_ids)
+                                 rows = cursor.fetchall() or []
+                                 db_meta_map = {int(row['ProductID']): row for row in rows if row.get('ProductID') is not None}
 
-                 # B. Hydrate iTunes Songs via Lookup API
-                 # iTunes data isn't in our DB, so we reach out to Apple's HTTP API.
-                 if itunes_ids:
-                     # Limit lookup batch size to prevent hitting Apple's rate limits
-                     lookup_ids = ",".join(str(i) for i in itunes_ids[:50])
-                     itunes_map = {}
-                     
+                 unresolved_itunes_abs_ids = []
+                 for r in top_recommendations:
                      try:
-                         # Send a non-blocking asynchronous HTTP GET request to Apple to map the IDs
+                         pid_int = int(r.product_id)
+                     except:
+                         continue
+
+                     data = db_meta_map.get(pid_int)
+                     if data:
+                         title = data.get('AlbumTitle')
+                         if title:
+                             r.trackName = title
+                             r.albumTitle = title
+
+                         if not r.artistName and pid_int > 0:
+                             r.artistName = "Library Artist"
+
+                         raw_cover = data.get('albumCoverImageUrl')
+                         if raw_cover:
+                             cover = generate_presigned_url(raw_cover)
+                             r.artworkUrl100 = cover
+                             r.albumCoverImageUrl = cover
+
+                         raw_preview = data.get('file_url') or data.get('preview_url')
+                         if raw_preview:
+                             playable = generate_presigned_url(raw_preview)
+                             r.previewUrl = playable
+                             r.fileUrl = playable
+
+                         if data.get('AlbumPrice') is not None:
+                             r.price = float(data.get('AlbumPrice') or 0.0)
+                             r.albumPrice = r.price
+                     else:
+                         # B. If unresolved and looks like a real iTunes track id, try Apple lookup.
+                         if pid_int < 0 and abs(pid_int) >= 1_000_000:
+                             unresolved_itunes_abs_ids.append(abs(pid_int))
+
+                 if unresolved_itunes_abs_ids:
+                     lookup_ids = ",".join(str(i) for i in list(dict.fromkeys(unresolved_itunes_abs_ids))[:50])
+                     itunes_map = {}
+                     try:
                          async with httpx.AsyncClient(timeout=5.0) as client:
-                             
-                             # Lookup original metadata including real Artist Names and high-res Album Art
                              resp = await client.get(f"{ITUNES_API_BASE_URL}/lookup", params={"id": lookup_ids})
                              if resp.status_code == 200:
                                  results = resp.json().get('results', [])
                                  for item in results:
-                                     
-                                     # Map by negative ID (our internal schema standard for iTunes IDs)
-                                     itunes_map[-item['trackId']] = item
+                                     track_id = item.get('trackId')
+                                     if track_id is not None:
+                                         itunes_map[-int(track_id)] = item
                      except Exception as ex:
                          console.log(f"iTunes hydration failed: {ex}")
 
-                     # Apply the downloaded Apple metadata to the actual result objects
                      for r in top_recommendations:
-                         try: pid_int = int(r.product_id)
-                         except: continue
-                         
+                         try:
+                             pid_int = int(r.product_id)
+                         except:
+                             continue
+
                          if pid_int < 0 and pid_int in itunes_map:
                              data = itunes_map[pid_int]
                              r.trackName = data.get('trackName')
@@ -908,6 +911,30 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
 
              except Exception as rx:
                  console.log(f"Error hydrating metadata: {rx}")
+
+        # Final metadata sanitization to prevent blank visualizer cards.
+        for r in top_recommendations:
+            pid_int = 0
+            try:
+                pid_int = int(r.product_id)
+            except Exception:
+                pid_int = 0
+
+            if not r.trackName:
+                r.trackName = r.albumTitle or r.collectionName or f"Track {r.product_id}"
+            if not r.artistName:
+                r.artistName = "Library Artist" if pid_int > 0 else "Unknown Artist"
+            if not r.albumTitle:
+                r.albumTitle = r.collectionName or r.trackName
+
+            # If artwork points to audio/video media, clear it so frontend fallback image is used.
+            art = str(r.artworkUrl100 or "").lower()
+            if art and any(ext in art for ext in [".mp3", ".wav", ".flac", ".ogg", ".mp4", ".mov", ".webm", ".m4v", ".wmv"]):
+                r.artworkUrl100 = None
+                try:
+                    r.albumCoverImageUrl = None
+                except Exception:
+                    pass
         
         # Output generation: Prepare "Live" extraction features for the frontend visualizer.
         # This allows the frontend web-audio canvas to jump and react even if the actual math 
