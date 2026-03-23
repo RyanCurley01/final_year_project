@@ -21,17 +21,17 @@ const getArtistBadgeColor = (artist) => {
 
 const fallbackImage = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="250" height="250" viewBox="0 0 250 250"><rect width="250" height="250" fill="#374151"/><circle cx="125" cy="125" r="80" fill="#4B5563"/><circle cx="125" cy="125" r="30" fill="#374151"/><circle cx="125" cy="125" r="10" fill="#6B7280"/></svg>');
 
-const isVideoLikeUrl = (url) => /\.(mp4|m4v|mov|webm|wmv)(\?|$)/i.test(String(url || ''));
+const isBadImageUrl = (url) => /\.(mp4|m4v|mov|webm|wmv|wav|mp3|flac|ogg)(\?|$)/i.test(String(url || ''));
 
 const getSafeCoverUrl = (song, size = '600x600') => {
-  const artwork = song?.artworkUrl100 && !isVideoLikeUrl(song.artworkUrl100)
+  const artwork = song?.artworkUrl100 && !isBadImageUrl(song.artworkUrl100)
     ? String(song.artworkUrl100).replace('100x100', size)
     : null;
-  const albumCover = song?.albumCoverImageUrl && !isVideoLikeUrl(song.albumCoverImageUrl)
+  const albumCover = song?.albumCoverImageUrl && !isBadImageUrl(song.albumCoverImageUrl)
     ? song.albumCoverImageUrl
     : null;
-  const imageUrl = song?.imageUrl && !isVideoLikeUrl(song.imageUrl) ? song.imageUrl : null;
-  const image = song?.image && !isVideoLikeUrl(song.image) ? song.image : null;
+  const imageUrl = song?.imageUrl && !isBadImageUrl(song.imageUrl) ? song.imageUrl : null;
+  const image = song?.image && !isBadImageUrl(song.image) ? song.image : null;
   return artwork || albumCover || imageUrl || image || fallbackImage;
 };
 
@@ -41,14 +41,6 @@ const normalizeTrackId = (value) => {
     return String(Math.abs(numeric));
   }
   return String(value ?? '');
-};
-
-const isLibraryContextSong = (song) => {
-  if (!song) return false;
-  if (song.source === 'database') return true;
-  const numericId = Number(song.trackId || song.id);
-  // Library DB IDs are small positive sequences. iTunes IDs are > 1,000,000
-  return Number.isFinite(numericId) && numericId > 0 && numericId < 1000000;
 };
 
 // Helper function for mood-based colors - same as SmartRecommendationVisualizer
@@ -198,9 +190,9 @@ const SongCard = ({ song, isPlaying, activeSong, onPlay, onPause, index, allSong
       </div>
 
       {song.matchedDbSong && (
-        <div className="mt-2 pt-2 border-t border-gray-700">
-          <p className="text-[10px] text-cyan-400">Matched to library:</p>
-          <p className="text-xs text-white truncate">{song.matchedDbSong.albumTitle}</p>
+        <div className="mt-2 pt-2 border-t border-gray-700/50">
+          <p className="text-[10px] text-cyan-400">Matched via library track:</p>
+          <p className="text-[11px] text-white truncate font-medium">{song.matchedDbSong.albumTitle}</p>
         </div>
       )}
     </div>
@@ -221,6 +213,7 @@ const SimilarSongs = () => {
   const [cachedAudioFeatures, setCachedAudioFeatures] = useState({});
   
   const intervalRef = useRef(null);
+  const matchStartedRef = useRef(false);
   const dispatch = useDispatch();
   const navigate = useNavigate();
   const { activeSong, isPlaying, playbackRate } = useSelector((state) => state.player);
@@ -359,6 +352,23 @@ const SimilarSongs = () => {
     fetchAllSongs();
   }, []);
 
+  // Visualiser should only appear for an actively playing/selected song.
+  const getCurrentTarget = () => {
+    if (activeSong && Object.keys(activeSong).length > 0) {
+      return activeSong;
+    }
+    return null;
+  };
+  
+  const currentTargetContext = getCurrentTarget();
+
+  // Reset visualiser state immediately when the active track changes.
+  useEffect(() => {
+    setDisplayedFeatures(null);
+    setDisplayedPlaybackRate(Number(playbackRateRef.current || 1));
+    setRecommendations([]);
+  }, [activeSong?.trackId || activeSong?.id]);
+
   // Single useEffect to handle all recommendation updates
   useEffect(() => {
     // Clear any existing interval
@@ -367,7 +377,9 @@ const SimilarSongs = () => {
       intervalRef.current = null;
     }
 
-    if (!activeSong || songs.length === 0) {
+    const targetSong = getCurrentTarget();
+
+    if (!targetSong || songs.length === 0) {
       setRecommendations([]);
       return;
     }
@@ -379,7 +391,7 @@ const SimilarSongs = () => {
 
         // Construct live features but merge with cache if available for stability
         let featuresToSend = null;
-        if (audioFeaturesRef.current) {
+        if (activeSong && audioFeaturesRef.current) {
             featuresToSend = {
                  tempo: audioFeaturesRef.current.tempo ? parseFloat(audioFeaturesRef.current.tempo) : null,
                  energy: audioFeaturesRef.current.energy ? parseFloat(audioFeaturesRef.current.energy) : null,
@@ -391,7 +403,7 @@ const SimilarSongs = () => {
             };
             
             // Merge with cache if available for current song
-            const songIdStr = String(activeSong.trackId || activeSong.id);
+            const songIdStr = String(targetSong.trackId || targetSong.id);
             const cached = cachedAudioFeatures[songIdStr] || cachedAudioFeatures[String(-Math.abs(Number(songIdStr)))];
             
             if (cached) {
@@ -401,8 +413,8 @@ const SimilarSongs = () => {
                 // Keep energy/valence live for pulse
             }
         } else {
-             // Try to use cache if no live features
-             const songIdStr = String(activeSong.trackId || activeSong.id);
+             // Try to use cache if no live features or no active song
+             const songIdStr = String(targetSong.trackId || targetSong.id);
              const cached = cachedAudioFeatures[songIdStr] || cachedAudioFeatures[String(-Math.abs(Number(songIdStr)))];
              if (cached) {
                  featuresToSend = {
@@ -410,17 +422,17 @@ const SimilarSongs = () => {
                     tempo: Number(cached.tempo),
                     energy: Number(cached.energy),
                     valence: Number(cached.valence),
-                    playback_rate: parseFloat(playbackRateRef.current || 1)
+                    playback_rate: 1
                  };
              }
         }
 
         const payload = {
-          source: isLibraryContextSong(activeSong) ? 'discover_page' : 'similar_songs',
-            current_product_id: String(activeSong.trackId || activeSong.id),
-            preview_url: String(activeSong.previewUrl || activeSong.fileUrl || ''),
+          source: 'similar_songs', // Always force 'similar_songs' context so iTunes tracks are scored
+            current_product_id: String(targetSong.trackId || targetSong.id),
+            preview_url: String(targetSong.previewUrl || targetSong.fileUrl || ''),
             audio_features: featuresToSend,
-            limit: 5
+            limit: 150
         };
 
         console.log('[SimilarSongs] Sending Unified Payload:', JSON.stringify(payload, null, 2));
@@ -500,7 +512,126 @@ const SimilarSongs = () => {
         intervalRef.current = null;
       }
     };
-  }, [activeSong?.trackId || activeSong?.id, songs]);
+  }, [activeSong?.trackId || activeSong?.id, songs.length > 0, dbSongs.length > 0]);
+
+  // Bulk Match Endpoint for caching library song string names
+  useEffect(() => {
+    // Only run if we have data loaded and haven't already started
+    if (loading || dbSongs.length === 0 || songs.length === 0) return;
+    const hasCachedFeatures = Object.keys(cachedAudioFeatures || {}).length > 0;
+    const hasComputedSongFeatures = songs.some((s) => s.tempo != null || s.energy != null || s.valence != null);
+    if (!hasCachedFeatures && !hasComputedSongFeatures) return;
+    if (matchStartedRef.current) return;
+
+    matchStartedRef.current = true;
+    setAnalyzing(true);
+
+    const matchSongsUsingBulkEndpoint = async () => {
+        const apiBaseUrl = envConfig.getApiBaseUrl();
+        console.log(`[SimilarSongs] Matching ${songs.length} iTunes songs to Library using Bulk Match...`);
+        const BATCH_SIZE = 10;
+        const targetIds = dbSongs.map((s) => s.id);
+        const matchedByTrack = new Map();
+
+        const runMatchPass = async (candidateSongs) => {
+          const batches = [];
+          for (let i = 0; i < candidateSongs.length; i += BATCH_SIZE) {
+            batches.push(candidateSongs.slice(i, i + BATCH_SIZE));
+          }
+
+          for (const batch of batches) {
+            const payload = {
+              candidates: batch.map((s) => {
+                const rawId = String(s.trackId || s.id || '');
+                const numericId = Number(rawId);
+                const negId = Number.isFinite(numericId) && numericId !== 0 ? String(-Math.abs(numericId)) : null;
+                const cached = cachedAudioFeatures[rawId] || (negId ? cachedAudioFeatures[negId] : null);
+                const src = cached || s;
+
+                return {
+                  trackId: String(s.trackId || s.id),
+                  trackName: String(s.trackName || s.albumTitle || 'Unknown'),
+                  artistName: String(s.artistName),
+                  previewUrl: String(s.previewUrl || s.fileUrl || ''),
+                  audio_features: {
+                    tempo: Number(src.tempo ?? 120),
+                    energy: Number(src.energy ?? 0.5),
+                    valence: Number(src.valence ?? 0.5),
+                    danceability: Number(src.danceability ?? 0.5),
+                    acousticness: Number(src.acousticness ?? 0.5),
+                    spectral_centroid: Number(src.spectral_centroid ?? 1500),
+                    spectral_rolloff: Number(src.spectral_rolloff ?? 3000),
+                    zero_crossing_rate: Number(src.zero_crossing_rate ?? 0.05),
+                    instrumentalness: Number(src.instrumentalness ?? 0.5),
+                    loudness: Number(src.loudness ?? -14),
+                    speechiness: Number(src.speechiness ?? 0.1),
+                  },
+                };
+              }),
+              target_ids: targetIds,
+              limit: BATCH_SIZE,
+            };
+
+            try {
+              const response = await fetch(`${apiBaseUrl}/api/audio/match-library`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+              });
+
+              if (response.ok) {
+                const data = fixTextDeep(await response.json());
+                const matches = data.matches || [];
+
+                matches.forEach((match) => {
+                  const key = normalizeTrackId(match.input_track_id);
+                  const fallbackTitle = match.matched_product_id ? `Track ${match.matched_product_id}` : 'No similar library track found';
+                  matchedByTrack.set(key, {
+                    id: match.matched_product_id ?? null,
+                    albumTitle: match.matched_product_name || fallbackTitle,
+                  });
+                });
+              } else {
+                const failText = await response.text();
+                console.warn('Bulk match non-200 response', response.status, failText);
+              }
+            } catch (e) {
+              console.warn('Bulk match failed', e);
+            }
+
+            await new Promise((r) => setTimeout(r, 50));
+          }
+        };
+
+        await runMatchPass(songs);
+
+        const unresolved = songs.filter((s) => !matchedByTrack.has(normalizeTrackId(s.trackId || s.id)));
+        if (unresolved.length > 0) {
+          console.warn(`[SimilarSongs] Retrying library match for ${unresolved.length} unresolved songs`);
+          await runMatchPass(unresolved);
+        }
+
+        setSongs((currentSongs) =>
+          currentSongs.map((song) => {
+            const key = normalizeTrackId(song.trackId || song.id);
+            const resolved = matchedByTrack.get(key);
+            return {
+              ...song,
+              matchedDbSong:
+                resolved ||
+                song.matchedDbSong || {
+                  id: null,
+                  albumTitle: 'No similar library track found',
+                },
+            };
+          })
+        );
+
+        setAnalyzing(false);
+    };
+
+    matchSongsUsingBulkEndpoint();
+  }, [loading, dbSongs.length, songs.length, cachedAudioFeatures]);
 
     // Filter songs and sort by the same unified score used by the visualizer.
   const filteredSongs = useMemo(() => {
@@ -667,7 +798,7 @@ const SimilarSongs = () => {
             {analyzing && (
                 <div className="flex items-center gap-2">
                     <div className="w-3 h-3 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin"></div>
-                    <span className="text-xs text-yellow-500 font-semibold animate-pulse">Analyzing audio & matching... scores update live</span>
+                    <span className="text-xs text-yellow-500 font-semibold animate-pulse">Loading similar library songs...</span>
                 </div>
             )}
           </div>
@@ -716,18 +847,18 @@ const SimilarSongs = () => {
           </div>
         )}
         {/* Empty State - when no song is playing */}
-        {(!activeSong || Object.keys(activeSong).length === 0) && (
+        {!currentTargetContext && (
           <div className="bg-gradient-to-br from-gray-900 to-black p-4 rounded-lg border border-gray-800">
-            <p className="text-gray-400 text-center text-sm">Play a song to see recommendations</p>
+            <p className="text-gray-400 text-center text-sm">Loading library match...</p>
           </div>
         )}
 
-        {/* Active State - when a song is playing */}
-        {activeSong && Object.keys(activeSong).length > 0 && (
+        {/* Active State - when matching context is available */}
+        {currentTargetContext && (
         <div className="bg-gradient-to-br from-gray-900 to-black p-4 rounded-lg border border-gray-800 overflow-x-hidden">
           <h4 className="text-sm font-bold text-white mb-1">Similar Artist Tracks</h4>
           <p className="text-[12px] text-gray-400 leading-tight">
-            Based on <span className="text-cyan-400 font-semibold truncate">{activeSong.trackName || activeSong.albumTitle}</span>
+            Based on <span className="text-cyan-400 font-semibold truncate">{currentTargetContext.trackName || currentTargetContext.albumTitle}</span>
           </p>
 
           {/* Current Track Analysis */}
@@ -736,9 +867,9 @@ const SimilarSongs = () => {
                 {/* Spinning Album Cover */}
                 <div className="relative w-12 h-16 flex-shrink-0">
                   <img 
-                    key={activeSong?.albumCoverImageUrl || activeSong?.artworkUrl100 || 'no-cover'}
-                    src={getSafeCoverUrl(activeSong, '200x200')}
-                    alt={activeSong.trackName || activeSong.albumTitle}
+                    key={currentTargetContext?.albumCoverImageUrl || currentTargetContext?.artworkUrl100 || 'no-cover'}
+                    src={getSafeCoverUrl(currentTargetContext, '200x200')}
+                    alt={currentTargetContext.trackName || currentTargetContext.albumTitle}
                     className={`w-12 h-12 rounded-full object-cover border-2 border-cyan-500/50 ${isPlaying ? 'animate-spin' : ''}`}
                     style={{ animationDuration: '3s' }}
                     onError={(e) => { e.target.src = fallbackImage; }}
@@ -748,8 +879,8 @@ const SimilarSongs = () => {
                   </div>
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-[17px] font-semibold text-white truncate leading-tight">{activeSong.trackName || activeSong.albumTitle}</p>
-                  <p className="text-[12px] text-gray-400 truncate -mt-3">{activeSong.artistName || 'Unknown Artist'}</p>
+                  <p className="text-[17px] font-semibold text-white truncate leading-tight">{currentTargetContext.trackName || currentTargetContext.albumTitle}</p>
+                  <p className="text-[12px] text-gray-400 truncate -mt-3">{currentTargetContext.artistName || 'Unknown Artist'}</p>
                 </div>
                 {isPlaying && (
                   <div className="flex gap-0.5">
@@ -793,10 +924,11 @@ const SimilarSongs = () => {
                       };
                   })
                   .sort((a, b) => b.similarity_score - a.similarity_score)
-                  .map((rec) => {
+                  .slice(0, 5)
+                  .map((rec, idx) => {
                   return (
                   <div 
-                    key={rec.id}
+                    key={String(rec.product_id || rec.id || rec.trackId || `${rec.trackName || 'rec'}-${idx}`)}
                     onClick={() => handleRecommendationClick(rec)}
                     className="relative p-2 bg-gray-800/70 hover:bg-gray-700/70 rounded-lg border border-gray-700 hover:border-cyan-500 transition-all cursor-pointer group"
                   >
