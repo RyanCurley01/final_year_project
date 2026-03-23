@@ -294,7 +294,7 @@ async def startup_cache():
                                 
                                 console.log(f"   ✅ Best scaler: {best_scaler_name} (silhouette={best_sil:.4f})")
                                 
-                                # 3. Split FULL 39D scaled data for model training
+                                # 3. Split FULL 51D scaled data for model training
                                 # Models train on full feature space so each algorithm
                                 # learns genuinely different boundaries. PCA is only for visualization.
                                 y = cluster_names
@@ -307,7 +307,7 @@ async def startup_cache():
                                     stratify=y_test, test_size=0.5, random_state=1138
                                 )
                                 
-                                # 4. Train and tune 4 models with GridSearchCV on 39D features
+                                # 4. Train and tune 4 models with GridSearchCV on 51D features
                                 
                                 # Support Vector Machine (RBF kernel for non-linear boundaries)
                                 grid_svm = GridSearchCV(
@@ -444,7 +444,7 @@ async def startup_cache():
                                 console.log(f"   ★ Best model: {best_model_name} (val={best_val:.4f})")
                                 
                                 # 9. Decision boundary grids for each model
-                                # Map 2D grid back to 39D via PCA inverse_transform, then predict
+                                # Map 2D grid back to 51D via PCA inverse_transform, then predict
                                 grid_res = 80
                                 x_min_g = float(X_pca[:, 0].min() - 0.5)
                                 x_max_g = float(X_pca[:, 0].max() + 0.5)
@@ -455,8 +455,8 @@ async def startup_cache():
                                     np.linspace(y_min_g, y_max_g, grid_res)
                                 )
                                 grid_2d = np.c_[xx.ravel(), yy.ravel()]
-                                # Project 2D grid points back to 39D scaled space
-                                grid_39d = pca_reducer.inverse_transform(grid_2d)
+                                # Project 2D grid points back to 51D scaled space
+                                grid_51d = pca_reducer.inverse_transform(grid_2d)
                                 
                                 boundary_base = {
                                     "x_min": x_min_g, "x_max": x_max_g,
@@ -466,7 +466,7 @@ async def startup_cache():
                                 
                                 all_model_boundaries = {}
                                 for mname, mdl in individual_full_models.items():
-                                    preds = mdl.predict(grid_39d)
+                                    preds = mdl.predict(grid_51d)
                                     labels_list = [int(p.split()[-1]) for p in preds]
                                     all_model_boundaries[mname] = {
                                         **boundary_base,
