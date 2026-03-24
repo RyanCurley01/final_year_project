@@ -22,17 +22,42 @@ import os
 import sys
 from collections import defaultdict
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Set, Tuple
 
 import boto3
 import pymysql
 import requests
+from dotenv import load_dotenv
 
 
 DEFAULT_TARGET_SIZE = 80
 DEFAULT_S3_PREFIX = "generated-images"
 DEFAULT_DOWNLOAD_TIMEOUT_SECS = 10
 DEFAULT_DOWNLOAD_LIMIT_BYTES = 8_000_000
+
+
+def _load_env_files() -> None:
+    candidates: List[Path] = []
+
+    script_path = Path(__file__).resolve()
+    candidates.extend(script_path.parents)
+
+    cwd = Path.cwd().resolve()
+    candidates.append(cwd)
+    candidates.extend(cwd.parents)
+
+    seen: Set[Path] = set()
+    for root in candidates:
+        if root in seen:
+            continue
+        seen.add(root)
+        for env_path in (root / "audio_service" / ".env", root / ".env"):
+            if env_path.exists():
+                load_dotenv(env_path, override=False)
+
+
+_load_env_files()
 
 
 @dataclass
@@ -48,12 +73,25 @@ class DbRow:
     url_hash: str
 
 
+@dataclass(frozen=True)
+class S3Object:
+    key: str
+    product_id: int
+    url_hash: str
+    byte_size: int
+    content_type: Optional[str]
+    last_modified_ts: float
+    public_url: str
+
+
 @dataclass
 class Plan:
     overflow_db_ids: List[int]
     overflow_keys: Set[str]
     orphan_s3_keys: Set[str]
     missing_kept_rows: List[DbRow]
+    missing_db_objects: List[S3Object]
+    refresh_db_objects: List[S3Object]
     kept_keys_expected: Set[str]
 
 
@@ -100,6 +138,14 @@ def _s3_client():
     return boto3.client(**kwargs)
 
 
+def _public_s3_url(bucket: str, region: str, key: str) -> str:
+    return f"https://{bucket}.s3.{region}.amazonaws.com/{key}"
+
+
+def _build_local_image_url(product_id: int, url_hash: str) -> str:
+    return f"/api/images/file/{int(product_id)}/{str(url_hash)}"
+
+
 def _guess_ext_from_content_type(content_type: Optional[str]) -> str:
     if not content_type:
         return ".img"
@@ -115,20 +161,81 @@ def _guess_ext_from_content_type(content_type: Optional[str]) -> str:
     return ".img"
 
 
+def _guess_content_type_from_key(key: str) -> str:
+    lower = str(key).strip().lower()
+    if lower.endswith(".jpg") or lower.endswith(".jpeg"):
+        return "image/jpeg"
+    if lower.endswith(".png"):
+        return "image/png"
+    if lower.endswith(".webp"):
+        return "image/webp"
+    if lower.endswith(".gif"):
+        return "image/gif"
+    return "application/octet-stream"
+
+
 def _build_storage_key(prefix: str, row: DbRow) -> str:
     ext = _guess_ext_from_content_type(row.content_type)
     return f"{prefix}/{row.product_id}/{row.url_hash}{ext}"
 
 
-def _list_pool_keys(s3, bucket: str, prefix: str) -> Set[str]:
-    keys: Set[str] = set()
+def _parse_pool_key(prefix: str, key: str) -> Optional[Tuple[int, str]]:
+    cleaned_prefix = str(prefix).strip().strip("/")
+    cleaned_key = str(key).strip()
+    expected_prefix = f"{cleaned_prefix}/"
+    if not cleaned_key.startswith(expected_prefix):
+        return None
+
+    remainder = cleaned_key[len(expected_prefix):]
+    parts = remainder.split("/")
+    if len(parts) != 2:
+        return None
+
+    product_part, filename = parts
+    if "." not in filename:
+        return None
+
+    try:
+        product_id = int(product_part)
+    except ValueError:
+        return None
+
+    url_hash = filename.rsplit(".", 1)[0].strip()
+    if not url_hash:
+        return None
+    return product_id, url_hash
+
+
+def _list_pool_objects(s3, bucket: str, prefix: str, region: str) -> Tuple[List[S3Object], Set[str]]:
+    objects: List[S3Object] = []
+    invalid_keys: Set[str] = set()
     paginator = s3.get_paginator("list_objects_v2")
     for page in paginator.paginate(Bucket=bucket, Prefix=f"{prefix}/"):
         for obj in page.get("Contents", []):
             key = str(obj.get("Key") or "").strip()
-            if key:
-                keys.add(key)
-    return keys
+            if not key:
+                continue
+
+            parsed = _parse_pool_key(prefix, key)
+            if not parsed:
+                invalid_keys.add(key)
+                continue
+
+            product_id, url_hash = parsed
+            last_modified = obj.get("LastModified")
+            last_modified_ts = float(last_modified.timestamp()) if last_modified else 0.0
+            objects.append(
+                S3Object(
+                    key=key,
+                    product_id=product_id,
+                    url_hash=url_hash,
+                    byte_size=int(obj.get("Size") or 0),
+                    content_type=_guess_content_type_from_key(key),
+                    last_modified_ts=last_modified_ts,
+                    public_url=_public_s3_url(bucket, region, key),
+                )
+            )
+    return objects, invalid_keys
 
 
 def _fetch_db_rows(conn) -> List[DbRow]:
@@ -177,51 +284,109 @@ def _group_rows(rows: Iterable[DbRow]) -> Dict[int, List[DbRow]]:
     return grouped
 
 
+def _group_objects(objects: Iterable[S3Object]) -> Dict[int, List[S3Object]]:
+    grouped: Dict[int, List[S3Object]] = defaultdict(list)
+    for obj in objects:
+        grouped[obj.product_id].append(obj)
+    for pid in grouped:
+        grouped[pid].sort(key=lambda o: (o.last_modified_ts, o.key), reverse=True)
+    return grouped
+
+
+def _fetch_existing_product_ids(conn, product_ids: Set[int]) -> Set[int]:
+    if not product_ids:
+        return set()
+
+    found: Set[int] = set()
+    with conn.cursor() as cursor:
+        product_list = sorted(int(pid) for pid in product_ids)
+        for chunk in _chunked(product_list, 500):
+            placeholders = ",".join(["%s"] * len(chunk))
+            cursor.execute(
+                f"SELECT ProductID FROM Products WHERE ProductID IN ({placeholders})",
+                chunk,
+            )
+            for row in cursor.fetchall() or []:
+                found.add(int(row["ProductID"]))
+    return found
+
+
 def _build_plan(
+    conn,
     rows: List[DbRow],
-    s3_keys: Set[str],
+    s3_objects: List[S3Object],
+    invalid_s3_keys: Set[str],
     target_size: int,
     s3_prefix: str,
 ) -> Plan:
-    grouped = _group_rows(rows)
+    grouped_objects = _group_objects(s3_objects)
+    row_by_key: Dict[str, DbRow] = {}
+    for row in rows:
+        key = row.storage_key or _build_storage_key(s3_prefix, row)
+        row_by_key[key] = row
+
+    product_ids_in_s3 = {obj.product_id for obj in s3_objects}
+    existing_product_ids = _fetch_existing_product_ids(conn, product_ids_in_s3)
+    s3_keys = {obj.key for obj in s3_objects}
 
     overflow_db_ids: List[int] = []
     overflow_keys: Set[str] = set()
-    orphan_s3_keys: Set[str] = set()
+    orphan_s3_keys: Set[str] = set(invalid_s3_keys)
     missing_kept_rows: List[DbRow] = []
+    missing_db_objects: List[S3Object] = []
+    refresh_db_objects: List[S3Object] = []
     kept_keys_expected: Set[str] = set()
 
-    all_db_keys: Set[str] = set()
+    represented_row_ids: Set[int] = set()
 
-    for pid, pool_rows in grouped.items():
-        kept = pool_rows[:target_size]
-        overflow = pool_rows[target_size:]
+    for product_id, objects in grouped_objects.items():
+        kept = objects[:target_size]
+        overflow = objects[target_size:]
 
-        for row in kept:
-            key = row.storage_key or _build_storage_key(s3_prefix, row)
-            kept_keys_expected.add(key)
-            if row.storage_key:
-                all_db_keys.add(row.storage_key)
-            if key not in s3_keys:
-                missing_kept_rows.append(row)
-
-        for row in overflow:
-            overflow_db_ids.append(row.image_gen_id)
-            if row.storage_key:
-                overflow_keys.add(row.storage_key)
-                all_db_keys.add(row.storage_key)
-
-    for key in s3_keys:
-        if not key.startswith(f"{s3_prefix}/"):
+        if product_id not in existing_product_ids:
+            orphan_s3_keys.update(obj.key for obj in kept)
+            orphan_s3_keys.update(obj.key for obj in overflow)
             continue
-        if key not in kept_keys_expected:
-            orphan_s3_keys.add(key)
+
+        for obj in kept:
+            kept_keys_expected.add(obj.key)
+            db_row = row_by_key.get(obj.key)
+            if not db_row:
+                missing_db_objects.append(obj)
+                continue
+
+            represented_row_ids.add(db_row.image_gen_id)
+
+            expected_image_url = _build_local_image_url(obj.product_id, obj.url_hash)
+            if (
+                db_row.storage_key != obj.key
+                or db_row.image_url != expected_image_url
+                or (db_row.byte_size or 0) != int(obj.byte_size or 0)
+                or (db_row.content_type or "") != (obj.content_type or "")
+            ):
+                refresh_db_objects.append(obj)
+
+        for obj in overflow:
+            overflow_keys.add(obj.key)
+            db_row = row_by_key.get(obj.key)
+            if db_row:
+                overflow_db_ids.append(db_row.image_gen_id)
+                represented_row_ids.add(db_row.image_gen_id)
+
+    for row in rows:
+        key = row.storage_key or _build_storage_key(s3_prefix, row)
+        if key in overflow_keys:
+            continue
+        if key not in s3_keys:
+            missing_kept_rows.append(row)
 
     return Plan(
         overflow_db_ids=overflow_db_ids,
         overflow_keys=overflow_keys,
         orphan_s3_keys=orphan_s3_keys,
         missing_kept_rows=missing_kept_rows,
+        missing_db_objects=missing_db_objects,
+        refresh_db_objects=refresh_db_objects,
         kept_keys_expected=kept_keys_expected,
     )
 
@@ -328,6 +493,50 @@ def _backfill_missing_rows(
     return uploaded, failed
 
 
+def _upsert_db_rows_from_s3(conn, objects: List[S3Object]) -> int:
+    if not objects:
+        return 0
+
+    payload = [
+        (
+            obj.product_id,
+            "s3",
+            None,
+            obj.public_url,
+            obj.key,
+            obj.content_type,
+            obj.byte_size,
+            _build_local_image_url(obj.product_id, obj.url_hash),
+            obj.url_hash,
+            1980,
+            1280,
+            None,
+        )
+        for obj in objects
+    ]
+
+    with conn.cursor() as cursor:
+        cursor.executemany(
+            """
+            INSERT INTO ImageGeneration
+                (ProductID, Provider, KeywordTag, SourceUrl, StorageKey, ContentType, ByteSize,
+                 ImageUrl, UrlHash, Width, Height, LockId)
+            VALUES
+                (%s, %s, %s, %s, %s, %s, %s,
+                 %s, %s, %s, %s, %s)
+            ON DUPLICATE KEY UPDATE
+                Provider = VALUES(Provider),
+                SourceUrl = COALESCE(ImageGeneration.SourceUrl, VALUES(SourceUrl)),
+                StorageKey = VALUES(StorageKey),
+                ContentType = VALUES(ContentType),
+                ByteSize = VALUES(ByteSize),
+                ImageUrl = VALUES(ImageUrl)
+            """,
+            payload,
+        )
+        return int(cursor.rowcount or 0)
+
+
 def _print_summary(plan: Plan, song_count: int, s3_count: int, target_size: int):
     print("\n=== Image Pool Sync Plan ===")
     print(f"Songs with s3 rows: {song_count}")
@@ -337,6 +546,8 @@ def _print_summary(plan: Plan, song_count: int, s3_count: int, target_size: int)
     print(f"Overflow keys to delete from S3: {len(plan.overflow_keys)}")
     print(f"Orphan keys to delete from S3: {len(plan.orphan_s3_keys)}")
     print(f"Missing kept rows eligible for backfill: {len(plan.missing_kept_rows)}")
+    print(f"Missing DB rows to insert from S3: {len(plan.missing_db_objects)}")
+    print(f"Existing DB rows to refresh from S3: {len(plan.refresh_db_objects)}")
 
 
 def main() -> int:
@@ -365,21 +576,26 @@ def main() -> int:
     try:
         bucket = _required("bucket", args.bucket)
         s3_prefix = str(args.s3_prefix).strip().strip("/")
+        region = _required("AWS_REGION", _env("AWS_REGION", _env("AWS_DEFAULT_REGION", "eu-west-1")))
 
         conn = _mysql_conn()
         s3 = _s3_client()
 
         rows = _fetch_db_rows(conn)
         grouped = _group_rows(rows)
-        s3_keys = _list_pool_keys(s3, bucket, s3_prefix)
+        s3_objects, invalid_s3_keys = _list_pool_objects(s3, bucket, s3_prefix, region)
 
-        plan = _build_plan(rows, s3_keys, args.target_size, s3_prefix)
-        _print_summary(plan, song_count=len(grouped), s3_count=len(s3_keys), target_size=args.target_size)
+        plan = _build_plan(conn, rows, s3_objects, invalid_s3_keys, args.target_size, s3_prefix)
+        _print_summary(plan, song_count=len(grouped), s3_count=len(s3_objects), target_size=args.target_size)
 
         if not args.apply:
             print("\nDry-run only. Re-run with --apply to execute.")
             conn.close()
             return 0
+
+        inserted_from_s3 = len(plan.missing_db_objects)
+        refreshed_from_s3 = len(plan.refresh_db_objects)
+        _upsert_db_rows_from_s3(conn, plan.missing_db_objects + plan.refresh_db_objects)
 
         deleted_rows = _delete_db_rows(conn, plan.overflow_db_ids)
         deleted_overflow_s3 = _delete_s3_keys(s3, bucket, plan.overflow_keys)
@@ -406,6 +622,8 @@ def main() -> int:
         print(f"Deleted DB overflow rows: {deleted_rows}")
         print(f"Deleted S3 overflow keys: {deleted_overflow_s3}")
         print(f"Deleted S3 orphan keys: {deleted_orphan_s3}")
+        print(f"Inserted DB rows from S3: {inserted_from_s3}")
+        print(f"Refreshed DB rows from S3: {refreshed_from_s3}")
         print(f"Backfilled missing kept rows: {uploaded}")
         print(f"Backfill failures: {failed}")
         print("\nDone.")
