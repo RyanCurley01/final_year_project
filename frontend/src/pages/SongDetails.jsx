@@ -474,11 +474,10 @@ const SongDetails = () => {
             await computeMLSimilarity(songData, validSongs);
           } else {
             console.log("Skipping ML similarity: Target is not audio or no valid comparison songs");
-            setLoading(false);
-             if (!isTargetAudio) {
-                 setError('ML Similarity not available for non-audio (ZIP) content.');
+            if (isTargetAudio) {
+                await computeMLSimilarity(songData, []);
             } else {
-                 setError('No other songs available for comparison.');
+                setLoading(false);
             }
           }
         } else {
@@ -507,11 +506,6 @@ const SongDetails = () => {
              } else {
                  console.log("Skipping ML similarity: Target is not audio");
                  setLoading(false);
-                 if (!isTargetAudio) {
-                     setError('ML Similarity not available for non-audio (ZIP) content.');
-                 } else {
-                     setError('No other songs from this artist available for comparison.');
-                 }
              }
           }
         }

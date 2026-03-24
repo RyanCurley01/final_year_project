@@ -49,16 +49,6 @@ const isPlaceholderArtist = (name) => {
   return !n || n === 'unknown artist' || n === 'library artist';
 };
 
-// Shuffle array helper
-const shuffleArray = (array) => {
-  const shuffled = [...array];
-  for (let i = shuffled.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-  }
-  return shuffled;
-};
-
 // Helper function for mood-based colors - same as SmartRecommendationVisualizer
 const getFeatureColor = (label, value) => {
   const numericValue = parseInt(value);

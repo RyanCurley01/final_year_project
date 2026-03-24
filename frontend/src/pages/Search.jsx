@@ -21,55 +21,78 @@ import { fixTextDeep } from '../utils/fixText';
 
 const ARTISTS = ['Aphex Twin', 'Boards of Canada', 'Squarepusher'];
 
-const getArtistBadgeColor = (artist) => {
-  if (artist?.toLowerCase().includes('aphex')) return 'bg-purple-500';
-  if (artist?.toLowerCase().includes('boards')) return 'bg-orange-500';
-  if (artist?.toLowerCase().includes('squarepusher')) return 'bg-cyan-500';
-  return 'bg-gray-500';
-};
-
 const fallbackImage = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="250" height="250" viewBox="0 0 250 250"><rect width="250" height="250" fill="#374151"/><circle cx="125" cy="125" r="80" fill="#4B5563"/><circle cx="125" cy="125" r="30" fill="#374151"/><circle cx="125" cy="125" r="10" fill="#6B7280"/></svg>');
+
+const normalizeTrackId = (value) => {
+  const numeric = Number(value);
+  if (Number.isFinite(numeric) && numeric !== 0) {
+    return String(Math.abs(numeric));
+  }
+  return String(value ?? '');
+};
 
 const SongCard = ({ song, isPlaying, activeSong, onPlay, onPause, index, onSongNameClick, onArtistClick, onAlbumClick, playbackRate }) => {
   const dispatch = useDispatch();
+  // Resolves direct identity equality checks verifying global playback pointers against local references.
   const isThisSongActive = activeSong?.id === song.id;
   
-  // Prioritize the song's own artwork. Only use matched DB song's cover if the main song has none (unlikely for iTunes)
-  // And definitely do NOT override artwork with a video from a matched song for the card display.
+  // Evaluates cascading fallback chains determining primary visual boundaries, strictly isolating 
+  // embedded metadata graphics to prevent unwanted video allocations overriding static imagery constraints.
   const albumArt = song.albumCoverImageUrl || song.artworkUrl100?.replace('100x100', '600x600') || fallbackImage;
   
-  // Enable video only for database songs (discover page style)
+  // Imposes database origin requirements restricting rich media rendering loops exclusively 
+  // to internally hosted entities containing explicit MP4 references.
   const isVideo = song.source === 'database' && albumArt && albumArt.toLowerCase().includes('.mp4');
   const coverMedia = albumArt;
+  
+  // Maps definitive origin state booleans routing conditional UI rendering logic.
   const isLibrarySong = song.source === 'database';
+  
+  // Generates unified identification strings applying lower-case transformations detecting 
+  // exact keyword matches mapping custom component overrides natively.
   const songTitle = song.trackName || song.albumTitle || '';
   const isTeddyEmotion = songTitle.toLowerCase().includes('teddy emotion');
   const useOnsetImages = isVideo && !isTeddyEmotion;
   
+  // Instantiates local boolean tracking primitives defining CSS visibility classes globally.
   const [isHovered, setIsHovered] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
 
-  // Discount logic matching CustomerScreen SongCard (even IDs get 50% off)
+  // Processes modulus calculations extracting uniform deterministic price modifications 
+  // binding even-numbered item integers directly towards mathematical discount reductions.
   const songPrice = song.matchedDbSong?.albumPrice || song.price || 0;
   const songId = song.matchedDbSong?.id || song.id;
   const hasDiscount = isLibrarySong && songId != null && songId % 2 === 0;
   const discountedPrice = hasDiscount ? songPrice / 2 : null;
 
-  // Wishlist support
+  // Mounts global Redux selectors monitoring remote persistent structural arrays mapping 
+  // currently authed user boundaries against strictly internally sourced audio records.
   const { items: wishlistItems } = useSelector((state) => state.wishlist);
   const { currentUser } = useAuth();
+  
+  // Computes precise intersection booleans returning true exclusively if current properties 
+  // reside inside user-specific remote relational tables explicitly.
   const isWishlisted = isLibrarySong && wishlistItems.some(
     (item) => item.productId === songId || item.product?.id === songId
   );
 
+
+  // Executes asynchronous user authentication checks dispatching complex nested persistence payloads.
+  // Performs deterministic fallback evaluations routing distinct HTTP token structures depending 
+  // on active session origin types (Firebase vs Standard native identities).
   const handleToggleWishlist = async (e) => {
     e.stopPropagation();
     if (!currentUser || !isLibrarySong) return;
+    
+    // Normalizes parameter bindings standardizing backend variable shapes natively.
     const accountId = currentUser.id;
     const email = currentUser.email || currentUser.accountEmailAddress;
     const password = currentUser.password;
     const isFirebaseUser = !!currentUser.firebaseUid;
     let authParams = {};
+    
+    // Injects verified asynchronous Firebase identity strings directly preventing rejected loops 
+    // when evaluating secured remote wishlist interfaces.
     if (isFirebaseUser && firebaseAuth.currentUser) {
       try {
         const token = await firebaseAuth.currentUser.getIdToken();
@@ -78,7 +101,12 @@ const SongCard = ({ song, isPlaying, activeSong, onPlay, onPause, index, onSongN
     } else if (email && password) {
       authParams = { email, password };
     }
+    
+    // Determines strict boolean gates limiting asynchronous dispatches only if tokens resolved successfully.
     const hasAuth = !!(authParams.password || authParams.firebaseToken);
+    
+    // Overwrites current relational sets applying explicitly bound structural payloads mapped 
+    // against globally available context identifiers executing dual local and remote mutations.
     if (isWishlisted) {
       const entry = wishlistItems.find((item) => item.productId === songId || item.product?.id === songId);
       if (entry) {
@@ -91,13 +119,15 @@ const SongCard = ({ song, isPlaying, activeSong, onPlay, onPause, index, onSongN
     }
   };
 
-  // Handle playback rate change for videos
+  // Parses mathematical string value evaluations capturing numeric user interventions globally.
+  // Overrides primary DOM events halting propagation to securely update Redux states.
   const handlePlaybackRateChange = (e) => {
     const newRate = parseFloat(e.target.value);
     dispatch(setPlaybackRate(newRate));
   };
 
-  // Handle clicking on song name - navigate to details
+  // Traps strict navigation context hooks capturing bound dataset identities passing parameters 
+  // towards parent evaluation routines avoiding default application event bubbling blocks.
   const handleSongNameClick = (e) => {
     e.stopPropagation();
     if (onSongNameClick) {
@@ -105,7 +135,8 @@ const SongCard = ({ song, isPlaying, activeSong, onPlay, onPause, index, onSongN
     }
   };
 
-  // Handle clicking on artist name - navigate to artist details
+  // Isolates exact text values executing nested routing invocations dynamically pushing users 
+  // into specified detail hierarchies rendering matching records conditionally.
   const handleArtistClick = (e) => {
     e.stopPropagation();
     if (onArtistClick) {
@@ -113,7 +144,8 @@ const SongCard = ({ song, isPlaying, activeSong, onPlay, onPause, index, onSongN
     }
   };
 
-  // Handle clicking on album name - navigate to album details
+  // Distributes complex application node updates routing users identically towards specialized 
+  // views based directly on associated album identifier parameters.
   const handleAlbumClick = (e) => {
     e.stopPropagation();
     if (onAlbumClick && song.collectionName) {
@@ -363,7 +395,10 @@ const SongCard = ({ song, isPlaying, activeSong, onPlay, onPause, index, onSongN
 };
 
 const Search = () => {
+  // Extracts explicit navigational matching strings driving primary search iterations.
   const { searchTerm } = useParams();
+  
+  // Instantiates local UI boolean handlers defining conditional visual components structurally.
   const [loading, setLoading] = useState(true);
   const [songs, setSongs] = useState([]);
   const [dbSongs, setDbSongs] = useState([]);
@@ -371,28 +406,32 @@ const Search = () => {
   const [error, setError] = useState(null);
   const [recommendations, setRecommendations] = useState([]);
   const [recLoading, setRecLoading] = useState(false);
-  const [recommendationPool, setRecommendationPool] = useState([]); // Pool of all artist songs for visualizer
+  const [recommendationPool, setRecommendationPool] = useState([]);
   const [displayedFeatures, setDisplayedFeatures] = useState(null);
   const [displayedPlaybackRate, setDisplayedPlaybackRate] = useState(1);
-  const [cachedAudioFeatures, setCachedAudioFeatures] = useState({}); // Real features from DB
+  const [cachedAudioFeatures, setCachedAudioFeatures] = useState({});
   const [analyzing, setAnalyzing] = useState(false);
   
+  // Maps persistent asynchronous references overcoming React state closure staleness across loops.
   const intervalRef = useRef(null);
   const dispatch = useDispatch();
   const navigate = useNavigate();
   const { activeSong, isPlaying, playbackRate } = useSelector((state) => state.player);
   
-  // Get audio features from shared context
+  // Extracts real-time graphical context bindings reflecting global media element matrices natively.
   const { audioFeatures } = useAudioFeatures();
+  const matchStartedRef = useRef(false);
   
-  // Store values in refs so interval always has latest value without triggering re-renders
+  // Caches active analytical node parameters enforcing constant reference access inside unmounted iterations.
   const audioFeaturesRef = useRef(audioFeatures);
   audioFeaturesRef.current = audioFeatures;
   const playbackRateRef = useRef(playbackRate);
   playbackRateRef.current = playbackRate;
 
-  // Initial data fetch - searches database songs and iTunes artist songs based on searchTerm
+  // Executes asynchronous queries resolving cross-platform data joins merging native database objects with iTunes entities.
   useEffect(() => {
+      matchStartedRef.current = false;
+      setAnalyzing(false);
     const abortController = new AbortController();
     
     const fetchSearchResults = async () => {
@@ -495,7 +534,7 @@ const Search = () => {
           source: 'database'
         }));
         
-        // NOW filter that pool by the user's search word
+        // Now filter that pool by the user's search word
         // fetches all products from the database and filters them locally to see if 
         // the typed word is in the song name, Album Title, Artist Name, or Genre.
         const filteredArtistSongs = allArtistSongs.filter(song => {
@@ -588,110 +627,287 @@ const Search = () => {
     fetchCachedFeatures();
   }, []); // Fetch once on mount
 
-  // Single useEffect to handle all recommendation updates (Visualizer logic commented out)
-  /*
+  // --- Bulk Match Hook: Correlate external iTunes songs with internal Database tracks ---
+  // This hook silently pipelines all loaded iTunes songs through the ML matching backend 
+  // so the UI can display which specific local library track was deemed "most visually/musically similar".
   useEffect(() => {
-    // Clear any existing interval
-    if (intervalRef.current) {
-      clearInterval(intervalRef.current);
-      intervalRef.current = null;
-    }
+    // Early exit guard clause: Do not execute if core data is missing or still fetching.
+    if (loading || dbSongs.length === 0 || songs.length === 0) return;
+    
+    // Thread safety flag constraint: Enforce strict single-execution concurrency. 
+    // Prevents duplicate expensive bulk matching loops across aggressive React strict-mode re-renders.
+    if (matchStartedRef.current) return;
 
-    if (!activeSong || songs.length === 0) {
-      setRecommendations([]);
-      return;
-    }
+    // Lock the execution mutex state and display loading indicators in the UI.
+    matchStartedRef.current = true;
+    setAnalyzing(true);
+    const matchStartedAt = Date.now();
 
-    // Helper function to update recommendations
-    const updateRecs = async () => {
-      try {
+    const finishAnalyzing = async () => {
+      const elapsed = Date.now() - matchStartedAt;
+      const minVisibleMs = 700;
+      if (elapsed < minVisibleMs) {
+        await new Promise((resolve) => setTimeout(resolve, minVisibleMs - elapsed));
+      }
+      setAnalyzing(false);
+    };
+
+    // Internal async closure handling the bulk networking request logic.
+    const matchSongsUsingBulkEndpoint = async () => {
         const apiBaseUrl = envConfig.getApiBaseUrl();
-        // Unified endpoint handles pool selection based on source
+        console.log(`[SimilarSongs] Matching ${songs.length} iTunes songs to Library using Bulk Match...`);
+        const candidateSongs = songs.filter((song) => song.source !== 'database');
+        if (candidateSongs.length === 0) {
+          await finishAnalyzing();
+          return;
+        }
         
-        // Note: displayedSongs was likely intended to be filteredSongs or songs, check variable scope if restoring
-        const candidateSource = songs; // Fallback if displayedSongs was unavailable
+        // Define rate limits: process a maximum of 10 external songs per API transmission.
+        const BATCH_SIZE = 10;
+        
+        // Extract a flat array of valid library reference Database IDs to act as the scoring bounds.
+        const targetIds = dbSongs
+          .map((s) => Number(s.id))
+          .filter((id) => Number.isFinite(id) && id > 0);
+        
+        // Initialize a runtime dictionary map holding successful positive track correlations.
+        const matchedByTrack = new Map();
 
-        const payload = {
-            source: 'search_component',
-            current_product_id: String(activeSong.trackId || activeSong.id),
-            preview_url: String(activeSong.previewUrl || activeSong.fileUrl || ''),
-            audio_features: audioFeaturesRef.current ? {
-                 tempo: Number(audioFeaturesRef.current.tempo),
-                 energy: Number(audioFeaturesRef.current.energy),
-                 valence: Number(audioFeaturesRef.current.valence),
-                 danceability: Number(audioFeaturesRef.current.danceability),
-                 acousticness: Number(audioFeaturesRef.current.acousticness),
-                 effective_tempo: audioFeaturesRef.current.tempo ? (Number(audioFeaturesRef.current.tempo) * Number(playbackRateRef.current || 1)) : null,
-                 playback_rate: Number(playbackRateRef.current || 1)
-            } : null,
-            limit: 5,
-            // Compare against top 15 results to prevent backend timeout from feature extraction
-            // Strict casting to prevent 422 errors
-            candidates: candidateSource.slice(0, 15).map(s => ({
-                trackId: String(s.trackId || s.id || 0),
-                trackName: String(s.trackName || s.albumTitle || 'Unknown Track'),
-                artistName: String(s.artistName || 'Unknown Artist'),
-                collectionName: s.collectionName || s.albumTitle ? String(s.collectionName || s.albumTitle) : null,
-                artworkUrl100: s.artworkUrl100 || s.coverImage ? String(s.artworkUrl100 || s.coverImage) : null,
-                previewUrl: s.previewUrl || s.fileUrl ? String(s.previewUrl || s.fileUrl) : null
-                // Removed extra fields (price, genre, duration) to avoid validation errors if backend is stale
-            })),
-            limit: 5
+        // Sub-function orchestrating the chunking protocol constraints and network calls.
+        const runMatchPass = async (candidateSongs) => {
+          const batches = [];
+          
+          // Slice the large candidate array into smaller, manageable subarrays dictated by BATCH_SIZE.
+          for (let i = 0; i < candidateSongs.length; i += BATCH_SIZE) {
+            batches.push(candidateSongs.slice(i, i + BATCH_SIZE));
+          }
+
+          // Iteratively send each sliced cluster to the remote backend service synchronously.
+          for (const batch of batches) {
+            const payload = {
+              // Map the external candidate structures to fit backend schema expectations
+              candidates: batch.map((s) => {
+                // Ensure Track ID casts predictably to a string baseline
+                const rawId = String(s.trackId || s.id || '');
+                const numericId = Number(rawId);
+                
+                // Account for potential negative integer mappings used for internal cache differentiation.
+                const negId = Number.isFinite(numericId) && numericId !== 0 ? String(-Math.abs(numericId)) : null;
+                
+                // Determine whether static cached features exist for the song identity.
+                const cached = cachedAudioFeatures[rawId] || (negId ? cachedAudioFeatures[negId] : null);
+                
+                // Use cached parameters as primary logic source; default to direct object values otherwise.
+                const src = cached || s;
+
+                // Return a heavily normalized audio payload containing 11 required ML feature fields.
+                // Apply strict defaults utilizing the nullish coalescing operator to prevent division/math errors remotely.
+                return {
+                  trackId: String(s.trackId || s.id),
+                  trackName: String(s.trackName || s.albumTitle || 'Unknown'),
+                  artistName: String(s.artistName),
+                  previewUrl: String(s.previewUrl || s.fileUrl || ''),
+                  audio_features: {
+                    tempo: Number(src.tempo ?? 120),
+                    energy: Number(src.energy ?? 0.5),
+                    valence: Number(src.valence ?? 0.5),
+                    danceability: Number(src.danceability ?? 0.5),
+                    acousticness: Number(src.acousticness ?? 0.5),
+                    spectral_centroid: Number(src.spectral_centroid ?? 1500),
+                    spectral_rolloff: Number(src.spectral_rolloff ?? 3000),
+                    zero_crossing_rate: Number(src.zero_crossing_rate ?? 0.05),
+                    instrumentalness: Number(src.instrumentalness ?? 0.5),
+                    loudness: Number(src.loudness ?? -14),
+                    speechiness: Number(src.speechiness ?? 0.1),
+                  },
+                };
+              }),
+              // Configure computational boundaries limits for the backend logic model.
+              limit: BATCH_SIZE,
+            };
+
+            if (targetIds.length > 0) {
+              // Attach the active pool of native DB targets when valid IDs exist.
+              payload.target_ids = targetIds;
+            }
+
+            try {
+              // Initiate POST payload mapping correlation matrices on the python application layer over local proxy.
+              const response = await fetch(`${apiBaseUrl}/api/audio/match-library`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+              });
+
+              if (response.ok) {
+                // Read matched output safely mapped via Unicode normalizers.
+                const data = fixTextDeep(await response.json());
+                const matches = data.matches || [];
+
+                // Store positive matches by hashing their normalized ID locally for instant UI referencing.
+                matches.forEach((match) => {
+                  const key = normalizeTrackId(match.input_track_id);
+                  const fallbackTitle = match.matched_product_id ? `Track ${match.matched_product_id}` : 'No similar library track found';
+                  
+                  // Retain structured relationship details containing native application identifiers.
+                  matchedByTrack.set(key, {
+                    id: match.matched_product_id ?? null,
+                    albumTitle: match.matched_product_name || fallbackTitle,
+                  });
+                });
+              } else {
+                // Log non-200 protocol codes effectively without halting execution arrays.
+                const failText = await response.text();
+                console.warn('Bulk match non-200 response', response.status, failText);
+              }
+            } catch (e) {
+              // Silently trap and log total network failures, allowing subsequent iteration batches continuity.
+              console.warn('Bulk match failed', e);
+            }
+
+            // Implement a deliberate 50ms pacing delay between loop triggers to act as network back-pressure protection.
+            await new Promise((r) => setTimeout(r, 50));
+          }
         };
 
-        console.log('[Search] Sending Unified Payload:', JSON.stringify(payload, null, 2));
+        const runUnifiedFallback = async (songsToMatch) => {
+          for (const song of songsToMatch) {
+            const songKey = normalizeTrackId(song.trackId || song.id);
+            if (matchedByTrack.has(songKey)) continue;
 
-        const response = await fetch(`${apiBaseUrl}/api/audio/unified-recommendations`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(payload),
-          signal: AbortSignal.timeout(5000)
-        });
+            const previewUrl = String(song.previewUrl || song.fileUrl || '');
+            if (!previewUrl) continue;
 
-        if (response.ok) {
-           const data = fixTextDeep(await response.json());
-           if (data.recommendations) {
-               setRecommendations(data.recommendations);
-           }
-           if (data.target_features) {
-               setDisplayedFeatures({
-                   tempo: data.target_features.tempo,
-                   energy: data.target_features.energy,
-                   valence: data.target_features.valence,
-                   danceability: data.target_features.danceability
-               });
-           }
+            const rawId = String(song.trackId || song.id || '');
+            const numericId = Number(rawId);
+            const negId = Number.isFinite(numericId) && numericId !== 0 ? String(-Math.abs(numericId)) : null;
+            const cached = cachedAudioFeatures[rawId] || (negId ? cachedAudioFeatures[negId] : null);
+
+            const payload = {
+              source: 'search_component',
+              current_product_id: rawId,
+              preview_url: previewUrl,
+              limit: 1,
+            };
+
+            if (cached) {
+              payload.audio_features = {
+                tempo: Number(cached.tempo ?? 120),
+                energy: Number(cached.energy ?? 0.5),
+                valence: Number(cached.valence ?? 0.5),
+                danceability: Number(cached.danceability ?? 0.5),
+                acousticness: Number(cached.acousticness ?? 0.5),
+                spectral_centroid: Number(cached.spectral_centroid ?? 1500),
+                spectral_rolloff: Number(cached.spectral_rolloff ?? 3000),
+                zero_crossing_rate: Number(cached.zero_crossing_rate ?? 0.05),
+                instrumentalness: Number(cached.instrumentalness ?? 0.5),
+                loudness: Number(cached.loudness ?? -14),
+                speechiness: Number(cached.speechiness ?? 0.1),
+              };
+            }
+
+            try {
+              const response = await fetch(`${apiBaseUrl}/api/audio/unified-recommendations`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+              });
+
+              if (!response.ok) {
+                await new Promise((resolve) => setTimeout(resolve, 40));
+                continue;
+              }
+
+              const data = fixTextDeep(await response.json());
+              const first = (data.recommendations || [])[0];
+              if (!first) {
+                await new Promise((resolve) => setTimeout(resolve, 40));
+                continue;
+              }
+
+              const matchedId = first.product_id || first.id || first.trackId || null;
+              if (matchedId == null) {
+                await new Promise((resolve) => setTimeout(resolve, 40));
+                continue;
+              }
+
+              matchedByTrack.set(songKey, {
+                id: matchedId,
+                albumTitle:
+                  first.albumTitle ||
+                  first.trackName ||
+                  first.collectionName ||
+                  `Track ${matchedId}`,
+              });
+            } catch (err) {
+              console.warn('Search unified fallback failed:', err);
+            }
+
+            await new Promise((resolve) => setTimeout(resolve, 40));
+          }
+        };
+
+        // Execute the main bulk matching pass for all loaded external artists.
+        await runMatchPass(candidateSongs);
+
+        // Identify any songs that failed to return a valid local library match during the primary run.
+        const unresolved = candidateSongs.filter((s) => !matchedByTrack.has(normalizeTrackId(s.trackId || s.id)));
+        
+        // If orphaned tracks exist, trigger a secondary fallback network pass specifically targeting those failures.
+        if (unresolved.length > 0) {
+          console.warn(`[SimilarSongs] Retrying library match for ${unresolved.length} unresolved songs`);
+          await runMatchPass(unresolved);
         }
-      } catch (err) {
-         // console.warn("ML Similarity update failed", err);
-      }
+
+        const stillUnresolved = candidateSongs.filter((s) => !matchedByTrack.has(normalizeTrackId(s.trackId || s.id)));
+        if (stillUnresolved.length > 0) {
+          await runUnifiedFallback(stillUnresolved.slice(0, 30));
+        }
+
+        // Commit the final resolution matrix back to the master song array in component state.
+        setSongs((currentSongs) =>
+          currentSongs.map((song) => {
+            if (song.source === 'database') return song;
+
+            // Re-normalize identifiers to ensure strict map lookups avoid type or whitespace mismatches.
+            const key = normalizeTrackId(song.trackId || song.id);
+            const resolved = matchedByTrack.get(key);
+            
+            // Merge the resolved local database ID and Title directly onto the external iTunes object.
+            // Assign a dummy fallback object string if the track completely failed similarity thresholding.
+            return {
+              ...song,
+              matchedDbSong:
+                resolved ||
+                song.matchedDbSong || {
+                  id: null,
+                  albumTitle: 'No similar library track found',
+                },
+            };
+          })
+        );
+
+        // Remove the visual loading flag indicating network bulk-analysis completion.
+        await finishAnalyzing();
     };
 
-    // Immediate update
-    setRecLoading(true);
-    updateRecs();
-    setRecLoading(false);
+    // Invoke the asynchronous bulk match logic tree on mount.
+    matchSongsUsingBulkEndpoint().catch(async (err) => {
+      console.warn('Search bulk matching aborted:', err);
+      await finishAnalyzing();
+    });
+  }, [loading, dbSongs.length, songs.length, cachedAudioFeatures]);
+  
 
-    // Set up polling interval (3 seconds) - same as SmartRecommendationVisualizer
-    intervalRef.current = setInterval(updateRecs, 3000);
-
-    // Cleanup
-    return () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-        intervalRef.current = null;
-      }
-    };
-  }, [activeSong?.id, recommendationPool, songs]);
-  */
-
+  // Calculates deterministic subset parameters routing internal queries matching text 
+  // definitions against standardized entity shapes preserving unchanged memory states.
   const filteredSongs = useMemo(() => {
     if (filter === 'all') return songs;
     return songs.filter(song => song.artistName?.toLowerCase().includes(filter.toLowerCase()));
   }, [songs, filter]);
 
+  // Invokes global audio configuration models passing strict component tracking 
+  // indicators switching primary UI rendering nodes into active playing context loops.
   const handlePlay = (song, index) => {
     if (song.fileUrl) {
       dispatch(setActiveSong({ song, data: filteredSongs, i: index }));
@@ -699,13 +915,17 @@ const Search = () => {
     }
   };
 
+  // Traps current active playback nodes issuing deterministic boolean false 
+  // signals resetting global state buffers avoiding runtime media collisions.
   const handlePause = () => {
     dispatch(playPause(false));
   };
 
-  // Handle clicking on a song name - navigate to song details page
+  // Orchestrates dynamic detail routing constructing parameterized history stacks 
+  // isolating explicitly matching components preventing internal layout rendering crashes.
   const handleSongNameClick = (song) => {
-    // For database songs, navigate like Discover page with full product data
+    // Processes strict schema translations masking deep nested database objects into 
+    // unified surface-level interfaces identical towards standard discovery architectures.
     if (song.source === 'database') {
       const dbSong = song.matchedDbSong || song;
       navigate(`/songs/${dbSong.productId || dbSong.id || song.id}`, {
@@ -741,43 +961,49 @@ const Search = () => {
         }
       });
     } else {
-      // For artist songs, navigate with iTunes data - only use songs from the 3 main artists for similarity
+      // Isolates generalized external fallback iterations specifically validating standard 
+      // array bounds limiting similarity matrices strictly to predefined query artists.
       const mainArtistSongs = songs.filter(s => {
-        if (s.id === song.id) return false; // Exclude current song
+        if (s.id === song.id) return false;
         const artistLower = (s.artistName || '').toLowerCase();
         return artistLower.includes('aphex') || 
                artistLower.includes('boards of canada') || 
                artistLower.includes('squarepusher');
       });
       
+      // Executes standard react router navigations passing localized payload targets.
       navigate(`/songs/${song.trackId || song.id}`, {
         state: {
           song: song,
-          artistSongs: mainArtistSongs, // Only pass songs from the 3 main artists
-          fromDiscover: true // Use all passed songs for similarity (not filtered by artist)
+          artistSongs: mainArtistSongs,
+          fromDiscover: true
         }
       });
     }
   };
 
-  // Handle clicking on artist name - navigate to artist details page
+  // Injects structural text substitutions converting display constants into valid 
+  // navigation slugs targeting static predefined sub-router configurations natively.
   const handleArtistClick = (artistName) => {
     const slug = artistName.toLowerCase().replace(/\s+/g, '-');
     navigate(`/artists/${slug}`);
   };
 
-  // Handle clicking on album name - navigate to album details page
+  // Encodes raw string identifiers structuring parameter constraints pushing interface 
+  // viewports explicitly into targeted relational list boundaries rendering metadata maps.
   const handleAlbumClick = (albumName, song) => {
     navigate(`/albums/${encodeURIComponent(albumName)}`, {
       state: {
-        // Pass artist name to filter album songs by artist
+        // Transmits contextual lookup criteria ensuring dynamic filtering logic applies 
+        // accurately when resolving disjoint dataset structures within secondary mounted components.
         artistName: song.artistName,
         albumArtwork: song.artworkUrl100?.replace('100x100', '600x600')
       }
     });
   };
 
-  // Handle clicking on a recommended artist song
+  // Traps click propagation overriding localized track arrays binding direct player nodes 
+  // triggering autonomous audio decoding natively via store dispatcher endpoints.
   const handleRecommendationClick = (song) => {
     if (song?.fileUrl) {
       const index = songs.findIndex(s => s.id === song.id);
@@ -812,7 +1038,7 @@ const Search = () => {
     );
   }
 
-  // Show no results state
+  // Conditionally builds the UX to represent an exhaustive but empty cross-reference search
   if (songs.length === 0 && !loading) {
     return (
       <div className="flex flex-col items-center justify-center h-[60vh]">
@@ -827,7 +1053,7 @@ const Search = () => {
 
   return (
     <div className="flex flex-col lg:flex-row gap-6 scrollbar-hide overflow-x-hidden">
-      {/* Main Content */}
+      {/* Compiles the central structural div housing the primary Search application grid */}
       <div className={`flex-1 min-w-0`}>
         {/* Back navigation */}
         <div className="mb-4">
@@ -868,7 +1094,7 @@ const Search = () => {
           */}
         </div>
 
-        {/* Song Grid */}
+        {/* Instantiates a dynamic mapping pipeline converting nested song objects into distinct interactive SongCards within a Tailwind CSS grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6">
           {filteredSongs.map((song, i) => (
             <SongCard key={song.id} song={song} isPlaying={isPlaying} activeSong={activeSong} onPlay={handlePlay} onPause={handlePause} index={i} onSongNameClick={handleSongNameClick} onArtistClick={handleArtistClick} onAlbumClick={handleAlbumClick} playbackRate={playbackRate} />
@@ -876,7 +1102,7 @@ const Search = () => {
         </div>
       </div>
 
-      {/* Right Sidebar - Real-time Recommendations */}
+      {/* Reserves conditionally rendered layout real estate to act as an asynchronous recommendation view context */}
       {false && (
       <div className={`w-full ${filter === 'visualizer' ? 'lg:w-full lg:max-w-full' : 'lg:w-[330px] lg:min-w-[330px]'}`}>
         {/* Back button when in visualizer mode */}

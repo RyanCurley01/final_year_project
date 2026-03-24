@@ -54,7 +54,7 @@ def _env_bool(name: str, default: bool = False) -> bool:
     return str(raw).strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
-EXTERNAL_IMAGE_GENERATION_ENABLED = _env_bool("EXTERNAL_IMAGE_GENERATION_ENABLED", default=False)
+EXTERNAL_IMAGE_GENERATION_ENABLED = _env_bool("EXTERNAL_IMAGE_GENERATION_ENABLED", default=True)
 
 # Imported iTunes AudioFeatures retention controls.
 # Keep this bounded so historical chart churn does not degrade ML clustering and similarity quality.
