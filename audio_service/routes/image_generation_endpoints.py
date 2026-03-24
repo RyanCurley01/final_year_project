@@ -80,15 +80,6 @@ def get_image_pool(
             "mood": mood,
         }
 
-    if not core._is_library_product_id(int(product_id)):
-        return {
-            "images": [],
-            "source": "library_song_only",
-            "song_title": song_title,
-            "tags_used": [],
-            "mood": mood,
-        }
-
     try:
         with core.get_db_connection() as conn:
             if not conn:

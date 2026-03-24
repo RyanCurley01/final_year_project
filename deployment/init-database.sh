@@ -222,6 +222,33 @@ USE Game_Store_System;
         INDEX idx_interaction_type (InteractionType),
         INDEX idx_timestamp (InteractionTimestamp)
     );
+
+    -- Keep derived purchase tracking tables in sync with each new order item.
+    DROP TRIGGER IF EXISTS After_Order_Item_Insert;
+    DELIMITER //
+    CREATE TRIGGER After_Order_Item_Insert
+    AFTER INSERT ON Order_Items
+    FOR EACH ROW
+    BEGIN
+        DECLARE v_AccountID BIGINT;
+
+        INSERT INTO Sold_Products (OrderItemID, ProductID)
+        VALUES (NEW.OrderItemID, NEW.ProductID);
+
+        INSERT INTO Purchased_Products (OrderItemID, ProductID)
+        VALUES (NEW.OrderItemID, NEW.ProductID);
+
+        SELECT AccountID INTO v_AccountID
+        FROM Orders
+        WHERE OrderID = NEW.OrderID
+        LIMIT 1;
+
+        IF v_AccountID IS NOT NULL THEN
+            INSERT INTO CustomerSummary (AccountID, ProductID, OrderID)
+            VALUES (v_AccountID, NEW.ProductID, NEW.OrderID);
+        END IF;
+    END//
+    DELIMITER ;
     
 
     -- Insert Accounts (Managers, Employees, Customers)
@@ -804,7 +831,46 @@ USE Game_Store_System;
 EOSQL
 )
 
-# Try localhost first, then remote host
-echo "$SQL_COMMANDS" | mysql -u root -p"${MYSQL_ROOT_PASSWORD}" || echo "$SQL_COMMANDS" | mysql --protocol=TCP --host=db -u root -p"${MYSQL_ROOT_PASSWORD}"
+# Resolve script-relative paths so this script works from any cwd
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LIB_AF_SQL_PATH="${SCRIPT_DIR}/../scripts/database/audio_features_insert.sql"
+
+run_mysql_pipe() {
+    local sql="$1"
+    echo "$sql" | mysql -u root -p"${MYSQL_ROOT_PASSWORD}" \
+        || echo "$sql" | mysql --protocol=TCP --host=db -u root -p"${MYSQL_ROOT_PASSWORD}"
+}
+
+run_mysql_query() {
+    local query="$1"
+    mysql -Nse "$query" -u root -p"${MYSQL_ROOT_PASSWORD}" \
+        || mysql --protocol=TCP --host=db -Nse "$query" -u root -p"${MYSQL_ROOT_PASSWORD}"
+}
+
+run_mysql_file() {
+    local file_path="$1"
+    mysql -u root -p"${MYSQL_ROOT_PASSWORD}" Game_Store_System < "$file_path" \
+        || mysql --protocol=TCP --host=db -u root -p"${MYSQL_ROOT_PASSWORD}" Game_Store_System < "$file_path"
+}
+
+# Run the main initialization payload
+run_mysql_pipe "$SQL_COMMANDS"
+
+# Safety net: if positive ProductID AudioFeatures are missing, backfill them from the standalone seed file.
+LIB_AF_COUNT=$(run_mysql_query "USE Game_Store_System; SELECT COUNT(*) FROM AudioFeatures WHERE ProductID > 0;")
+if [ -z "$LIB_AF_COUNT" ]; then
+    echo "ERROR: Unable to verify AudioFeatures seed count."
+    exit 1
+fi
+
+if [ "$LIB_AF_COUNT" -lt 47 ]; then
+    if [ ! -f "$LIB_AF_SQL_PATH" ]; then
+        echo "ERROR: Missing fallback seed file: $LIB_AF_SQL_PATH"
+        exit 1
+    fi
+
+    echo "Library AudioFeatures missing ($LIB_AF_COUNT found). Backfilling from $LIB_AF_SQL_PATH"
+    run_mysql_file "$LIB_AF_SQL_PATH"
+fi
 
 echo "Database initialization complete!"

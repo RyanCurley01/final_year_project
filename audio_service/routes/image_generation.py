@@ -100,8 +100,8 @@ def _schedule_pool_refill(
     if not _EXTERNAL_IMAGE_GENERATION_ENABLED:
         return
 
-    # Product IDs must be positive library IDs for DB-backed pool refill.
-    if product_id <= 0:
+    # Product IDs can be positive (library) or negative (imported iTunes).
+    if not _is_supported_product_id(product_id):
         return
 
     # Throttle refill scheduling per song to avoid repeated background jobs.
@@ -439,6 +439,11 @@ def _allowed_images_by_budget(remaining_bytes: int, avg_image_bytes: int) -> int
 def _is_library_product_id(product_id: int) -> bool:
     """Library songs use positive ProductIDs; iTunes-imported songs use negative IDs."""
     return int(product_id) > 0
+
+
+def _is_supported_product_id(product_id: int) -> bool:
+    """Image pools support both library and imported songs; only zero/invalid IDs are rejected."""
+    return int(product_id) != 0
 
 
 def _sanitize_filename(value: str, fallback: str = "image-pool") -> str:
@@ -1266,7 +1271,7 @@ def ensure_song_image_pool(
     if not _EXTERNAL_IMAGE_GENERATION_ENABLED:
         return 0
 
-    if not _is_library_product_id(product_id):
+    if not _is_supported_product_id(product_id):
         return 0
 
     with get_db_connection() as conn:
