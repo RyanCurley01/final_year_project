@@ -345,8 +345,8 @@ const StockSidebar = () => {
                           {renderSection("New Songs This Week", newThisWeek, productMap, {
                             statusResolver: () => true,
                           })}
-                          {renderSection("Unavailable Songs (Last Week)", unavailableLastWeek, productMap)}
-                          {renderSection("Unavailable Songs (This Week)", unavailableThisWeek, productMap)}
+                          {renderSection("Unavailable Songs This Week", unavailableThisWeek, productMap)}
+                          {renderSection("Unavailable Songs Last Week", unavailableLastWeek, productMap)}
                         </>
                       );
                     })()
