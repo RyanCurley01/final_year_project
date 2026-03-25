@@ -4,6 +4,36 @@
 
 COMPOSE_FILE="docker-compose.services.yml"
 PROJECT_NAME="gamestore_services"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+repair_order_tracking() {
+    local trigger_sql="${SCRIPT_DIR}/add_order_triggers.sql"
+    local backfill_sql="${SCRIPT_DIR}/backfill_order_tracking.sql"
+    local attempts=0
+    local max_attempts=30
+
+    if [ ! -f "$trigger_sql" ] || [ ! -f "$backfill_sql" ]; then
+        echo "⚠️  Skipping order tracking repair: SQL files not found"
+        return 0
+    fi
+
+    echo "🔧 Ensuring order tracking trigger and backfill are applied..."
+    until docker compose -f "$COMPOSE_FILE" -p "$PROJECT_NAME" exec -T db \
+        sh -lc 'mysqladmin ping -h localhost -u root -p"$MYSQL_ROOT_PASSWORD" --silent' >/dev/null 2>&1; do
+        attempts=$((attempts + 1))
+        if [ "$attempts" -ge "$max_attempts" ]; then
+            echo "⚠️  Database did not become ready in time; skipping order tracking repair"
+            return 1
+        fi
+        sleep 2
+    done
+
+    docker compose -f "$COMPOSE_FILE" -p "$PROJECT_NAME" exec -T db \
+        sh -lc 'mysql -u root -p"$MYSQL_ROOT_PASSWORD" Game_Store_System' < "$trigger_sql"
+    docker compose -f "$COMPOSE_FILE" -p "$PROJECT_NAME" exec -T db \
+        sh -lc 'mysql -u root -p"$MYSQL_ROOT_PASSWORD" Game_Store_System' < "$backfill_sql"
+    echo "✅ Order tracking trigger and backfill applied"
+}
 
 show_usage() {
     echo "Usage: $0 [COMMAND] [OPTIONS]"
@@ -44,6 +74,7 @@ start_services() {
         echo "🚀 Starting all microservices..."
         echo "📦 This will start: database, accounts, products, orders, payments, and ai services"
         docker compose -f "$COMPOSE_FILE" -p "$PROJECT_NAME" up -d
+        repair_order_tracking
         echo "✅ All services started"
         echo ""
         echo "📝 Note: These services run OUTSIDE your dev container"
@@ -51,6 +82,9 @@ start_services() {
     else
         echo "🚀 Starting $1..."
         docker compose -f "$COMPOSE_FILE" -p "$PROJECT_NAME" up -d "$1"
+        if [ "$1" = "db" ]; then
+            repair_order_tracking
+        fi
         echo "✅ $1 started"
     fi
 }
@@ -71,10 +105,14 @@ restart_services() {
     if [ -z "$1" ]; then
         echo "🔄 Restarting all microservices..."
         docker compose -f "$COMPOSE_FILE" -p "$PROJECT_NAME" restart
+        repair_order_tracking
         echo "✅ All services restarted"
     else
         echo "🔄 Restarting $1..."
         docker compose -f "$COMPOSE_FILE" -p "$PROJECT_NAME" restart "$1"
+        if [ "$1" = "db" ]; then
+            repair_order_tracking
+        fi
         echo "✅ $1 restarted"
     fi
 }

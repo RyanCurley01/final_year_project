@@ -834,6 +834,8 @@ EOSQL
 # Resolve script-relative paths so this script works from any cwd
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LIB_AF_SQL_PATH="${SCRIPT_DIR}/../scripts/database/audio_features_insert.sql"
+ORDER_TRIGGER_SQL_PATH="${SCRIPT_DIR}/add_order_triggers.sql"
+ORDER_BACKFILL_SQL_PATH="${SCRIPT_DIR}/backfill_order_tracking.sql"
 
 run_mysql_pipe() {
     local sql="$1"
@@ -855,6 +857,16 @@ run_mysql_file() {
 
 # Run the main initialization payload
 run_mysql_pipe "$SQL_COMMANDS"
+
+# Re-apply order tracking trigger/backfill explicitly so derived purchase tables
+# are present even if trigger creation was skipped in an older initialization.
+if [ -f "$ORDER_TRIGGER_SQL_PATH" ]; then
+    run_mysql_file "$ORDER_TRIGGER_SQL_PATH"
+fi
+
+if [ -f "$ORDER_BACKFILL_SQL_PATH" ]; then
+    run_mysql_file "$ORDER_BACKFILL_SQL_PATH"
+fi
 
 # Safety net: if positive ProductID AudioFeatures are missing, backfill them from the standalone seed file.
 LIB_AF_COUNT=$(run_mysql_query "USE Game_Store_System; SELECT COUNT(*) FROM AudioFeatures WHERE ProductID > 0;")
