@@ -1052,13 +1052,14 @@ async def refresh_topcharts():
 
         iTunes songs (ProductID < 0):
             1. Fetch the current Top 150 chart songs (RSS) + 75 search songs.
-      2. Songs that dropped off the charts → mark unavailable in Stock (kept for history).
-      3. New chart entries → import Products + AudioFeatures + Stock.
-      4. Existing chart songs → ensure Stock is available.
+            2. Determine a strict replacement budget for this cycle.
+            3. Import up to that many new chart entries.
+            4. Mark the same number of dropped songs unavailable in Stock (kept for history).
+            5. Existing chart songs → ensure Stock is available.
 
         Library songs (ProductID > 0):
-            5. Validate the fixed 47-song library set has a reachable file_url (S3) and AudioFeatures.
-      6. Mark unavailable if the file is gone; mark available if it came back.
+            6. Validate the fixed 47-song library set has a reachable file_url (S3) and AudioFeatures.
+            7. Mark unavailable if the file is gone; mark available if it came back.
 
     Finally reload the ML cache so recommendations reflect the latest state.
     """
@@ -1079,34 +1080,58 @@ async def refresh_topcharts():
         live_ids: set[int] = set(rss_entries.keys()) | set(search_tracks.keys())
         console.log(f"   📡 Live charts: {len(rss_entries)} top-chart + {len(search_tracks)} pop = {len(live_ids)} unique songs")
 
-        # 2. Get existing iTunes product IDs from DB
+        # 2. Get existing iTunes product IDs from DB and track which imported rows
+        # are currently available in stock. Only currently available songs can be
+        # removed as replacements in this cycle.
         existing_itunes_ids: set[int] = set()
+        available_itunes_ids: set[int] = set()
         with get_db_connection() as conn:
             if conn:
                 with conn.cursor() as cursor:
-                    cursor.execute("SELECT ProductID FROM Products WHERE ProductID < 0")
-                    existing_itunes_ids = {row['ProductID'] for row in cursor.fetchall()}
+                    cursor.execute(
+                        """
+                        SELECT p.ProductID, MAX(COALESCE(s.IsAvailable, 1)) AS IsAvailable
+                        FROM Products p
+                        LEFT JOIN Stock s ON s.ProductID = p.ProductID
+                        WHERE p.ProductID < 0
+                        GROUP BY p.ProductID
+                        """
+                    )
+                    imported_rows = cursor.fetchall()
+                    existing_itunes_ids = {int(row['ProductID']) for row in imported_rows}
+                    available_itunes_ids = {
+                        int(row['ProductID'])
+                        for row in imported_rows
+                        if int(row.get('IsAvailable') or 0) == 1
+                    }
         console.log(f"   💾 Existing in DB: {len(existing_itunes_ids)} iTunes songs")
 
-        # 3. Compute diff
-        ids_to_mark_unavailable = existing_itunes_ids - live_ids   # dropped off charts
-        ids_to_add              = live_ids - existing_itunes_ids   # new on charts
-        ids_kept                = existing_itunes_ids & live_ids   # still on charts
+        # 3. Compute diff and pair removals/additions so each cycle performs
+        # strict one-for-one replacement for the rotating imported pool.
+        ids_to_add_all = sorted(live_ids - existing_itunes_ids)
+        ids_dropped_all = sorted(available_itunes_ids - live_ids)
+        ids_kept = existing_itunes_ids & live_ids   # still on charts or returning from retention
 
-        console.log(f"   📊 Diff: {len(ids_to_mark_unavailable)} dropped, {len(ids_to_add)} new, {len(ids_kept)} kept")
+        console.log(f"   📊 Diff: {len(ids_dropped_all)} replaceable drops, {len(ids_to_add_all)} new, {len(ids_kept)} kept")
 
-        # 4. Mark dropped songs as unavailable (preserves history in Stock)
-        marked_unavailable_count = 0
-        if ids_to_mark_unavailable:
-            with get_db_connection() as conn:
-                if conn:
-                    with conn.cursor() as cursor:
-                        _mark_products_unavailable(cursor, list(ids_to_mark_unavailable))
-                        conn.commit()
-                        marked_unavailable_count = len(ids_to_mark_unavailable)
-            console.log(f"   🚫 Marked {marked_unavailable_count} dropped iTunes songs as unavailable")
+        # 4. Determine the exact number of replacement pairs allowed this cycle.
+        max_imports_per_cycle = int(os.getenv("MAX_IMPORTS_PER_CYCLE", str(AUDIO_FEATURES_MAX_IMPORTED_ROWS)))
+        replacement_budget = min(len(ids_dropped_all), len(ids_to_add_all), max_imports_per_cycle)
+        ids_to_add_this_cycle = ids_to_add_all[:replacement_budget]
+        ids_to_remove_candidates = ids_dropped_all[:replacement_budget]
+        deferred_additions_count = max(0, len(ids_to_add_all) - replacement_budget)
+        deferred_removals_count = max(0, len(ids_dropped_all) - replacement_budget)
+
+        if replacement_budget == 0:
+            console.log("   ℹ️ No replacement pairs scheduled this cycle")
+        else:
+            console.log(
+                f"   🔁 Replacement budget: {replacement_budget} "
+                f"(deferred adds: {deferred_additions_count}, deferred removals: {deferred_removals_count})"
+            )
 
         # 5. Re-mark kept songs as available (they're still on the charts)
+        # and revive retained songs that re-enter the live set.
         if ids_kept:
             with get_db_connection() as conn:
                 if conn:
@@ -1115,21 +1140,13 @@ async def refresh_topcharts():
                             _upsert_stock(cursor, int(pid), 1)
                         conn.commit()
 
-        # 6. Import new chart/search songs.
-        # Default allows filling up to configured imported capacity in one run.
-        MAX_IMPORTS_PER_CYCLE = int(os.getenv("MAX_IMPORTS_PER_CYCLE", str(AUDIO_FEATURES_MAX_IMPORTED_ROWS)))
+        # 6. Import only the matched replacement additions for this cycle.
+        marked_unavailable_count = 0
         imported_count = 0
         error_count = 0
-        skipped_for_next_cycle = 0
         loop = asyncio.get_running_loop()
 
-        for pid in ids_to_add:
-            if imported_count >= MAX_IMPORTS_PER_CYCLE:
-                skipped_for_next_cycle = len(ids_to_add) - imported_count - error_count
-                console.log(f"   ⏸️  Import cap reached ({MAX_IMPORTS_PER_CYCLE}). "
-                            f"{skipped_for_next_cycle} songs deferred to next cycle.")
-                break
-
+        for pid in ids_to_add_this_cycle:
             try:
                 song: dict | None = None
                 if pid in rss_entries:
@@ -1154,8 +1171,28 @@ async def refresh_topcharts():
                 error_count += 1
                 console.log(f"   ❌ Error importing {pid}: {e}")
 
+        # 7. Only retire as many currently available songs as were successfully
+        # imported, so every removal has a concrete replacement in the same cycle.
+        ids_to_mark_unavailable = ids_to_remove_candidates[:imported_count]
+        deferred_removals_count += max(0, replacement_budget - imported_count)
+        deferred_additions_count += max(0, replacement_budget - imported_count)
+
+        if ids_to_mark_unavailable:
+            with get_db_connection() as conn:
+                if conn:
+                    with conn.cursor() as cursor:
+                        _mark_products_unavailable(cursor, ids_to_mark_unavailable)
+                        conn.commit()
+                        marked_unavailable_count = len(ids_to_mark_unavailable)
+            console.log(f"   🚫 Marked {marked_unavailable_count} replaced iTunes songs as unavailable")
+
+        if imported_count != marked_unavailable_count:
+            console.log(
+                f"   ⚠️ Replacement imbalance after import: imported={imported_count}, removed={marked_unavailable_count}"
+            )
+
         # ── LIBRARY SONGS ─────────────────────────────────────────────
-        # 7. Validate library songs (positive ProductIDs): check file_url + AudioFeatures
+        # 8. Validate library songs (positive ProductIDs): check file_url + AudioFeatures
         library_available = 0
         library_unavailable = 0
         with get_db_connection() as conn:
@@ -1213,17 +1250,11 @@ async def refresh_topcharts():
                 )
 
         # ── RELOAD ────────────────────────────────────────────────────
-        # 8. Reload ML cache
+        # 9. Reload ML cache
         await ml_service.startup_cache()
 
         cached_imported_count = sum(1 for pid in ml_service.audio_features_cache if int(pid) < 0)
         cached_library_count = sum(1 for pid in ml_service.audio_features_cache if int(pid) > 0)
-        expected_imported_count = len(live_ids)
-
-        if cached_imported_count != expected_imported_count:
-            console.log(
-                f"   ⚠️ Imported cache count mismatch: expected {expected_imported_count}, got {cached_imported_count}"
-            )
 
         elapsed = (datetime.utcnow() - start_ts).total_seconds()
         summary = {
@@ -1233,10 +1264,12 @@ async def refresh_topcharts():
             "live_topcharts": len(rss_entries),
             "live_artist_search": len(search_tracks),
             "live_imported_total": len(live_ids),
-            "itunes_new_detected": len(ids_to_add),
+            "itunes_new_detected": len(ids_to_add_all),
+            "itunes_replacement_budget": replacement_budget,
             "itunes_marked_unavailable": marked_unavailable_count,
             "itunes_imported": imported_count,
-            "itunes_deferred": skipped_for_next_cycle,
+            "itunes_deferred_additions": deferred_additions_count,
+            "itunes_deferred_removals": deferred_removals_count,
             "itunes_kept": len(ids_kept),
             "library_available": library_available,
             "library_unavailable": library_unavailable,

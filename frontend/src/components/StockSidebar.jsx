@@ -37,6 +37,22 @@ const latestDateValue = (...values) => {
   return latest ? latest.toISOString() : null;
 };
 
+const getValidDate = (value) => {
+  if (!value) return null;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
+
+const normalizeProductId = (value) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const isImportedReplacementSong = (item) => {
+  const productId = normalizeProductId(item?.productId);
+  return productId !== null && productId < 0;
+};
+
 const StockSidebar = () => {
   const { currentUser } = useAuth();
   const [isOpen, setIsOpen] = useState(false);
@@ -262,8 +278,8 @@ const StockSidebar = () => {
               Stock Availability
             </h2>
             <p className="text-gray-400 text-sm mb-4">
-              Weekly stock summary with current songs, new songs this week,
-              unavailable songs from last week, and unavailable songs from this week.
+              Weekly stock summary with the current catalogue plus imported
+              replacement songs added and removed from the rotating stock pool.
             </p>
 
             <div className="overflow-auto bg-[#1a1a1a] p-2 rounded w-full">
@@ -294,19 +310,32 @@ const StockSidebar = () => {
 
                       const songsList = filteredData.filter((item) => !!isAvailable(item));
 
-                      const unavailableLastWeek = filteredData.filter((item) => {
+                      const replacementPool = filteredData.filter(isImportedReplacementSong);
+
+                      const unavailableLastWeek = replacementPool.filter((item) => {
                         const available = isAvailable(item);
                         return !available && inRange(item.unavailableSince, lastWeekStart, thisWeekStart);
                       });
 
-                      const unavailableThisWeek = filteredData.filter((item) => {
+                      const unavailableThisWeek = replacementPool.filter((item) => {
                         const available = isAvailable(item);
                         return !available && inRange(item.unavailableSince, thisWeekStart, nextWeekStart);
                       });
 
-                      const newThisWeek = songsList.filter((item) => {
+                      const newThisWeekCandidates = replacementPool.filter((item) => {
+                        const available = isAvailable(item);
+                        if (!available) return false;
                         return inRange(item.availableSince, thisWeekStart, nextWeekStart);
                       });
+
+                      const replacementCountThisWeek = unavailableThisWeek.length;
+                      const newThisWeek = [...newThisWeekCandidates]
+                        .sort((left, right) => {
+                          const rightDate = getValidDate(right.availableSince)?.getTime() ?? 0;
+                          const leftDate = getValidDate(left.availableSince)?.getTime() ?? 0;
+                          return rightDate - leftDate;
+                        })
+                        .slice(0, replacementCountThisWeek || newThisWeekCandidates.length);
 
                       return (
                         <>
