@@ -24,6 +24,7 @@ router = APIRouter()
 # Interval (in seconds) between automatic top-chart refreshes.
 # Default: 1 hour.  Override with env var TOPCHARTS_REFRESH_INTERVAL.
 REFRESH_INTERVAL = int(os.getenv("TOPCHARTS_REFRESH_INTERVAL", 60 * 60))
+STARTUP_REFRESH_DELAY = int(os.getenv("TOPCHARTS_STARTUP_REFRESH_DELAY", 5))
 
 # Weekly catalog composition targets
 TOPCHARTS_TARGET_COUNT = 150
@@ -1297,21 +1298,26 @@ async def refresh_topcharts():
 # BACKGROUND AUTO-REFRESH SCHEDULER
 # ============================================
 
+async def _run_scheduled_refresh(trigger: str):
+    try:
+        console.log(f"⏰ {trigger} store refresh starting (interval={REFRESH_INTERVAL}s)...")
+        await refresh_topcharts()
+    except Exception as e:
+        console.log(f"⚠️ {trigger} store refresh failed: {e}")
+
 async def _topcharts_refresh_loop():
     """
     Background coroutine that refreshes the store on a fixed interval (default 1 hour).
     Runs forever until the task is cancelled (e.g. on app shutdown).
     """
-    # Wait a short period after startup before the first refresh so the cache
-    # is already warmed when the service comes up.
-    await asyncio.sleep(30)
+    # Wait a short period after startup so dependent services are ready, then
+    # hydrate the imported catalogue immediately instead of waiting an hour.
+    if STARTUP_REFRESH_DELAY > 0:
+        await asyncio.sleep(STARTUP_REFRESH_DELAY)
+    await _run_scheduled_refresh("Startup")
     while True:
-        try:
-            console.log(f"⏰ Scheduled store refresh starting (interval={REFRESH_INTERVAL}s)...")
-            await refresh_topcharts()
-        except Exception as e:
-            console.log(f"⚠️ Scheduled store refresh failed: {e}")
         await asyncio.sleep(REFRESH_INTERVAL)
+        await _run_scheduled_refresh("Scheduled")
 
 
 def start_refresh_scheduler():
@@ -1319,7 +1325,9 @@ def start_refresh_scheduler():
     global _refresh_task
     if _refresh_task is None or _refresh_task.done():
         _refresh_task = asyncio.get_event_loop().create_task(_topcharts_refresh_loop())
-        console.log(f"🕐 Top-charts auto-refresh scheduled every {REFRESH_INTERVAL}s")
+        console.log(
+            f"🕐 Top-charts auto-refresh scheduled: startup delay={STARTUP_REFRESH_DELAY}s, interval={REFRESH_INTERVAL}s"
+        )
 
 
 def stop_refresh_scheduler():
