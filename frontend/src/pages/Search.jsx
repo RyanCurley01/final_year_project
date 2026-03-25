@@ -31,6 +31,42 @@ const normalizeTrackId = (value) => {
   return String(value ?? '');
 };
 
+const buildAudioFeaturePayload = (features) => {
+  if (!features) {
+    return null;
+  }
+
+  return {
+    tempo: Number(features.tempo ?? 120),
+    energy: Number(features.energy ?? 0.5),
+    valence: Number(features.valence ?? 0.5),
+    danceability: Number(features.danceability ?? 0.5),
+    acousticness: Number(features.acousticness ?? 0.5),
+    spectral_centroid: Number(features.spectral_centroid ?? features.spectralCentroid ?? 1500),
+    spectral_rolloff: Number(features.spectral_rolloff ?? features.spectralRolloff ?? 3000),
+    zero_crossing_rate: Number(features.zero_crossing_rate ?? features.zeroCrossingRate ?? 0.05),
+    instrumentalness: Number(features.instrumentalness ?? 0.5),
+    loudness: Number(features.loudness ?? -14),
+    speechiness: Number(features.speechiness ?? 0.1),
+  };
+};
+
+const MATCH_PENDING_STATE = {
+  id: null,
+  albumTitle: 'Matching library...',
+};
+
+const MATCH_NOT_FOUND_STATE = {
+  id: null,
+  albumTitle: 'No similar library track found',
+};
+
+const MATCH_STATUS = {
+  pending: 'pending',
+  resolved: 'resolved',
+  notFound: 'not_found',
+};
+
 const SongCard = ({ song, isPlaying, activeSong, onPlay, onPause, index, onSongNameClick, onArtistClick, onAlbumClick, playbackRate }) => {
   const dispatch = useDispatch();
   // Resolves direct identity equality checks verifying global playback pointers against local references.
@@ -381,11 +417,15 @@ const SongCard = ({ song, isPlaying, activeSong, onPlay, onPause, index, onSongN
               {song.collectionName}
             </p>
           </div>
-          {/* Matched to library section - like SimilarSongs page */}
-          {song.matchedDbSong && (
+          {/* Matched library section */}
+          {(song.matchedDbSong || song.matchStatus === MATCH_STATUS.pending) && (
             <div className="mt-2 pt-2 border-t border-gray-700">
               <p className="text-[10px] text-cyan-400">Matched to library:</p>
-              <p className="text-xs text-white truncate">{song.matchedDbSong.albumTitle}</p>
+              <p className="text-xs text-white truncate">
+                {song.matchStatus === MATCH_STATUS.pending
+                  ? MATCH_PENDING_STATE.albumTitle
+                  : song.matchedDbSong?.albumTitle}
+              </p>
             </div>
           )}
         </>
@@ -543,7 +583,11 @@ const Search = () => {
           const albumMatch = normalize(song.collectionName).includes(searchNorm);
           const genreMatch = normalize(song.primaryGenreName).includes(searchNorm);
           return trackMatch || artistMatch || albumMatch || genreMatch;
-        });
+        }).map((song) => ({
+          ...song,
+          matchedDbSong: null,
+          matchStatus: MATCH_STATUS.pending,
+        }));
         
         // Combine results and calculate relevance scores
         const allResults = [...filteredDbSongs, ...filteredArtistSongs].map(song => {
@@ -655,23 +699,44 @@ const Search = () => {
     // Internal async closure handling the bulk networking request logic.
     const matchSongsUsingBulkEndpoint = async () => {
         const apiBaseUrl = envConfig.getApiBaseUrl();
-        console.log(`[SimilarSongs] Matching ${songs.length} iTunes songs to Library using Bulk Match...`);
+        console.log(`[Search] Matching ${songs.length} iTunes songs to 47 library songs using Bulk Match...`);
         const candidateSongs = songs.filter((song) => song.source !== 'database');
         if (candidateSongs.length === 0) {
           await finishAnalyzing();
           return;
         }
         
-        // Define rate limits: process a maximum of 10 external songs per API transmission.
-        const BATCH_SIZE = 10;
+        // Define rate limits: process a maximum of 5 external songs per API transmission.
+        const BATCH_SIZE = 5;
         
-        // Extract a flat array of valid library reference Database IDs to act as the scoring bounds.
-        const targetIds = dbSongs
-          .map((s) => Number(s.id))
-          .filter((id) => Number.isFinite(id) && id > 0);
+        // Restrict matching to the curated 47-song internal library pool for this page.
+        const targetIds = Array.from(
+          new Set(
+            dbSongs
+              .map((song) => Number(song.id))
+              .filter((id) => Number.isFinite(id) && id > 0)
+          )
+        );
         
         // Initialize a runtime dictionary map holding successful positive track correlations.
         const matchedByTrack = new Map();
+
+        const applyResolvedMatches = () => {
+          setSongs((currentSongs) =>
+            currentSongs.map((song) => {
+              const resolved = matchedByTrack.get(normalizeTrackId(song.trackId || song.id));
+              if (!resolved) {
+                return song;
+              }
+
+              return {
+                ...song,
+                matchedDbSong: resolved,
+                matchStatus: MATCH_STATUS.resolved,
+              };
+            })
+          );
+        };
 
         // Sub-function orchestrating the chunking protocol constraints and network calls.
         const runMatchPass = async (candidateSongs) => {
@@ -697,30 +762,20 @@ const Search = () => {
                 // Determine whether static cached features exist for the song identity.
                 const cached = cachedAudioFeatures[rawId] || (negId ? cachedAudioFeatures[negId] : null);
                 
-                // Use cached parameters as primary logic source; default to direct object values otherwise.
-                const src = cached || s;
-
-                // Return a heavily normalized audio payload containing 11 required ML feature fields.
-                // Apply strict defaults utilizing the nullish coalescing operator to prevent division/math errors remotely.
-                return {
+                const audioFeatures = buildAudioFeaturePayload(cached);
+                const candidate = {
                   trackId: String(s.trackId || s.id),
                   trackName: String(s.trackName || s.albumTitle || 'Unknown'),
                   artistName: String(s.artistName),
                   previewUrl: String(s.previewUrl || s.fileUrl || ''),
-                  audio_features: {
-                    tempo: Number(src.tempo ?? 120),
-                    energy: Number(src.energy ?? 0.5),
-                    valence: Number(src.valence ?? 0.5),
-                    danceability: Number(src.danceability ?? 0.5),
-                    acousticness: Number(src.acousticness ?? 0.5),
-                    spectral_centroid: Number(src.spectral_centroid ?? 1500),
-                    spectral_rolloff: Number(src.spectral_rolloff ?? 3000),
-                    zero_crossing_rate: Number(src.zero_crossing_rate ?? 0.05),
-                    instrumentalness: Number(src.instrumentalness ?? 0.5),
-                    loudness: Number(src.loudness ?? -14),
-                    speechiness: Number(src.speechiness ?? 0.1),
-                  },
                 };
+
+                // Only send real cached features. Otherwise let the backend extract from preview audio.
+                if (audioFeatures) {
+                  candidate.audio_features = audioFeatures;
+                }
+
+                return candidate;
               }),
               // Configure computational boundaries limits for the backend logic model.
               limit: BATCH_SIZE,
@@ -747,7 +802,7 @@ const Search = () => {
                 // Store positive matches by hashing their normalized ID locally for instant UI referencing.
                 matches.forEach((match) => {
                   const key = normalizeTrackId(match.input_track_id);
-                  const fallbackTitle = match.matched_product_id ? `Track ${match.matched_product_id}` : 'No similar library track found';
+                  const fallbackTitle = match.matched_product_id ? `Track ${match.matched_product_id}` : 'No similar TopCharts track found';
                   
                   // Retain structured relationship details containing native application identifiers.
                   matchedByTrack.set(key, {
@@ -755,6 +810,8 @@ const Search = () => {
                     albumTitle: match.matched_product_name || fallbackTitle,
                   });
                 });
+
+                applyResolvedMatches();
               } else {
                 // Log non-200 protocol codes effectively without halting execution arrays.
                 const failText = await response.text();
@@ -770,83 +827,6 @@ const Search = () => {
           }
         };
 
-        const runUnifiedFallback = async (songsToMatch) => {
-          for (const song of songsToMatch) {
-            const songKey = normalizeTrackId(song.trackId || song.id);
-            if (matchedByTrack.has(songKey)) continue;
-
-            const previewUrl = String(song.previewUrl || song.fileUrl || '');
-            if (!previewUrl) continue;
-
-            const rawId = String(song.trackId || song.id || '');
-            const numericId = Number(rawId);
-            const negId = Number.isFinite(numericId) && numericId !== 0 ? String(-Math.abs(numericId)) : null;
-            const cached = cachedAudioFeatures[rawId] || (negId ? cachedAudioFeatures[negId] : null);
-
-            const payload = {
-              source: 'search_component',
-              current_product_id: rawId,
-              preview_url: previewUrl,
-              limit: 1,
-            };
-
-            if (cached) {
-              payload.audio_features = {
-                tempo: Number(cached.tempo ?? 120),
-                energy: Number(cached.energy ?? 0.5),
-                valence: Number(cached.valence ?? 0.5),
-                danceability: Number(cached.danceability ?? 0.5),
-                acousticness: Number(cached.acousticness ?? 0.5),
-                spectral_centroid: Number(cached.spectral_centroid ?? 1500),
-                spectral_rolloff: Number(cached.spectral_rolloff ?? 3000),
-                zero_crossing_rate: Number(cached.zero_crossing_rate ?? 0.05),
-                instrumentalness: Number(cached.instrumentalness ?? 0.5),
-                loudness: Number(cached.loudness ?? -14),
-                speechiness: Number(cached.speechiness ?? 0.1),
-              };
-            }
-
-            try {
-              const response = await fetch(`${apiBaseUrl}/api/audio/unified-recommendations`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload),
-              });
-
-              if (!response.ok) {
-                await new Promise((resolve) => setTimeout(resolve, 40));
-                continue;
-              }
-
-              const data = fixTextDeep(await response.json());
-              const first = (data.recommendations || [])[0];
-              if (!first) {
-                await new Promise((resolve) => setTimeout(resolve, 40));
-                continue;
-              }
-
-              const matchedId = first.product_id || first.id || first.trackId || null;
-              if (matchedId == null) {
-                await new Promise((resolve) => setTimeout(resolve, 40));
-                continue;
-              }
-
-              matchedByTrack.set(songKey, {
-                id: matchedId,
-                albumTitle:
-                  first.albumTitle ||
-                  first.trackName ||
-                  first.collectionName ||
-                  `Track ${matchedId}`,
-              });
-            } catch (err) {
-              console.warn('Search unified fallback failed:', err);
-            }
-
-            await new Promise((resolve) => setTimeout(resolve, 40));
-          }
-        };
-
         // Execute the main bulk matching pass for all loaded external artists.
         await runMatchPass(candidateSongs);
 
@@ -857,11 +837,6 @@ const Search = () => {
         if (unresolved.length > 0) {
           console.warn(`[SimilarSongs] Retrying library match for ${unresolved.length} unresolved songs`);
           await runMatchPass(unresolved);
-        }
-
-        const stillUnresolved = candidateSongs.filter((s) => !matchedByTrack.has(normalizeTrackId(s.trackId || s.id)));
-        if (stillUnresolved.length > 0) {
-          await runUnifiedFallback(stillUnresolved.slice(0, 30));
         }
 
         // Commit the final resolution matrix back to the master song array in component state.
@@ -880,9 +855,9 @@ const Search = () => {
               matchedDbSong:
                 resolved ||
                 song.matchedDbSong || {
-                  id: null,
-                  albumTitle: 'No similar library track found',
+                  ...MATCH_NOT_FOUND_STATE,
                 },
+              matchStatus: resolved ? MATCH_STATUS.resolved : MATCH_STATUS.notFound,
             };
           })
         );

@@ -37,6 +37,28 @@ from ml_service import KEY_NAME_TO_INDEX, TIME_SIG_TO_BEATS, _parse_json_list
 router = APIRouter()
 
 
+def _expand_match_target_ids(target_ids: Optional[List[int]]) -> Optional[set[int]]:
+    """Expand requested target IDs so live iTunes track IDs can match cached imported IDs."""
+    if not target_ids:
+        return None
+
+    expanded: set[int] = set()
+    for raw_target_id in target_ids:
+        try:
+            target_id = int(raw_target_id)
+        except Exception:
+            continue
+
+        if target_id == 0:
+            continue
+
+        expanded.add(target_id)
+        expanded.add(abs(target_id))
+        expanded.add(-abs(target_id))
+
+    return expanded or None
+
+
 def _resolve_discover_product_id(current_id_raw: str, preview_url: Optional[str]) -> int:
     """Resolve ProductID for discover/library songs.
 
@@ -1494,36 +1516,36 @@ async def melody_finder(request: MelodyFinderRequest):
 @router.post("/api/audio/match-library", response_model=Dict)
 async def match_library_songs(request: LibraryMatchRequest):
     """
-    Match external comparison songs against the ENTIRE internal library (cached products).
-    Used by SimilarSongs page to find which library track each artist song is most similar to.
-    
-    This is effectively a 'Reverse Search':
-    - Input: List of Artist Songs
-    - Target: All 47 cached library songs
-    - Output: For each input song, the best matching library song and score.
+    Match external comparison songs against a cached target pool.
+
+    By default this searches the positive-ID library cache. When target_ids are supplied,
+    the matcher restricts scoring to that explicit set, including imported iTunes/TopCharts
+    songs whose cached ProductIDs are stored as negative IDs.
     """
     try:
         if not ml_service.cache_loaded or not ml_service.audio_features_cache:
             # Try to trigger load if empty
             await ml_service.startup_cache()
             
-        # 1. Get Cached Library Songs (positive IDs)
-        # If target_ids provided in request, filter by them. Otherwise take all.
-        
-        target_set = set(request.target_ids) if request.target_ids else None
+        # 1. Get cached target songs.
+        # If target_ids are supplied, only compare against that explicit set.
+        # Otherwise preserve legacy behavior and compare against positive-ID library songs.
+        target_set = _expand_match_target_ids(request.target_ids)
         
         library_songs = []
         for pid, features in ml_service.audio_features_cache.items():
             try: 
                 pid_int = int(pid)
-                if pid_int > 0: # Positive IDs are library songs
-                    if target_set and pid_int not in target_set:
+                if target_set is not None:
+                    if pid_int not in target_set:
                         continue
-                        
-                    # Add ID to features for easier access
-                    f = features.copy()
-                    f['id'] = pid
-                    library_songs.append(f)
+                elif pid_int <= 0:
+                    continue
+
+                # Add ID to features for easier access
+                f = features.copy()
+                f['id'] = pid
+                library_songs.append(f)
             except: pass
             
         if not library_songs:
@@ -1592,49 +1614,42 @@ async def match_library_songs(request: LibraryMatchRequest):
             if not candidate_features:
                 continue
 
-            # Create vector for candidate
-            c_vec = [
-                float(candidate_features.get('tempo', 120) or 120) / 200.0,
-                float(candidate_features.get('energy', 0.5) or 0.5),
-                float(candidate_features.get('valence', 0.5) or 0.5),
-                float(candidate_features.get('danceability', 0.5) or 0.5),
-                float(candidate_features.get('acousticness', 0.5) or 0.5),
-                float(candidate_features.get('spectral_centroid', 1500.0) / 5000.0),
-                float(candidate_features.get('spectral_rolloff', 3000.0) / 10000.0),
-                float(candidate_features.get('zero_crossing_rate', 0.05) * 10.0),
-                float(candidate_features.get('instrumentalness', 0.5)),
-                float((candidate_features.get('loudness', -60.0) + 60.0) / 60.0),
-                float(candidate_features.get('speechiness', 0.1))
-            ]
+            # Build the same richer feature vector used by the main ML similarity routes.
+            c_vec = _build_similarity_vector(candidate_features)
             
             best_match = None
             best_score = -1.0
             
             # Compare against all library songs
             for lib_song in library_songs:
-                l_vec = [
-                    float(lib_song.get('tempo', 120) or 120) / 200.0,
-                    float(lib_song.get('energy', 0.5) or 0.5),
-                    float(lib_song.get('valence', 0.5) or 0.5),
-                    float(lib_song.get('danceability', 0.5) or 0.5),
-                    float(lib_song.get('acousticness', 0.5) or 0.5),
-                    float(lib_song.get('spectral_centroid', 1500.0) / 5000.0),
-                    float(lib_song.get('spectral_rolloff', 3000.0) / 10000.0),
-                    float(lib_song.get('zero_crossing_rate', 0.05) * 10.0),
-                    float(lib_song.get('instrumentalness', 0.5)),
-                    float((lib_song.get('loudness', -60.0) + 60.0) / 60.0),
-                    float(lib_song.get('speechiness', 0.1))
-                ]
+                l_vec = _build_similarity_vector(lib_song)
                 
-                # Manual Dot Product for speed (Cosine Sim)
-                # Vectors are not normalised here, so using sklearn is better usually
-                # But for 1 vs 47, loop is fine. 
-                # Let's use sklearn for batch if possible, but 1-to-many loop is okay here
+                # Blend the full-vector cosine score with musically legible core traits,
+                # matching the main recommendation pipeline more closely.
+                cosine_raw = float(cosine_similarity([c_vec], [l_vec])[0][0])
+                cosine_norm = max(0.0, min(1.0, (cosine_raw + 1.0) / 2.0))
+
+                tempo_match = 1.0 - min(abs(candidate_features.get('tempo', 120) - lib_song.get('tempo', 120)), 100) / 100
+                energy_match = 1.0 - abs(candidate_features.get('energy', 0.5) - lib_song.get('energy', 0.5))
+                mood_match = 1.0 - abs(candidate_features.get('valence', 0.5) - lib_song.get('valence', 0.5))
+                dance_match = 1.0 - abs(candidate_features.get('danceability', 0.5) - lib_song.get('danceability', 0.5))
+
+                core_match = (
+                    tempo_match * 0.25
+                    + energy_match * 0.30
+                    + mood_match * 0.20
+                    + dance_match * 0.25
+                )
+
+                blended_score = (cosine_norm * 0.45) + (core_match * 0.55)
+                blended_score = max(0.0, min(0.999, blended_score))
+
+                seed_str = f"{candidate.trackId}:{lib_song.get('id', '')}"
+                tie_jitter = (abs(hash(seed_str)) % 1000) / 1_000_000.0
+                blended_score = max(0.0, min(0.999, blended_score + tie_jitter))
                 
-                score = cosine_similarity([c_vec], [l_vec])[0][0]
-                
-                if score > best_score:
-                    best_score = score
+                if blended_score > best_score:
+                    best_score = blended_score
                     best_match = lib_song
 
             if best_match:
