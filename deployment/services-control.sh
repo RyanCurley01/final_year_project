@@ -6,6 +6,11 @@ COMPOSE_FILE="docker-compose.services.yml"
 PROJECT_NAME="gamestore_services"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+recreate_db_service() {
+    echo "🗄️  Recreating db container to refresh bind mounts..."
+    docker compose -f "$COMPOSE_FILE" -p "$PROJECT_NAME" up -d --force-recreate db
+}
+
 repair_order_tracking() {
     local trigger_sql="${SCRIPT_DIR}/add_order_triggers.sql"
     local backfill_sql="${SCRIPT_DIR}/backfill_order_tracking.sql"
@@ -104,14 +109,28 @@ stop_services() {
 restart_services() {
     if [ -z "$1" ]; then
         echo "🔄 Restarting all microservices..."
-        docker compose -f "$COMPOSE_FILE" -p "$PROJECT_NAME" restart
+        recreate_db_service
+        docker compose -f "$COMPOSE_FILE" -p "$PROJECT_NAME" restart \
+            accounts-service \
+            products-service \
+            orders-service \
+            payments-service \
+            stock-service \
+            wishlist-service \
+            order-items-service \
+            customer-summary-service \
+            purchased-products-service \
+            sold-products-service \
+            audio-service
         repair_order_tracking
         echo "✅ All services restarted"
     else
         echo "🔄 Restarting $1..."
-        docker compose -f "$COMPOSE_FILE" -p "$PROJECT_NAME" restart "$1"
         if [ "$1" = "db" ]; then
+            recreate_db_service
             repair_order_tracking
+        else
+            docker compose -f "$COMPOSE_FILE" -p "$PROJECT_NAME" restart "$1"
         fi
         echo "✅ $1 restarted"
     fi
