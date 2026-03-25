@@ -58,6 +58,10 @@ const normalizeTrackId = (value) => {
   return String(value ?? '');
 };
 
+// Converts whatever shape the cache returns into the exact payload contract expected by
+// the Python matching endpoint. The fallback defaults are intentionally conservative so
+// the backend can still score a song if one or two feature fields are missing, while the
+// rest of the request continues to carry the real extracted values we already know.
 const buildAudioFeaturePayload = (features) => {
   if (!features) {
     return null;
@@ -78,6 +82,9 @@ const buildAudioFeaturePayload = (features) => {
   };
 };
 
+// These sentinel objects keep the UI state explicit. Instead of relying on null checks
+// alone, the page can render three distinct states for every external song card:
+// still matching, matched to a library track, or definitively not found.
 const MATCH_PENDING_STATE = {
   id: null,
   albumTitle: 'Matching library...',
@@ -840,6 +847,9 @@ const SimilarSongs = () => {
         const BATCH_SIZE = 5;
         
         // Restrict matching to the curated 47-song internal library pool for this page.
+        // This is important because SimilarSongs is supposed to answer the question
+        // "which library track is closest to this iTunes song?" rather than searching
+        // across every imported cache row and producing unstable matches.
         const targetIds = Array.from(
           new Set(
             dbSongs
@@ -851,6 +861,9 @@ const SimilarSongs = () => {
         // Initialize a runtime dictionary map holding successful positive track correlations.
         const matchedByTrack = new Map();
 
+        // Apply matches incrementally as each batch returns so cards can flip from the
+        // pending label to the resolved library title immediately, instead of making the
+        // user wait for the entire multi-batch run to complete first.
         const applyResolvedMatches = () => {
           setSongs((currentSongs) =>
             currentSongs.map((song) => {
@@ -879,6 +892,9 @@ const SimilarSongs = () => {
 
           // Iteratively send each sliced cluster to the remote backend service synchronously.
           for (const batch of batches) {
+            // Each batch deliberately sends only minimal song metadata plus cached audio
+            // features when we have them. If a candidate has no cached vector yet, the
+            // backend is allowed to extract features from the preview URL on demand.
             const payload = {
               // Map the external candidate structures to fit backend schema expectations
               candidates: batch.map((s) => {
@@ -957,6 +973,9 @@ const SimilarSongs = () => {
           }
         };
 
+        // Execute the main pass first, then only retry the unresolved subset. That keeps
+        // the network cost bounded while still giving slow previews or transient failures
+        // a second chance before the UI marks them as not found.
         // Execute the main bulk matching pass for all loaded external artists.
         await runMatchPass(candidateSongs);
 

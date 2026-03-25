@@ -181,3 +181,6 @@ git pull --no-rebase
 To restart the audio service container
 docker compose -f docker-compose.services.yml -p gamestore_services build --no-cache audio-service && \
 docker compose -f docker-compose.services.yml -p gamestore_services up -d audio-service
+
+command to refresh topcharts
+curl -X POST "http://localhost:5000/api/itunes/refresh-topcharts"   

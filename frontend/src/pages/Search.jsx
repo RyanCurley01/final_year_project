@@ -31,6 +31,9 @@ const normalizeTrackId = (value) => {
   return String(value ?? '');
 };
 
+// Normalizes cached feature rows into the backend match-library schema. Search reuses the
+// same helper as SimilarSongs so both pages feed the matcher the same numeric fields and
+// therefore produce consistent library matches for the same iTunes track.
 const buildAudioFeaturePayload = (features) => {
   if (!features) {
     return null;
@@ -51,6 +54,10 @@ const buildAudioFeaturePayload = (features) => {
   };
 };
 
+// Provides a browser-safe timeout wrapper for fetch. Some environments support
+// AbortSignal.timeout directly and some do not, so this helper keeps Search from
+// crashing on the first request while still guaranteeing that a slow preview match
+// cannot leave the page in a permanent pending state.
 const fetchWithTimeout = async (url, options = {}, timeoutMs = 12000) => {
   if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function') {
     return fetch(url, {
@@ -76,6 +83,10 @@ const fetchWithTimeout = async (url, options = {}, timeoutMs = 12000) => {
   }
 };
 
+// Explicit match-state sentinels let Search distinguish between:
+// 1) songs still waiting for a library match,
+// 2) songs already resolved to a library title, and
+// 3) songs that exhausted matching attempts with no good result.
 const MATCH_PENDING_STATE = {
   id: null,
   albumTitle: 'Matching library...',
@@ -607,6 +618,10 @@ const Search = () => {
           source: 'database'
         }));
 
+        // Build a direct title lookup from the filtered library songs already visible in
+        // this search result. This gives Search an instant exact-match fast path so an
+        // iTunes track that clearly corresponds to a library song does not waste time in
+        // the ML queue and can render its resolved library label immediately.
         const librarySongsByTitle = new Map(
           filteredDbSongs.map((song) => [normalize(song.trackName || song.albumTitle || ''), song.matchedDbSong || song])
         );
@@ -622,6 +637,9 @@ const Search = () => {
           return trackMatch || artistMatch || albumMatch || genreMatch;
         }).map((song) => ({
           ...song,
+          // If an exact normalized title match already exists in the filtered library set,
+          // mark the song as resolved immediately. Otherwise keep it pending so only the
+          // genuinely ambiguous iTunes results are sent to the backend matcher.
           matchedDbSong: librarySongsByTitle.get(normalize(song.trackName || song.albumTitle || '')) || null,
           matchStatus: librarySongsByTitle.has(normalize(song.trackName || song.albumTitle || ''))
             ? MATCH_STATUS.resolved
@@ -738,6 +756,10 @@ const Search = () => {
     const matchSongsUsingBulkEndpoint = async () => {
         const apiBaseUrl = envConfig.getApiBaseUrl();
         console.log(`[Search] Matching ${songs.length} iTunes songs to 47 library songs using Bulk Match...`);
+        // Search only sends unresolved external songs through ML matching. Library cards
+        // are already resolved by definition, and direct title matches were resolved in
+        // fetchSearchResults above, so the backend workload is limited to the cases where
+        // similarity scoring actually adds value.
         const candidateSongs = songs.filter(
           (song) => song.source !== 'database' && song.matchStatus === MATCH_STATUS.pending
         );
@@ -763,6 +785,9 @@ const Search = () => {
         // Initialize a runtime dictionary map holding successful positive track correlations.
         const matchedByTrack = new Map();
 
+        // This final sweep guarantees every still-pending iTunes card lands in a terminal
+        // UI state after both passes. Without it, failed lookups would remain stuck on the
+        // loading label and the page-level matching indicator would never clear.
         const finalizeMatchStates = () => {
           setSongs((currentSongs) =>
             currentSongs.map((song) => {
@@ -810,6 +835,10 @@ const Search = () => {
 
           // Iteratively send each sliced cluster to the remote backend service synchronously.
           for (const batch of batches) {
+            // Keep each request payload intentionally small: identity fields, preview URL,
+            // and cached audio features only when available. The backend can then combine
+            // deterministic cached vectors with on-demand extraction for the minority of
+            // tracks that have not been processed yet.
             const payload = {
               // Map the external candidate structures to fit backend schema expectations
               candidates: batch.map((s) => {

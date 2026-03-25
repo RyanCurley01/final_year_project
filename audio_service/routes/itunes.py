@@ -756,13 +756,14 @@ def _upsert_stock(cursor, product_id: int, is_available: int):
         if available_flag == 1:
             cursor.execute(
                 "INSERT INTO Stock (IsAvailable, ProductID, UnavailableSince, AvailableSince) VALUES (1, %s, NULL, NOW()) "
-                "ON DUPLICATE KEY UPDATE IsAvailable = 1, UnavailableSince = NULL, AvailableSince = COALESCE(AvailableSince, NOW())",
+                "ON DUPLICATE KEY UPDATE IsAvailable = 1, UnavailableSince = NULL, "
+                "AvailableSince = CASE WHEN IsAvailable = 0 THEN NOW() ELSE AvailableSince END",
                 (product_id,)
             )
         else:
             cursor.execute(
                 "INSERT INTO Stock (IsAvailable, ProductID, UnavailableSince, AvailableSince) VALUES (0, %s, NOW(), NULL) "
-                "ON DUPLICATE KEY UPDATE IsAvailable = 0, UnavailableSince = COALESCE(UnavailableSince, NOW())",
+                "ON DUPLICATE KEY UPDATE IsAvailable = 0, UnavailableSince = COALESCE(UnavailableSince, NOW()), AvailableSince = NULL",
                 (product_id,)
             )
         return
@@ -777,7 +778,9 @@ def _upsert_stock(cursor, product_id: int, is_available: int):
         if available_flag == 1:
             try:
                 cursor.execute(
-                    "UPDATE Stock SET IsAvailable = 1, UnavailableSince = NULL, AvailableSince = COALESCE(AvailableSince, NOW()) WHERE StockID = %s",
+                    "UPDATE Stock SET IsAvailable = 1, UnavailableSince = NULL, "
+                    "AvailableSince = CASE WHEN IsAvailable = 0 THEN NOW() ELSE AvailableSince END "
+                    "WHERE StockID = %s",
                     (sid,)
                 )
             except Exception:
@@ -785,7 +788,7 @@ def _upsert_stock(cursor, product_id: int, is_available: int):
         else:
             try:
                 cursor.execute(
-                    "UPDATE Stock SET IsAvailable = 0, UnavailableSince = COALESCE(UnavailableSince, NOW()) WHERE StockID = %s",
+                    "UPDATE Stock SET IsAvailable = 0, UnavailableSince = COALESCE(UnavailableSince, NOW()), AvailableSince = NULL WHERE StockID = %s",
                     (sid,)
                 )
             except Exception:
@@ -1213,9 +1216,24 @@ async def refresh_topcharts():
         # 8. Reload ML cache
         await ml_service.startup_cache()
 
+        cached_imported_count = sum(1 for pid in ml_service.audio_features_cache if int(pid) < 0)
+        cached_library_count = sum(1 for pid in ml_service.audio_features_cache if int(pid) > 0)
+        expected_imported_count = len(live_ids)
+
+        if cached_imported_count != expected_imported_count:
+            console.log(
+                f"   ⚠️ Imported cache count mismatch: expected {expected_imported_count}, got {cached_imported_count}"
+            )
+
         elapsed = (datetime.utcnow() - start_ts).total_seconds()
         summary = {
             "status": "success",
+            "topcharts_target": TOPCHARTS_TARGET_COUNT,
+            "artist_search_target": ITUNES_SEARCH_TARGET_COUNT,
+            "live_topcharts": len(rss_entries),
+            "live_artist_search": len(search_tracks),
+            "live_imported_total": len(live_ids),
+            "itunes_new_detected": len(ids_to_add),
             "itunes_marked_unavailable": marked_unavailable_count,
             "itunes_imported": imported_count,
             "itunes_deferred": skipped_for_next_cycle,
@@ -1227,6 +1245,8 @@ async def refresh_topcharts():
             "pruned_imported": prune_result["pruned"],
             "imported_before_prune": prune_result["before"],
             "imported_after_prune": prune_result["after"],
+            "cached_imported_available": cached_imported_count,
+            "cached_library_total": cached_library_count,
             "total_in_cache": len(ml_service.audio_features_cache),
             "elapsed_seconds": round(elapsed, 1),
         }

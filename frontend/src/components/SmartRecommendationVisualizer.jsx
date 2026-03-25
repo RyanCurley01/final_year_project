@@ -8,6 +8,11 @@ import placeholders from '../utils/placeholderImage';
 import envConfig from '../config/environment';
 import blissImage from '../assets/bliss.png';
 
+const toFiniteNumber = (value) => {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+};
+
 /**
  * SmartRecommendationVisualizer (formerly PersonalRecommendations)
  * Displays real-time audio-based recommendations with visual similarity indicators
@@ -140,7 +145,9 @@ const SmartRecommendationVisualizer = ({
         console.log("🧪 Model Selection Scores:", response.data.model_metrics);
       }
 
-      // Grabs the array of recommended songs from the backend's JSON response
+      // Grabs the array of recommended songs from the backend's JSON response.
+      // Keep the payload untouched so the render path uses the same frontend
+      // scoring flow as TopCharts and SimilarSongs.
       const recs = response.data.recommendations || [];
       
         // Reads the exact audio feature mathematical values (Tempo, Energy, etc.) 
@@ -359,9 +366,13 @@ const SmartRecommendationVisualizer = ({
         currentTempo = Number(featuresToUse.tempo) * rateToUse;
     }
     
-    
-    // Grabs the original tempo of the recommended candidate track, falling back to 120 BPM if missing
-    const targetTempo = Number(rec.tempo) || 120;
+    // Only recompute live percentages when the backend actually returned a full
+    // candidate feature vector for this specific recommendation. Falling back to
+    // shared defaults here makes every card collapse onto the same percentages.
+    const targetTempo = toFiniteNumber(rec.tempo);
+    const targetEnergy = toFiniteNumber(rec.energy);
+    const targetValence = toFiniteNumber(rec.valence);
+    const targetDanceability = toFiniteNumber(rec.danceability);
     
     // Calculates Absolute Difference: Finds exactly how many BPM apart the two tracks are currently playing
     const tempoDiff = Math.abs(targetTempo - currentTempo);
@@ -370,13 +381,13 @@ const SmartRecommendationVisualizer = ({
     const tempoMatch = Math.max(0, 1 - Math.min(tempoDiff / 100.0, 1.0));
     
     // Real-Time Energy Math: Normalizes client-side extraction energy, gets distance from candidate energy, bounding 0 to 1
-    const energyMatch = Math.max(0, 1 - Math.abs((Number(featuresToUse.energy) || 0.5) - (Number(rec.energy) || 0.5)));
+    const energyMatch = Math.max(0, 1 - Math.abs((Number(featuresToUse.energy) || 0.5) - targetEnergy));
     
     // Real-Time Mood Math: Normalizes client-side valence, calculates difference from candidate valence target
-    const moodMatch = Math.max(0, 1 - Math.abs((Number(featuresToUse.valence) || 0.5) - (Number(rec.valence) || 0.5)));
+    const moodMatch = Math.max(0, 1 - Math.abs((Number(featuresToUse.valence) || 0.5) - targetValence));
     
     // Real-Time Danceability Math: Calculates difference between current active rhythm constraints and candidate track groove
-    const danceabilityMatch = Math.max(0, 1 - Math.abs((Number(featuresToUse.danceability) || 0.5) - (Number(rec.danceability) || 0.5)));
+    const danceabilityMatch = Math.max(0, 1 - Math.abs((Number(featuresToUse.danceability) || 0.5) - targetDanceability));
 
     // Reconstructs the master linear scoring algorithm identically to the backend service calculation weighting
     // Tempo (25%), Energy (30%), Mood (20%), Danceability (25%) representing human-audible importance
@@ -420,13 +431,6 @@ const SmartRecommendationVisualizer = ({
     if (moodMatch >= 0.8) return '#10b981'; // green
     if (moodMatch >= 0.6) return '#f59e0b'; // amber
     return '#ef4444'; // red
-  };
-
-  const getSimilarityLabel = (score) => {
-    if (score >= 0.8) return 'Highly Similar';
-    if (score >= 0.6) return 'Similar';
-    if (score >= 0.4) return 'Somewhat Similar';
-    return 'Different Vibe';
   };
 
   if (!currentProduct) {
@@ -557,26 +561,11 @@ const SmartRecommendationVisualizer = ({
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             className="space-y-2 overflow-x-hidden"
-          >
-            {/* Matches count - Show "Verified" if cached features used */}
-            {/* <p className="text-[12px] text-gray-500 mb-2 flex items-center gap-2">
-              <span>{recommendations.length} {recommendations.length === 1 ? 'match' : 'matches'} • Updates 3s</span>
-              {displayedFeatures?.using_cached && (
-                 <span className="text-cyan-500 flex items-center gap-1 bg-cyan-900/20 px-1.5 rounded" title="Using verified audio features from database">
-                   ✓ Verified
-                 </span>
-              )}
-              {!displayedFeatures?.using_cached && (
-                 <span className="text-gray-500 animate-pulse">• Live Analysis</span>
-              )}
-            </p> */}
-            
+          >          
             {recommendations
             .map(rec => {
-              // Calculate live match scores
               const liveMatch = calculateLiveMatch(rec);
-              
-              // Use live scores if available, otherwise static
+
               return {
                 ...rec,
                 similarity_score: liveMatch ? liveMatch.similarity_score : rec.similarity_score,
@@ -586,7 +575,7 @@ const SmartRecommendationVisualizer = ({
                 danceability_match: liveMatch ? liveMatch.danceability_match : (rec.danceability_match || rec.dance_match)
               };
             })
-            .sort((a, b) => b.similarity_score - a.similarity_score)
+            .sort((a, b) => (b.similarity_score || 0) - (a.similarity_score || 0))
             // 2nd Map: The actual visual rendering loop for the UI cards mapping backend IDs to frontend components
             .map((rec, index) => {
               
@@ -596,7 +585,7 @@ const SmartRecommendationVisualizer = ({
               // 2. FALLBACK RESOLUTION: 
               // If the frontend store found the song, grab its rich title.
               // If it could not find it (maybe an iTunes track not loaded), gracefully fallback to the ID string.
-              const displayTitle = product?.albumTitle || `Track ID: ${rec.product_id}`;
+              const displayTitle = rec.trackName || rec.albumTitle || product?.albumTitle || `Track ID: ${rec.product_id}`;
               
               // Attempts to grab the local high-res image if the mapping successfully returned a product
               const displayUrl = product?.albumCoverImageUrl || null;
@@ -639,7 +628,7 @@ const SmartRecommendationVisualizer = ({
                       <h5 className="font-semibold text-white truncate group-hover:text-cyan-400 transition-colors">
                         {displayTitle}
                       </h5>
-                      <p className="text-[12px] text-gray-400 truncate mb-1">{rec.reason}</p>
+                      <p className="text-[12px] text-gray-400 truncate mb-1">{rec.reason || rec.match_reason}</p>
                       
                       {/* Feature Matches */}
                       <div className="flex gap-1 flex-wrap">

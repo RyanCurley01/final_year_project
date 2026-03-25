@@ -84,6 +84,7 @@ async def startup_cache():
             with get_db_connection() as conn:
                 if conn:
                     with conn.cursor() as cursor:
+                        next_audio_features_cache = {}
                         sql = """
                             SELECT 
                                 af.ProductID,
@@ -144,7 +145,7 @@ async def startup_cache():
                                     float(row.get('Acousticness', 0.5))
                                 )
                                 
-                            audio_features_cache[row['ProductID']] = {
+                            next_audio_features_cache[row['ProductID']] = {
                                 'id': row['ProductID'],
                                 'tempo': row['Tempo'],
                                 'energy': row['Energy'],
@@ -173,6 +174,7 @@ async def startup_cache():
                                 'chroma_mean': chroma_list
                             }
                         
+                        audio_features_cache = next_audio_features_cache
                         cache_loaded = True
                         console.log(f"✅ Cached {len(audio_features_cache)} audio features for fast recommendations")
                         

@@ -400,6 +400,9 @@ const SongDetails = () => {
     const fetchCachedFeatures = async () => {
       try {
         const audioApiUrl = envConfig.getApiBaseUrl();
+        // SongDetails prefers the shared cache before triggering any fresh analysis so the
+        // ranking here stays aligned with SimilarSongs/Search and does not drift because of
+        // repeated live extraction noise or slightly different feature rounding.
         const response = await fetch(`${audioApiUrl}/api/audio/cached-features?artist_only=false`);
         if (response.ok) {
           const data = fixTextDeep(await response.json());
@@ -518,37 +521,13 @@ const SongDetails = () => {
 
     initializePage();
   }, [songid, location.state]);
-
-  // Real-time update loop DISABLED (Static loading only)
-  // useEffect(() => {
-  //   const interval = setInterval(() => {
-  //     const liveFeatures = audioFeaturesRef.current;
-      
-  //     // Only update if we are playing the song that is being displayed
-  //     const isCurrentSongActive = activeSong && targetSong && (
-  //         String(activeSong.trackId || activeSong.id) === String(targetSong.trackId || targetSong.id)
-  //     );
-      
-  //     if (isPlaying && isCurrentSongActive && liveFeatures && targetSong && artistSongs.length > 0) {
-  //       // Prepare adjusted features
-  //       const featuresToSend = {
-  //            tempo: Number(liveFeatures.tempo),
-  //            energy: Number(liveFeatures.energy),
-  //            valence: Number(liveFeatures.valence),
-  //            danceability: Number(liveFeatures.danceability),
-  //            acousticness: Number(liveFeatures.acousticness),
-  //       };
-
-  //       computeMLSimilarity(targetSong, artistSongs, featuresToSend).catch(err => {
-  //           console.warn("[SongDetails] Real-time update failed:", err);
-  //       });
-  //     }
-  //   }, 3000);
-
-  //   return () => clearInterval(interval);
-  // }, [isPlaying, activeSong, targetSong, artistSongs]);
+  
 
   // Compute ML similarity using the backend
+  // Central ranking pipeline for SongDetails. This function tries very hard to keep the
+  // result set deterministic: first use cached extracted features, then fall back to live
+  // analyser features, then normalize the backend response into one consistent song shape
+  // regardless of whether the recommendation came from the local library or iTunes data.
   const computeMLSimilarity = async (targetSong, comparisonSongs, overrideFeatures = null) => {
     const apiBaseUrl = envConfig.getApiBaseUrl();
     
@@ -556,6 +535,9 @@ const SongDetails = () => {
       const liveFeatures = overrideFeatures || audioFeaturesRef.current;
       const isDiscoverRequest = isLibraryContextSong(targetSong);
       const songIdStr = String(targetSong.trackId || targetSong.id);
+      // Check both the raw ID and the negative imported-ID form because the same logical
+      // song can appear in frontend state under a positive/display ID while its extracted
+      // feature row is stored in the backend cache under the imported negative ProductID.
       let cached =
         cachedAudioFeatures[songIdStr] ||
         cachedAudioFeatures[String(-Math.abs(Number(songIdStr)))];
@@ -563,6 +545,10 @@ const SongDetails = () => {
       if (!cached) {
         try {
           const audioApiUrl = envConfig.getApiBaseUrl();
+          // One lazy re-fetch gives SongDetails a second chance to find a deterministic
+          // cached vector before falling back to live audio features. This avoids using
+          // volatile analyser state when the backend cache simply had not been loaded into
+          // this page yet.
           const cacheResp = await fetch(`${audioApiUrl}/api/audio/cached-features?artist_only=false`);
           if (cacheResp.ok) {
             const cacheData = fixTextDeep(await cacheResp.json());
@@ -575,6 +561,9 @@ const SongDetails = () => {
         }
       }
 
+      // The backend receives exactly one target feature vector. Cached vectors win because
+      // they are stable across page loads; live analyser features are only used as a last
+      // resort so the details page can still function when cache coverage is incomplete.
       let featuresToSend = null;
       if (cached) {
         featuresToSend = {
@@ -626,6 +615,10 @@ const SongDetails = () => {
       const data = fixTextDeep(await response.json());
       
       if (data.status === 'success') {
+        // Build a lookup table from the comparison songs that were already available in the
+        // page context. Backend recommendations sometimes return partial metadata, so this
+        // map lets us rehydrate missing names, artwork, preview URLs, and source flags from
+        // the richer frontend song objects we already have.
         const comparisonMetaById = new Map();
         (comparisonSongs || []).forEach((s) => {
           const rawId = s.trackId || s.id;
@@ -703,6 +696,10 @@ const SongDetails = () => {
 
         if (needsLibraryArtworkHydration) {
           try {
+            // Discover-origin requests can produce strong library matches that have the
+            // right ProductID and score but no cover art attached in the recommendation
+            // payload. In that case, hydrate from the products API so the details grid
+            // renders polished library cards instead of blank artwork placeholders.
             const products = await productService.getAllProducts();
             const productsById = new Map(
               (products || []).map((p) => [Number(p.id || p.productId), p])

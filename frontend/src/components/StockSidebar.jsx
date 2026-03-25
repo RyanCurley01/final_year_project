@@ -22,6 +22,21 @@ const inRange = (value, start, end) => {
   return ts >= start && ts < end;
 };
 
+const latestDateValue = (...values) => {
+  let latest = null;
+
+  values.forEach((value) => {
+    if (!value) return;
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return;
+    if (!latest || parsed > latest) {
+      latest = parsed;
+    }
+  });
+
+  return latest ? latest.toISOString() : null;
+};
+
 const StockSidebar = () => {
   const { currentUser } = useAuth();
   const [isOpen, setIsOpen] = useState(false);
@@ -72,6 +87,18 @@ const StockSidebar = () => {
 
             const currentAvail = current.isAvailable !== undefined ? current.isAvailable : current.available;
             const itemAvail = item.isAvailable !== undefined ? item.isAvailable : item.available;
+            const mergedAvailableSince = latestDateValue(
+              current.availableSince,
+              current.AvailableSince,
+              item.availableSince,
+              item.AvailableSince
+            );
+            const mergedUnavailableSince = latestDateValue(
+              current.unavailableSince,
+              current.UnavailableSince,
+              item.unavailableSince,
+              item.UnavailableSince
+            );
 
             // Keep newest-ish row by larger id (when present), and OR availability.
             const currentId = Number(current.id ?? current.stockId ?? current.StockID ?? 0);
@@ -81,6 +108,8 @@ const StockSidebar = () => {
             mergedByProduct.set(key, {
               ...preferred,
               isAvailable: Boolean(currentAvail) || Boolean(itemAvail),
+              availableSince: mergedAvailableSince,
+              unavailableSince: mergedUnavailableSince,
             });
           });
 
@@ -233,8 +262,8 @@ const StockSidebar = () => {
               Stock Availability
             </h2>
             <p className="text-gray-400 text-sm mb-4">
-              Weekly stock summary with no capped range: unavailable songs from last week,
-              unavailable songs from this week, and newly added songs this week.
+              Weekly stock summary with current songs, new songs this week,
+              unavailable songs from last week, and unavailable songs from this week.
             </p>
 
             <div className="overflow-auto bg-[#1a1a1a] p-2 rounded w-full">
@@ -261,31 +290,32 @@ const StockSidebar = () => {
                       nextWeekStart.setDate(nextWeekStart.getDate() + 7);
                       const lastWeekStart = new Date(thisWeekStart);
                       lastWeekStart.setDate(lastWeekStart.getDate() - 7);
+                      const isAvailable = (item) => item.isAvailable !== undefined ? item.isAvailable : item.available;
+
+                      const songsList = filteredData.filter((item) => !!isAvailable(item));
 
                       const unavailableLastWeek = filteredData.filter((item) => {
-                        const available = item.isAvailable !== undefined ? item.isAvailable : item.available;
+                        const available = isAvailable(item);
                         return !available && inRange(item.unavailableSince, lastWeekStart, thisWeekStart);
                       });
 
                       const unavailableThisWeek = filteredData.filter((item) => {
-                        const available = item.isAvailable !== undefined ? item.isAvailable : item.available;
+                        const available = isAvailable(item);
                         return !available && inRange(item.unavailableSince, thisWeekStart, nextWeekStart);
                       });
 
-                      const newThisWeek = filteredData.filter((item) => {
-                        const available = item.isAvailable !== undefined ? item.isAvailable : item.available;
-                        return !!available && inRange(item.availableSince, thisWeekStart, nextWeekStart);
+                      const newThisWeek = songsList.filter((item) => {
+                        return inRange(item.availableSince, thisWeekStart, nextWeekStart);
                       });
-
-                      // Match DB stock exactly: use full deduped Stock dataset.
-                      const songsThisWeek = filteredData;
 
                       return (
                         <>
-                          {renderSection("Songs This Week", songsThisWeek, productMap, {
+                          {renderSection("Songs List", songsList, productMap, {
                             statusResolver: () => true,
                           })}
-                          {renderSection("New Songs Added (This Week)", newThisWeek, productMap)}
+                          {renderSection("New Songs This Week", newThisWeek, productMap, {
+                            statusResolver: () => true,
+                          })}
                           {renderSection("Unavailable Songs (Last Week)", unavailableLastWeek, productMap)}
                           {renderSection("Unavailable Songs (This Week)", unavailableThisWeek, productMap)}
                         </>
