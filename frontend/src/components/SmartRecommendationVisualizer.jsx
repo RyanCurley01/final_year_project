@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import axios from 'axios';
 import { useAudioFeatures } from '../context/AudioFeaturesContext';
 import placeholders from '../utils/placeholderImage';
+import fixText from '../utils/fixText';
 import envConfig from '../config/environment';
 import blissImage from '../assets/bliss.png';
 
@@ -58,6 +59,7 @@ const SmartRecommendationVisualizer = ({
 
   // Get current song ID for comparison
   const currentSongId = activeSong?.id || activeSong?.productId || activeSong?.trackId;
+  const currentSongTitle = fixText(currentProduct?.albumTitle || currentProduct?.trackName || '');
 
   // RECOMMENDATION VISUALIZER LOGIC:
   // Subscribes directly to `activeSong` Redux pointer. Whenever the user clicks a
@@ -486,7 +488,7 @@ const SmartRecommendationVisualizer = ({
             );
           })()}
           <div className="flex-1 min-w-0">
-            <p className="text-[17px] font-semibold text-white truncate leading-tight">{currentProduct.albumTitle || currentProduct.trackName}</p>
+            <p className="text-[17px] font-semibold text-white truncate leading-tight">{currentSongTitle}</p>
             <p className="text-[12px] text-gray-400 truncate -mt-3">Selected Electronic Works</p>
           </div>
           {isPlaying && (
@@ -585,7 +587,7 @@ const SmartRecommendationVisualizer = ({
               // 2. FALLBACK RESOLUTION: 
               // If the frontend store found the song, grab its rich title.
               // If it could not find it (maybe an iTunes track not loaded), gracefully fallback to the ID string.
-              const displayTitle = rec.trackName || rec.albumTitle || product?.albumTitle || `Track ID: ${rec.product_id}`;
+              const displayTitle = fixText(rec.trackName || rec.albumTitle || product?.albumTitle || `Track ID: ${rec.product_id}`);
               
               // Attempts to grab the local high-res image if the mapping successfully returned a product
               const displayUrl = product?.albumCoverImageUrl || null;

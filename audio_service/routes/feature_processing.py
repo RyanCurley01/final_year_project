@@ -1,6 +1,7 @@
 # audio_service/routes/feature_processing.py
 from fastapi import APIRouter, HTTPException
 import asyncio
+import json
 from typing import Optional, Dict
 
 from utils import console
@@ -15,13 +16,134 @@ import ml_service
 
 router = APIRouter()
 
+
+def _safe_json_list(raw_value, expected_length: int) -> list[float]:
+    if raw_value in (None, "", b""):
+        return []
+
+    parsed = raw_value
+    if isinstance(raw_value, (str, bytes, bytearray)):
+        try:
+            parsed = json.loads(raw_value)
+        except Exception:
+            return []
+
+    if not isinstance(parsed, list):
+        return []
+
+    values: list[float] = []
+    for item in parsed[:expected_length]:
+        try:
+            values.append(float(item))
+        except Exception:
+            values.append(0.0)
+    return values
+
+
+def _is_incomplete_feature_row(row: Dict) -> bool:
+    return (
+        row.get('FeatureProductID') is None
+        or row.get('MfccMean') is None
+        or row.get('Mood') is None
+        or row.get('Key_Signature') is None
+        or row.get('TimeSignature') is None
+        or row.get('Duration') is None
+        or row.get('GenreCluster') in (None, 'Unknown')
+        or row.get('Genre') in (None, 'Unknown')
+        or row.get('SpectralBandwidth') is None
+        or row.get('SpectralContrast') is None
+    )
+
+
+def _is_placeholder_library_feature_row(row: Dict) -> bool:
+    if int(row.get('ProductID') or 0) <= 0 or row.get('FeatureProductID') is None:
+        return False
+
+    mfcc_values = _safe_json_list(row.get('MfccMean'), 13)
+    chroma_values = _safe_json_list(row.get('ChromaMean'), 12)
+    spectral_contrast_values = _safe_json_list(row.get('SpectralContrast'), 7)
+
+    zero_vector_mfcc = bool(mfcc_values) and all(abs(value) < 1e-9 for value in mfcc_values)
+    zero_vector_chroma = bool(chroma_values) and all(abs(value) < 1e-9 for value in chroma_values)
+    zero_vector_contrast = bool(spectral_contrast_values) and all(abs(value) < 1e-9 for value in spectral_contrast_values)
+
+    placeholder_signature = (
+        abs(float(row.get('Tempo') or 0.0) - 120.0) < 1e-6
+        and abs(float(row.get('Energy') or 0.0) - 0.55) < 1e-6
+        and abs(float(row.get('Danceability') or 0.0) - 0.5) < 1e-6
+        and abs(float(row.get('Valence') or 0.0) - 0.5) < 1e-6
+        and abs(float(row.get('Acousticness') or 0.0) - 0.2) < 1e-6
+        and abs(float(row.get('Instrumentalness') or 0.0) - 0.7) < 1e-6
+        and abs(float(row.get('Loudness') or 0.0) - (-12.0)) < 1e-6
+        and abs(float(row.get('Speechiness') or 0.0) - 0.08) < 1e-6
+        and abs(float(row.get('SpectralCentroid') or 0.0) - 2000.0) < 1e-6
+        and abs(float(row.get('SpectralRolloff') or 0.0) - 4000.0) < 1e-6
+        and abs(float(row.get('ZeroCrossingRate') or 0.0) - 0.08) < 1e-6
+        and abs(float(row.get('SpectralBandwidth') or 0.0) - 2000.0) < 1e-6
+        and abs(float(row.get('RmsEnergy') or 0.0) - 0.08) < 1e-6
+        and abs(float(row.get('OnsetRate') or 0.0) - 2.0) < 1e-6
+        and abs(float(row.get('HarmonicRatio') or 0.0) - 0.6) < 1e-6
+        and abs(float(row.get('PercussiveRatio') or 0.0) - 0.4) < 1e-6
+        and str(row.get('Mood') or '').lower() == 'neutral'
+        and str(row.get('GenreCluster') or '') == 'Cluster 1'
+        and str(row.get('Key_Signature') or '') == 'C'
+        and str(row.get('TimeSignature') or '') == '4/4'
+        and int(row.get('Duration') or 0) == 30
+    )
+
+    return placeholder_signature or zero_vector_mfcc or zero_vector_chroma or zero_vector_contrast
+
+
+def _is_placeholder_feature_payload(product_id: int, features: Dict) -> bool:
+    if int(product_id or 0) <= 0:
+        return False
+
+    mfcc_values = [float(value) for value in (features.get('mfcc_mean') or [])[:13] if value is not None]
+    chroma_values = [float(value) for value in (features.get('chroma_mean') or [])[:12] if value is not None]
+    spectral_contrast_values = [float(value) for value in (features.get('spectral_contrast_mean') or [])[:7] if value is not None]
+
+    zero_vector_mfcc = bool(mfcc_values) and all(abs(value) < 1e-9 for value in mfcc_values)
+    zero_vector_chroma = bool(chroma_values) and all(abs(value) < 1e-9 for value in chroma_values)
+    zero_vector_contrast = bool(spectral_contrast_values) and all(abs(value) < 1e-9 for value in spectral_contrast_values)
+
+    placeholder_signature = (
+        abs(float(features.get('tempo') or 0.0) - 120.0) < 1e-6
+        and abs(float(features.get('energy') or 0.0) - 0.55) < 1e-6
+        and abs(float(features.get('danceability') or 0.0) - 0.5) < 1e-6
+        and abs(float(features.get('valence') or 0.0) - 0.5) < 1e-6
+        and abs(float(features.get('acousticness') or 0.0) - 0.2) < 1e-6
+        and abs(float(features.get('instrumentalness') or 0.0) - 0.7) < 1e-6
+        and abs(float(features.get('loudness') or 0.0) - (-12.0)) < 1e-6
+        and abs(float(features.get('speechiness') or 0.0) - 0.08) < 1e-6
+        and abs(float(features.get('spectral_centroid') or 0.0) - 2000.0) < 1e-6
+        and abs(float(features.get('spectral_rolloff') or 0.0) - 4000.0) < 1e-6
+        and abs(float(features.get('zero_crossing_rate') or 0.0) - 0.08) < 1e-6
+        and abs(float(features.get('spectral_bandwidth') or 0.0) - 2000.0) < 1e-6
+        and abs(float(features.get('rms_energy') or 0.0) - 0.08) < 1e-6
+        and abs(float(features.get('onset_rate') or 0.0) - 2.0) < 1e-6
+        and abs(float(features.get('harmonic_ratio') or 0.0) - 0.6) < 1e-6
+        and abs(float(features.get('percussive_ratio') or 0.0) - 0.4) < 1e-6
+        and str(features.get('mood') or '').lower() == 'neutral'
+        and str(features.get('key_signature') or '') == 'C'
+        and str(features.get('time_signature') or '') == '4/4'
+        and int(features.get('duration') or 0) == 30
+    )
+
+    return placeholder_signature or zero_vector_mfcc or zero_vector_chroma or zero_vector_contrast
+
 # ============================================
 # FEATURE EXTRACTION ADMINISTRATION
 # ============================================
 
 # EXECUTION ORDER: Router endpoint.
 @router.post("/api/audio/extract-all-features")
-async def extract_all_product_features(limit: int = 197, save_to_db: bool = True, reprocess_incomplete: bool = True):
+async def extract_all_product_features(
+    limit: int = 197,
+    save_to_db: bool = True,
+    reprocess_incomplete: bool = True,
+    reprocess_placeholders: bool = True,
+    library_only: bool = False,
+):
     """
     Extract audio features for all music products using librosa.
     This replaces the hardcoded genre/mood classification with industry-standard audio analysis.
@@ -29,7 +151,9 @@ async def extract_all_product_features(limit: int = 197, save_to_db: bool = True
     Args:
         limit: Maximum number of products to process (default 197 for safety)
         save_to_db: Whether to save extracted features to AudioFeatures table (default True)
-        reprocess_incomplete: Also re-extract songs that have NULL MfccMean/ChromaMean (default True)
+        reprocess_incomplete: Also re-extract songs that have incomplete feature rows (default True)
+        reprocess_placeholders: Also re-extract positive-ID library songs that match placeholder signatures (default True)
+        library_only: Restrict processing to positive-ID library songs (default False)
     
     Returns:
         Summary of extraction results
@@ -41,38 +165,74 @@ async def extract_all_product_features(limit: int = 197, save_to_db: bool = True
                 raise HTTPException(status_code=503, detail="Database connection unavailable")
             
             with conn.cursor() as cursor:
-                # Fetch products WITHOUT existing audio features,
-                # OR with incomplete features (NULL MfccMean/Mood/Key) if reprocess_incomplete is True
-                if reprocess_incomplete:
-                    cursor.execute("""
-                        SELECT p.ProductID, p.AlbumTitle, p.file_url 
-                        FROM Products p
-                        LEFT JOIN AudioFeatures af ON p.ProductID = af.ProductID
-                        WHERE p.AlbumTitle IS NOT NULL 
-                        AND p.AlbumTitle != 'Selected Electronic Works'
-                        AND p.file_url IS NOT NULL
-                        AND (af.ProductID IS NULL OR af.MfccMean IS NULL OR af.Mood IS NULL 
-                             OR af.Key_Signature IS NULL OR af.TimeSignature IS NULL OR af.Duration IS NULL
-                             OR af.GenreCluster IS NULL OR af.GenreCluster = 'Unknown'
-                             OR af.Genre IS NULL OR af.Genre = 'Unknown'
-                             OR af.SpectralBandwidth IS NULL OR af.SpectralContrast IS NULL)
-                        LIMIT %s
-                    """, (limit,))
-                else:
-                    cursor.execute("""
-                        SELECT p.ProductID, p.AlbumTitle, p.file_url 
-                        FROM Products p
-                        LEFT JOIN AudioFeatures af ON p.ProductID = af.ProductID
-                        WHERE p.AlbumTitle IS NOT NULL 
-                        AND p.AlbumTitle != 'Selected Electronic Works'
-                        AND p.file_url IS NOT NULL
-                        AND af.ProductID IS NULL
-                        LIMIT %s
-                    """, (limit,))
-                products = cursor.fetchall()
+                cursor.execute("""
+                    SELECT
+                        p.ProductID,
+                        p.AlbumTitle,
+                        p.file_url,
+                        af.ProductID AS FeatureProductID,
+                        af.Tempo,
+                        af.Energy,
+                        af.Danceability,
+                        af.Valence,
+                        af.Acousticness,
+                        af.Instrumentalness,
+                        af.Loudness,
+                        af.Speechiness,
+                        af.SpectralCentroid,
+                        af.SpectralRolloff,
+                        af.ZeroCrossingRate,
+                        af.Genre,
+                        af.GenreCluster,
+                        af.Mood,
+                        af.Key_Signature,
+                        af.TimeSignature,
+                        af.Duration,
+                        af.SpectralBandwidth,
+                        af.SpectralContrast,
+                        af.RmsEnergy,
+                        af.OnsetRate,
+                        af.HarmonicRatio,
+                        af.PercussiveRatio,
+                        af.MfccMean,
+                        af.ChromaMean
+                    FROM Products p
+                    LEFT JOIN AudioFeatures af ON p.ProductID = af.ProductID
+                    WHERE p.AlbumTitle IS NOT NULL
+                      AND p.AlbumTitle != 'Selected Electronic Works'
+                      AND p.file_url IS NOT NULL
+                    ORDER BY p.ProductID ASC
+                """)
+                candidate_rows = cursor.fetchall()
+
+        products = []
+        for row in candidate_rows:
+            product_id = int(row['ProductID'])
+            if library_only and product_id <= 0:
+                continue
+
+            if reprocess_incomplete:
+                should_process = _is_incomplete_feature_row(row)
+            else:
+                should_process = row.get('FeatureProductID') is None
+
+            if not should_process and reprocess_placeholders:
+                should_process = _is_placeholder_library_feature_row(row)
+
+            if should_process:
+                products.append({
+                    'ProductID': product_id,
+                    'AlbumTitle': row['AlbumTitle'],
+                    'file_url': row['file_url'],
+                })
+
+            if len(products) >= limit:
+                break
         
         console.log(f"🎵 Starting librosa feature extraction for {len(products)} products...")
         console.log(f"   Save to database: {save_to_db}")
+        console.log(f"   Library only: {library_only}")
+        console.log(f"   Reprocess placeholders: {reprocess_placeholders}")
 
         # Concurrency control: Process 4 songs at a time to check for stuck tasks without blocking all
         sem = asyncio.Semaphore(4)
@@ -103,6 +263,15 @@ async def extract_all_product_features(limit: int = 197, save_to_db: bool = True
                         features = await extract_features_for_product_async(product_id, file_url)
 
                     if features:
+                        if _is_placeholder_feature_payload(product_id, features):
+                            console.log(f"   ⚠️ Refusing to save placeholder-like features for library song {product_id}")
+                            return {
+                                "product_id": product_id,
+                                "album_title": product['AlbumTitle'],
+                                "status": "failed",
+                                "error": "Placeholder-like feature payload rejected"
+                            }
+
                         # Classify genre cluster using ML model
                         genre_cluster = ml_service.classify_genre_from_features(
                             features['tempo'],
@@ -166,7 +335,6 @@ async def extract_all_product_features(limit: int = 197, save_to_db: bool = True
                         saved = False
                         if save_to_db:
                             try:
-                                import json
                                 mfcc_json = json.dumps(features.get('mfcc_mean', [])) if features.get('mfcc_mean') else None
                                 chroma_json = json.dumps(features.get('chroma_mean', [])) if features.get('chroma_mean') else None
                                 spectral_contrast_json = json.dumps(features.get('spectral_contrast_mean', [])) if features.get('spectral_contrast_mean') else None
