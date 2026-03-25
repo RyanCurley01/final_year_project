@@ -51,6 +51,31 @@ const buildAudioFeaturePayload = (features) => {
   };
 };
 
+const fetchWithTimeout = async (url, options = {}, timeoutMs = 12000) => {
+  if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function') {
+    return fetch(url, {
+      ...options,
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  }
+
+  if (typeof AbortController === 'undefined') {
+    return fetch(url, options);
+  }
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeoutId);
+  }
+};
+
 const MATCH_PENDING_STATE = {
   id: null,
   albumTitle: 'Matching library...',
@@ -447,8 +472,6 @@ const Search = () => {
   const [recommendations, setRecommendations] = useState([]);
   const [recLoading, setRecLoading] = useState(false);
   const [recommendationPool, setRecommendationPool] = useState([]);
-  const [displayedFeatures, setDisplayedFeatures] = useState(null);
-  const [displayedPlaybackRate, setDisplayedPlaybackRate] = useState(1);
   const [cachedAudioFeatures, setCachedAudioFeatures] = useState({});
   const [analyzing, setAnalyzing] = useState(false);
   
@@ -471,7 +494,7 @@ const Search = () => {
   // Executes asynchronous queries resolving cross-platform data joins merging native database objects with iTunes entities.
   useEffect(() => {
       matchStartedRef.current = false;
-      setAnalyzing(false);
+      setAnalyzing(Boolean(searchTerm && searchTerm.trim()));
     const abortController = new AbortController();
     
     const fetchSearchResults = async () => {
@@ -481,6 +504,7 @@ const Search = () => {
       // If no search term, show empty state
       if (!searchTerm || searchTerm.trim() === '') {
         setSongs([]);
+        setAnalyzing(false);
         setLoading(false);
         return;
       }
@@ -492,9 +516,18 @@ const Search = () => {
       try {
         // Fetch database songs
         const products = await productService.getAllProducts();
-        // Only include actual store products (positive IDs), exclude cached iTunes songs
+        // Only include actual store products (positive IDs), exclude cached iTunes songs.
         const musicProducts = products.filter(p => p.albumTitle && p.fileUrl && p.id > 0);
-        setDbSongs(musicProducts);
+
+        // Use the same curated 47-song internal library target pool as SimilarSongs.
+        const libraryTargetSongs = musicProducts
+          .filter((product, index, self) =>
+            index === self.findIndex((candidate) => (
+              candidate.albumTitle === product.albumTitle && candidate.artistName === product.artistName
+            ))
+          )
+          .slice(0, 47);
+        setDbSongs(libraryTargetSongs);
         
         // Also fetch iTunes songs for the 3 artists (same as TopCharts)
         const allArtistSongs = [];
@@ -573,6 +606,10 @@ const Search = () => {
           matchedDbSong: song,
           source: 'database'
         }));
+
+        const librarySongsByTitle = new Map(
+          filteredDbSongs.map((song) => [normalize(song.trackName || song.albumTitle || ''), song.matchedDbSong || song])
+        );
         
         // Now filter that pool by the user's search word
         // fetches all products from the database and filters them locally to see if 
@@ -585,11 +622,13 @@ const Search = () => {
           return trackMatch || artistMatch || albumMatch || genreMatch;
         }).map((song) => ({
           ...song,
-          matchedDbSong: null,
-          matchStatus: MATCH_STATUS.pending,
+          matchedDbSong: librarySongsByTitle.get(normalize(song.trackName || song.albumTitle || '')) || null,
+          matchStatus: librarySongsByTitle.has(normalize(song.trackName || song.albumTitle || ''))
+            ? MATCH_STATUS.resolved
+            : MATCH_STATUS.pending,
         }));
         
-        // Combine results and calculate relevance scores
+        // Keep library songs first in Search; obvious iTunes/library duplicates are resolved directly above.
         const allResults = [...filteredDbSongs, ...filteredArtistSongs].map(song => {
           let relevance = 0.5;
           const title = normalize(song.trackName || song.albumTitle || '');
@@ -603,7 +642,7 @@ const Search = () => {
           else if (title.includes(searchNorm)) relevance = 0.75;
           else if (artist.includes(searchNorm)) relevance = 0.7;
           
-          // Database songs get a small boost
+          // Keep native library songs slightly ahead in Search ordering.
           if (song.source === 'database') relevance += 0.05;
           
           // Use relevance as the main sorting score, but DO NOT assign it to 'similarity'
@@ -612,7 +651,7 @@ const Search = () => {
           return { ...song, relevance, similarity: undefined };
         });
         
-        // Remove duplicates (prefer database version)
+        // Remove duplicates, preferring library entries over iTunes duplicates.
         const seen = new Set();
         const uniqueResults = allResults.filter(song => {
           // Create a distinctive key that avoids conflating different songs with similar names
@@ -620,9 +659,7 @@ const Search = () => {
           const key = `${song.trackName?.toLowerCase().trim()}-${song.artistName?.toLowerCase().trim()}`;
           
           if (seen.has(key)) {
-             // If we already have this song, but the current one is from database and the previous was from iTunes (unlikely given order), keep database.
-             // Given allResults = [...filteredDbSongs, ...matchedArtistSongs], DB songs come first.
-             // So if we see it again (iTunes version matches DB name), we skip the iTunes version. This is CORRECT behavior.
+             // Because library songs are ordered first above, iTunes duplicates are skipped.
              return false;
           }
           seen.add(key);
@@ -635,6 +672,7 @@ const Search = () => {
       } catch (err) {
         if (err.name !== 'AbortError') {
           setError(err.message);
+          setAnalyzing(false);
         }
       } finally {
         setLoading(false);
@@ -700,14 +738,18 @@ const Search = () => {
     const matchSongsUsingBulkEndpoint = async () => {
         const apiBaseUrl = envConfig.getApiBaseUrl();
         console.log(`[Search] Matching ${songs.length} iTunes songs to 47 library songs using Bulk Match...`);
-        const candidateSongs = songs.filter((song) => song.source !== 'database');
+        const candidateSongs = songs.filter(
+          (song) => song.source !== 'database' && song.matchStatus === MATCH_STATUS.pending
+        );
         if (candidateSongs.length === 0) {
           await finishAnalyzing();
           return;
         }
         
-        // Define rate limits: process a maximum of 5 external songs per API transmission.
+        // Keep Search aligned with SimilarSongs so matching throughput is high enough
+        // to finish before users see every iTunes result fall through to not-found.
         const BATCH_SIZE = 5;
+        const MATCH_REQUEST_TIMEOUT_MS = 12000;
         
         // Restrict matching to the curated 47-song internal library pool for this page.
         const targetIds = Array.from(
@@ -720,6 +762,25 @@ const Search = () => {
         
         // Initialize a runtime dictionary map holding successful positive track correlations.
         const matchedByTrack = new Map();
+
+        const finalizeMatchStates = () => {
+          setSongs((currentSongs) =>
+            currentSongs.map((song) => {
+              if (song.source === 'database') return song;
+
+              const resolved = matchedByTrack.get(normalizeTrackId(song.trackId || song.id));
+              return {
+                ...song,
+                matchedDbSong:
+                  resolved ||
+                  song.matchedDbSong || {
+                    ...MATCH_NOT_FOUND_STATE,
+                  },
+                matchStatus: resolved ? MATCH_STATUS.resolved : MATCH_STATUS.notFound,
+              };
+            })
+          );
+        };
 
         const applyResolvedMatches = () => {
           setSongs((currentSongs) =>
@@ -788,11 +849,11 @@ const Search = () => {
 
             try {
               // Initiate POST payload mapping correlation matrices on the python application layer over local proxy.
-              const response = await fetch(`${apiBaseUrl}/api/audio/match-library`, {
+              const response = await fetchWithTimeout(`${apiBaseUrl}/api/audio/match-library`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload),
-              });
+              }, MATCH_REQUEST_TIMEOUT_MS);
 
               if (response.ok) {
                 // Read matched output safely mapped via Unicode normalizers.
@@ -802,7 +863,7 @@ const Search = () => {
                 // Store positive matches by hashing their normalized ID locally for instant UI referencing.
                 matches.forEach((match) => {
                   const key = normalizeTrackId(match.input_track_id);
-                  const fallbackTitle = match.matched_product_id ? `Track ${match.matched_product_id}` : 'No similar TopCharts track found';
+                  const fallbackTitle = match.matched_product_id ? `Track ${match.matched_product_id}` : 'No similar library track found';
                   
                   // Retain structured relationship details containing native application identifiers.
                   matchedByTrack.set(key, {
@@ -818,7 +879,7 @@ const Search = () => {
                 console.warn('Bulk match non-200 response', response.status, failText);
               }
             } catch (e) {
-              // Silently trap and log total network failures, allowing subsequent iteration batches continuity.
+              // One slow preview should not keep the whole Search page in a pending state.
               console.warn('Bulk match failed', e);
             }
 
@@ -839,28 +900,8 @@ const Search = () => {
           await runMatchPass(unresolved);
         }
 
-        // Commit the final resolution matrix back to the master song array in component state.
-        setSongs((currentSongs) =>
-          currentSongs.map((song) => {
-            if (song.source === 'database') return song;
-
-            // Re-normalize identifiers to ensure strict map lookups avoid type or whitespace mismatches.
-            const key = normalizeTrackId(song.trackId || song.id);
-            const resolved = matchedByTrack.get(key);
-            
-            // Merge the resolved local database ID and Title directly onto the external iTunes object.
-            // Assign a dummy fallback object string if the track completely failed similarity thresholding.
-            return {
-              ...song,
-              matchedDbSong:
-                resolved ||
-                song.matchedDbSong || {
-                  ...MATCH_NOT_FOUND_STATE,
-                },
-              matchStatus: resolved ? MATCH_STATUS.resolved : MATCH_STATUS.notFound,
-            };
-          })
-        );
+        // Commit final matched or not-found state for every pending iTunes song.
+        finalizeMatchStates();
 
         // Remove the visual loading flag indicating network bulk-analysis completion.
         await finishAnalyzing();
@@ -869,6 +910,19 @@ const Search = () => {
     // Invoke the asynchronous bulk match logic tree on mount.
     matchSongsUsingBulkEndpoint().catch(async (err) => {
       console.warn('Search bulk matching aborted:', err);
+      setSongs((currentSongs) =>
+        currentSongs.map((song) => {
+          if (song.source === 'database' || song.matchStatus !== MATCH_STATUS.pending) {
+            return song;
+          }
+
+          return {
+            ...song,
+            matchedDbSong: song.matchedDbSong || { ...MATCH_NOT_FOUND_STATE },
+            matchStatus: MATCH_STATUS.notFound,
+          };
+        })
+      );
       await finishAnalyzing();
     });
   }, [loading, dbSongs.length, songs.length, cachedAudioFeatures]);
@@ -895,6 +949,11 @@ const Search = () => {
   const handlePause = () => {
     dispatch(playPause(false));
   };
+
+  const hasPendingLibraryMatches = useMemo(
+    () => songs.some((song) => song.source !== 'database' && song.matchStatus === MATCH_STATUS.pending),
+    [songs]
+  );
 
   // Orchestrates dynamic detail routing constructing parameterized history stacks 
   // isolating explicitly matching components preventing internal layout rendering crashes.
@@ -987,7 +1046,7 @@ const Search = () => {
     }
   };
 
-  if (loading) return <Loader title={searchTerm ? `Searching for "${searchTerm}"...` : "Loading..."} />;
+  if (loading) return <Loader title={searchTerm ? `Searching for "${searchTerm}"...` : 'Loading...'} />;
   
   if (error) {
     return (
@@ -1027,7 +1086,7 @@ const Search = () => {
   }
 
   return (
-    <div className="flex flex-col lg:flex-row gap-6 scrollbar-hide overflow-x-hidden">
+    <div className="flex flex-col lg:flex-row gap-6 pb-10 sm:pb-14 scrollbar-hide overflow-x-hidden">
       {/* Compiles the central structural div housing the primary Search application grid */}
       <div className={`flex-1 min-w-0`}>
         {/* Back navigation */}
@@ -1047,7 +1106,7 @@ const Search = () => {
           <p className="text-gray-400">Found {songs.length} {songs.length === 1 ? 'song' : 'songs'} matching your search</p>
           <div className="flex flex-col sm:flex-row gap-2 mt-1">
             <p className="text-xs text-cyan-400">Powered by iTunes API - Preview songs before purchasing</p>
-            {analyzing && (
+            {(analyzing || hasPendingLibraryMatches) && (
                 <div className="flex items-center gap-2">
                     <div className="w-3 h-3 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin"></div>
                     <span className="text-xs text-yellow-500 font-semibold animate-pulse">Analyzing audio & matching... scores update live</span>

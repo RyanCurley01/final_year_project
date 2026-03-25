@@ -1208,7 +1208,7 @@ const SimilarSongs = () => {
   return (
     // Main Container encapsulating the entire page view.
     // Uses horizontal flexbox on large screens and vertical stacking on mobile.
-    <div className="flex flex-col lg:flex-row gap-6 scrollbar-hide overflow-x-hidden">
+    <div className="flex flex-col lg:flex-row gap-6 pb-10 sm:pb-14 scrollbar-hide overflow-x-hidden">
 
       {/* Main Left Content Area - Contains Title, Filter Buttons, and Song Grid */}
       {/* Hide this entire area completely if the UI is toggled into 'visualizer' mode. */}

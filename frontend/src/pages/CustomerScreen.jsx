@@ -71,7 +71,7 @@ const CustomerScreen = () => {
   // In visualizer mode, show full-width visualizer
   if (viewMode === 'visualizer') {
     return (
-      <div className="w-full overflow-x-hidden">
+      <div className="w-full pb-10 sm:pb-14 overflow-x-hidden">
         {/* Back button */}
         <div className="mb-4">
           <button onClick={() => setViewMode('discover')} className="px-4 py-2 rounded-full text-sm font-medium transition-all bg-white/10 text-white hover:bg-white/20">
@@ -102,7 +102,7 @@ const CustomerScreen = () => {
   }
 
   return (
-    <div className="flex flex-col">
+    <div className="flex flex-col pb-10 sm:pb-14">
       <div className="mb-4 sm:mb-8">
         <h1 className="font-bold text-xl sm:text-2xl md:text-3xl text-white mb-4 sm:mb-6">Music Information Store</h1>
       </div>

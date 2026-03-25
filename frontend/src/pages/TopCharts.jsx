@@ -679,7 +679,7 @@ const TopCharts = () => {
   }
 
   return (
-    <div className="flex flex-col lg:flex-row gap-6 scrollbar-hide overflow-x-hidden">
+    <div className="flex flex-col lg:flex-row gap-6 pb-10 sm:pb-14 scrollbar-hide overflow-x-hidden">
       {/* Main Content */}
       <div className={`flex-1 min-w-0 ${filter === 'visualizer' ? 'hidden' : ''}`}>
         <div className="mb-4 sm:mb-6">

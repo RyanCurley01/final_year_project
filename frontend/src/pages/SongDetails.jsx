@@ -857,7 +857,7 @@ const SongDetails = () => {
   }
 
   return (
-    <div className="flex flex-col">
+    <div className="flex flex-col pb-10 sm:pb-14">
       {/* Back navigation */}
       <div className="mb-6">
         <button
