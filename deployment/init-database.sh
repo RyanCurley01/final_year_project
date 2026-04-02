@@ -252,8 +252,6 @@ USE Game_Store_System;
     
 
     -- Insert Accounts (Managers, Employees, Customers)
-    -- All passwords are BCrypt hashed version of 'password'
-    -- Using BCrypt hash: $2a$10$dXJ3SW6G7P50lGmMkkmwe.20cQQubK3.HZWzG3YB1tlRy.fqvM/BG
     INSERT INTO `Accounts` VALUES (1,'uid_john','John Smith','5551234567','john.smith@store.com','$2a$12$o1bIeFKxF1n9qHMZ7jmfuePFvy151/ELJxASYZTvg8sJiiyLqqBvi','Manager');
     INSERT INTO `Accounts` VALUES (2,'uid_sarah','Sarah Johnson','5552345678','sarah.j@store.com','$2a$12$o1bIeFKxF1n9qHMZ7jmfuePFvy151/ELJxASYZTvg8sJiiyLqqBvi','Employee');
     INSERT INTO `Accounts` VALUES (3,'uid_alice','Alice Brown','5554567890','alice.b@gmail.com','$2a$12$o1bIeFKxF1n9qHMZ7jmfuePFvy151/ELJxASYZTvg8sJiiyLqqBvi','Customer');

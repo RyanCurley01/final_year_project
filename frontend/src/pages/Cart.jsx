@@ -87,7 +87,7 @@ const Cart = () => {
         
         // Note: Sold_Products, Purchased_Products, and CustomerSummary tables 
         // are automatically populated by the MySQL database trigger After_Order_Item_Insert 
-        // whenever an Order_Item is created above. We do not need further API calls for them.
+        // whenever an Order_Item is created above.
       }
       
       // Step 3: Format the JSON strictly required by the official PayPal capture API.

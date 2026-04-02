@@ -190,35 +190,6 @@ class OnsetDetector {
   }
   
   /**
-   * Spectral Flatness — distinguishes tonal sounds from percussive/noise sounds.
-   * Ratio of geometric mean to arithmetic mean of the power spectrum.
-   *   Near 0 = tonal (bass lines, melodies — energy at specific harmonics)
-   *   Near 1 = noise-like (drums, percussion — energy spread across frequencies)
-   * This is the key metric for filtering out bass/melody false positives.
-   */
-  calculateSpectralFlatness(spectrum) {
-    let logSum = 0;
-    let sum = 0;
-    let count = 0;
-    
-    for (let k = 0; k < spectrum.length; k++) {
-      const magnitude = spectrum[k] / 255.0;
-      if (magnitude > 0.001) { // Skip near-zero to avoid log(0)
-        logSum += Math.log(magnitude);
-        count++;
-      }
-      sum += magnitude;
-    }
-    
-    if (count === 0 || sum === 0) return 0;
-    
-    const geometricMean = Math.exp(logSum / count);
-    const arithmeticMean = sum / spectrum.length;
-    
-    return arithmeticMean > 0 ? geometricMean / arithmeticMean : 0;
-  }
-  
-  /**
    * Detect spectral anomaly — any abnormal departure from the signal's own recent behaviour.
    * Instead of pattern-matching specific glitch types, this uses statistical outlier detection:
    *  1. Track running mean and standard deviation of spectral flux and centroid
@@ -306,7 +277,6 @@ class OnsetDetector {
     // Compute spectral features for this frame
     const spectralCentroid = this.calculateSpectralCentroid(this.frequencyData);
     const energy = this.calculateEnergy(this.frequencyData);
-    const spectralFlatness = this.calculateSpectralFlatness(this.frequencyData);
     
     // Skip onset detection if we have no audio data (all zeros)
     const hasAudio = this.frequencyData.some(v => v > 0);

@@ -18,6 +18,8 @@ try:
             s3={'addressing_style': 'virtual'}
         )
         
+        # boto3 S3 client is used to create 
+        # AWS credentials from S3_CONFIG (access key, secret key, region)
         s3_client = boto3.client(
             's3',
             region_name=S3_CONFIG['region'],
@@ -117,6 +119,8 @@ def upload_bytes(
         extra_args["Metadata"] = metadata
 
     try:
+        # Sets the S3 bucket details and uploads the data 
+        # to S3 using the put_object method of the S3 client.
         s3_client.put_object(Bucket=bucket_name, Key=object_key, Body=data, **extra_args)
         return True
     except ClientError as e:
