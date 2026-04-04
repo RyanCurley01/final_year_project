@@ -1116,8 +1116,14 @@ async def refresh_topcharts():
         console.log(f"   📊 Diff: {len(ids_dropped_all)} replaceable drops, {len(ids_to_add_all)} new, {len(ids_kept)} kept")
 
         # 4. Determine the exact number of replacement pairs allowed this cycle.
+        # Cold-start: when no iTunes songs exist yet, allow a full initial import
+        # up to max_imports_per_cycle instead of requiring one-for-one replacement.
         max_imports_per_cycle = int(os.getenv("MAX_IMPORTS_PER_CYCLE", str(AUDIO_FEATURES_MAX_IMPORTED_ROWS)))
-        replacement_budget = min(len(ids_dropped_all), len(ids_to_add_all), max_imports_per_cycle)
+        if not existing_itunes_ids:
+            replacement_budget = min(len(ids_to_add_all), max_imports_per_cycle)
+            console.log(f"   🆕 Cold start detected — seeding up to {replacement_budget} songs")
+        else:
+            replacement_budget = min(len(ids_dropped_all), len(ids_to_add_all), max_imports_per_cycle)
         ids_to_add_this_cycle = ids_to_add_all[:replacement_budget]
         ids_to_remove_candidates = ids_dropped_all[:replacement_budget]
         deferred_additions_count = max(0, len(ids_to_add_all) - replacement_budget)
@@ -1304,6 +1310,8 @@ async def _run_scheduled_refresh(trigger: str):
         await refresh_topcharts()
     except Exception as e:
         console.log(f"⚠️ {trigger} store refresh failed: {e}")
+        return False
+    return True
 
 async def _topcharts_refresh_loop():
     """
@@ -1314,7 +1322,20 @@ async def _topcharts_refresh_loop():
     # hydrate the imported catalogue immediately instead of waiting an hour.
     if STARTUP_REFRESH_DELAY > 0:
         await asyncio.sleep(STARTUP_REFRESH_DELAY)
-    await _run_scheduled_refresh("Startup")
+
+    # Retry startup refresh with backoff — DB may still be initialising
+    max_retries = 5
+    for attempt in range(1, max_retries + 1):
+        success = await _run_scheduled_refresh(f"Startup (attempt {attempt}/{max_retries})")
+        if success:
+            break
+        if attempt < max_retries:
+            wait = min(15 * attempt, 60)
+            console.log(f"⏳ Retrying startup refresh in {wait}s...")
+            await asyncio.sleep(wait)
+        else:
+            console.log("❌ Startup refresh exhausted all retries. Will retry at next scheduled interval.")
+
     while True:
         await asyncio.sleep(REFRESH_INTERVAL)
         await _run_scheduled_refresh("Scheduled")
