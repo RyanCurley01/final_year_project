@@ -78,7 +78,23 @@ start_services() {
     if [ -z "$1" ]; then
         echo "🚀 Starting all microservices..."
         echo "📦 This will start: database, accounts, products, orders, payments, and ai services"
-        docker compose -f "$COMPOSE_FILE" -p "$PROJECT_NAME" up -d
+        if ! docker compose -f "$COMPOSE_FILE" -p "$PROJECT_NAME" up -d 2>&1; then
+            echo "⚠️  Some services failed to start (database may still be initialising)."
+            echo "⏳ Waiting for database to become healthy before retrying..."
+            local attempts=0
+            local max_attempts=60
+            until docker compose -f "$COMPOSE_FILE" -p "$PROJECT_NAME" exec -T db \
+                sh -lc 'mysqladmin ping -h localhost -u root -p"$MYSQL_ROOT_PASSWORD" --silent' >/dev/null 2>&1; do
+                attempts=$((attempts + 1))
+                if [ "$attempts" -ge "$max_attempts" ]; then
+                    echo "❌ Database did not become healthy after ${max_attempts} attempts. Check logs with: $0 logs db"
+                    exit 1
+                fi
+                sleep 2
+            done
+            echo "✅ Database is healthy. Starting remaining services..."
+            docker compose -f "$COMPOSE_FILE" -p "$PROJECT_NAME" up -d
+        fi
         repair_order_tracking
         echo "✅ All services started"
         echo ""
