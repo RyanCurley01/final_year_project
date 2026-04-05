@@ -1065,8 +1065,12 @@ const SimilarSongs = () => {
     navigate(`/songs/${song.trackId || song.id}`, {
       state: {
         song: song,
-        // Pass the broader external song matrix forward to allow subsequent pages to generate ML graphs.
-        artistSongs: songs, 
+        // Pass both iTunes songs and DB library products so SongDetails can hydrate images
+        // for library recommendations via the comparisonMetaById lookup.
+        artistSongs: [...songs, ...dbSongs],
+        
+        // Skip artist-name filtering in SongDetails so all DB products remain available for image hydration.
+        fromDiscover: true,
         
         // Implement breadcrumb tracking for 'Back' button routing logic.
         from: '/similar-songs'

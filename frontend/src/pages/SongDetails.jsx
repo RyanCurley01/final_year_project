@@ -688,10 +688,10 @@ const SongDetails = () => {
             });
 
         let hydratedRecommendations = validRecommendations;
-        const needsLibraryArtworkHydration = isDiscoverRequest && validRecommendations.some((song) => {
+        const needsLibraryArtworkHydration = validRecommendations.some((song) => {
           const pid = Number(song.trackId || song.id);
           const hasArtwork = !!(song.artworkUrl100 || song.albumCoverImageUrl || song.imageUrl || song.image);
-          return Number.isFinite(pid) && pid > 0 && !hasArtwork;
+          return Number.isFinite(pid) && pid > 0 && pid < 1000000 && !hasArtwork;
         });
 
         if (needsLibraryArtworkHydration) {
