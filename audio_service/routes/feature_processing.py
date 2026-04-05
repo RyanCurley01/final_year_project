@@ -630,12 +630,13 @@ async def backfill_genre(force: bool = False):
 
 
 @router.post("/api/audio/backfill-genre-library")
-async def backfill_genre_library():
+async def backfill_genre_library(force: bool = False):
     """
     Predict Genre for library songs (positive ProductIDs) using a KNN
     classifier trained on iTunes songs that already have known genres.
     Requires /api/audio/backfill-genre to have run first so that iTunes
     songs provide labelled training data.
+    Use ?force=true to re-predict ALL library songs, overwriting existing genres.
     """
     import json
     import numpy as np
@@ -698,12 +699,17 @@ async def backfill_genre_library():
             vec = _build_vector(data)
             if len(vec) != 51:
                 continue
-            if genre not in ('Unknown', ''):
-                train_vectors.append(vec)
-                train_labels.append(genre)
-            elif pid > 0:  # library song needing genre
+            is_library = pid > 0
+            has_genre = genre not in ('Unknown', '')
+
+            if is_library and (force or not has_genre):
+                # Library song to predict (or re-predict when force=true)
                 predict_pids.append(pid)
                 predict_vectors.append(vec)
+            elif has_genre:
+                # Use as training data (iTunes songs + library songs not being re-predicted)
+                train_vectors.append(vec)
+                train_labels.append(genre)
 
         if not train_vectors:
             return {
