@@ -1505,17 +1505,7 @@ async def match_library_songs(request: LibraryMatchRequest):
         results = []
         
         # 2. For each input candidate, find best library match
-        for candidate in request.candidates[:request.limit]:
-            
-            # Extract features for candidate (or get from cache if exists)
-            # Check if this external song happens to be in our cache (e.g. by name match or ID)
-            # For now, we assume we need to extract from preview URL or we can't score it
-            # BUT, to save time, similar songs usually sends features or we rely on 'unified' style
-            # Actually, most efficiency is gained if we already have features. 
-            
-            # Since generating features for 50 input songs is slow, 
-            # we check if we have cached features for these 'external' songs (negative IDs)
-            
+        for candidate in request.candidates[:request.limit]:         
             candidate_features = None
 
             # Fast path: frontend may provide normalized audio features from unified results.
@@ -1527,17 +1517,15 @@ async def match_library_songs(request: LibraryMatchRequest):
 
             try:
                 # Try lookup by ID (negative ID for artist songs)
-                cid = str(candidate.trackId)
-                if cid in ml_service.audio_features_cache:
-                    candidate_features = ml_service.audio_features_cache[cid]
-                else:
-                    # Try negative version
-                    try:
-                        neg_id = str(-abs(int(cid)))
-                        if neg_id in ml_service.audio_features_cache:
-                             candidate_features = ml_service.audio_features_cache[neg_id]
-                    except: pass
-            except: pass
+                # Cache keys are integers, so convert to int for lookup
+                cid_int_lookup = int(candidate.trackId)
+                neg_id_lookup = -abs(cid_int_lookup)
+                if neg_id_lookup in ml_service.audio_features_cache:
+                    candidate_features = ml_service.audio_features_cache[neg_id_lookup]
+                elif abs(cid_int_lookup) in ml_service.audio_features_cache:
+                    candidate_features = ml_service.audio_features_cache[abs(cid_int_lookup)]
+            except (ValueError, TypeError):
+                pass
             
             if not candidate_features and candidate.previewUrl:
                  # Real-time extraction for uncached songs
@@ -1628,14 +1616,14 @@ async def match_library_songs(request: LibraryMatchRequest):
                 
         # Hydrate library names
         if results:
-             ids = {r.matched_product_id for r in results}
+             ids = [r.matched_product_id for r in results if r.matched_product_id is not None]
              if ids:
-                 id_string = ",".join(str(i) for i in ids)
+                 placeholders = ",".join(["%s"] * len(ids))
                  with get_db_connection() as conn:
                      if conn:
                          with conn.cursor() as cursor:
-                             sql = f"SELECT ProductID, AlbumTitle FROM Products WHERE ProductID IN ({id_string})"
-                             cursor.execute(sql)
+                             sql = f"SELECT ProductID, AlbumTitle FROM Products WHERE ProductID IN ({placeholders})"
+                             cursor.execute(sql, ids)
                              rows = cursor.fetchall()
                              name_map = {str(row['ProductID']): row['AlbumTitle'] for row in rows}
                              
