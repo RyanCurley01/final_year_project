@@ -753,30 +753,20 @@ const TopCharts = () => {
                   {(() => {
                     const activeMedia = activeSong?.albumCoverImageUrl || activeSong?.artworkUrl100;
                     const activeIsVideo = activeMedia && activeMedia.toLowerCase().includes('.mp4');
-                    const activeIsTeddy = (activeSong?.trackName || activeSong?.albumTitle || '').toLowerCase().includes('teddy emotion');
-                    const activeUseOnset = activeIsVideo && !activeIsTeddy;
-                    if (activeUseOnset) {
-                      return (
-                        <div className={`w-12 h-12 rounded-full overflow-hidden border-2 border-cyan-500/50 ${isPlaying ? 'animate-spin' : ''}`} style={{ animationDuration: '3s' }}>
-                          <OnsetImageCard
-                            songTitle={activeSong.trackName || activeSong.albumTitle}
-                            songId={activeSong.id}
-                            className="w-full h-full object-cover"
-                            isPlaying={isPlaying}
-                            isActive={true}
-                          />
-                        </div>
-                      );
-                    }
+                    const activeIsLibrary = (activeSong?.source === 'database') || (Number(activeSong?.id) > 0 && Number(activeSong?.id) < 1000000);
+                    const activeCoverUrl = getSafeCoverUrl(activeSong, '200x200');
+                    const activeHasBadCover = activeIsVideo || (activeIsLibrary && activeCoverUrl === fallbackImage);
                     return (
-                      <img 
-                        key={activeSong?.albumCoverImageUrl || activeSong?.artworkUrl100 || 'no-cover'}
-                        src={getSafeCoverUrl(activeSong, '200x200')}
-                        alt={activeSong.trackName || activeSong.albumTitle}
-                        className={`w-12 h-12 rounded-full object-cover border-2 border-cyan-500/50 ${isPlaying ? 'animate-spin' : ''}`}
-                        style={{ animationDuration: '3s' }}
-                        onError={(e) => { e.target.src = fallbackImage; }}
-                      />
+                      <>
+                        <img 
+                          key={activeHasBadCover ? `cloud-${activeSong?.id}` : (activeMedia || 'no-cover')}
+                          src={activeHasBadCover ? '/cloud-cover.webp' : activeCoverUrl}
+                          alt={activeSong.trackName || activeSong.albumTitle}
+                          className={`w-12 h-12 rounded-full object-cover border-2 border-cyan-500/50 ${isPlaying ? 'animate-spin' : ''}`}
+                          style={{ animationDuration: '3s' }}
+                          onError={(e) => { e.target.src = fallbackImage; }}
+                        />
+                      </>
                     );
                   })()}
                   <div className="absolute inset-0 flex items-center justify-center pointer-events-none -mt-4">
@@ -785,7 +775,7 @@ const TopCharts = () => {
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-[17px] font-semibold text-white truncate leading-tight">{activeSong.trackName || activeSong.albumTitle}</p>
-                  <p className="text-[12px] text-gray-400 truncate -mt-3">{activeSong.artistName || 'Unknown Artist'}</p>
+                  <p className="text-[12px] text-gray-400 truncate -mt-3">{activeSong.artistName && activeSong.artistName !== 'Unknown Artist' ? activeSong.artistName : (activeSong.albumTitle || 'Library Song')}</p>
                 </div>
                 {isPlaying && (
                   <div className="flex gap-0.5">
@@ -822,7 +812,12 @@ const TopCharts = () => {
                       return { ...rec, ...liveMatch };
                   })
                   .sort((a, b) => b.similarity_score - a.similarity_score)
-                  .map((rec) => (
+                  .map((rec) => {
+                  const isLibrarySong = rec.product_id > 0 && rec.product_id < 1000000;
+                  const recArtistName = isLibrarySong ? (rec.artistName && rec.artistName !== 'Unknown Artist' ? rec.artistName : 'Library Song') : (rec.artistName || 'Unknown Artist');
+                  const recCoverUrl = getSafeCoverUrl(rec, '200x200');
+                  const recHasArt = recCoverUrl && recCoverUrl !== fallbackImage;
+                  return (
                   <div 
                     key={rec.id}
                     onClick={() => handleRecommendationClick(rec)}
@@ -847,9 +842,18 @@ const TopCharts = () => {
                               />
                             );
                           }
+                          if (isLibrarySong && !recHasArt) {
+                            return (
+                              <div className="w-full h-full bg-gradient-to-br from-cyan-600 via-purple-600 to-pink-600 flex items-center justify-center">
+                                <svg className="w-8 h-8 text-blue-900" fill="currentColor" viewBox="0 0 24 24">
+                                  <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/>
+                                </svg>
+                              </div>
+                            );
+                          }
                           return (
                             <img 
-                              src={getSafeCoverUrl(rec, '200x200')}
+                              src={recCoverUrl}
                               alt={rec.trackName}
                               className="w-full h-full object-cover"
                               onError={(e) => { e.target.src = fallbackImage; }}
@@ -872,7 +876,7 @@ const TopCharts = () => {
                             {Math.round(rec.similarity_score * 100)}%
                           </span>
                         </div>
-                        <p className="text-xs text-gray-300 truncate font-medium">{rec.artistName}</p>
+                        <p className="text-xs text-gray-300 truncate font-medium">{recArtistName}</p>
                         <p className="text-xs text-gray-400 truncate">{rec.reason || rec.match_reason}</p>
                         
                         {/* Feature Matches */}
@@ -909,7 +913,8 @@ const TopCharts = () => {
                       </div>
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             </>
           )}

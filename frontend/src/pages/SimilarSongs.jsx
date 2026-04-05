@@ -7,6 +7,7 @@ import { useAudioFeatures } from '../context/AudioFeaturesContext';
 import { setActiveSong, playPause } from '../redux/features/playerSlice';
 import { productService } from '../redux/services';
 import { FaPauseCircle, FaPlayCircle } from 'react-icons/fa';
+import OnsetImageCard from '../components/OnsetImageCard';
 import envConfig from '../config/environment';
 import { fixTextDeep } from '../utils/fixText';
 
@@ -1328,25 +1329,34 @@ const SimilarSongs = () => {
                 
                 {/* Visual implementation of a spinning vinyl-record album cover */}
                 <div className="relative w-12 h-16 flex-shrink-0">
-                  <img 
-                    key={currentTargetContext?.albumCoverImageUrl || currentTargetContext?.artworkUrl100 || 'no-cover'}
-                    src={getSafeCoverUrl(currentTargetContext, '200x200')}
-                    alt={currentTargetContext.trackName || currentTargetContext.albumTitle}
-                    // Attaches a custom CSS `animate-spin` class only when Redux claims `isPlaying` flag is active.
-                    className={`w-12 h-12 rounded-full object-cover border-2 border-cyan-500/50 ${isPlaying ? 'animate-spin' : ''}`}
-                    style={{ animationDuration: '3s' }}
-                    onError={(e) => { e.target.src = fallbackImage; }}
-                  />
-                  {/* Decorative vinyl record center hole punched via z-indexing and absolute positioning */}
-                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none -mt-4">
-                    <div className="w-3 h-3 rounded-full bg-gray-900 border border-gray-700"></div>
-                  </div>
+                  {(() => {
+                    const coverMedia = currentTargetContext?.albumCoverImageUrl || currentTargetContext?.artworkUrl100;
+                    const ctxIsVideo = coverMedia && coverMedia.toLowerCase().includes('.mp4');
+                    const ctxIsLibrary = (currentTargetContext?.source === 'database') || (Number(currentTargetContext?.id) > 0 && Number(currentTargetContext?.id) < 1000000);
+                    const ctxCoverUrl = getSafeCoverUrl(currentTargetContext, '200x200');
+                    const ctxHasBadCover = ctxIsVideo || (ctxIsLibrary && ctxCoverUrl === fallbackImage);
+                    return (
+                      <>
+                        <img 
+                          key={ctxHasBadCover ? `cloud-${currentTargetContext?.id}` : (coverMedia || 'no-cover')}
+                          src={ctxHasBadCover ? '/cloud-cover.webp' : ctxCoverUrl}
+                          alt={currentTargetContext.trackName || currentTargetContext.albumTitle}
+                          className={`w-12 h-12 rounded-full object-cover border-2 border-cyan-500/50 ${isPlaying ? 'animate-spin' : ''}`}
+                          style={{ animationDuration: '3s' }}
+                          onError={(e) => { e.target.src = fallbackImage; }}
+                        />
+                        <div className="absolute inset-0 flex items-center justify-center pointer-events-none -mt-4">
+                          <div className="w-3 h-3 rounded-full bg-gray-900 border border-gray-700"></div>
+                        </div>
+                      </>
+                    );
+                  })()}
                 </div>
                 
                 {/* Truncated text wrappers mapping standard Track & Artist definitions */}
                 <div className="flex-1 min-w-0">
                   <p className="text-[17px] font-semibold text-white truncate leading-tight">{currentTargetContext.trackName || currentTargetContext.albumTitle}</p>
-                  <p className="text-[12px] text-gray-400 truncate -mt-3">{currentTargetContext.artistName || 'Unknown Artist'}</p>
+                  <p className="text-[12px] text-gray-400 truncate -mt-3">{currentTargetContext.artistName && currentTargetContext.artistName !== 'Unknown Artist' ? currentTargetContext.artistName : (currentTargetContext.albumTitle || 'Library Song')}</p>
                 </div>
                 
                 {/* Floating equalizer pulse bars mapped directly alongside track playback activity */}
@@ -1427,7 +1437,10 @@ const SimilarSongs = () => {
                   
                   // Formats final display strings to guard against undefined interface exceptions.
                   const recTitle = rec.trackName || rec.albumTitle || rec.collectionName || `Track ${rec.product_id || rec.id || idx + 1}`;
-                  const recArtist = rec.artistName || 'Unknown Artist';
+                  const isLibrarySong = rec.product_id > 0 && rec.product_id < 1000000;
+                  const recArtist = isLibrarySong ? (rec.artistName && rec.artistName !== 'Unknown Artist' ? rec.artistName : 'Library Song') : (rec.artistName || 'Unknown Artist');
+                  const recCoverUrl = getSafeCoverUrl(rec, '200x200');
+                  const recHasArt = recCoverUrl && recCoverUrl !== fallbackImage;
                   const scoreForDisplay = rec.live_similarity_score ?? rec.similarity_score ?? 0;
                   
                   // Returns the individual recommended track component card rendering loop.
@@ -1441,12 +1454,20 @@ const SimilarSongs = () => {
                         
                       {/* Sub-container restricting image bounds for fallback compatibility testing */}
                       <div className="w-12 h-12 rounded-md overflow-hidden flex-shrink-0 border border-gray-600 group-hover:border-cyan-500 transition-colors">
-                        <img 
-                          src={getSafeCoverUrl(rec, '200x200')}
-                          alt={recTitle}
-                          className="w-full h-full object-cover"
-                          onError={(e) => { e.target.src = fallbackImage; }}
-                        />
+                        {isLibrarySong && !recHasArt ? (
+                          <div className="w-full h-full bg-gradient-to-br from-cyan-600 via-purple-600 to-pink-600 flex items-center justify-center">
+                            <svg className="w-8 h-8 text-blue-900" fill="currentColor" viewBox="0 0 24 24">
+                              <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/>
+                            </svg>
+                          </div>
+                        ) : (
+                          <img 
+                            src={recCoverUrl}
+                            alt={recTitle}
+                            className="w-full h-full object-cover"
+                            onError={(e) => { e.target.src = fallbackImage; }}
+                          />
+                        )}
                       </div>
 
                       {/* Flex wrapper for the core track text elements */}

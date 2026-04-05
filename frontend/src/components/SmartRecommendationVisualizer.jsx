@@ -8,6 +8,7 @@ import placeholders from '../utils/placeholderImage';
 import fixText from '../utils/fixText';
 import envConfig from '../config/environment';
 import blissImage from '../assets/bliss.png';
+import OnsetImageCard from './OnsetImageCard';
 
 const toFiniteNumber = (value) => {
   const numeric = Number(value);
@@ -460,27 +461,20 @@ const SmartRecommendationVisualizer = ({
           {(() => {
             const coverMedia = currentProduct.albumCoverImageUrl || currentProduct.artworkUrl100?.replace('100x100', '200x200');
             const isVideo = coverMedia && coverMedia.toLowerCase().includes('.mp4');
+            const prodIsLibrary = (currentProduct?.source === 'database') || (Number(currentProduct?.id) > 0 && Number(currentProduct?.id) < 1000000);
+            const hasValidImage = coverMedia && !isVideo;
+            const useCloudCover = isVideo || (prodIsLibrary && !hasValidImage);
             
             return (
               <div className="relative w-12 h-16 flex-shrink-0">
-                {isVideo ? (
-                  <img 
-                    key={coverMedia || 'video-placeholder'}
-                    src={blissImage}
-                    alt="Album cover"
-                    className={`w-12 h-12 rounded-full object-cover border-2 border-cyan-500/50 ${isPlaying ? 'animate-spin' : ''}`}
-                    style={{ animationDuration: '3s' }}
-                  />
-                ) : (
-                  <img 
-                    key={coverMedia || 'no-cover'}
-                    src={coverMedia || placeholders.music}
-                    alt={currentProduct.trackName || currentProduct.albumTitle}
-                    className={`w-12 h-12 rounded-full object-cover border-2 border-cyan-500/50 ${isPlaying ? 'animate-spin' : ''}`}
-                    style={{ animationDuration: '3s' }}
-                    onError={(e) => { e.target.src = placeholders.music; }}
-                  />
-                )}
+                <img 
+                  key={useCloudCover ? `cloud-${currentProduct.id}` : (coverMedia || 'no-cover')}
+                  src={useCloudCover ? '/cloud-cover.webp' : (coverMedia || placeholders.music)}
+                  alt={currentProduct.trackName || currentProduct.albumTitle}
+                  className={`w-12 h-12 rounded-full object-cover border-2 border-cyan-500/50 ${isPlaying ? 'animate-spin' : ''}`}
+                  style={{ animationDuration: '3s' }}
+                  onError={(e) => { e.target.src = placeholders.music; }}
+                />
                 <div className="absolute inset-0 flex items-center justify-center pointer-events-none -mt-4">
                   <div className="w-3 h-3 rounded-full bg-gray-900 border border-gray-700"></div>
                 </div>
@@ -489,7 +483,7 @@ const SmartRecommendationVisualizer = ({
           })()}
           <div className="flex-1 min-w-0">
             <p className="text-[17px] font-semibold text-white truncate leading-tight">{currentSongTitle}</p>
-            <p className="text-[12px] text-gray-400 truncate -mt-3">Selected Electronic Works</p>
+            <p className="text-[12px] text-gray-400 truncate -mt-3">{currentProduct?.artistName && currentProduct.artistName !== 'Unknown Artist' ? currentProduct.artistName : (currentProduct?.albumTitle || 'Selected Electronic Works')}</p>
           </div>
           {isPlaying && (
             <div className="flex gap-0.5">

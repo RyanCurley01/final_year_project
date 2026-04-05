@@ -305,17 +305,12 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
 
         # PRIORITY 1: Check Cache (High Quality ML Features)
         if current_id_int != 0:          
-            # Checks negative (iTunes) variants of the ID in the cache.
+            # Checks negative (iTunes) variants of the ID in the cache
+            # and positive (local library) variants of the ID in the cache.
             neg_id = -abs(current_id_int)
-            if neg_id in ml_service.audio_features_cache:
-                
-                # If negative id is found, it makes a copy of those features.
+            if neg_id in ml_service.audio_features_cache:               
                 cached_features = ml_service.audio_features_cache[neg_id]
-            
-            # Checks positive (local library) variants of the ID in the cache.
             elif abs(current_id_int) in ml_service.audio_features_cache:
-                
-                # If positive id is found, it makes a copy of those features.
                 cached_features = ml_service.audio_features_cache[abs(current_id_int)]
              
              
@@ -332,12 +327,8 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
             # Checks whether the client frontend sent any real-time audio features 
             # (request.audio_features) inside the API request payload.
             if request.audio_features:
-                # assigns request.audio_features to a shorter, more convenient variable name 
-                # req_f to make the next few lines cleaner.
                 req_f = request.audio_features
                 
-                # Gets the playback_rate from the live frontend features.
-                # But, if playback_rate is missing or None, default to 1.0 (normal speed).
                 rate = req_f.playback_rate if req_f.playback_rate else 1.0
                 
                 # This checks if the song is being played at a modified speed. 
@@ -345,9 +336,6 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
                 # If it's anything else (e.g., 1.5 for 50% faster, or 0.8 for 20% slower), 
                 # you enter the block.
                 if rate != 1.0:
-                    
-                    # Gets the tempo inside target_features (falling back to a default 120 BPM if it happens to be missing). 
-                    # It then multiplies that base tempo by the rate to update the target song's tempo.
                     target_features['tempo'] = target_features.get('tempo', 120) * rate
 
 
@@ -377,7 +365,9 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
                 # S3 / Discover extraction: If it's a native DB song, use the specialized async generator.
                 target_features = await extract_features_for_product_async(current_id_int, request.preview_url)
         
-        
+        if not target_features:
+            return {"status": "success", "recommendations": [], "target_features": None}
+
         # 3. Select Candidates based on Source and Request Data
         candidates = []
 
@@ -386,9 +376,7 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
         if request.candidates and len(request.candidates) > 0:
             console.log(f"✅ Using {len(request.candidates)} provided comparison songs")
             
-            # Limit to 20 max: Processing audio takes ~2 seconds per song. Even multithreaded, 
-            # allowing the user to send 500 songs would cause the server request to timeout.
-            songs_to_process = request.candidates[:20]
+            songs_to_process = request.candidates[:247]
             
             # This list will hold the asynchronous execution tasks.
             tasks = []
@@ -423,7 +411,7 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
                 
                 
                 # Check 3: Not provided by frontend, and not in the cache. 
-                # We must download and analyze the candidate song on-the-fly.
+                # Then has to download and analyze the candidate song on-the-fly.
                 elif song.previewUrl:
                     loop = asyncio.get_event_loop()
                     
@@ -482,8 +470,8 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
                            'onset_rate': features.get('onset_rate', 2.0),
                            'harmonic_ratio': features.get('harmonic_ratio', 0.5),
                            'percussive_ratio': features.get('percussive_ratio', 0.5),
+                           'genre': features.get('genre', ''),
                            'genre_cluster': features.get('genre_cluster', ''),
-                           # The `_meta` field passes along UI info (title, image) so we don't have to hit iTunes later.
                            '_meta': song 
                       })
             
@@ -492,62 +480,17 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
             # the engine will mathematically evaluate the target against EVERY single song loaded in the global cache.
             all_cached = ml_service.audio_features_cache.items()
             
-            # Candidate Context Filtering Logic: We want to restrict the pool of songs based on where 
-            # the user currently is in the app to avoid mixing "pro" Apple songs and user-uploaded library songs.
-            if request.source in ['top_charts', 'similar_songs', 'search_component']:
-                # The user is in an "Artist" or "Global" context. We build a fresh candidate list.
-                candidates = []
-                for pid, p in all_cached:
-                     # For purely commercial views (TopCharts, SimilarSongs), ONLY allow Artist/iTunes Songs.
-                     # Since Library songs are stored as positive DB IDs, if `pid >= 0`, we skip them.
-                     if request.source in ['top_charts', 'similar_songs'] and pid >= 0:
-                         continue
-
-                     # Strict self-exclusion #1: String comparison to prevent recommending the track you are already playing.
-                     if str(pid) == clean_current_id or pid == current_id_int:
-                          continue
-                     
-                     # Strict self-exclusion #2: Handle accidental string/integer typing mismatches safely.
-                     try:
-                          if int(pid) == int(clean_current_id) or int(pid) == current_id_int:
-                               continue
-                     except: pass
-
-                     # Strict self-exclusion #3: Handle negative/positive mapping collisions.
-                     # If the DB song (ID 5) somehow shares traits with the iTunes song mapped to ID -5, skip it.
-                     try:
-                         if abs(int(pid)) == abs(int(clean_current_id)):
-                             continue
-                     except: pass
-
-                     # If it passes all exclusions, add it to the valid pool.
-                     candidates.append(p)
-                     
-                console.log(f"🔎 Filtered Candidates: {len(candidates)} from {len(all_cached)} cached items")
-
-            elif request.source == 'discover_page':
-                # The user is heavily browsing the user-uploaded Portfolio/Library "Discover" feed.
-                candidates = []
-                for pid, p in all_cached:
-                    # Positive IDs ONLY: Completely block all iTunes/Apple tracks natively (pid < 0).
-                    if pid > 0:
-                         # Apply basic self-exclusion so the same playing track doesn't show up.
-                         if str(pid) == clean_current_id or pid == current_id_int:
-                              continue
-                         try:
-                             if int(pid) == int(clean_current_id): continue
-                         except: pass
-                         # Add valid Library DB tracks.
-                         candidates.append(p)
-
-                # Diagnostic alert: If the discover match pool yielded absolutely nothing.
-                if not candidates:
-                    console.log("⚠️ Discover candidate pool is empty (positive ProductIDs only)")
-                         
-            else:
-                 # Catch-all: For unknown app views (e.g. Visualizers or raw debug hits), 
-                 # accept both Apple & Library tracks freely, just doing a flat string self-exclusion removal.
-                 candidates = [p for pid, p in all_cached if str(pid) != clean_current_id]
+            # No source filtering — all cached songs (iTunes + library) are candidates.
+            # Only self-exclusion is applied.
+            candidates = []
+            for pid, p in all_cached:
+                if str(pid) == clean_current_id or pid == current_id_int:
+                    continue
+                try:
+                    if abs(int(pid)) == abs(int(clean_current_id)):
+                        continue
+                except: pass
+                candidates.append(p)
 
         console.log(f"🔎 Candidate Pool Size: {len(candidates)}")
 
@@ -598,42 +541,6 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
             if is_self:
                 continue
 
-            # B. Source Context Enforcement
-
-            # We need to know where the recommendation request is coming from (Sidebar, Discover etc).
-            # Convert the source to pure lowercase characters for consistent substring matching.
-            source_lower = (request.source or '').lower()
-            
-            # Define words that indicate the user expects to see professional iTunes music
-            artist_context_keywords = ['chart', 'similar', 'visual', 'side', 'search']
-            
-            # Cross-reference the user's current request location against the list to toggle artist mode True/False
-            is_artist_context = any(kw in source_lower for kw in artist_context_keywords)
-            
-            # Explicit Override: If the request originated from the User portfolio views, firmly disable artist mode.
-            if 'discover' in source_lower or 'library' in source_lower:
-                is_artist_context = False
-
-            # If the user is currently looking at an Artist view (e.g., Top Charts list).
-            if is_artist_context:
-                try:
-                    # Retrieve the candidate track's integer ID
-                    candidate_id_int = int(candidate_id_raw)
-                    
-                    # Positive IDs under 1,000,000 belong to User Library songs, not iTunes tracks.
-                    if candidate_id_int > 0 and candidate_id_int < 1000000:
-                        
-                        # However, check if the song we are currently playing is ALSO a User Library song.
-                        is_current_library = current_id_int > 0 and current_id_int < 1000000
-                        
-                        # If the currently playing song is NOT from a user library, drop the user library candidate track.
-                        if not is_current_library:
-                            continue # Skip Library Song
-                except:
-                    # UUIDs are permitted to bypass
-                    pass 
-
-            # Only candidates that have passed the is_self and source-context checks make it to the final array
             filtered_candidates.append(c)
         
         
@@ -641,7 +548,7 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
         # (filtered_candidates) that just successfully passed the rigorous context filtering 
         # (like removing the target song itself and keeping user/iTunes boundaries where applicable)
         candidates = filtered_candidates
-        console.log(f"🔎 Final Filtered Candidates: {len(candidates)} (Artist Only Filter: {is_artist_context})")
+        console.log(f"🔎 Final Filtered Candidates: {len(candidates)}")
 
         # Checks if the strict filtering accidently removed every single candidate song. 
         # This acts as a failsafe so the server doesn't return an empty list entirely. 
@@ -760,20 +667,6 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
                 ('dance', dance_match, f"Comparable groove")
             ]
 
-            # Ensure Pydantic receives a strict bool for genre_match.
-            target_genre = str(target_features.get('genre') or '').strip().lower()
-            cand_genre = str(p.get('genre') or '').strip().lower()
-            genre_match = bool(target_genre and cand_genre and target_genre == cand_genre)
-
-            # Also check ML genre cluster match (e.g. "Cluster 0" == "Cluster 0")
-            target_cluster = str(target_features.get('genre_cluster') or '').strip().lower()
-            cand_cluster = str(p.get('genre_cluster') or '').strip().lower()
-            cluster_match = bool(target_cluster and cand_cluster and target_cluster == cand_cluster)
-
-            # Include genre in the reason selection when genres match
-            if genre_match:
-                matches.append(('genre', 1.0, f"Same genre ({p.get('genre', '')})"))
-
             # Scans array and targets the tuple possessing the highest Match Score for the output reason
             best_match = max(matches, key=lambda x: x[1])
             
@@ -781,16 +674,11 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
             meta = p.get('_meta') 
             
 
-            # Master algorithm: merges AI space match (45%), linear human-audible traits (55%), and genre adjustment
-            blended_score = (cosine_norm * 0.45) + (core_match * 0.55)
-
-            # Genre bonus: boost songs that share the same real genre (e.g. Electronic, Pop)
-            # so that Aphex Twin songs rank higher when another Aphex Twin track is playing
-            if genre_match:
-                blended_score += 0.08
-            # Smaller bonus for ML cluster match (catches songs the classifier groups together)
-            elif cluster_match:
-                blended_score += 0.04
+            # Score driven by the full 51D cosine similarity (includes MFCCs, chroma,
+            # spectral contrast, spectral bandwidth, etc. that distinguish genres).
+            # The 4 core traits are kept as a minor tiebreaker since they're already
+            # embedded in the 51D vector.
+            blended_score = (cosine_norm * 0.85) + (core_match * 0.15)
             
             # Locks the final score into a ceiling of 0.999 and floor 0.0 to prevent glitch overflows
             blended_score = max(0.0, min(0.999, blended_score))
@@ -814,7 +702,7 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
                 mood_match=round(mood_match, 3),
                 danceability_match=round(dance_match, 3),
                 dance_match=round(dance_match, 3), 
-                genre_match=genre_match,
+                genre_match=False,
                 reason=best_match[2],
                 
                 # Populates the raw attributes back out so front-end debug visualizers can display them

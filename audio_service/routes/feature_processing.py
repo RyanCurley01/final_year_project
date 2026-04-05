@@ -138,7 +138,7 @@ def _is_placeholder_feature_payload(product_id: int, features: Dict) -> bool:
 # EXECUTION ORDER: Router endpoint.
 @router.post("/api/audio/extract-all-features")
 async def extract_all_product_features(
-    limit: int = 197,
+    limit: int = 272,
     save_to_db: bool = True,
     reprocess_incomplete: bool = True,
     reprocess_placeholders: bool = True,
@@ -273,10 +273,10 @@ async def extract_all_product_features(
                             }
 
                         # Classify genre cluster using ML model
-                        # Determine genre: preserve existing; for new songs use ML-classified genre.
+                        # Determine genre: preserve existing; for new songs predict real genre via KNN.
                         existing_genre = ml_service.audio_features_cache.get(product_id, {}).get('genre')
-                        if not existing_genre or existing_genre in (None, 'Unknown', 'Soundtrack'):
-                            existing_genre = None  # will be replaced by genre_cluster below
+                        if not existing_genre or existing_genre in (None, 'Unknown', 'Soundtrack') or existing_genre.lower().startswith('cluster'):
+                            existing_genre = None  # will be replaced below
 
                         genre_cluster = ml_service.classify_genre_from_features(
                             features['tempo'],
@@ -305,9 +305,14 @@ async def extract_all_product_features(
                             current_cache_items=current_cache
                         )
 
-                        # If no real genre was found, use the ML-classified genre cluster
+                        # If no real genre was found, predict via KNN trained on iTunes genres.
+                        # Only fall back to cluster label if KNN has insufficient training data.
                         if not existing_genre:
-                            existing_genre = genre_cluster
+                            predicted_genre = ml_service.predict_real_genre(features)
+                            if predicted_genre:
+                                existing_genre = predicted_genre
+                            else:
+                                existing_genre = genre_cluster
 
                         # Update cache (via module)
                         # Genre is preserved as actual genre; genre_cluster stores ML cluster

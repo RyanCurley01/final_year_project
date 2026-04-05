@@ -19,6 +19,12 @@ const Track = ({ isPlaying, isActive, activeSong }) => {
   
   const coverMedia = getCoverMedia();
   const isVideo = coverMedia && coverMedia.toLowerCase().includes('.mp4');
+  // Check if artworkUrl100 is a .mp4 (happens when library songs are played from recommendation sidebar)
+  const artworkIsVideo = activeSong?.artworkUrl100 && activeSong.artworkUrl100.toLowerCase().includes('.mp4');
+  // Library songs (positive ID < 1000000, source=database) with video covers or no valid image should show cloud cover
+  const isLibrarySong = (activeSong?.source === 'database') || (Number(activeSong?.id) > 0 && Number(activeSong?.id) < 1000000);
+  const hasNoValidImage = !coverMedia || isVideo || artworkIsVideo;
+  const showCloudCover = isVideo || artworkIsVideo || (isLibrarySong && hasNoValidImage);
   const songTitle = activeSong?.albumTitle || activeSong?.trackName || '';
   const isTeddyEmotion = songTitle.toLowerCase().includes('teddy emotion');
   const useOnsetImages = isVideo && !isTeddyEmotion;
@@ -53,48 +59,40 @@ const Track = ({ isPlaying, isActive, activeSong }) => {
 
   return (
   <div className="flex items-center justify-start flex-shrink-0">
-    <div className={`${isPlaying && isActive ? 'animate-spin' : ''} block h-12 w-12 sm:h-16 sm:w-16 mr-2 sm:mr-4 flex-shrink-0`} style={{ animationDuration: '3s' }}>
-      {useOnsetImages ? (
-        <div className="rounded-full overflow-hidden w-full h-full">
-          <OnsetImageCard
-            songTitle={songTitle}
-            songId={activeSong?.id || activeSong?.productId}
-            className="w-full h-full object-cover"
-            isPlaying={isPlaying && isActive}
-            isActive={isActive}
+    <div className="relative h-12 w-12 sm:h-16 sm:w-16 mr-2 sm:mr-4 flex-shrink-0">
+      <div className={`${isPlaying && isActive ? 'animate-spin' : ''} block h-full w-full`} style={{ animationDuration: '3s' }}>
+        {showCloudCover ? (
+          <img 
+            key={`cloud-${activeSong?.id}`}
+            src="/cloud-cover.webp"
+            alt="cover art"
+            className="rounded-full object-cover w-full h-full border-2 border-cyan-500/50"
+            onError={(e) => {
+              if (e.target.src !== placeholders.small) {
+                e.target.src = placeholders.small;
+              }
+            }}
           />
-        </div>
-      ) : isVideo && !videoError ? (
-        <video
-          ref={videoRef}
-          src={coverMedia}
-          crossOrigin="anonymous"
-          alt="cover art"
-          className="rounded-full object-cover w-full h-full"
-          muted
-          playsInline
-          preload="auto"
-          style={{ willChange: 'transform' }}
-          onError={(e) => {
-            setVideoError(true);
-          }}
-        />
-      ) : null}
-      {!isVideo || videoError ? (
-        <img 
-          key={coverMedia}
-          src={coverMedia || placeholders.small} 
-          alt="cover art" 
-          className={`rounded-full object-cover w-full h-full`}
-          onError={(e) => {
-            if (e.target.src !== placeholders.small) {
-              e.target.src = placeholders.small;
-            }
-          }}
-        />
-      ) : null}
+        ) : null}
+        {!showCloudCover ? (
+          <img 
+            key={coverMedia}
+            src={coverMedia || placeholders.small} 
+            alt="cover art" 
+            className={`rounded-full object-cover w-full h-full border-2 border-cyan-500/50`}
+            onError={(e) => {
+              if (e.target.src !== placeholders.small) {
+                e.target.src = placeholders.small;
+              }
+            }}
+          />
+        ) : null}
+      </div>
+      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+        <div className="w-3 h-3 rounded-full bg-gray-900 border border-gray-700"></div>
+      </div>
     </div>
-    <div className="min-w-0">
+    <div className="min-w-0 flex-1">
       <p className="text-white font-bold text-sm sm:text-base truncate">
         {activeSong?.trackName || activeSong?.albumTitle || 'No active Song'}
       </p>
@@ -102,6 +100,13 @@ const Track = ({ isPlaying, isActive, activeSong }) => {
         {activeSong?.artistName === 'Unknown Artist' || (activeSong?.source === 'database') ? ' ' : (activeSong?.artistName || 'Select a song')}
       </p>
     </div>
+    {isPlaying && isActive && (
+      <div className="flex gap-0.5 ml-2 flex-shrink-0">
+        <span className="w-1 h-2 bg-cyan-400 rounded-full animate-pulse"></span>
+        <span className="w-1 h-3 bg-cyan-400 rounded-full animate-pulse" style={{ animationDelay: '150ms' }}></span>
+        <span className="w-1 h-2 bg-cyan-400 rounded-full animate-pulse" style={{ animationDelay: '300ms' }}></span>
+      </div>
+    )}
   </div>
   );
 };

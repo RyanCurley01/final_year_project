@@ -624,3 +624,120 @@ def classify_genre_from_features(
     except Exception as e:
         console.log(f"⚠️ Genre classification failed: {e}")
         return "Unknown"
+
+
+# ---- KNN-based real genre predictor (uses iTunes genres as training data) ----
+_genre_knn_model = None
+_genre_knn_labels = None
+_genre_knn_cache_size = 0  # tracks when to retrain
+
+
+def _build_genre_vector(data: dict) -> list:
+    """Build a 51D feature vector from a cache entry for genre KNN."""
+    vec = [
+        float(data.get('tempo', 120)),
+        float(data.get('energy', 0.5)),
+        float(data.get('valence', 0.5)),
+        float(data.get('danceability', 0.5)),
+        float(data.get('acousticness', 0.5)),
+        float(data.get('spectral_centroid', 1500.0)),
+        float(data.get('spectral_rolloff', 3000.0)),
+        float(data.get('zero_crossing_rate', 0.05)),
+        float(data.get('instrumentalness', 0.5)),
+        float(data.get('loudness', -60.0)),
+        float(data.get('speechiness', 0.1)),
+        float(data.get('spectral_bandwidth', 1500.0)),
+        float(data.get('rms_energy', 0.02)),
+        float(data.get('onset_rate', 2.0)),
+        float(data.get('harmonic_ratio', 0.5)),
+        float(data.get('percussive_ratio', 0.5)),
+        float(data.get('duration', 30.0)),
+        float(KEY_NAME_TO_INDEX.get(data.get('key_signature', 'C'), 0)),
+        float(TIME_SIG_TO_BEATS.get(data.get('time_signature', '4/4'), 4)),
+    ]
+    mfcc = data.get('mfcc_mean', [0.0] * 13)
+    if isinstance(mfcc, str):
+        mfcc = json.loads(mfcc)
+    vec.extend([float(x) for x in mfcc[:13]])
+    vec.extend([0.0] * max(0, 13 - len(mfcc)))
+    chroma = data.get('chroma_mean', [0.0] * 12)
+    if isinstance(chroma, str):
+        chroma = json.loads(chroma)
+    vec.extend([float(x) for x in chroma[:12]])
+    vec.extend([0.0] * max(0, 12 - len(chroma)))
+    sc = data.get('spectral_contrast_mean', [0.0] * 7)
+    if isinstance(sc, str):
+        sc = json.loads(sc)
+    vec.extend([float(x) for x in sc[:7]])
+    vec.extend([0.0] * max(0, 7 - len(sc)))
+    return vec
+
+
+def _is_real_genre(genre: str) -> bool:
+    """Return True if genre is a real label, not a cluster or placeholder."""
+    if not genre:
+        return False
+    g = genre.strip().lower()
+    return g not in ('', 'unknown', 'soundtrack') and not g.startswith('cluster')
+
+
+def _train_genre_knn():
+    """Train (or retrain) the genre KNN from cached songs with real genre labels."""
+    global _genre_knn_model, _genre_knn_labels, _genre_knn_cache_size
+
+    train_vectors, train_labels = [], []
+    for pid, data in audio_features_cache.items():
+        genre = data.get('genre', '')
+        if not _is_real_genre(genre):
+            continue
+        vec = _build_genre_vector(data)
+        if len(vec) != 51:
+            continue
+        train_vectors.append(vec)
+        train_labels.append(genre)
+
+    if len(train_vectors) < 3:
+        _genre_knn_model = None
+        _genre_knn_labels = None
+        return
+
+    X = np.array(train_vectors)
+    if feature_scaler is not None:
+        X = feature_scaler.transform(X)
+
+    k = min(5, len(train_vectors))
+    clf = KNeighborsClassifier(n_neighbors=k)
+    clf.fit(X, train_labels)
+
+    _genre_knn_model = clf
+    _genre_knn_labels = list(set(train_labels))
+    _genre_knn_cache_size = len(audio_features_cache)
+    console.log(f"🎵 Trained genre KNN: {len(train_vectors)} songs, {len(_genre_knn_labels)} genres")
+
+
+def predict_real_genre(features: dict) -> Optional[str]:
+    """
+    Predict a real genre label (e.g. 'Electronic', 'Pop') for a song
+    using KNN trained on iTunes songs with known genres.
+    Returns None if not enough training data is available.
+    """
+    global _genre_knn_model, _genre_knn_cache_size
+
+    # Retrain if cache has grown significantly since last training
+    if _genre_knn_model is None or len(audio_features_cache) - _genre_knn_cache_size > 20:
+        _train_genre_knn()
+
+    if _genre_knn_model is None:
+        return None
+
+    try:
+        vec = _build_genre_vector(features)
+        if len(vec) != 51:
+            return None
+        X = np.array([vec])
+        if feature_scaler is not None:
+            X = feature_scaler.transform(X)
+        return str(_genre_knn_model.predict(X)[0])
+    except Exception as e:
+        console.log(f"⚠️ Genre KNN prediction failed: {e}")
+        return None
