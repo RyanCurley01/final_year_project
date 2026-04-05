@@ -32,13 +32,38 @@ ITUNES_SEARCH_TARGET_COUNT = 75
 LIBRARY_TARGET_COUNT = 47
 ITUNES_SEARCH_TERMS = [
     "Aphex Twin", "Squarepusher", "Boards of Canada",
-    "pop", "rock", "hip hop", "r&b", "country",
-    "electronic", "dance", "indie", "latin", "jazz",
-    "alternative", "folk", "house", "techno", "metal",
+    "Autechre", "Four Tet", "Brian Eno",
+    "ambient electronic", "IDM", "electronica",
 ]
 
 # Track the background task so we can cancel it on shutdown
 _refresh_task: asyncio.Task | None = None
+
+
+async def _lookup_real_genre(track_id: int, fallback: str = "Unknown") -> str:
+    """
+    Look up the authoritative primaryGenreName for a single track via the
+    iTunes Lookup API.  The RSS category label is unreliable (it reflects
+    the *chart* category, not the track's actual genre), so we always prefer
+    the Lookup API result.
+
+    Falls back to *fallback* on any error.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                f"https://itunes.apple.com/lookup?id={track_id}"
+            )
+            if resp.status_code == 200:
+                results = resp.json().get("results", [])
+                if results:
+                    genre = results[0].get("primaryGenreName")
+                    if genre:
+                        return genre
+    except Exception:
+        pass
+    return fallback
+
 
 # ============================================
 # ITUNES INTEGRATION ENDPOINTS
@@ -241,8 +266,10 @@ async def import_top_songs(limit: int = 150):
                     chroma_mean=features.get('chroma_mean'),
                     spectral_contrast_mean=features.get('spectral_contrast_mean')
                 )
-                # Extract actual genre from RSS category
-                actual_genre = entry.get('category', {}).get('attributes', {}).get('label', 'Unknown')
+                # Look up the real genre from the iTunes Lookup API
+                # (RSS category label reflects the chart, not the track's actual genre)
+                rss_genre = entry.get('category', {}).get('attributes', {}).get('label', 'Unknown')
+                actual_genre = await _lookup_real_genre(track_id, fallback=rss_genre)
 
                 # Insert into DB
                 with get_db_connection() as conn:
@@ -756,6 +783,7 @@ def _upsert_stock(cursor, product_id: int, is_available: int):
     Works whether or not the UNIQUE index on ProductID exists:
       - With the index: ON DUPLICATE KEY UPDATE fires on the unique ProductID.
       - Without the index: falls back to check-then-insert/update.
+    Silently skips FK constraint errors (product may not exist yet).
     """
     available_flag = 1 if int(is_available) == 1 else 0
     try:
@@ -773,7 +801,9 @@ def _upsert_stock(cursor, product_id: int, is_available: int):
                 (product_id,)
             )
         return
-    except Exception:
+    except Exception as e:
+        if "1452" in str(e):
+            return  # FK constraint — product doesn't exist yet, skip
         pass
 
     # Fallback for schemas without unique key or UnavailableSince support.
@@ -806,12 +836,16 @@ def _upsert_stock(cursor, product_id: int, is_available: int):
                     "INSERT INTO Stock (IsAvailable, ProductID, UnavailableSince, AvailableSince) VALUES (1, %s, NULL, NOW())",
                     (product_id,)
                 )
-            except Exception:
+            except Exception as e:
+                if "1452" in str(e):
+                    return
                 cursor.execute("INSERT INTO Stock (IsAvailable, ProductID) VALUES (1, %s)", (product_id,))
         else:
             try:
                 cursor.execute("INSERT INTO Stock (IsAvailable, ProductID, UnavailableSince) VALUES (0, %s, NOW())", (product_id,))
-            except Exception:
+            except Exception as e:
+                if "1452" in str(e):
+                    return
                 cursor.execute("INSERT INTO Stock (IsAvailable, ProductID) VALUES (0, %s)", (product_id,))
 
 
@@ -878,7 +912,9 @@ async def _import_single_song_rss(entry, loop) -> dict | None:
         chroma_mean=features.get('chroma_mean'),
         spectral_contrast_mean=features.get('spectral_contrast_mean')
     )
-    actual_genre = entry.get('category', {}).get('attributes', {}).get('label', 'Unknown')
+    # Look up the real genre via iTunes Lookup API (RSS category is unreliable)
+    rss_genre = entry.get('category', {}).get('attributes', {}).get('label', 'Unknown')
+    actual_genre = await _lookup_real_genre(track_id, fallback=rss_genre)
 
     mfcc_json = json.dumps(features.get('mfcc_mean', [])) if features.get('mfcc_mean') else None
     chroma_json = json.dumps(features.get('chroma_mean', [])) if features.get('chroma_mean') else None
@@ -1018,18 +1054,28 @@ async def _fetch_current_chart_ids() -> tuple[dict[int, dict], dict[int, dict]]:
     search_tracks: dict[int, dict] = {}
 
     async with httpx.AsyncClient(timeout=30.0) as client:
-        # --- Top 150 charting songs via RSS ---
-        try:
-            rss_url = f"https://itunes.apple.com/us/rss/topsongs/limit={TOPCHARTS_TARGET_COUNT}/json"
-            resp = await client.get(rss_url)
-            if resp.status_code == 200:
-                entries = resp.json().get('feed', {}).get('entry', [])
-                for entry in entries:
-                    tid_str = entry.get('id', {}).get('attributes', {}).get('im:id')
-                    if tid_str:
-                        rss_entries[-int(tid_str)] = entry
-        except Exception as e:
-            console.log(f"   ⚠️ RSS fetch failed: {e}")
+        # --- Top 150 charting songs via Electronic genre RSS ---
+        electronic_rss_feeds = [
+            f"https://itunes.apple.com/us/rss/topsongs/limit=200/genre=7/json",   # Electronic
+            f"https://itunes.apple.com/us/rss/topsongs/limit=200/genre=17/json",  # Dance
+        ]
+        for rss_url in electronic_rss_feeds:
+            if len(rss_entries) >= TOPCHARTS_TARGET_COUNT:
+                break
+            try:
+                resp = await client.get(rss_url)
+                if resp.status_code == 200:
+                    entries = resp.json().get('feed', {}).get('entry', [])
+                    for entry in entries:
+                        tid_str = entry.get('id', {}).get('attributes', {}).get('im:id')
+                        if tid_str:
+                            pid = -int(tid_str)
+                            if pid not in rss_entries:
+                                rss_entries[pid] = entry
+                                if len(rss_entries) >= TOPCHARTS_TARGET_COUNT:
+                                    break
+            except Exception as e:
+                console.log(f"   ⚠️ Electronic RSS fetch failed: {e}")
 
         # --- Top 75 popular songs via additional RSS genre feeds + artist/genre search ---
         # Dynamic target: if RSS returned fewer than expected, let search fill the gap
@@ -1038,15 +1084,12 @@ async def _fetch_current_chart_ids() -> tuple[dict[int, dict], dict[int, dict]]:
             AUDIO_FEATURES_MAX_IMPORTED_ROWS - len(rss_entries),
         )
 
-        # First try additional RSS genre feeds (hot tracks) for genuinely charting songs
-        rss_genre_feeds = [
-            "https://itunes.apple.com/us/rss/topsongs/limit=50/genre=14/json",   # Pop
-            "https://itunes.apple.com/us/rss/topsongs/limit=50/genre=18/json",   # Hip-Hop/Rap
-            "https://itunes.apple.com/us/rss/topsongs/limit=50/genre=21/json",   # Rock
-            "https://itunes.apple.com/us/rss/topsongs/limit=50/genre=15/json",   # R&B/Soul
-        ]
+        # Skip genre RSS sub-feeds (iTunes sub-genre IDs are unreliable).
+        # Fill entirely from artist search terms for accurate electronic content.
+        rss_genre_feeds = []
+        genre_rss_budget = 0
         for feed_url in rss_genre_feeds:
-            if len(search_tracks) >= search_target:
+            if len(search_tracks) >= genre_rss_budget:
                 break
             try:
                 resp = await client.get(feed_url)
@@ -1070,6 +1113,11 @@ async def _fetch_current_chart_ids() -> tuple[dict[int, dict], dict[int, dict]]:
                                 if not preview_url and len(links) >= 2:
                                     preview_url = links[1].get('attributes', {}).get('href')
                             if preview_url:
+                                # Look up real genre via iTunes Lookup API
+                                real_genre = await _lookup_real_genre(
+                                    int(tid_str),
+                                    fallback=entry.get('category', {}).get('attributes', {}).get('label', 'Unknown')
+                                )
                                 search_tracks[pid] = {
                                     'trackId': int(tid_str),
                                     'trackName': entry.get('im:name', {}).get('label', 'Unknown'),
@@ -1077,9 +1125,9 @@ async def _fetch_current_chart_ids() -> tuple[dict[int, dict], dict[int, dict]]:
                                     'previewUrl': preview_url,
                                     'artworkUrl100': entry.get('im:image', [{}])[-1].get('label', ''),
                                     'trackPrice': float(entry.get('im:price', {}).get('attributes', {}).get('amount', '0.99') or '0.99'),
-                                    'primaryGenreName': entry.get('category', {}).get('attributes', {}).get('label', 'Unknown'),
+                                    'primaryGenreName': real_genre,
                                 }
-                                if len(search_tracks) >= search_target:
+                                if len(search_tracks) >= genre_rss_budget:
                                     break
             except Exception as e:
                 console.log(f"   ⚠️ Genre RSS feed failed: {e}")

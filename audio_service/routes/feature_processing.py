@@ -538,11 +538,17 @@ async def backfill_mood():
 
 
 @router.post("/api/audio/backfill-genre")
-async def backfill_genre():
+async def backfill_genre(force: bool = False):
     """
-    Backfill NULL/Unknown Genre values in AudioFeatures by looking up the
-    actual genre from the iTunes Lookup API.  Works for iTunes-imported songs
-    (negative ProductIDs) whose absolute value is the iTunes trackId.
+    Backfill Genre values in AudioFeatures by looking up the actual genre
+    from the iTunes Lookup API.  Works for iTunes-imported songs (negative
+    ProductIDs) whose absolute value is the iTunes trackId.
+
+    Query params:
+        force=true  — re-lookup ALL iTunes-imported songs, not just
+                       NULL/Unknown ones.  Use this to fix songs that were
+                       imported with the wrong RSS chart-category genre
+                       (e.g. "Pop" instead of "Electronic").
     """
     import httpx
 
@@ -552,18 +558,25 @@ async def backfill_genre():
             if not conn:
                 raise HTTPException(status_code=503, detail="Database connection unavailable")
             with conn.cursor() as cursor:
-                cursor.execute("""
-                    SELECT ProductID FROM AudioFeatures
-                    WHERE (Genre IS NULL OR Genre = '' OR Genre = 'Unknown')
-                    AND ProductID < 0
-                """)
+                if force:
+                    # Re-lookup every iTunes-imported song
+                    cursor.execute("""
+                        SELECT ProductID FROM AudioFeatures
+                        WHERE ProductID < 0
+                    """)
+                else:
+                    cursor.execute("""
+                        SELECT ProductID FROM AudioFeatures
+                        WHERE (Genre IS NULL OR Genre = '' OR Genre = 'Unknown')
+                        AND ProductID < 0
+                    """)
                 rows = cursor.fetchall()
 
         if not rows:
             return {"status": "success", "updated": 0, "message": "No rows need genre backfill"}
 
         product_ids = [r['ProductID'] for r in rows]
-        console.log(f"🎵 Backfilling genre for {len(product_ids)} songs via iTunes Lookup...")
+        console.log(f"🎵 Backfilling genre for {len(product_ids)} songs via iTunes Lookup {'(force)' if force else ''}...")
 
         # 2. iTunes Lookup API accepts up to ~200 comma-separated IDs per request
         updated = 0

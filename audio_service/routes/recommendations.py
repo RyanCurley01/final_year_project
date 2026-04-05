@@ -96,6 +96,37 @@ def _resolve_discover_product_id(current_id_raw: str, preview_url: Optional[str]
         return 0
 
 
+def _genre_agreement_score(target: dict, candidate: dict) -> float:
+    """Return a -1.0 to +1.0 genre agreement signal.
+
+    +1.0  exact genre match  (e.g. both "Electronic")
+    +0.6  same ML genre_cluster but different human-readable genre
+    +0.0  genre info missing on either side → neutral (no penalty)
+    -0.3  both have genre info but they disagree on genre AND cluster
+    """
+    t_genre = (target.get('genre') or '').strip().lower()
+    c_genre = (candidate.get('genre') or '').strip().lower()
+    t_cluster = (target.get('genre_cluster') or '').strip().lower()
+    c_cluster = (candidate.get('genre_cluster') or '').strip().lower()
+
+    # If either side is missing genre info, stay neutral
+    if not t_genre and not t_cluster:
+        return 0.0
+    if not c_genre and not c_cluster:
+        return 0.0
+
+    # Exact genre match (strongest signal)
+    if t_genre and c_genre and t_genre == c_genre:
+        return 1.0
+
+    # Same ML cluster (decent signal even if human labels differ)
+    if t_cluster and c_cluster and t_cluster == c_cluster:
+        return 0.6
+
+    # Both have info but nothing matches → penalise
+    return -0.3
+
+
 def _build_similarity_vector(f: dict) -> list:
     """
     Build a normalized similarity vector from audio features dict.
@@ -649,6 +680,11 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
             # Compresses the cosine similarity score from [-1, 1] into a strict [0, 1] percentage band
             cosine_norm = max(0.0, min(1.0, (float(score) + 1.0) / 2.0))
             
+            # Genre agreement: compare target and candidate genre / genre_cluster.
+            # Returns -0.3 (mismatch) to +1.0 (exact match); 0.0 when info is absent.
+            genre_agree = _genre_agreement_score(target_features, p)
+            is_genre_match = genre_agree > 0.5  # True for exact genre or same cluster
+            
             # Sums the 4 human-audible traits using set perceptual weights (e.g. Energy 30%, Tempo 25%)
             # This ensures high-dimensional abstract AI matches (Cosine) don't override the 
             # fact that a user just wants a musically-similar Tempo and Energy.
@@ -666,6 +702,8 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
                 ('mood', mood_match, f"Similar mood"),
                 ('dance', dance_match, f"Comparable groove")
             ]
+            if is_genre_match:
+                matches.append(('genre', 1.0, f"Same genre ({p.get('genre', 'Unknown')})"))
 
             # Scans array and targets the tuple possessing the highest Match Score for the output reason
             best_match = max(matches, key=lambda x: x[1])
@@ -678,7 +716,9 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
             # spectral contrast, spectral bandwidth, etc. that distinguish genres).
             # The 4 core traits are kept as a minor tiebreaker since they're already
             # embedded in the 51D vector.
-            blended_score = (cosine_norm * 0.85) + (core_match * 0.15)
+            # Genre agreement adds up to ±0.10 to separate same-genre from cross-genre.
+            genre_bonus = genre_agree * 0.10
+            blended_score = (cosine_norm * 0.80) + (core_match * 0.10) + genre_bonus
             
             # Locks the final score into a ceiling of 0.999 and floor 0.0 to prevent glitch overflows
             blended_score = max(0.0, min(0.999, blended_score))
@@ -702,7 +742,7 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
                 mood_match=round(mood_match, 3),
                 danceability_match=round(dance_match, 3),
                 dance_match=round(dance_match, 3), 
-                genre_match=False,
+                genre_match=is_genre_match,
                 reason=best_match[2],
                 
                 # Populates the raw attributes back out so front-end debug visualizers can display them
@@ -1546,7 +1586,9 @@ async def match_library_songs(request: LibraryMatchRequest):
                     + dance_match * 0.25
                 )
 
-                blended_score = (cosine_norm * 0.45) + (core_match * 0.55)
+                genre_agree = _genre_agreement_score(candidate_features, lib_song)
+                genre_bonus = genre_agree * 0.10
+                blended_score = (cosine_norm * 0.40) + (core_match * 0.50) + genre_bonus
                 blended_score = max(0.0, min(0.999, blended_score))
 
                 seed_str = f"{candidate.trackId}:{lib_song.get('id', '')}"
