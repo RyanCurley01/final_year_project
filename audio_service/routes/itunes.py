@@ -30,7 +30,12 @@ STARTUP_REFRESH_DELAY = int(os.getenv("TOPCHARTS_STARTUP_REFRESH_DELAY", 5))
 TOPCHARTS_TARGET_COUNT = 150
 ITUNES_SEARCH_TARGET_COUNT = 75
 LIBRARY_TARGET_COUNT = 47
-ITUNES_SEARCH_TERMS = ["pop", "electronic", "dance", "house", "techno", "indie"]
+ITUNES_SEARCH_TERMS = [
+    "Aphex Twin", "Squarepusher", "Boards of Canada",
+    "pop", "rock", "hip hop", "r&b", "country",
+    "electronic", "dance", "indie", "latin", "jazz",
+    "alternative", "folk", "house", "techno", "metal",
+]
 
 # Track the background task so we can cancel it on shutdown
 _refresh_task: asyncio.Task | None = None
@@ -344,27 +349,27 @@ async def import_itunes_songs_to_database(limit: int = 50, genre: str = "pop"):
     Import iTunes songs into the database to increase dataset size for better similarity scores.
     
     Steps:
-    1. Search iTunes for songs (pop only)
+    1. Search iTunes for songs by the given genre or artist name
     2. Extract audio features from preview URLs
     3. Insert into Products table (with negative ProductIDs to avoid conflicts)
     4. Insert features into AudioFeatures table
     5. Reload cache
     
     Args:
-        limit: Number of songs to import (max 50)
-        genre: Requested genre (ignored; pop is enforced)
+        limit: Number of songs to import (max 75)
+        genre: Search term — artist name (e.g. "Aphex Twin") or genre (e.g. "pop")
     
     Returns:
         Summary of imported songs
     """
     try:
         enforced_limit = max(1, min(int(limit or ITUNES_SEARCH_TARGET_COUNT), ITUNES_SEARCH_TARGET_COUNT))
-        enforced_genre = "pop"
-        console.log(f"🎵 Starting iTunes import: {enforced_limit} {enforced_genre} songs...")
+        search_term = genre or "pop"
+        console.log(f"🎵 Starting iTunes import: {enforced_limit} '{search_term}' songs...")
         
         # 1. Search iTunes API
         itunes_url = f"{ITUNES_API_BASE_URL}/search"
-        params = {"term": enforced_genre, "limit": enforced_limit, "media": "music", "entity": "song"}
+        params = {"term": search_term, "limit": enforced_limit, "media": "music", "entity": "song"}
         
         async with httpx.AsyncClient(timeout=15.0) as client:
             response = await client.get(itunes_url, params=params)
@@ -1002,12 +1007,18 @@ async def _fetch_current_chart_ids() -> tuple[dict[int, dict], dict[int, dict]]:
     Fetch the current iTunes Top songs (RSS) and a capped set of iTunes search songs,
     returning two dicts mapping negative product_id → entry/track
     for RSS and Search results respectively.
+
+    Sources:
+      - RSS: Top 150 charting songs (topsongs feed).
+      - Search: Top 75 most popular current songs via the iTunes "topSongs" lookup
+        plus artist-specific searches (Aphex Twin, Squarepusher, Boards of Canada),
+        followed by genre fallback terms if still under target.
     """
     rss_entries: dict[int, dict] = {}
     search_tracks: dict[int, dict] = {}
 
     async with httpx.AsyncClient(timeout=30.0) as client:
-        # --- Pop top songs via RSS ---
+        # --- Top 150 charting songs via RSS ---
         try:
             rss_url = f"https://itunes.apple.com/us/rss/topsongs/limit={TOPCHARTS_TARGET_COUNT}/json"
             resp = await client.get(rss_url)
@@ -1020,9 +1031,62 @@ async def _fetch_current_chart_ids() -> tuple[dict[int, dict], dict[int, dict]]:
         except Exception as e:
             console.log(f"   ⚠️ RSS fetch failed: {e}")
 
-        # --- Search API fallback pool (multiple terms) ---
+        # --- Top 75 popular songs via additional RSS genre feeds + artist/genre search ---
+        # Dynamic target: if RSS returned fewer than expected, let search fill the gap
+        search_target = max(
+            ITUNES_SEARCH_TARGET_COUNT,
+            AUDIO_FEATURES_MAX_IMPORTED_ROWS - len(rss_entries),
+        )
+
+        # First try additional RSS genre feeds (hot tracks) for genuinely charting songs
+        rss_genre_feeds = [
+            "https://itunes.apple.com/us/rss/topsongs/limit=50/genre=14/json",   # Pop
+            "https://itunes.apple.com/us/rss/topsongs/limit=50/genre=18/json",   # Hip-Hop/Rap
+            "https://itunes.apple.com/us/rss/topsongs/limit=50/genre=21/json",   # Rock
+            "https://itunes.apple.com/us/rss/topsongs/limit=50/genre=15/json",   # R&B/Soul
+        ]
+        for feed_url in rss_genre_feeds:
+            if len(search_tracks) >= search_target:
+                break
+            try:
+                resp = await client.get(feed_url)
+                if resp.status_code == 200:
+                    feed_entries = resp.json().get('feed', {}).get('entry', [])
+                    for entry in feed_entries:
+                        tid_str = entry.get('id', {}).get('attributes', {}).get('im:id')
+                        if not tid_str:
+                            continue
+                        pid = -int(tid_str)
+                        if pid not in rss_entries and pid not in search_tracks:
+                            # Convert RSS entry to search-like dict for _import_single_song_search compat
+                            links = entry.get('link', [])
+                            preview_url = None
+                            if isinstance(links, list):
+                                for link in links:
+                                    link_type = link.get('attributes', {}).get('type', '')
+                                    if 'audio' in link_type or 'video' in link_type:
+                                        preview_url = link.get('attributes', {}).get('href')
+                                        break
+                                if not preview_url and len(links) >= 2:
+                                    preview_url = links[1].get('attributes', {}).get('href')
+                            if preview_url:
+                                search_tracks[pid] = {
+                                    'trackId': int(tid_str),
+                                    'trackName': entry.get('im:name', {}).get('label', 'Unknown'),
+                                    'artistName': entry.get('im:artist', {}).get('label', 'Unknown'),
+                                    'previewUrl': preview_url,
+                                    'artworkUrl100': entry.get('im:image', [{}])[-1].get('label', ''),
+                                    'trackPrice': float(entry.get('im:price', {}).get('attributes', {}).get('amount', '0.99') or '0.99'),
+                                    'primaryGenreName': entry.get('category', {}).get('attributes', {}).get('label', 'Unknown'),
+                                }
+                                if len(search_tracks) >= search_target:
+                                    break
+            except Exception as e:
+                console.log(f"   ⚠️ Genre RSS feed failed: {e}")
+
+        # Then fill remaining slots with artist-specific and genre search terms
         for term in ITUNES_SEARCH_TERMS:
-            if len(search_tracks) >= ITUNES_SEARCH_TARGET_COUNT:
+            if len(search_tracks) >= search_target:
                 break
             try:
                 params = {"term": term, "limit": 200, "media": "music", "entity": "song"}
@@ -1038,7 +1102,7 @@ async def _fetch_current_chart_ids() -> tuple[dict[int, dict], dict[int, dict]]:
                             and pid not in search_tracks
                         ):
                             search_tracks[pid] = track
-                            if len(search_tracks) >= ITUNES_SEARCH_TARGET_COUNT:
+                            if len(search_tracks) >= search_target:
                                 break
             except Exception as e:
                 console.log(f"   ⚠️ Search fetch failed for term '{term}': {e}")
@@ -1052,7 +1116,9 @@ async def refresh_topcharts():
     Live differential sync of the entire store catalogue (every 1 hour).
 
         iTunes songs (ProductID < 0):
-            1. Fetch the current Top 150 chart songs (RSS) + 75 search songs.
+            1. Fetch the current Top 150 chart songs (RSS) + top 75 charting/artist songs
+               (genre RSS feeds for Pop/Hip-Hop/Rock/R&B, Aphex Twin, Squarepusher,
+               Boards of Canada, and genre fallback terms).
             2. Determine a strict replacement budget for this cycle.
             3. Import up to that many new chart entries.
             4. Mark the same number of dropped songs unavailable in Stock (kept for history).

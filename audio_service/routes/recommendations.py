@@ -759,21 +759,38 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
                 ('mood', mood_match, f"Similar mood"),
                 ('dance', dance_match, f"Comparable groove")
             ]
-            
-            # Scans array and targets the tuple possessing the highest Match Score for the output reason
-            best_match = max(matches, key=lambda x: x[1])
 
             # Ensure Pydantic receives a strict bool for genre_match.
             target_genre = str(target_features.get('genre') or '').strip().lower()
             cand_genre = str(p.get('genre') or '').strip().lower()
             genre_match = bool(target_genre and cand_genre and target_genre == cand_genre)
+
+            # Also check ML genre cluster match (e.g. "Cluster 0" == "Cluster 0")
+            target_cluster = str(target_features.get('genre_cluster') or '').strip().lower()
+            cand_cluster = str(p.get('genre_cluster') or '').strip().lower()
+            cluster_match = bool(target_cluster and cand_cluster and target_cluster == cand_cluster)
+
+            # Include genre in the reason selection when genres match
+            if genre_match:
+                matches.append(('genre', 1.0, f"Same genre ({p.get('genre', '')})"))
+
+            # Scans array and targets the tuple possessing the highest Match Score for the output reason
+            best_match = max(matches, key=lambda x: x[1])
             
             # Attempts to grab textual metadata if pre-resolved and embedded in cache dictionary
             meta = p.get('_meta') 
             
 
             # Master algorithm: merges AI space match (45%), linear human-audible traits (55%), and genre adjustment
-            blended_score = (cosine_norm * 0.45) + (core_match * 0.55) 
+            blended_score = (cosine_norm * 0.45) + (core_match * 0.55)
+
+            # Genre bonus: boost songs that share the same real genre (e.g. Electronic, Pop)
+            # so that Aphex Twin songs rank higher when another Aphex Twin track is playing
+            if genre_match:
+                blended_score += 0.08
+            # Smaller bonus for ML cluster match (catches songs the classifier groups together)
+            elif cluster_match:
+                blended_score += 0.04
             
             # Locks the final score into a ceiling of 0.999 and floor 0.0 to prevent glitch overflows
             blended_score = max(0.0, min(0.999, blended_score))

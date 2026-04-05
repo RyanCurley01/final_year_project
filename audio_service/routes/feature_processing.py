@@ -273,6 +273,11 @@ async def extract_all_product_features(
                             }
 
                         # Classify genre cluster using ML model
+                        # Determine genre: preserve existing; for new songs use ML-classified genre.
+                        existing_genre = ml_service.audio_features_cache.get(product_id, {}).get('genre')
+                        if not existing_genre or existing_genre in (None, 'Unknown', 'Soundtrack'):
+                            existing_genre = None  # will be replaced by genre_cluster below
+
                         genre_cluster = ml_service.classify_genre_from_features(
                             features['tempo'],
                             features['energy'],
@@ -300,6 +305,10 @@ async def extract_all_product_features(
                             current_cache_items=current_cache
                         )
 
+                        # If no real genre was found, use the ML-classified genre cluster
+                        if not existing_genre:
+                            existing_genre = genre_cluster
+
                         # Update cache (via module)
                         # Genre is preserved as actual genre; genre_cluster stores ML cluster
                         ml_service.audio_features_cache[product_id] = {
@@ -309,7 +318,7 @@ async def extract_all_product_features(
                             'valence': features['valence'],
                             'danceability': features['danceability'],
                             'acousticness': features['acousticness'],
-                            'genre': ml_service.audio_features_cache.get(product_id, {}).get('genre', 'Unknown'),
+                            'genre': existing_genre,
                             'genre_cluster': genre_cluster,
                             'mood': features.get('mood', derive_mood(features['valence'], features['energy'], features['danceability'], features['acousticness'])),
                             'spectral_centroid': features.get('spectral_centroid', 1500.0),
@@ -368,7 +377,7 @@ async def extract_all_product_features(
                                                     SpectralCentroid = VALUES(SpectralCentroid),
                                                     SpectralRolloff = VALUES(SpectralRolloff),
                                                     ZeroCrossingRate = VALUES(ZeroCrossingRate),
-                                                    Genre = COALESCE(Genre, VALUES(Genre)),
+                                                    Genre = COALESCE(VALUES(Genre), Genre),
                                                     SpectralBandwidth = VALUES(SpectralBandwidth),
                                                     SpectralContrast = VALUES(SpectralContrast),
                                                     RmsEnergy = VALUES(RmsEnergy),
@@ -396,7 +405,7 @@ async def extract_all_product_features(
                                                 features.get('spectral_centroid', 1500.0),
                                                 features.get('spectral_rolloff', 3000.0),
                                                 features.get('zero_crossing_rate', 0.05),
-                                                ml_service.audio_features_cache.get(product_id, {}).get('genre', 'Unknown'),
+                                                existing_genre,
                                                 features.get('spectral_bandwidth', 1500.0),
                                                 spectral_contrast_json,
                                                 features.get('rms_energy', 0.02),
