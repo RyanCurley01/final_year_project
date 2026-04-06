@@ -334,7 +334,7 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
         # Cascading fallback system to get the audio features (tempo, energy, etc.) 
         # of the song you are currently playing.
 
-        # PRIORITY 1: Check Cache (High Quality ML Features)
+        # Step 1: Check Cache (High Quality ML Features)
         if current_id_int != 0:          
             # Checks negative (iTunes) variants of the ID in the cache
             # and positive (local library) variants of the ID in the cache.
@@ -370,8 +370,8 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
                     target_features['tempo'] = target_features.get('tempo', 120) * rate
 
 
-        # PRIORITY 2: Live Extraction from Preview URL (Fallback)
-        # If Priorities 1 fails to find features but a URL was provided, download and extract live.
+        # Step 2: Live Extraction from Preview URL (Fallback)
+        # If Step 1 fails to find features but a URL was provided, download and extract live.
         if not target_features and request.preview_url:
             console.log(f"🔍 Extracting features for {request.source} from {request.preview_url}")
             
@@ -399,7 +399,7 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
         if not target_features:
             return {"status": "success", "recommendations": [], "target_features": None}
 
-        # 3. Select Candidates based on Source and Request Data
+        # Step 3: Select Candidates based on Source and Request Data
         candidates = []
 
         # Explicit Candidates Condition: If the frontend sends an array of specific songs 
@@ -407,7 +407,7 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
         if request.candidates and len(request.candidates) > 0:
             console.log(f"✅ Using {len(request.candidates)} provided comparison songs")
             
-            songs_to_process = request.candidates[:247]
+            songs_to_process = request.candidates[:272]
             
             # This list will hold the asynchronous execution tasks.
             tasks = []
@@ -441,7 +441,7 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
                     tasks.append(asyncio.sleep(0, result=safe_features))
                 
                 
-                # Check 3: Not provided by frontend, and not in the cache. 
+                # Not provided by frontend, and not in the cache. 
                 # Then has to download and analyze the candidate song on-the-fly.
                 elif song.previewUrl:
                     loop = asyncio.get_event_loop()
@@ -460,7 +460,7 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
             # Execution Block: This single line runs all tasks in parallel simultaneously.
             if tasks:
                 # return_exceptions=True means if one song fails to download, it returns the Exception string instead 
-                # of throwing it and crashing the whole list of 20 successful songs.
+                # of throwing it and crashing the whole list of 272 successful songs.
                 results = await asyncio.gather(*tasks, return_exceptions=True)
             else:
                 results = []
@@ -526,7 +526,7 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
         console.log(f"🔎 Candidate Pool Size: {len(candidates)}")
 
 
-        # 3. Calculate Similarity
+        # Step 4: Filters out the same candidate song in a target song list by id
         if not candidates:
              # Fast fail: If there are absolutely zero candidate tracks to process, return empty array immediately.
              return {"status": "success", "recommendations": []}
@@ -534,7 +534,7 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
         # Initialize an empty array to track the fully validated and sanitized pool of candidate tracks.
         filtered_candidates = []
         
-        # Loop through every collected candidate track from step 2 for final strict evaluation.
+        # Loop through every collected candidate track from step 3 for final strict evaluation.
         for c in candidates:
             # A. Robust Self-Filtering
             # Get the candidate's ID directly from its dictionary payload.
@@ -573,86 +573,40 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
                 continue
 
             filtered_candidates.append(c)
-        
-        
+          
         # Replaces the original, unfiltered list of potential matching songs with the new list 
-        # (filtered_candidates) that just successfully passed the rigorous context filtering 
-        # (like removing the target song itself and keeping user/iTunes boundaries where applicable)
         candidates = filtered_candidates
         console.log(f"🔎 Final Filtered Candidates: {len(candidates)}")
 
-        # Checks if the strict filtering accidently removed every single candidate song. 
-        # This acts as a failsafe so the server doesn't return an empty list entirely. 
-        # It only triggers if the user isn't in the strict 'Discover' view
-        if not candidates and request.source != 'discover_page':
-            # temporary empty list to hold the fallback candidates.
-            relaxed_candidates = []
-            
-            # Loops through the entirety of the global machine-learning cache again.
-            for pid, p in ml_service.audio_features_cache.items():
-                
-                # Compares the sanitized ID of the current loop iteration against the target song.
-                if str(pid).strip() == clean_current_id:
-                    # If the track is the target song, it skips it to prevent self-recommendation.
-                    continue
-                
-                # Adds the track to the relaxed pool. This essentially ignores all source context rules, 
-                # keeping only the "do not recommend the current song" rule.
-                relaxed_candidates.append(p)
-                
-            # Overwrites the candidates variable with this emergency backup list of songs.
-            candidates = relaxed_candidates
-            console.log(f"⚠️ Relaxed fallback candidate pool: {len(candidates)}")
-  
-        
-        # A final circuit breaker if even the relaxed fallback found absolutely nothing 
-        # (e.g., the cache is completely empty minus the target song).
+        # A final circuit breaker if no candidates passed the filtering or if the cache is empty
         if not candidates:         
-            # Instantly exits the endpoint, returning a valid JSON success payload but with an empty recommendations array.
             return {"status": "success", "recommendations": []}
 
 
-        # Vectorization: Passes the target song's raw properties dictionary into a helper. 
-        # The helper flattens all properties (tempo, energy, MFCCs, Chroma) 
-        # into a single straight line array composed of 51 floating-point numbers where 
-        # all ranges are scaled down strictly between 0 and 1.
+        # To convert the target song's raw properties into a staight line array for cosine similarity. 
         target_vector = _build_similarity_vector(target_features)
         
-        # An array to hold the mathematically flattened arrays of 51 floats for the candidate songs.
         candidate_vectors = []
-        
-        # Parallel array to hold the full Python dictionary objects for those candidate songs
         candidate_objs = []
         
         # Iterates through the finalized pool of candidate tracks.
-        for p in candidates:
+        for cand in candidates:
             # Converts the current candidate's properties into the flattened 51-float math array.
-            vec = _build_similarity_vector(p)
+            vec = _build_similarity_vector(cand)
             
-            # Stores the math array
             candidate_vectors.append(vec)
             
-            # Stores the raw dictionary in exactly the same index position as the math array
-            candidate_objs.append(p)
+            candidate_objs.append(cand)
              
         if not candidate_vectors:
             return {"status": "success", "recommendations": []}
 
-        # 4. Pure cosine similarity on manually-normalized vectors
-        # Converts the target's standard Python list into a high-performance C-based NumPy matrix. 
-        # The .reshape(1, -1) forces it into a 2D matrix representing 1 row and 51 columns, 
-        # a strict requirement for the sklearn Cosine calculation.
+        # Cosine similarity on manually-normalized vectors.
         target_arr = np.array(target_vector).reshape(1, -1)
         
-        # Converts the entire list of candidate arrays into a massive 2D NumPy matrix where rows are 
-        # songs and columns are the 51 features.
         candidates_arr = np.array(candidate_vectors)
         
-        # Uses scikit-learn to calculate the mathematical angle distance (cosine similarity)
-        # between the 1 target row and all the candidate rows simultaneously. 
-        # It results in a matrix of scores ranging from -1.0 (opposites) to 1.0 (identical). 
-        # The [0] accesses the first (and only) row of the returned 2D calculation 
-        # matrix to give us a simple 1D array of scores.
+        # To calculate the mathematical angle distance (cosine similarity)
         sims = cosine_similarity(target_arr, candidates_arr)[0]
         
         
@@ -663,26 +617,26 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
         for i, score in enumerate(sims):
             
             # Uses the index i to grab the original un-flattened dictionary data for that specific candidate song
-            p = candidate_objs[i]
+            cand = candidate_objs[i]
             
             # Calculates absolute difference in BPM, caps it at 100, scales to percentage and subtracts from 1.0
-            tempo_match=1.0 - min(abs(target_features.get('tempo',120) - (p.get('tempo') or 120)), 100)/100
+            tempo_match=1.0 - min(abs(target_features.get('tempo',120) - (cand.get('tempo') or 120)), 100)/100
             
             # Calculates absolute mathematical distance between target's energy and candidate's energy
-            energy_match=1.0 - abs(target_features.get('energy',0.5) - (p.get('energy') or 0.5))
+            energy_match=1.0 - abs(target_features.get('energy',0.5) - (cand.get('energy') or 0.5))
             
             # Calculates mood match using standard valence mapping (0.0 sad, 1.0 happy)
-            mood_match=1.0 - abs(target_features.get('valence',0.5) - (p.get('valence') or 0.5))
+            mood_match=1.0 - abs(target_features.get('valence',0.5) - (cand.get('valence') or 0.5))
             
             # Calculates danceability match, defaulting to 0.5 if keys are missing
-            dance_match=1.0 - abs(target_features.get('danceability',0.5) - (p.get('danceability') or 0.5))
+            dance_match=1.0 - abs(target_features.get('danceability',0.5) - (cand.get('danceability') or 0.5))
 
             # Compresses the cosine similarity score from [-1, 1] into a strict [0, 1] percentage band
             cosine_norm = max(0.0, min(1.0, (float(score) + 1.0) / 2.0))
             
             # Genre agreement: compare target and candidate genre / genre_cluster.
             # Returns -0.3 (mismatch) to +1.0 (exact match); 0.0 when info is absent.
-            genre_agree = _genre_agreement_score(target_features, p)
+            genre_agree = _genre_agreement_score(target_features, cand)
             is_genre_match = genre_agree > 0.5  # True for exact genre or same cluster
             
             # Sums the 4 human-audible traits using set perceptual weights (e.g. Energy 30%, Tempo 25%)
@@ -697,19 +651,19 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
             
             # Creates an array of tuples holding Identifier, Match Score, and Contextual String tag
             matches = [
-                ('tempo', tempo_match, f"Matching rhythm ({p.get('tempo', 0):.0f} BPM)"),
-                ('energy', energy_match, f"Similar intensity ({p.get('energy', 0):.0%})"),
+                ('tempo', tempo_match, f"Matching rhythm ({cand.get('tempo', 0):.0f} BPM)"),
+                ('energy', energy_match, f"Similar intensity ({cand.get('energy', 0):.0%})"),
                 ('mood', mood_match, f"Similar mood"),
                 ('dance', dance_match, f"Comparable groove")
             ]
             if is_genre_match:
-                matches.append(('genre', 1.0, f"Same genre ({p.get('genre', 'Unknown')})"))
+                matches.append(('genre', 1.0, f"Same genre ({cand.get('genre', 'Unknown')})"))
 
             # Scans array and targets the tuple possessing the highest Match Score for the output reason
             best_match = max(matches, key=lambda x: x[1])
             
             # Attempts to grab textual metadata if pre-resolved and embedded in cache dictionary
-            meta = p.get('_meta') 
+            meta = cand.get('_meta') 
             
 
             # Score driven by the full 51D cosine similarity (includes MFCCs, chroma,
@@ -724,7 +678,7 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
             blended_score = max(0.0, min(0.999, blended_score))
 
             # Concatenates target song id and candidate song id to create a predictable unique string
-            seed_str = f"{clean_current_id}:{p.get('id', '')}"
+            seed_str = f"{clean_current_id}:{cand.get('id', '')}"
             
             # Uses standard string hashing to generate a sub-decimal value for tie-breaking
             tie_jitter = (abs(hash(seed_str)) % 1000) / 1_000_000.0
@@ -735,7 +689,7 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
             
             # Instantiates response model mapping calculation values to 3 decimal places out for readability
             result = AudioSimilarityResult(
-                product_id=p['id'],
+                product_id=cand['id'],
                 similarity_score=round(float(blended_score), 3),
                 tempo_match=round(tempo_match, 3),
                 energy_match=round(energy_match, 3),
@@ -746,13 +700,13 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
                 reason=best_match[2],
                 
                 # Populates the raw attributes back out so front-end debug visualizers can display them
-                tempo=p.get('tempo'),
-                energy=p.get('energy'),
-                valence=p.get('valence'),
-                danceability=p.get('danceability'),
-                acousticness=p.get('acousticness'),
-                instrumentalness=p.get('instrumentalness'),
-                speechiness=p.get('speechiness'),
+                tempo=cand.get('tempo'),
+                energy=cand.get('energy'),
+                valence=cand.get('valence'),
+                danceability=cand.get('danceability'),
+                acousticness=cand.get('acousticness'),
+                instrumentalness=cand.get('instrumentalness'),
+                speechiness=cand.get('speechiness'),
                 
                 # Hydrates textual names and image metadata strings if available from cache obj
                 trackName=meta.trackName if meta else None,
@@ -778,7 +732,7 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
         # Slices array cutting off the tail end to retain only the highest matches relative to the boundary limit
         top_recommendations = recommendations[:limit_count]
         
-        # 5. Hydrate Data from Database and iTunes for Cached Items
+        # Hydrate Data from Database and iTunes for Cached Items
         # Tracks pulled from cache only contain math stats. We need text names and image URLs.
         # Scans tracks and aggregates ones missing a trackName into this new array for dynamic hydration
         missing_meta_ids = [r for r in top_recommendations if not r.trackName]
