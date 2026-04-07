@@ -117,10 +117,7 @@ async def startup_cache():
                             LEFT JOIN Stock s ON s.ProductID = af.ProductID
                             WHERE af.Tempo IS NOT NULL
                               AND af.Energy IS NOT NULL
-                              AND (
-                                    af.ProductID > 0
-                                    OR COALESCE(s.IsAvailable, 1) = 1
-                              )
+                              AND af.ProductID > 0
                         """
                         cursor.execute(sql)
                         results = cursor.fetchall()
@@ -174,6 +171,14 @@ async def startup_cache():
                                 'chroma_mean': chroma_list
                             }
                         
+                        # Deduplicate: if both +ID and -ID exist for the same song,
+                        # keep only the positive (library) entry.
+                        neg_dupes = [k for k in next_audio_features_cache if k < 0 and -k in next_audio_features_cache]
+                        for k in neg_dupes:
+                            del next_audio_features_cache[k]
+                        if neg_dupes:
+                            console.log(f"🧹 Removed {len(neg_dupes)} duplicate negative-ID cache entries")
+
                         audio_features_cache = next_audio_features_cache
                         cache_loaded = True
                         console.log(f"✅ Cached {len(audio_features_cache)} audio features for fast recommendations")

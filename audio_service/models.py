@@ -202,7 +202,7 @@ class LibraryMatchRequest(BaseModel):
     """Request to match external songs against the internal library (cached products)"""
     candidates: List[SearchSong]
     target_ids: Optional[List[int]] = None # Optional list of specific library IDs to compare against
-    limit: int = 50 # Max songs to process at once
+    limit: int = 150 # Max songs to process at once
 
 class LibraryMatchResult(BaseModel):
     """Result of matching an external song to the library"""

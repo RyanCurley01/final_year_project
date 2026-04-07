@@ -1537,6 +1537,7 @@ async def match_library_songs(request: LibraryMatchRequest):
         
         # Prepares an empty list to assemble the final response objects
         recommendations = []
+        skipped_track_ids = []
         
         # 2. Loops through each input candidate song finding the best library match
         for candidate in request.candidates[:request.limit]:         
@@ -1545,6 +1546,8 @@ async def match_library_songs(request: LibraryMatchRequest):
             # Fast path: frontend may provide normalized audio features from unified results.
             if getattr(candidate, 'audio_features', None):
                 try:
+                    # Converts the LibraryMatchRequest model into a dictionary
+                    # so the scoring logic can use .get() on it
                     candidate_features = candidate.audio_features.model_dump()
                 except Exception:
                     candidate_features = None
@@ -1561,23 +1564,10 @@ async def match_library_songs(request: LibraryMatchRequest):
             except (ValueError, TypeError):
                 pass
             
-            if not candidate_features and candidate.previewUrl:
-                 # Real-time extraction for uncached songs
-                 try:
-                     # Use the async wrapper
-                     candidate_id_int = 0
-                     try: candidate_id_int = int(candidate.trackId)
-                     except: pass
-                     
-                     # Wait for extraction (this might be slow, but necessary for first load)
-                     extracted = await extract_audio_features_from_preview_async(candidate.previewUrl, candidate_id_int)
-                     
-                     if extracted:
-                         candidate_features = extracted
-                 except Exception as ex:
-                     console.log(f"Extraction failed for {candidate.trackName}: {ex}")
-                 
             if not candidate_features:
+                # No cached features — record this trackId so the frontend knows
+                # it was skipped due to missing features (not a network error).
+                skipped_track_ids.append(candidate.trackId)
                 continue
 
             # Converts the candidate's properties into the flattened 51-float math array for cosine similarity.
@@ -1585,7 +1575,11 @@ async def match_library_songs(request: LibraryMatchRequest):
             
             best_library_match = None
             best_blended_score = -1.0
-            
+            best_tempo_match = 0.0
+            best_energy_match = 0.0
+            best_mood_match = 0.0
+            best_dance_match = 0.0
+
             # Compare against all library songs to find the single best match for this candidate
             for lib_song in library_songs:
                 # Converts the current library song's properties into the flattened 51-float math array.
@@ -1608,6 +1602,10 @@ async def match_library_songs(request: LibraryMatchRequest):
                 # Calculates danceability match, defaulting to 0.5 if keys are missing
                 dance_match = 1.0 - abs(candidate_features.get('danceability', 0.5) - lib_song.get('danceability', 0.5))
 
+                # Genre agreement: compare candidate and library song genre / genre_cluster.
+                # Returns -0.3 (mismatch) to +1.0 (exact match); 0.0 when info is absent.
+                genre_agree = _genre_agreement_score(candidate_features, lib_song)
+                
                 # Sums the 4 human-audible traits using set perceptual weights (e.g. Energy 30%, Tempo 25%)
                 # This ensures high-dimensional abstract AI matches (Cosine) don't override the 
                 # fact that a user just wants a musically-similar Tempo and Energy.
@@ -1617,10 +1615,6 @@ async def match_library_songs(request: LibraryMatchRequest):
                     + mood_match * 0.20
                     + dance_match * 0.25
                 )
-
-                # Genre agreement: compare candidate and library song genre / genre_cluster.
-                # Returns -0.3 (mismatch) to +1.0 (exact match); 0.0 when info is absent.
-                genre_agree = _genre_agreement_score(candidate_features, lib_song)
 
                 # Score driven by the full 51D cosine similarity (includes MFCCs, chroma,
                 # spectral contrast, spectral bandwidth, etc. that distinguish genres).
@@ -1641,39 +1635,27 @@ async def match_library_songs(request: LibraryMatchRequest):
 
                 # Adds jitter bit forcing absolute math ties to have arbitrary differences so sorting isn't pure random
                 blended_score = max(0.0, min(0.999, blended_score + tie_jitter))
-                
+
+                # Track the best scoring library song and its per-metric scores
                 if blended_score > best_blended_score:
                     best_blended_score = blended_score
                     best_library_match = lib_song
+                    best_tempo_match = tempo_match
+                    best_energy_match = energy_match
+                    best_mood_match = mood_match
+                    best_dance_match = dance_match
 
+            # After comparing all library songs, emit one result for the winning match
             if best_library_match:
-                # Recalculate the 4 individual trait matches against the winning library song
-                # so the response contains per-metric readouts for the frontend diagnostic badge array.
-
-                # Calculates absolute difference in BPM, caps it at 100, scales to percentage and subtracts from 1.0
-                tempo_match = 1.0 - min(abs(candidate_features.get('tempo', 120) - best_library_match.get('tempo', 120)), 100) / 100
-
-                # Calculates absolute mathematical distance between candidate's energy and best match's energy
-                energy_match = 1.0 - abs(candidate_features.get('energy', 0.5) - best_library_match.get('energy', 0.5))
-
-                # Calculates mood match using standard valence mapping (0.0 sad, 1.0 happy)
-                mood_match = 1.0 - abs(candidate_features.get('valence', 0.5) - best_library_match.get('valence', 0.5))
-
-                # Calculates danceability match, defaulting to 0.5 if keys are missing
-                dance_match = 1.0 - abs(candidate_features.get('danceability', 0.5) - best_library_match.get('danceability', 0.5))
-
-                # Instantiates response model mapping calculation values to 3 decimal places out for readability
                 result = LibraryMatchResult(
                     input_track_id=candidate.trackId,
                     matched_product_id=best_library_match['id'],
                     similarity_score=float(best_blended_score),
-                    tempo_match=round(tempo_match, 3),
-                    energy_match=round(energy_match, 3),
-                    mood_match=round(mood_match, 3),
-                    dance_match=round(dance_match, 3)
+                    tempo_match=round(best_tempo_match, 3),
+                    energy_match=round(best_energy_match, 3),
+                    mood_match=round(best_mood_match, 3),
+                    dance_match=round(best_dance_match, 3)
                 )
-
-                # Stores the fully calculated candidate into the list ready to ship to the user
                 recommendations.append(result)
                 
         # Hydrate Data from Database for Cached Items
@@ -1698,7 +1680,8 @@ async def match_library_songs(request: LibraryMatchRequest):
         # Return a final dictionary response to FastAPI representing our success JSON payload.
         return {
             "status": "success",
-            "matches": recommendations
+            "matches": recommendations,
+            "skipped": skipped_track_ids
         }
 
     except Exception as e:
@@ -1706,3 +1689,181 @@ async def match_library_songs(request: LibraryMatchRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ============================================
+# BACKGROUND CACHE-WARM ENDPOINT
+# ============================================
+
+# Global lock to prevent concurrent warm-up tasks from overlapping
+_warm_cache_lock = asyncio.Lock()
+
+@router.post("/api/audio/warm-cache")
+async def warm_cache(body: Dict):
+    """
+    Sync the audio features cache with the current set of iTunes songs on
+    the SimilarSongs page:
+
+    1. Prune: delete DB rows + in-memory entries for negative-ProductID songs
+       that are no longer in the active iTunes list (rotated out).
+    2. Warm: extract features for songs that are in the list but missing
+       from the cache.
+
+    Request body:
+      {
+        "songs": [ { "trackId": ..., "previewUrl": ..., ... } ],
+        "current_track_ids": [ 123456, 789012, ... ]
+      }
+    """
+    songs = body.get("songs", [])
+    current_track_ids = body.get("current_track_ids", [])
+
+    pruned_count = 0
+
+    # --- Prune stale iTunes entries (negative ProductIDs not in current list) ---
+    if current_track_ids:
+        valid_neg_ids = set()
+        for tid in current_track_ids:
+            try:
+                valid_neg_ids.add(-abs(int(tid)))
+            except (ValueError, TypeError):
+                continue
+
+        stale_ids = [
+            pid for pid in list(ml_service.audio_features_cache.keys())
+            if isinstance(pid, int) and pid < 0 and pid not in valid_neg_ids
+        ]
+
+        if stale_ids:
+            console.log(f"🗑️ Pruning {len(stale_ids)} stale iTunes entries from cache + DB")
+
+            for pid in stale_ids:
+                ml_service.audio_features_cache.pop(pid, None)
+
+            try:
+                with get_db_connection() as conn:
+                    if conn:
+                        with conn.cursor() as cursor:
+                            placeholders = ",".join(["%s"] * len(stale_ids))
+                            cursor.execute(
+                                f"DELETE FROM AudioFeatures WHERE ProductID IN ({placeholders})",
+                                stale_ids
+                            )
+                            cursor.execute(
+                                f"DELETE FROM Products WHERE ProductID IN ({placeholders})",
+                                stale_ids
+                            )
+                            conn.commit()
+                pruned_count = len(stale_ids)
+            except Exception as db_err:
+                console.log(f"⚠️ Prune DB error: {db_err}")
+
+    # --- Warm uncached songs (in-memory only, no DB writes) ---
+    uncached = []
+    for song in songs[:200]:
+        try:
+            track_id = int(song.get("trackId", 0))
+            if track_id == 0:
+                continue
+            neg_id = -abs(track_id)
+            if neg_id in ml_service.audio_features_cache or abs(track_id) in ml_service.audio_features_cache:
+                continue
+            if not song.get("previewUrl"):
+                continue
+            uncached.append(song)
+        except (ValueError, TypeError):
+            continue
+
+    if uncached:
+        console.log(f"🔥 Cache warm requested for {len(uncached)} uncached songs (in-memory only)")
+        asyncio.create_task(_warm_cache_background(uncached))
+
+    return {
+        "status": "success",
+        "pruned": pruned_count,
+        "queued": len(uncached),
+        "message": f"Pruned {pruned_count} stale, extraction started for {len(uncached)} songs (in-memory only)"
+    }
+
+
+async def _warm_cache_background(songs: List[Dict]):
+    """Extract features for uncached songs and insert into DB + in-memory cache."""
+    async with _warm_cache_lock:
+        extracted_count = 0
+        for song in songs:
+            try:
+                track_id = int(song["trackId"])
+                preview_url = song["previewUrl"]
+                product_id = -abs(track_id)
+
+                # Double-check cache (another task may have populated it)
+                if product_id in ml_service.audio_features_cache:
+                    continue
+
+                # Extract audio features from the preview URL
+                features = await extract_audio_features_from_preview_async(preview_url, track_id)
+                if not features:
+                    continue
+
+                # Classify genre
+                genre_cluster = ml_service.classify_genre_from_features(
+                    features['tempo'], features['energy'], features['valence'],
+                    features['danceability'], features['acousticness'],
+                    spectral_centroid=features.get('spectral_centroid', 1500.0),
+                    spectral_rolloff=features.get('spectral_rolloff', 3000.0),
+                    zero_crossing_rate=features.get('zero_crossing_rate', 0.05),
+                    instrumentalness=features.get('instrumentalness', 0.5),
+                    loudness=features.get('loudness', -60.0),
+                    speechiness=features.get('speechiness', 0.1),
+                    spectral_bandwidth=features.get('spectral_bandwidth', 1500.0),
+                    rms_energy=features.get('rms_energy', 0.02),
+                    onset_rate=features.get('onset_rate', 2.0),
+                    harmonic_ratio=features.get('harmonic_ratio', 0.5),
+                    percussive_ratio=features.get('percussive_ratio', 0.5),
+                    duration=features.get('duration', 0),
+                    key_signature=features.get('key_signature', 'C'),
+                    time_signature=features.get('time_signature', '4/4'),
+                    mfcc_mean=features.get('mfcc_mean'),
+                    chroma_mean=features.get('chroma_mean'),
+                    spectral_contrast_mean=features.get('spectral_contrast_mean'),
+                    current_cache_size=len(ml_service.audio_features_cache),
+                    current_cache_items=ml_service.audio_features_cache
+                )
+
+                predicted_genre = ml_service.predict_real_genre(features) or genre_cluster
+
+                # Update in-memory cache only (no DB writes — iTunes songs are transient)
+                ml_service.audio_features_cache[product_id] = {
+                    'id': product_id,
+                    'tempo': features['tempo'],
+                    'energy': features['energy'],
+                    'valence': features['valence'],
+                    'danceability': features['danceability'],
+                    'acousticness': features['acousticness'],
+                    'genre': predicted_genre,
+                    'genre_cluster': genre_cluster,
+                    'mood': features.get('mood', 'Unknown'),
+                    'spectral_centroid': features.get('spectral_centroid', 1500.0),
+                    'spectral_rolloff': features.get('spectral_rolloff', 3000.0),
+                    'zero_crossing_rate': features.get('zero_crossing_rate', 0.05),
+                    'instrumentalness': features.get('instrumentalness', 0.5),
+                    'loudness': features.get('loudness', -60.0),
+                    'speechiness': features.get('speechiness', 0.1),
+                    'key_signature': features.get('key_signature'),
+                    'time_signature': features.get('time_signature'),
+                    'duration': features.get('duration', 0),
+                    'spectral_bandwidth': features.get('spectral_bandwidth', 1500.0),
+                    'spectral_contrast_mean': features.get('spectral_contrast_mean', []),
+                    'rms_energy': features.get('rms_energy', 0.02),
+                    'onset_rate': features.get('onset_rate', 2.0),
+                    'harmonic_ratio': features.get('harmonic_ratio', 0.5),
+                    'percussive_ratio': features.get('percussive_ratio', 0.5),
+                    'mfcc_mean': features.get('mfcc_mean', []),
+                    'chroma_mean': features.get('chroma_mean', [])
+                }
+
+                extracted_count += 1
+                console.log(f"   🔥 Warm-cached: {song.get('trackName', track_id)} (ID: {product_id})")
+
+            except Exception as e:
+                console.log(f"⚠️ Cache warm failed for track {song.get('trackId')}: {e}")
+
+        console.log(f"🔥 Cache warm complete: {extracted_count}/{len(songs)} songs extracted")

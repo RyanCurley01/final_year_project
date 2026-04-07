@@ -96,9 +96,15 @@ const MATCH_NOT_FOUND_STATE = {
   albumTitle: 'No similar library track found',
 };
 
+const MATCH_WARMING_STATE = {
+  id: null,
+  albumTitle: 'Loading song matches...',
+};
+
 const MATCH_STATUS = {
   pending: 'pending',
   resolved: 'resolved',
+  warming: 'warming',
   notFound: 'not_found',
 };
 
@@ -295,15 +301,56 @@ const SongCard = ({ song, isPlaying, activeSong, onPlay, onPause, index, onSongN
       </div>
 
       {/* Database Matching Footer - If an iTunes song was matched with a 
-      library track via similarity, display the linked local track info */}
-      {(song.matchedDbSong || song.matchStatus === MATCH_STATUS.pending) && (
+      library track via similarity, display the linked local track info and match score badges */}
+      {(song.matchedDbSong || song.matchStatus === MATCH_STATUS.pending || song.matchStatus === MATCH_STATUS.warming) && (
         <div className="mt-2 pt-2 border-t border-gray-700/50">
           <p className="text-[10px] text-cyan-400">Matched via library track:</p>
+          {song.matchStatus === MATCH_STATUS.warming ? (
+            <div className="flex items-center gap-1.5 mt-0.5">
+              <div className="w-2.5 h-2.5 border-2 border-yellow-400 border-t-transparent rounded-full animate-spin"></div>
+              <p className="text-[11px] text-yellow-400 truncate font-medium">
+                {MATCH_WARMING_STATE.albumTitle}
+              </p>
+            </div>
+          ) : (
           <p className="text-[11px] text-white truncate font-medium">
             {song.matchStatus === MATCH_STATUS.pending
               ? MATCH_PENDING_STATE.albumTitle
               : song.matchedDbSong?.albumTitle}
           </p>
+          )}
+          {song.matchStatus === MATCH_STATUS.resolved && song.matchedDbSong?.tempo_match != null && (
+            <div className="flex gap-1 mt-1 flex-wrap">
+              <span className={`px-1 py-0.5 rounded text-[10px] ${
+                song.matchedDbSong.tempo_match >= 0.7 ? 'bg-green-500/30 text-green-300' : 
+                song.matchedDbSong.tempo_match >= 0.5 ? 'bg-yellow-500/30 text-yellow-300' : 
+                'bg-red-500/30 text-red-300'
+              }`}>
+                Tempo:{Math.round(song.matchedDbSong.tempo_match * 100)}%
+              </span>
+              <span className={`px-1 py-0.5 rounded text-[10px] ${
+                song.matchedDbSong.energy_match >= 0.7 ? 'bg-green-500/30 text-green-300' : 
+                song.matchedDbSong.energy_match >= 0.5 ? 'bg-yellow-500/30 text-yellow-300' : 
+                'bg-red-500/30 text-red-300'
+              }`}>
+                Energy:{Math.round(song.matchedDbSong.energy_match * 100)}%
+              </span>
+              <span className={`px-1 py-0.5 rounded text-[10px] ${
+                song.matchedDbSong.mood_match >= 0.7 ? 'bg-green-500/30 text-green-300' : 
+                song.matchedDbSong.mood_match >= 0.5 ? 'bg-yellow-500/30 text-yellow-300' : 
+                'bg-red-500/30 text-red-300'
+              }`}>
+                Mood:{Math.round(song.matchedDbSong.mood_match * 100)}%
+              </span>
+              <span className={`px-1 py-0.5 rounded text-[10px] ${
+                song.matchedDbSong.dance_match >= 0.7 ? 'bg-green-500/30 text-green-300' : 
+                song.matchedDbSong.dance_match >= 0.5 ? 'bg-yellow-500/30 text-yellow-300' : 
+                'bg-red-500/30 text-red-300'
+              }`}>
+                Dance:{Math.round(song.matchedDbSong.dance_match * 100)}%
+              </span>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -342,8 +389,9 @@ const SimilarSongs = () => {
   // Tracks the playback rate to adjust feature visualization (e.g., effective tempo)
   const [displayedPlaybackRate, setDisplayedPlaybackRate] = useState(1);
   
-  // A dictionary mapping song IDs to their pre-computed audio features to save processing
-  const [cachedAudioFeatures, setCachedAudioFeatures] = useState({});
+  // A dictionary mapping song IDs to their pre-computed audio features to save processing.
+  // Starts as null (not yet loaded) to distinguish "not fetched yet" from "fetched but empty".
+  const [cachedAudioFeatures, setCachedAudioFeatures] = useState(null);
   
   // --- Refs & External Hooks ---
   // Stores the polling interval ID so it can be reliably cleared on unmount
@@ -390,6 +438,8 @@ const SimilarSongs = () => {
         }
       } catch (err) {
         console.warn('Could not fetch cached audio features:', err.message);
+        // Mark as loaded (empty) so the bulk match hook can proceed without waiting forever.
+        setCachedAudioFeatures({});
       }
     };
     fetchCachedFeatures();
@@ -595,7 +645,7 @@ const SimilarSongs = () => {
         const songIdStr = String(targetSong.trackId || targetSong.id);
         
         // Lookup previously computed feature sets in local cache memory (checking both normal and matched negative ID keys).
-        const cached = cachedAudioFeatures[songIdStr] || cachedAudioFeatures[String(-Math.abs(Number(songIdStr)))];
+        const cached = cachedAudioFeatures?.[songIdStr] || cachedAudioFeatures?.[String(-Math.abs(Number(songIdStr)))];
 
         if (cached) {
           // If a static cache copy exists, enforce strict numerical types and ignore any active playback speed adjustments.
@@ -812,7 +862,9 @@ const SimilarSongs = () => {
   // so the UI can display which specific local library track was deemed "most visually/musically similar".
   useEffect(() => {
     // Early exit guard clause: Do not execute if core data is missing or still fetching.
-    if (loading || dbSongs.length === 0 || songs.length === 0) return;
+    // cachedAudioFeatures is null until the cached-features API resolves, preventing a race
+    // condition where the bulk match fires before features are available.
+    if (loading || dbSongs.length === 0 || songs.length === 0 || cachedAudioFeatures === null) return;
     
     // Thread safety flag constraint: Enforce strict single-execution concurrency. 
     // Prevents duplicate expensive bulk matching loops across aggressive React strict-mode re-renders.
@@ -842,8 +894,8 @@ const SimilarSongs = () => {
           return;
         }
         
-        // Define rate limits: process a maximum of 5 external songs per API transmission.
-        const BATCH_SIZE = 5;
+        // Define rate limits: process a maximum of 50 external songs per API transmission.
+        const BATCH_SIZE = 50;
         
         // Restrict matching to the curated 47-song internal library pool for this page.
         // This is important because SimilarSongs is supposed to answer the question
@@ -881,8 +933,10 @@ const SimilarSongs = () => {
         };
 
         // Sub-function orchestrating the chunking protocol constraints and network calls.
+        // Returns a Set of trackId strings that the backend skipped (no cached features).
         const runMatchPass = async (candidateSongs) => {
           const batches = [];
+          const skippedIds = new Set();
           
           // Slice the large candidate array into smaller, manageable subarrays dictated by BATCH_SIZE.
           for (let i = 0; i < candidateSongs.length; i += BATCH_SIZE) {
@@ -949,12 +1003,21 @@ const SimilarSongs = () => {
                   const key = normalizeTrackId(match.input_track_id);
                   const fallbackTitle = match.matched_product_id ? `Track ${match.matched_product_id}` : 'No similar library track found';
                   
-                  // Retain structured relationship details containing native application identifiers.
+                  // Retain structured relationship details and per-metric match scores for badge display.
                   matchedByTrack.set(key, {
                     id: match.matched_product_id ?? null,
                     albumTitle: match.matched_product_name || fallbackTitle,
+                    similarity_score: match.similarity_score ?? null,
+                    tempo_match: match.tempo_match ?? null,
+                    energy_match: match.energy_match ?? null,
+                    mood_match: match.mood_match ?? null,
+                    dance_match: match.dance_match ?? null,
                   });
                 });
+
+                // Track songs the backend skipped due to missing cached features.
+                const skipped = data.skipped || [];
+                skipped.forEach((id) => skippedIds.add(normalizeTrackId(id)));
 
                 applyResolvedMatches();
               } else {
@@ -970,40 +1033,149 @@ const SimilarSongs = () => {
             // Implement a deliberate 50ms pacing delay between loop triggers to act as network back-pressure protection.
             await new Promise((r) => setTimeout(r, 50));
           }
+
+          return skippedIds;
         };
 
-        // Execute the main pass first, then only retry the unresolved subset. That keeps
-        // the network cost bounded while still giving slow previews or transient failures
-        // a second chance before the UI marks them as not found.
         // Execute the main bulk matching pass for all loaded external artists.
-        await runMatchPass(candidateSongs);
+        const skippedIds = await runMatchPass(candidateSongs);
 
-        // Identify any songs that failed to return a valid local library match during the primary run.
+        // Separate unresolved songs into two categories:
+        // 1. Network failures — songs the backend never saw (worth retrying)
+        // 2. Cache misses — songs the backend explicitly skipped (no cached features)
         const unresolved = candidateSongs.filter((s) => !matchedByTrack.has(normalizeTrackId(s.trackId || s.id)));
-        
-        // If orphaned tracks exist, trigger a secondary fallback network pass specifically targeting those failures.
-        if (unresolved.length > 0) {
-          console.warn(`[SimilarSongs] Retrying library match for ${unresolved.length} unresolved songs`);
-          await runMatchPass(unresolved);
+        const networkFailures = unresolved.filter((s) => !skippedIds.has(normalizeTrackId(s.trackId || s.id)));
+        const cacheMisses = unresolved.filter((s) => skippedIds.has(normalizeTrackId(s.trackId || s.id)));
+
+        // Retry only genuine network failures (not cache misses — those will never resolve without warm-up).
+        if (networkFailures.length > 0) {
+          console.warn(`[SimilarSongs] Retrying library match for ${networkFailures.length} network failures`);
+          await runMatchPass(networkFailures);
         }
+
+        // Call warm-cache to:
+        // 1. Prune stale iTunes AudioFeatures that rotated out of the current iTunes list
+        // 2. Extract features for uncached songs IN-MEMORY ONLY (no DB writes)
+        const allTrackIds = candidateSongs.map((s) => Number(s.trackId || s.id)).filter(Boolean);
+        const warmSongs = cacheMisses.map((s) => ({
+          trackId: Number(s.trackId || s.id),
+          previewUrl: s.previewUrl || s.fileUrl || '',
+          trackName: s.trackName || s.albumTitle || 'Unknown',
+          artistName: s.artistName || 'Unknown Artist',
+          artworkUrl100: s.artworkUrl100 || '',
+        })).filter((s) => s.trackId && s.previewUrl);
+
+        console.log(`[SimilarSongs] Syncing cache: ${warmSongs.length} to warm (in-memory only), ${allTrackIds.length} active trackIds for pruning`);
+
+        fetch(`${apiBaseUrl}/api/audio/warm-cache`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            songs: warmSongs,
+            current_track_ids: allTrackIds,
+          }),
+        }).then((res) => {
+          if (res.ok) return res.json();
+          throw new Error(`warm-cache ${res.status}`);
+        }).then((data) => {
+          console.log(`[SimilarSongs] Cache sync response:`, data);
+        }).catch((err) => {
+          console.warn('[SimilarSongs] Cache sync failed:', err.message);
+        });
+
+        // Poll: re-run match-library for skipped songs as the backend extracts
+        // features in-memory in the background. Songs will progressively resolve.
+        if (cacheMisses.length > 0) {
+          const MAX_POLL_ATTEMPTS = 15;
+          const POLL_INTERVAL_MS = 20_000;
+          let remaining = [...cacheMisses];
+          let attempt = 0;
+
+          const pollForNewMatches = async () => {
+            while (remaining.length > 0 && attempt < MAX_POLL_ATTEMPTS) {
+              attempt++;
+              await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+
+              console.log(`[SimilarSongs] Poll ${attempt}/${MAX_POLL_ATTEMPTS}: retrying ${remaining.length} previously-skipped songs...`);
+              const pollSkipped = await runMatchPass(remaining);
+
+              const newlyMatched = remaining.filter((s) => matchedByTrack.has(normalizeTrackId(s.trackId || s.id)));
+              if (newlyMatched.length > 0) {
+                console.log(`[SimilarSongs] Poll ${attempt}: ${newlyMatched.length} new matches found!`);
+
+                setSongs((currentSongs) =>
+                  currentSongs.map((song) => {
+                    const key = normalizeTrackId(song.trackId || song.id);
+                    const resolved = matchedByTrack.get(key);
+                    if (resolved && song.matchStatus !== MATCH_STATUS.resolved) {
+                      return {
+                        ...song,
+                        matchedDbSong: resolved,
+                        matchStatus: MATCH_STATUS.resolved,
+                      };
+                    }
+                    return song;
+                  })
+                );
+              }
+
+              remaining = remaining.filter((s) => pollSkipped.has(normalizeTrackId(s.trackId || s.id)));
+
+              if (remaining.length === 0) {
+                console.log(`[SimilarSongs] All songs matched — polling complete.`);
+              }
+            }
+
+            if (remaining.length > 0) {
+              console.log(`[SimilarSongs] Polling ended with ${remaining.length} songs still unresolved after ${attempt} attempts.`);
+
+              // Flip any remaining "warming" songs to "not found" since polling is done.
+              const remainingIds = new Set(remaining.map((s) => normalizeTrackId(s.trackId || s.id)));
+              setSongs((currentSongs) =>
+                currentSongs.map((song) => {
+                  const key = normalizeTrackId(song.trackId || song.id);
+                  if (remainingIds.has(key) && song.matchStatus === MATCH_STATUS.warming) {
+                    return {
+                      ...song,
+                      matchedDbSong: { ...MATCH_NOT_FOUND_STATE },
+                      matchStatus: MATCH_STATUS.notFound,
+                    };
+                  }
+                  return song;
+                })
+              );
+            }
+          };
+
+          pollForNewMatches().catch((err) =>
+            console.warn('[SimilarSongs] Poll loop error:', err)
+          );
+        }
+
+        // Build a set of cache-miss track IDs so we can mark them as "warming" (yellow spinner)
+        // instead of "not found" while the backend extracts their features in-memory.
+        const warmingTrackIds = new Set(cacheMisses.map((s) => normalizeTrackId(s.trackId || s.id)));
 
         // Commit the final resolution matrix back to the master song array in component state.
         setSongs((currentSongs) =>
           currentSongs.map((song) => {
-            // Re-normalize identifiers to ensure strict map lookups avoid type or whitespace mismatches.
             const key = normalizeTrackId(song.trackId || song.id);
             const resolved = matchedByTrack.get(key);
             
-            // Merge the resolved local database ID and Title directly onto the external iTunes object.
-            // Assign a dummy fallback object string if the track completely failed similarity thresholding.
+            if (resolved) {
+              return { ...song, matchedDbSong: resolved, matchStatus: MATCH_STATUS.resolved };
+            }
+
+            // Songs whose features are being extracted in-memory show a warming state.
+            if (warmingTrackIds.has(key)) {
+              return { ...song, matchedDbSong: { ...MATCH_WARMING_STATE }, matchStatus: MATCH_STATUS.warming };
+            }
+
+            // Everything else is definitively not found.
             return {
               ...song,
-              matchedDbSong:
-                resolved ||
-                song.matchedDbSong || {
-                  ...MATCH_NOT_FOUND_STATE,
-                },
-              matchStatus: resolved ? MATCH_STATUS.resolved : MATCH_STATUS.notFound,
+              matchedDbSong: song.matchedDbSong || { ...MATCH_NOT_FOUND_STATE },
+              matchStatus: MATCH_STATUS.notFound,
             };
           })
         );
