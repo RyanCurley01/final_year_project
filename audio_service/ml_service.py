@@ -117,7 +117,10 @@ async def startup_cache():
                             LEFT JOIN Stock s ON s.ProductID = af.ProductID
                             WHERE af.Tempo IS NOT NULL
                               AND af.Energy IS NOT NULL
-                              AND af.ProductID > 0
+                              AND (
+                                    af.ProductID > 0
+                                    OR COALESCE(s.IsAvailable, 1) = 1
+                              )
                         """
                         cursor.execute(sql)
                         results = cursor.fetchall()
