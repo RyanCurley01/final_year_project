@@ -148,7 +148,7 @@ const SongCard = ({ song, isPlaying, activeSong, onPlay, onPause, index, onSongN
   };
 
   return (
-    <div className="flex flex-col p-4 bg-white/5 backdrop-blur-sm animate-slideup rounded-lg cursor-pointer hover:bg-white/10 transition-all">
+    <div className="flex flex-col h-full p-4 bg-white/5 backdrop-blur-sm animate-slideup rounded-lg cursor-pointer hover:bg-white/10 transition-all">
       <div 
         className="relative w-full aspect-square rounded-lg overflow-hidden outline-none border-none"
         onMouseEnter={() => setIsHovered(true)}
@@ -376,6 +376,47 @@ const SongCard = ({ song, isPlaying, activeSong, onPlay, onPause, index, onSongN
             </p>
           </div>
 
+          {/* Matched library track label for iTunes songs */}
+          {song.matchedLibraryTrack && (
+            <div className="mt-2 pt-2 border-t border-gray-700/50">
+              <p className="text-[10px] text-cyan-400">Matched via library track:</p>
+              <p className="text-[11px] text-white truncate font-medium">{song.matchedLibraryTrack}</p>
+            </div>
+          )}
+
+          {/* Audio Feature Match Badges */}
+          {song.tempo_match != null && (
+            <div className="flex gap-1 mt-auto pt-2 flex-wrap">
+              <span className={`px-1 py-0.5 rounded text-[10px] ${
+                song.tempo_match >= 0.7 ? 'bg-green-500/30 text-green-300' : 
+                song.tempo_match >= 0.5 ? 'bg-yellow-500/30 text-yellow-300' : 
+                'bg-red-500/30 text-red-300'
+              }`}>
+                Tempo:{Math.round(song.tempo_match * 100)}%
+              </span>
+              <span className={`px-1 py-0.5 rounded text-[10px] ${
+                song.energy_match >= 0.7 ? 'bg-green-500/30 text-green-300' : 
+                song.energy_match >= 0.5 ? 'bg-yellow-500/30 text-yellow-300' : 
+                'bg-red-500/30 text-red-300'
+              }`}>
+                Energy:{Math.round((song.energy_match || 0) * 100)}%
+              </span>
+              <span className={`px-1 py-0.5 rounded text-[10px] ${
+                song.mood_match >= 0.7 ? 'bg-green-500/30 text-green-300' : 
+                song.mood_match >= 0.5 ? 'bg-yellow-500/30 text-yellow-300' : 
+                'bg-red-500/30 text-red-300'
+              }`}>
+                Mood:{Math.round((song.mood_match || 0) * 100)}%
+              </span>
+              <span className={`px-1 py-0.5 rounded text-[10px] ${
+                (song.dance_match) >= 0.7 ? 'bg-green-500/30 text-green-300' : 
+                (song.dance_match) >= 0.5 ? 'bg-yellow-500/30 text-yellow-300' : 
+                'bg-red-500/30 text-red-300'
+              }`}>
+                Dance:{Math.round((song.dance_match || 0) * 100)}%
+              </span>
+            </div>
+          )}
         </>
       )}
     </div>
@@ -575,6 +616,57 @@ const Search = () => {
         // Sort by relevance
         uniqueResults.sort((a, b) => b.relevance - a.relevance);
         setSongs(uniqueResults);
+
+        // Match iTunes songs against library to show "Matched via library track" + feature badges
+        const itunesSongs = uniqueResults.filter(s => s.source === 'itunes');
+        if (itunesSongs.length > 0) {
+          try {
+            const audioApiUrl = envConfig.getApiBaseUrl();
+            const candidates = itunesSongs.map(s => ({
+              trackId: String(s.trackId || s.id),
+              trackName: s.trackName || '',
+              artistName: s.artistName || '',
+              previewUrl: s.previewUrl || s.fileUrl || '',
+            }));
+            const matchResp = await fetch(`${audioApiUrl}/api/audio/match-library`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ candidates, limit: itunesSongs.length }),
+              signal: abortController.signal,
+            });
+            if (matchResp.ok) {
+              const matchData = fixTextDeep(await matchResp.json());
+              if (matchData.status === 'success' && matchData.matches) {
+                const matchMap = new Map();
+                matchData.matches.forEach(m => {
+                  if (m.matched_product_name || m.similarity_score > 0) {
+                    matchMap.set(String(m.input_track_id), m);
+                  }
+                });
+                if (matchMap.size > 0) {
+                  setSongs(prev => prev.map(s => {
+                    if (s.source !== 'itunes') return s;
+                    const key = String(s.trackId || s.id);
+                    const matched = matchMap.get(key);
+                    if (!matched) return s;
+                    return {
+                      ...s,
+                      matchedLibraryTrack: matched.matched_product_name || null,
+                      tempo_match: matched.tempo_match ?? null,
+                      energy_match: matched.energy_match ?? null,
+                      mood_match: matched.mood_match ?? null,
+                      dance_match: matched.dance_match ?? null,
+                    };
+                  }));
+                }
+              }
+            }
+          } catch (matchErr) {
+            if (matchErr.name !== 'AbortError') {
+              console.warn('[Search] Library match lookup failed:', matchErr.message);
+            }
+          }
+        }
       } catch (err) {
         if (err.name !== 'AbortError') {
           setError(err.message);

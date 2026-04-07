@@ -69,7 +69,7 @@ const firstRealArtistName = (...values) => {
 };
 
 // Similar Song Card Component
-const SimilarSongCard = ({ song, isPlaying, activeSong, onPlay, onPause, rank, playbackRate, allSimilarSongs }) => {
+const SimilarSongCard = ({ song, isPlaying, activeSong, onPlay, onPause, rank, playbackRate, allSimilarSongs, targetSongName }) => {
   const dispatch = useDispatch();
   const navigate = useNavigate();
   const isThisSongActive = (activeSong?.trackId && String(activeSong.trackId) === String(song.trackId)) || 
@@ -135,7 +135,7 @@ const SimilarSongCard = ({ song, isPlaying, activeSong, onPlay, onPause, rank, p
   };
 
   return (
-    <div className="flex flex-col p-4 bg-white/5 backdrop-blur-sm rounded-lg cursor-pointer hover:bg-white/10 transition-all">
+    <div className="flex flex-col h-full p-4 bg-white/5 backdrop-blur-sm rounded-lg cursor-pointer hover:bg-white/10 transition-all">
       <div 
         className="relative w-full aspect-square rounded-lg overflow-hidden"
         onMouseEnter={() => setIsHovered(true)}
@@ -336,6 +336,14 @@ const SimilarSongCard = ({ song, isPlaying, activeSong, onPlay, onPause, rank, p
 
       </div>
 
+      {/* Matched to clicked song label */}
+      {song.tempo_match != null && targetSongName && (
+        <div className="mt-2 pt-2 border-t border-gray-700/50">
+          <p className="text-[10px] text-cyan-400">Matched via clicked song name:</p>
+          <p className="text-[11px] text-white truncate font-medium">{targetSongName}</p>
+        </div>
+      )}
+
       {/* Price and Add to Cart for library songs */}
       {isLibrarySong && (
         <div className="mt-2">
@@ -368,6 +376,40 @@ const SimilarSongCard = ({ song, isPlaying, activeSong, onPlay, onPause, rank, p
               Add to Cart
             </button>
           </div>
+        </div>
+      )}
+
+      {/* Audio Feature Match Badges - always at the bottom */}
+      {song.tempo_match != null && (
+        <div className="flex gap-1 mt-auto pt-2 flex-wrap">
+          <span className={`px-1 py-0.5 rounded text-[10px] ${
+            song.tempo_match >= 0.7 ? 'bg-green-500/30 text-green-300' : 
+            song.tempo_match >= 0.5 ? 'bg-yellow-500/30 text-yellow-300' : 
+            'bg-red-500/30 text-red-300'
+          }`}>
+            Tempo:{Math.round(song.tempo_match * 100)}%
+          </span>
+          <span className={`px-1 py-0.5 rounded text-[10px] ${
+            song.energy_match >= 0.7 ? 'bg-green-500/30 text-green-300' : 
+            song.energy_match >= 0.5 ? 'bg-yellow-500/30 text-yellow-300' : 
+            'bg-red-500/30 text-red-300'
+          }`}>
+            Energy:{Math.round((song.energy_match || 0) * 100)}%
+          </span>
+          <span className={`px-1 py-0.5 rounded text-[10px] ${
+            song.mood_match >= 0.7 ? 'bg-green-500/30 text-green-300' : 
+            song.mood_match >= 0.5 ? 'bg-yellow-500/30 text-yellow-300' : 
+            'bg-red-500/30 text-red-300'
+          }`}>
+            Mood:{Math.round((song.mood_match || 0) * 100)}%
+          </span>
+          <span className={`px-1 py-0.5 rounded text-[10px] ${
+            (song.dance_match || song.danceability_match) >= 0.7 ? 'bg-green-500/30 text-green-300' : 
+            (song.dance_match || song.danceability_match) >= 0.5 ? 'bg-yellow-500/30 text-yellow-300' : 
+            'bg-red-500/30 text-red-300'
+          }`}>
+            Dance:{Math.round(((song.dance_match || song.danceability_match) || 0) * 100)}%
+          </span>
         </div>
       )}
 
@@ -750,7 +792,8 @@ const SongDetails = () => {
           (a, b) => (b.similarity_score ?? 0) - (a.similarity_score ?? 0)
         );
 
-        setSimilarSongs(rankedRecommendations.slice(0, 20));
+        const top20 = rankedRecommendations.slice(0, 20);
+        setSimilarSongs(top20);
         
         if (data.target_features) {
           setTargetFeatures(data.target_features);
@@ -969,6 +1012,7 @@ const SongDetails = () => {
                 rank={index + 1}
                 playbackRate={playbackRate}
                 allSimilarSongs={similarSongs}
+                targetSongName={targetSong?.trackName || targetSong?.albumTitle}
               />
             ))}
           </div>
