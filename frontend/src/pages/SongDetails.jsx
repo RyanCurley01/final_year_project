@@ -333,7 +333,7 @@ const SimilarSongCard = ({ song, isPlaying, activeSong, onPlay, onPause, rank, p
             {song.collectionName || song.albumTitle}
           </p>
         )}
-        <p className="text-xs text-cyan-400 truncate">{song.match_reason}</p>
+
       </div>
 
       {/* Price and Add to Cart for library songs */}

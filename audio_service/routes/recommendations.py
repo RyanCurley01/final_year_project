@@ -300,10 +300,8 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
         # warm up the cache "lazy-loaded" style. This cache stores pre-calculated features of all 
         # known songs so the database doesn't need to be queried constantly
         if not ml_service.cache_loaded or not ml_service.audio_features_cache:
-            try:
-                await ml_service.startup_cache()
-            except Exception as cache_err:
-                console.log(f"⚠️ Lazy cache warmup failed in unified recommendations: {cache_err}")
+            # Try to trigger load if empty
+            await ml_service.startup_cache()
 
         # Converts the incoming current_product_id to an integer safely
         current_id_str = str(request.current_product_id)
@@ -902,24 +900,27 @@ async def get_midi_recommendations(request: MidiTargetRequest):
     the target is entirely user-defined.
     """
     try:
+        # Cache Check: Before doing anything, verify the ML audio_features_cache is loaded into memory.
+        # If it isn't (e.g., if the server just restarted), raise immediately since MIDI has no fallback.
         if not ml_service.cache_loaded or not ml_service.audio_features_cache:
             raise HTTPException(status_code=503, detail="Audio features cache not loaded yet")
 
-        tf = request.target_features
+        target_features_raw = request.target_features
 
-        # Build a synthetic target dict from MIDI knob values
-        target = {
-            'tempo':             float(tf.get('tempo', 0.5)) * 200,   # de-normalise to BPM
-            'energy':            float(tf.get('energy', 0.5)),
-            'valence':           float(tf.get('valence', 0.5)),
-            'danceability':      float(tf.get('danceability', 0.5)),
-            'acousticness':      float(tf.get('acousticness', 0.5)),
-            'spectral_centroid': float(tf.get('spectral_centroid', 0.3)) * 5000,
-            'spectral_rolloff':  float(tf.get('spectral_centroid', 0.3)) * 10000,
-            'zero_crossing_rate':float(tf.get('zero_crossing_rate', 0.05)),
-            'instrumentalness':  float(tf.get('instrumentalness', 0.5)),
-            'loudness':          float(tf.get('loudness', 0.5)) * 60 - 60,
-            'speechiness':       float(tf.get('speechiness', 0.1)),
+        # Build a synthetic target dict by de-normalizing the MIDI knob values back to real-world units.
+        # The frontend sends 0.0-1.0 slider positions; this converts them to BPM, dB, Hz etc.
+        target_features = {
+            'tempo':             float(target_features_raw.get('tempo', 0.5)) * 200,   # de-normalise to BPM
+            'energy':            float(target_features_raw.get('energy', 0.5)),
+            'valence':           float(target_features_raw.get('valence', 0.5)),
+            'danceability':      float(target_features_raw.get('danceability', 0.5)),
+            'acousticness':      float(target_features_raw.get('acousticness', 0.5)),
+            'spectral_centroid': float(target_features_raw.get('spectral_centroid', 0.3)) * 5000,
+            'spectral_rolloff':  float(target_features_raw.get('spectral_centroid', 0.3)) * 10000,
+            'zero_crossing_rate':float(target_features_raw.get('zero_crossing_rate', 0.05)),
+            'instrumentalness':  float(target_features_raw.get('instrumentalness', 0.5)),
+            'loudness':          float(target_features_raw.get('loudness', 0.5)) * 60 - 60,
+            'speechiness':       float(target_features_raw.get('speechiness', 0.1)),
         }
 
         # Use ONLY the 11 core features the MIDI knobs actually control.
@@ -942,111 +943,187 @@ async def get_midi_recommendations(request: MidiTargetRequest):
                 float(f.get('speechiness') if f.get('speechiness') is not None else 0.1),
             ]
 
-        target_vector = _midi_vector(target)
+        # To convert the target song's raw properties into a straight line array for cosine similarity.
+        target_vector = _midi_vector(target_features)
 
-        # Gather candidates: filter to allowed_ids if provided,
-        # otherwise only library songs (positive IDs < 1000)
-        # and TopCharts/artist songs (negative IDs)
+        # Fallback to pure cache iteration: iterate EVERY cached song and filter by allowed IDs.
+        # If allowed_ids are provided, restrict to that explicit set.
+        # Otherwise only library songs (positive IDs < 1000) and TopCharts/artist songs (negative IDs).
         allowed_set = set(request.allowed_ids) if request.allowed_ids else None
         candidate_vectors = []
         candidate_objs = []
-        for pid, data in ml_service.audio_features_cache.items():
+
+        # Iterates through the finalized pool of candidate tracks.
+        for pid, cand in ml_service.audio_features_cache.items():
             if allowed_set is not None:
                 if pid not in allowed_set:
                     continue
             elif not (pid < 0 or (0 < pid < 1000)):
                 continue  # skip ephemeral/live iTunes songs with large positive IDs
-            vec = _midi_vector(data)
+
+            # Converts the current candidate's properties into the flattened 11-float math array.
+            vec = _midi_vector(cand)
             candidate_vectors.append(vec)
-            candidate_objs.append((pid, data))
+            candidate_objs.append((pid, cand))
 
+        # A final circuit breaker if no candidates passed the filtering or if the cache is empty
         if not candidate_vectors:
-            return {"status": "success", "recommendations": [], "target_features": tf}
+            return {"status": "success", "recommendations": [], "target_features": target_features_raw}
 
+        # Cosine similarity on manually-normalized vectors.
         target_arr = np.array(target_vector).reshape(1, -1)
-        cand_arr = np.array(candidate_vectors)
-        sims = cosine_similarity(target_arr, cand_arr)[0]
+        candidates_arr = np.array(candidate_vectors)
 
-        scored = []
-        for idx, score in enumerate(sims):
-            pid, data = candidate_objs[idx]
-            tempo_match = 1.0 - min(abs(target.get('tempo', 120) - (data.get('tempo') or 120)), 100) / 100
-            energy_match = 1.0 - abs(target.get('energy', 0.5)  - (data.get('energy') or 0.5))
-            mood_match   = 1.0 - abs(target.get('valence', 0.5) - (data.get('valence') or 0.5))
-            dance_match  = 1.0 - abs(target.get('danceability', 0.5) - (data.get('danceability') or 0.5))
+        # To calculate the mathematical angle distance (cosine similarity)
+        sims = cosine_similarity(target_arr, candidates_arr)[0]
 
+        # Prepares an empty list to assemble the final response objects
+        recommendations = []
+
+        # Loops through the list of raw cosine similarity scores calculated by the ML engine
+        for i, score in enumerate(sims):
+
+            # Uses the index i to grab the original un-flattened dictionary data for that specific candidate song
+            pid, cand = candidate_objs[i]
+
+            # Calculates absolute difference in BPM, caps it at 100, scales to percentage and subtracts from 1.0
+            tempo_match = 1.0 - min(abs(target_features.get('tempo', 120) - (cand.get('tempo') or 120)), 100) / 100
+
+            # Calculates absolute mathematical distance between target's energy and candidate's energy
+            energy_match = 1.0 - abs(target_features.get('energy', 0.5) - (cand.get('energy') or 0.5))
+
+            # Calculates mood match using standard valence mapping (0.0 sad, 1.0 happy)
+            mood_match = 1.0 - abs(target_features.get('valence', 0.5) - (cand.get('valence') or 0.5))
+
+            # Calculates danceability match, defaulting to 0.5 if keys are missing
+            dance_match = 1.0 - abs(target_features.get('danceability', 0.5) - (cand.get('danceability') or 0.5))
+
+            # Compresses the cosine similarity score from [-1, 1] into a strict [0, 1] percentage band
+            cosine_norm = max(0.0, min(1.0, (float(score) + 1.0) / 2.0))
+
+            # Genre agreement: compare target and candidate genre / genre_cluster.
+            # Returns -0.3 (mismatch) to +1.0 (exact match); 0.0 when info is absent.
+            genre_agree = _genre_agreement_score(target_features, cand)
+            is_genre_match = genre_agree > 0.5  # True for exact genre or same cluster
+
+            # Sums the 4 human-audible traits using set perceptual weights (e.g. Energy 30%, Tempo 25%)
+            # This ensures high-dimensional abstract AI matches (Cosine) don't override the
+            # fact that a user just wants a musically-similar Tempo and Energy.
+            core_match = (
+                tempo_match * 0.25
+                + energy_match * 0.30
+                + mood_match * 0.20
+                + dance_match * 0.25
+            )
+
+            # Creates an array of tuples holding Identifier, Match Score, and Contextual String tag
             matches = [
-                ('tempo', tempo_match,  f"Matching rhythm ({data.get('tempo', 0):.0f} BPM)"),
-                ('energy', energy_match, f"Similar intensity ({data.get('energy', 0):.0%})"),
+                ('tempo', tempo_match,  f"Matching rhythm ({cand.get('tempo', 0):.0f} BPM)"),
+                ('energy', energy_match, f"Similar intensity ({cand.get('energy', 0):.0%})"),
                 ('mood', mood_match,     "Similar mood"),
                 ('dance', dance_match,   "Comparable groove")
             ]
+            if is_genre_match:
+                matches.append(('genre', 1.0, f"Same genre ({cand.get('genre', 'Unknown')})"))
+
+            # Scans array and targets the tuple possessing the highest Match Score for the output reason
             best_match = max(matches, key=lambda x: x[1])
 
-            scored.append({
+            # Score driven by the 11D cosine similarity of MIDI-controlled features.
+            # The 4 core traits are kept as a minor tiebreaker since they're already
+            # embedded in the vector.
+            # Genre agreement adds up to ±0.10 to separate same-genre from cross-genre.
+            genre_bonus = genre_agree * 0.10
+            blended_score = (cosine_norm * 0.80) + (core_match * 0.10) + genre_bonus
+
+            # Locks the final score into a ceiling of 0.999 and floor 0.0 to prevent glitch overflows
+            blended_score = max(0.0, min(0.999, blended_score))
+
+            # Concatenates target knob config and candidate song id to create a predictable unique string
+            seed_str = f"midi:{pid}"
+
+            # Uses standard string hashing to generate a sub-decimal value for tie-breaking
+            tie_jitter = (abs(hash(seed_str)) % 1000) / 1_000_000.0
+
+            # Adds jitter bit forcing absolute math ties to have arbitrary differences so sorting isn't pure random
+            blended_score = max(0.0, min(0.999, blended_score + tie_jitter))
+
+            # Instantiates response dict mapping calculation values to 3 decimal places out for readability
+            recommendations.append({
                 'product_id': pid,
-                'similarity_score': round(float(score), 3),
+                'similarity_score': round(float(blended_score), 3),
                 'tempo_match': round(tempo_match, 3),
                 'energy_match': round(energy_match, 3),
                 'mood_match': round(mood_match, 3),
                 'danceability_match': round(dance_match, 3),
+                'genre_match': is_genre_match,
                 'reason': best_match[2],
-                'tempo': data.get('tempo'),
-                'energy': data.get('energy'),
-                'valence': data.get('valence'),
-                'danceability': data.get('danceability'),
-                'acousticness': data.get('acousticness'),
-                'genre': data.get('genre', 'Unknown'),
-                'genreCluster': data.get('genre_cluster', 'Unknown'),
-                'mood': data.get('mood', 'Unknown'),
+                # Populates the raw attributes back out so front-end debug visualizers can display them
+                'tempo': cand.get('tempo'),
+                'energy': cand.get('energy'),
+                'valence': cand.get('valence'),
+                'danceability': cand.get('danceability'),
+                'acousticness': cand.get('acousticness'),
+                'genre': cand.get('genre', 'Unknown'),
+                'genreCluster': cand.get('genre_cluster', 'Unknown'),
+                'mood': cand.get('mood', 'Unknown'),
             })
 
-        scored = [s for s in scored if s['similarity_score'] > 0]
-        scored.sort(key=lambda x: x['similarity_score'], reverse=True)
-        top = scored[:request.limit]
+        # List comprehension completely deleting any tracks that mathematically dropped to 0.0 or less
+        recommendations = [r for r in recommendations if r['similarity_score'] > 0]
 
-        # Hydrate metadata from DB / cache
-        if top:
-            db_ids = [s['product_id'] for s in top if isinstance(s['product_id'], int) and s['product_id'] > 0]
-            itunes_ids = [s['product_id'] for s in top if isinstance(s['product_id'], int) and s['product_id'] < 0]
+        # Executes an in-place sort using the blended score with reverse=True pushing highest matches to index 0
+        recommendations.sort(key=lambda x: x['similarity_score'], reverse=True)
 
-            name_map = {}
+        # Slices array cutting off the tail end to retain only the highest matches relative to the boundary limit
+        top_recommendations = recommendations[:request.limit]
+
+        # Hydrate Data from Database and iTunes for Cached Items
+        # Tracks pulled from cache only contain math stats. We need text names and image URLs.
+        if top_recommendations:
+            db_ids = [r['product_id'] for r in top_recommendations if isinstance(r['product_id'], int) and r['product_id'] > 0]
+            itunes_ids = [r['product_id'] for r in top_recommendations if isinstance(r['product_id'], int) and r['product_id'] < 0]
+
+            # A. Hydrate from Products table for BOTH positive and negative cached IDs.
+            db_meta_map = {}
             if db_ids:
-                placeholders_str = ",".join(["%s"] * len(db_ids))
+                placeholders = ",".join(["%s"] * len(db_ids))
                 with get_db_connection() as conn:
                     if conn:
                         with conn.cursor() as cursor:
-                            cursor.execute(f"SELECT ProductID, AlbumTitle, albumCoverImageUrl, preview_url, file_url FROM Products WHERE ProductID IN ({placeholders_str})", db_ids)
+                            cursor.execute(f"SELECT ProductID, AlbumTitle, albumCoverImageUrl, preview_url, file_url FROM Products WHERE ProductID IN ({placeholders})", db_ids)
                             for row in cursor.fetchall():
-                                name_map[row['ProductID']] = row
+                                db_meta_map[row['ProductID']] = row
 
             if itunes_ids:
-                placeholders_str = ",".join(["%s"] * len(itunes_ids))
+                placeholders = ",".join(["%s"] * len(itunes_ids))
                 with get_db_connection() as conn:
                     if conn:
                         with conn.cursor() as cursor:
-                            cursor.execute(f"SELECT ProductID, AlbumTitle, albumCoverImageUrl, preview_url FROM Products WHERE ProductID IN ({placeholders_str})", itunes_ids)
+                            cursor.execute(f"SELECT ProductID, AlbumTitle, albumCoverImageUrl, preview_url FROM Products WHERE ProductID IN ({placeholders})", itunes_ids)
                             for row in cursor.fetchall():
-                                name_map[row['ProductID']] = row
+                                db_meta_map[row['ProductID']] = row
 
-            for s in top:
-                meta = name_map.get(s['product_id'])
+            # Hydrates textual names and image metadata strings if available from database
+            for r in top_recommendations:
+                meta = db_meta_map.get(r['product_id'])
                 if meta:
-                    s['trackName'] = meta.get('AlbumTitle')
-                    s['artworkUrl100'] = generate_presigned_url(meta.get('albumCoverImageUrl'))
-                    raw_prev = meta.get('preview_url')
-                    s['previewUrl'] = generate_presigned_url(raw_prev) if raw_prev else None
+                    r['trackName'] = meta.get('AlbumTitle')
+                    r['artworkUrl100'] = generate_presigned_url(meta.get('albumCoverImageUrl'))
+                    raw_preview = meta.get('preview_url')
+                    r['previewUrl'] = generate_presigned_url(raw_preview) if raw_preview else None
                     if meta.get('file_url'):
-                        s['fileUrl'] = generate_presigned_url(meta.get('file_url'))
-                    s['isLibrary'] = s['product_id'] > 0
+                        r['fileUrl'] = generate_presigned_url(meta.get('file_url'))
+                    r['isLibrary'] = r['product_id'] > 0
 
-        console.log(f"🎛️ MIDI recs: {len(top)} results for target {tf}")
+        console.log(f"🎛️ MIDI recs: {len(top_recommendations)} results for target {target_features_raw}")
 
+        # Return a final dictionary response to FastAPI representing our success JSON payload.
         return {
             "status": "success",
-            "count": len(top),
-            "target_features": tf,
-            "recommendations": top
+            "count": len(top_recommendations),
+            "target_features": target_features_raw,
+            "recommendations": top_recommendations
         }
 
     except HTTPException:
@@ -1422,43 +1499,46 @@ async def match_library_songs(request: LibraryMatchRequest):
     songs whose cached ProductIDs are stored as negative IDs.
     """
     try:
+        # Cache Check: Before doing anything, verify the ML audio_features_cache is loaded into memory.
+        # If it isn't (e.g., if the server just restarted), attempt to warm up the cache "lazy-loaded" style.
         if not ml_service.cache_loaded or not ml_service.audio_features_cache:
             # Try to trigger load if empty
             await ml_service.startup_cache()
             
-        # 1. Get cached target songs.
+        # 1. Get cached target songs (the library pool to match against).
         # If target_ids are supplied, only compare against that explicit set.
         # Otherwise preserve legacy behavior and compare against positive-ID library songs.
-        target_set = _expand_match_target_ids(request.target_ids)
+        expanded_target_ids = _expand_match_target_ids(request.target_ids)
         
+        # Iterates through the full audio features cache and collects every library song
+        # that passes the target filter into a flat list for brute-force comparison.
         library_songs = []
         for pid, features in ml_service.audio_features_cache.items():
             try: 
                 pid_int = int(pid)
-                if target_set is not None:
-                    if pid_int not in target_set:
+                if expanded_target_ids is not None:
+                    if pid_int not in expanded_target_ids:
                         continue
                 elif pid_int <= 0:
                     continue
 
-                # Add ID to features for easier access
+                # .copy() avoids mutating the global cache; inject the ID for later reference.
                 f = features.copy()
                 f['id'] = pid
                 library_songs.append(f)
             except: pass
             
+        # A final circuit breaker if no library songs passed the filtering or if the cache is empty
         if not library_songs:
             # If we requested specific targets but none were found in cache, that's an issue
-            if target_set:
-                console.log(f"Warning: None of the {len(target_set)} target IDs were found in cache.")
+            if expanded_target_ids:
+                console.log(f"Warning: None of the {len(expanded_target_ids)} target IDs were found in cache.")
             return {"status": "error", "message": "No matching library songs found in cache"}
-
-        # Limit library songs to standard set if needed (e.g. 47) 
-        # but we scan all available positive IDs
         
-        results = []
+        # Prepares an empty list to assemble the final response objects
+        recommendations = []
         
-        # 2. For each input candidate, find best library match
+        # 2. Loops through each input candidate song finding the best library match
         for candidate in request.candidates[:request.limit]:         
             candidate_features = None
 
@@ -1472,12 +1552,12 @@ async def match_library_songs(request: LibraryMatchRequest):
             try:
                 # Try lookup by ID (negative ID for artist songs)
                 # Cache keys are integers, so convert to int for lookup
-                cid_int_lookup = int(candidate.trackId)
-                neg_id_lookup = -abs(cid_int_lookup)
+                candidate_id_int = int(candidate.trackId)
+                neg_id_lookup = -abs(candidate_id_int)
                 if neg_id_lookup in ml_service.audio_features_cache:
                     candidate_features = ml_service.audio_features_cache[neg_id_lookup]
-                elif abs(cid_int_lookup) in ml_service.audio_features_cache:
-                    candidate_features = ml_service.audio_features_cache[abs(cid_int_lookup)]
+                elif abs(candidate_id_int) in ml_service.audio_features_cache:
+                    candidate_features = ml_service.audio_features_cache[abs(candidate_id_int)]
             except (ValueError, TypeError):
                 pass
             
@@ -1485,42 +1565,52 @@ async def match_library_songs(request: LibraryMatchRequest):
                  # Real-time extraction for uncached songs
                  try:
                      # Use the async wrapper
-                     cid_int = 0
-                     try: cid_int = int(candidate.trackId)
+                     candidate_id_int = 0
+                     try: candidate_id_int = int(candidate.trackId)
                      except: pass
                      
                      # Wait for extraction (this might be slow, but necessary for first load)
-                     extracted = await extract_audio_features_from_preview_async(candidate.previewUrl, cid_int)
+                     extracted = await extract_audio_features_from_preview_async(candidate.previewUrl, candidate_id_int)
                      
                      if extracted:
                          candidate_features = extracted
-                         # Optional: Cache it logic here if desired
                  except Exception as ex:
                      console.log(f"Extraction failed for {candidate.trackName}: {ex}")
                  
             if not candidate_features:
                 continue
 
-            # Build the same richer feature vector used by the main ML similarity routes.
-            c_vec = _build_similarity_vector(candidate_features)
+            # Converts the candidate's properties into the flattened 51-float math array for cosine similarity.
+            candidate_vector = _build_similarity_vector(candidate_features)
             
-            best_match = None
-            best_score = -1.0
+            best_library_match = None
+            best_blended_score = -1.0
             
-            # Compare against all library songs
+            # Compare against all library songs to find the single best match for this candidate
             for lib_song in library_songs:
-                l_vec = _build_similarity_vector(lib_song)
+                # Converts the current library song's properties into the flattened 51-float math array.
+                lib_vector = _build_similarity_vector(lib_song)
                 
-                # Blend the full-vector cosine score with musically legible core traits,
-                # matching the main recommendation pipeline more closely.
-                cosine_raw = float(cosine_similarity([c_vec], [l_vec])[0][0])
+                # To calculate the mathematical angle distance (cosine similarity)
+                # Compresses the cosine similarity score from [-1, 1] into a strict [0, 1] percentage band
+                cosine_raw = float(cosine_similarity([candidate_vector], [lib_vector])[0][0])
                 cosine_norm = max(0.0, min(1.0, (cosine_raw + 1.0) / 2.0))
 
+                # Calculates absolute difference in BPM, caps it at 100, scales to percentage and subtracts from 1.0
                 tempo_match = 1.0 - min(abs(candidate_features.get('tempo', 120) - lib_song.get('tempo', 120)), 100) / 100
+
+                # Calculates absolute mathematical distance between candidate's energy and library song's energy
                 energy_match = 1.0 - abs(candidate_features.get('energy', 0.5) - lib_song.get('energy', 0.5))
+
+                # Calculates mood match using standard valence mapping (0.0 sad, 1.0 happy)
                 mood_match = 1.0 - abs(candidate_features.get('valence', 0.5) - lib_song.get('valence', 0.5))
+
+                # Calculates danceability match, defaulting to 0.5 if keys are missing
                 dance_match = 1.0 - abs(candidate_features.get('danceability', 0.5) - lib_song.get('danceability', 0.5))
 
+                # Sums the 4 human-audible traits using set perceptual weights (e.g. Energy 30%, Tempo 25%)
+                # This ensures high-dimensional abstract AI matches (Cosine) don't override the 
+                # fact that a user just wants a musically-similar Tempo and Energy.
                 core_match = (
                     tempo_match * 0.25
                     + energy_match * 0.30
@@ -1528,49 +1618,68 @@ async def match_library_songs(request: LibraryMatchRequest):
                     + dance_match * 0.25
                 )
 
+                # Genre agreement: compare candidate and library song genre / genre_cluster.
+                # Returns -0.3 (mismatch) to +1.0 (exact match); 0.0 when info is absent.
                 genre_agree = _genre_agreement_score(candidate_features, lib_song)
+
+                # Score driven by the full 51D cosine similarity (includes MFCCs, chroma,
+                # spectral contrast, spectral bandwidth, etc. that distinguish genres).
+                # The 4 core traits are kept as a minor tiebreaker since they're already
+                # embedded in the 51D vector.
+                # Genre agreement adds up to ±0.10 to separate same-genre from cross-genre.
                 genre_bonus = genre_agree * 0.10
-                blended_score = (cosine_norm * 0.40) + (core_match * 0.50) + genre_bonus
+                blended_score = (cosine_norm * 0.80) + (core_match * 0.10) + genre_bonus
+
+                # Locks the final score into a ceiling of 0.999 and floor 0.0 to prevent glitch overflows
                 blended_score = max(0.0, min(0.999, blended_score))
 
+                # Concatenates candidate song id and library song id to create a predictable unique string
                 seed_str = f"{candidate.trackId}:{lib_song.get('id', '')}"
+
+                # Uses standard string hashing to generate a sub-decimal value for tie-breaking
                 tie_jitter = (abs(hash(seed_str)) % 1000) / 1_000_000.0
+
+                # Adds jitter bit forcing absolute math ties to have arbitrary differences so sorting isn't pure random
                 blended_score = max(0.0, min(0.999, blended_score + tie_jitter))
                 
-                if blended_score > best_score:
-                    best_score = blended_score
-                    best_match = lib_song
+                if blended_score > best_blended_score:
+                    best_blended_score = blended_score
+                    best_library_match = lib_song
 
-            if best_match:
-                 # Match Reason
-                tempo_match=1.0 - min(abs(candidate_features.get('tempo',120) - best_match.get('tempo',120)), 100)/100
-                energy_match=1.0 - abs(candidate_features.get('energy',0.5) - best_match.get('energy',0.5))
-                mood_match=1.0 - abs(candidate_features.get('valence',0.5) - best_match.get('valence',0.5))
-                dance_match=1.0 - abs(candidate_features.get('danceability',0.5) - best_match.get('danceability',0.5))
-            
-                reason_list = [
-                    ('tempo', tempo_match, f"Matching rhythm ({best_match.get('tempo', 0):.0f} BPM)"),
-                    ('energy', energy_match, f"Similar intensity ({best_match.get('energy', 0):.0%})"),
-                    ('mood', mood_match, f"Similar mood"),
-                    ('dance', dance_match, f"Comparable groove")
-                ]
-                text_reason = max(reason_list, key=lambda x: x[1])[2]
+            if best_library_match:
+                # Recalculate the 4 individual trait matches against the winning library song
+                # so the response contains per-metric readouts for the frontend diagnostic badge array.
 
-                res = LibraryMatchResult(
+                # Calculates absolute difference in BPM, caps it at 100, scales to percentage and subtracts from 1.0
+                tempo_match = 1.0 - min(abs(candidate_features.get('tempo', 120) - best_library_match.get('tempo', 120)), 100) / 100
+
+                # Calculates absolute mathematical distance between candidate's energy and best match's energy
+                energy_match = 1.0 - abs(candidate_features.get('energy', 0.5) - best_library_match.get('energy', 0.5))
+
+                # Calculates mood match using standard valence mapping (0.0 sad, 1.0 happy)
+                mood_match = 1.0 - abs(candidate_features.get('valence', 0.5) - best_library_match.get('valence', 0.5))
+
+                # Calculates danceability match, defaulting to 0.5 if keys are missing
+                dance_match = 1.0 - abs(candidate_features.get('danceability', 0.5) - best_library_match.get('danceability', 0.5))
+
+                # Instantiates response model mapping calculation values to 3 decimal places out for readability
+                result = LibraryMatchResult(
                     input_track_id=candidate.trackId,
-                    matched_product_id=best_match['id'],
-                    similarity_score=float(best_score),
-                    match_reason=text_reason,
+                    matched_product_id=best_library_match['id'],
+                    similarity_score=float(best_blended_score),
                     tempo_match=round(tempo_match, 3),
                     energy_match=round(energy_match, 3),
                     mood_match=round(mood_match, 3),
                     dance_match=round(dance_match, 3)
                 )
-                results.append(res)
+
+                # Stores the fully calculated candidate into the list ready to ship to the user
+                recommendations.append(result)
                 
-        # Hydrate library names
-        if results:
-             ids = [r.matched_product_id for r in results if r.matched_product_id is not None]
+        # Hydrate Data from Database for Cached Items
+        # Tracks pulled from cache only contain math stats. We need text names for display.
+        if recommendations:
+             ids = [r.matched_product_id for r in recommendations if r.matched_product_id is not None]
              if ids:
                  placeholders = ",".join(["%s"] * len(ids))
                  with get_db_connection() as conn:
@@ -1579,14 +1688,17 @@ async def match_library_songs(request: LibraryMatchRequest):
                              sql = f"SELECT ProductID, AlbumTitle FROM Products WHERE ProductID IN ({placeholders})"
                              cursor.execute(sql, ids)
                              rows = cursor.fetchall()
-                             name_map = {str(row['ProductID']): row['AlbumTitle'] for row in rows}
-                             
-                             for r in results:
-                                 r.matched_product_name = name_map.get(str(r.matched_product_id))
 
+                             # Hydrates textual names if available from database
+                             db_meta_map = {str(row['ProductID']): row['AlbumTitle'] for row in rows}
+                             
+                             for r in recommendations:
+                                 r.matched_product_name = db_meta_map.get(str(r.matched_product_id))
+
+        # Return a final dictionary response to FastAPI representing our success JSON payload.
         return {
             "status": "success",
-            "matches": results
+            "matches": recommendations
         }
 
     except Exception as e:

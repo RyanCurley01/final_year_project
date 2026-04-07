@@ -209,7 +209,6 @@ class LibraryMatchResult(BaseModel):
     input_track_id: str | int
     matched_product_id: Optional[str | int] = None
     similarity_score: float = 0.0
-    match_reason: Optional[str] = None
     tempo_match: float = 0.0
     energy_match: float = 0.0
     mood_match: float = 0.0

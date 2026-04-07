@@ -362,6 +362,7 @@ export default function MidiExplorer() {
         setLoading(true); // Show a spinning loader next to "Matching Songs"
         
         // 3. Send the exact current slider coordinates (targetRef.current) to the backend
+        const apiUrl = envConfig.getApiBaseUrl();
         const resp = await fetch(`${apiUrl}/api/audio/midi-recommendations`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
