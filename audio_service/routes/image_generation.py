@@ -1356,7 +1356,10 @@ def ensure_song_image_pool(
 
 def precompute_all_song_image_pools(pool_size: int = _DEFAULT_POOL_SIZE) -> dict:
     """Precompute per-song image pools so the frontend never needs placeholders."""
-    # Return structured no-op summary when generation is disabled.
+    
+    # Guard clause: If LoremFlickr external generation is toggled off via env var,
+    # return immediately with a structured no-op summary so callers can distinguish
+    # "disabled" from "failed".
     if not _EXTERNAL_IMAGE_GENERATION_ENABLED:
         return {
             "songs": 0,
@@ -1367,8 +1370,11 @@ def precompute_all_song_image_pools(pool_size: int = _DEFAULT_POOL_SIZE) -> dict
             "elapsed_seconds": 0.0,
         }
 
-    # Collect aggregate progress metrics for long-running precompute jobs.
+    # Start a wall-clock timer so the summary reports total runtime of the batch job.
     started = time.time()
+    
+    # Accumulator dictionary tracking progress across all songs. This is returned
+    # at the end and also logged periodically during the run.
     summary = {
         "songs": 0,
         "inserted": 0,
@@ -1378,11 +1384,15 @@ def precompute_all_song_image_pools(pool_size: int = _DEFAULT_POOL_SIZE) -> dict
         "s3_limit_bytes": int(IMAGE_POOL_MAX_TOTAL_BYTES),
     }
 
+    # Open a single database connection for the entire batch to avoid connection churn.
     with get_db_connection() as conn:
         if not conn:
             return {**summary, "status": "db_unavailable"}
 
         with conn.cursor() as cursor:
+            # Query all library songs (ProductID > 0) that have a title and preview URL,
+            # LEFT JOINing AudioFeatures to get mood/energy/genre columns used for keyword generation.
+            # iTunes-imported songs (negative IDs) are excluded — they don't get image pools.
             cursor.execute(
                 """
                 SELECT p.ProductID, p.AlbumTitle,
@@ -1398,31 +1408,47 @@ def precompute_all_song_image_pools(pool_size: int = _DEFAULT_POOL_SIZE) -> dict
                 """
             )
             rows = cursor.fetchall() or []
+            
+            # Load the current total S3 storage usage (bytes + image count) to enforce the 1.7GB budget cap.
             total_s3_bytes, total_s3_images = _db_s3_storage_stats(cursor)
             budget_exhausted = False
 
+            # Iterate through every eligible library song one at a time.
             for row in rows:
-                # Process one product at a time, trimming overflow first.
                 pid = int(row["ProductID"])
                 title = row.get("AlbumTitle") or ""
+                
+                # Trim Phase: If this song somehow has MORE images than the target pool_size
+                # (e.g. pool_size was reduced since last run), delete the excess rows from the
+                # database and remove the corresponding S3 objects to reclaim storage.
                 trimmed_rows, trimmed_keys = _db_trim_song_pool_by_provider_with_keys(cursor, pid, "s3", int(pool_size))
                 if trimmed_rows > 0:
                     _delete_s3_keys_best_effort(trimmed_keys)
+                    
+                # Count how many S3-hosted images this song currently has in the database.
                 existing = _db_count_images_by_provider(cursor, pid, "s3")
                 inserted_for_song = 0
 
+                # Skip Condition: If the pool is already at or above target size, no work needed.
                 if existing >= int(pool_size):
                     summary["skipped"] += 1
                 else:
-                    # Bounded retries per song prevent endless loops on bad inputs.
+                    # Multi-Round Fill Loop: Each round attempts to fetch and host the remaining
+                    # missing images. Multiple rounds are needed because some images get rejected
+                    # by moderation (face detection, red borders) or fail to download.
                     rounds = 0
                     no_progress_rounds = 0
                     max_rounds_per_song = 8
 
                     while existing < int(pool_size) and rounds < max_rounds_per_song:
                         rounds += 1
+                        
+                        # Calculate how many images are still needed to reach the target pool size.
                         missing = max(0, int(pool_size) - existing)
 
+                        # Budget Guard: Calculate how many bytes remain before hitting the global
+                        # 1.7GB S3 storage cap, then convert to an image count using the running
+                        # average image size. This prevents any single song from blowing the budget.
                         remaining_budget_bytes = max(0, int(IMAGE_POOL_MAX_TOTAL_BYTES) - int(total_s3_bytes))
                         avg_image_bytes = (
                             int(total_s3_bytes // total_s3_images)
@@ -1433,6 +1459,8 @@ def precompute_all_song_image_pools(pool_size: int = _DEFAULT_POOL_SIZE) -> dict
                             missing,
                             _allowed_images_by_budget(remaining_budget_bytes, avg_image_bytes),
                         )
+                        
+                        # If the budget allows zero more images, stop the entire precompute job.
                         if budget_limited_missing <= 0:
                             budget_exhausted = True
                             summary["status"] = "budget_cap_reached"
@@ -1441,6 +1469,9 @@ def precompute_all_song_image_pools(pool_size: int = _DEFAULT_POOL_SIZE) -> dict
                             )
                             break
 
+                        # Keyword Generation: Translate this song's audio features (mood, energy,
+                        # genre, tempo, etc.) into safe Flickr search keywords like "sunset",
+                        # "mountain", "aurora" that produce visually relevant nature photographs.
                         keywords = _build_keywords_from_features(
                             mood=row.get("Mood"),
                             energy=row.get("Energy"),
@@ -1451,7 +1482,15 @@ def precompute_all_song_image_pools(pool_size: int = _DEFAULT_POOL_SIZE) -> dict
                             genre=row.get("Genre"),
                             title=title,
                         )
+                        
+                        # URL Generation: Build LoremFlickr URLs using the keywords, one keyword
+                        # per URL with unique ?lock=N values for image variety.
                         images = _generate_loremflickr_urls(keywords, budget_limited_missing, nocache=True)
+                        
+                        # Download + Moderate + Upload: For each URL, download the image, run it
+                        # through face detection and red-border moderation, then upload passing
+                        # images to S3. Returns (hosted_images, failed_images) split.
+                        # Uses aggressive settings (1 retry, no backoff, no delay) for batch speed.
                         hosted_images, _failed_images = _host_loremflickr_images_to_s3(
                             pid,
                             images,
@@ -1462,7 +1501,8 @@ def precompute_all_song_image_pools(pool_size: int = _DEFAULT_POOL_SIZE) -> dict
 
                         inserted_round = 0
                         if hosted_images:
-                            # Track in-memory budget counters as new hosted bytes are added.
+                            # Persist the hosted image metadata (S3 key, URL hash, byte size, etc.)
+                            # into the ImageGeneration table via INSERT IGNORE (deduped by ProductID + UrlHash).
                             inserted_round += _db_insert_hosted_images(
                                 cursor,
                                 pid,
@@ -1470,15 +1510,21 @@ def precompute_all_song_image_pools(pool_size: int = _DEFAULT_POOL_SIZE) -> dict
                                 _contains_banned_figure_terms,
                                 _hash_url,
                             )
+                            
+                            # Update the running in-memory byte/count totals so the budget guard
+                            # stays accurate across songs without re-querying the database.
                             for hosted in hosted_images:
                                 total_s3_bytes += int(hosted.get("byteSize") or 0)
                                 total_s3_images += 1
 
                         inserted_for_song += int(inserted_round or 0)
 
-                        # Persist every round so progress is visible and recoverable.
+                        # Commit after every round so that if the server crashes mid-batch,
+                        # all previously inserted images are preserved and recoverable.
                         conn.commit()
 
+                        # Re-check the actual DB count to detect whether this round made progress.
+                        # If moderation rejected every image, the count won't have increased.
                         refreshed_existing = _db_count_images_by_provider(cursor, pid, "s3")
                         if refreshed_existing <= existing:
                             no_progress_rounds += 1
@@ -1486,26 +1532,33 @@ def precompute_all_song_image_pools(pool_size: int = _DEFAULT_POOL_SIZE) -> dict
                             no_progress_rounds = 0
                         existing = refreshed_existing
 
+                        # Stall Detection: If two consecutive rounds produced zero new images
+                        # (all rejected by moderation or failed to download), give up on this
+                        # song to avoid wasting time on keywords that only return bad images.
                         if no_progress_rounds >= 2:
-                            # Stop retrying this song if hosting/moderation made no progress.
                             break
 
+                    # If the pool still couldn't reach target size after all rounds,
+                    # record it as underfilled for reporting purposes.
                     if existing < int(pool_size):
-                        # Mark songs that could not reach target size.
                         summary["underfilled_songs"] += 1
 
+                # Update aggregate counters regardless of whether the song was skipped or filled.
                 summary["songs"] += 1
                 summary["inserted"] += int(inserted_for_song or 0)
 
+                # If the global S3 budget was exhausted, stop processing remaining songs entirely.
                 if budget_exhausted:
                     break
 
+                # Progress logging every 10 songs so operators can monitor long-running batch jobs.
                 if (summary["songs"] % 10) == 0:
                     console.log(
                         f"🖼️ Precompute progress: songs={summary['songs']}/{len(rows)} "
                         f"inserted={summary['inserted']} skipped={summary['skipped']}"
                     )
 
+    # Finalize the summary with storage stats and elapsed time before returning.
     summary["status"] = summary.get("status") or "ok"
     summary["s3_total_bytes"] = int(total_s3_bytes) if 'total_s3_bytes' in locals() else 0
     summary["s3_total_images"] = int(total_s3_images) if 'total_s3_images' in locals() else 0
