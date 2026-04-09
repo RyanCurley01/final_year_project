@@ -14,7 +14,7 @@ from config import executor
 from s3_service import generate_presigned_url
 
 
-def derive_mood(valence: float, energy: float, danceability: float = 0.5, acousticness: float = 0.5) -> str:
+def derive_mood(valence: float, energy: float) -> str:
     """
     Derive mood from audio features using Russell's Circumplex Model of Affect.
     Maps valence (positivity) and energy (arousal) to four mood quadrants.

@@ -33,18 +33,35 @@ TIME_SIG_TO_BEATS = {
 }
 
 def _parse_json_list(val, expected_len: int, default_val: float = 0.0) -> List[float]:
-    """Safely parse a JSON text field into a list of floats."""
+    """Safely parse a JSON text field into a list of floats.
+    
+    Database TEXT columns like MfccMean, ChromaMean, and SpectralContrast store
+    variable-length numeric arrays as JSON strings (e.g. '[0.12, 0.45, ...]').
+    This helper normalises them into a fixed-length Python list of floats so
+    the ML pipeline always receives vectors of the expected dimension (13 for
+    MFCC, 12 for Chroma, 7 for SpectralContrast).
+    """
+    
+    # Nothing stored yet — return a zero-filled placeholder of the right length
     if val is None:
         return [default_val] * expected_len
+
+    # Already a Python list (e.g. passed programmatically, not from the DB)
     if isinstance(val, list):
         return [float(x) for x in val]
+
+    # Value is a JSON string from the database — attempt to decode it
     try:
         parsed = json.loads(val)
         if isinstance(parsed, list):
             return [float(x) for x in parsed]
     except (json.JSONDecodeError, TypeError):
+        # Malformed or unexpected type — fall through to the default
         pass
+
+    # Fallback: couldn't parse anything useful, so return zeros
     return [default_val] * expected_len
+
 
 # EXECUTION ORDER: Global state initialization.
 # Cache for audio features - loaded once at startup to avoid repeated DB queries
@@ -132,6 +149,9 @@ async def startup_cache():
                                 row['Tempo'] = 120.0
                             
                             # Parse MFCC and Chroma JSON arrays
+                            # Mel-Frequency Cepstral Coefficients (MFCC) are a set of 13 values that capture the timbral texture of a track,
+                            # while Chroma features are 12 values representing the intensity of each pitch class (C, C#, D, etc.) in the track.
+                            # Both are stored as JSON strings in the database and need to be parsed into Python lists for ML processing.
                             mfcc_list = _parse_json_list(row.get('MfccMean'), 13)
                             chroma_list = _parse_json_list(row.get('ChromaMean'), 12)
                             
@@ -140,9 +160,7 @@ async def startup_cache():
                             if not mood_val:
                                 mood_val = derive_mood(
                                     float(row.get('Valence', 0.5)),
-                                    float(row.get('Energy', 0.5)),
-                                    float(row.get('Danceability', 0.5)),
-                                    float(row.get('Acousticness', 0.5))
+                                    float(row.get('Energy', 0.5))
                                 )
                                 
                             next_audio_features_cache[row['ProductID']] = {
@@ -165,6 +183,8 @@ async def startup_cache():
                                 'time_signature': row.get('TimeSignature'),
                                 'duration': row.get('Duration', 0),
                                 'spectral_bandwidth': row.get('SpectralBandwidth', 1500.0),
+                                 
+                                # Contrast between peaks and valleys across 7 frequency bands 
                                 'spectral_contrast_mean': _parse_json_list(row.get('SpectralContrast'), 7),
                                 'rms_energy': row.get('RmsEnergy', 0.02),
                                 'onset_rate': row.get('OnsetRate', 2.0),
@@ -263,16 +283,30 @@ async def startup_cache():
                                 X_pca = None
                                 X_scaled = None
                                 
+                                # Compare two normalization strategies to find which produces tighter clusters:
+                                # - MinMaxScaler squashes every feature to a 0–1 range
+                                # - StandardScaler centres each feature to mean=0, std=1
                                 for scaler_name, scaler_obj in [('MinMaxScaler', MinMaxScaler()), ('StandardScaler', StandardScaler())]:
+                                    # Normalize the raw 51D feature matrix using this scaler
                                     X_sc = scaler_obj.fit_transform(X)
-                                    pca_tmp = PCA(n_components=2)
+                                    
+                                    # Reduce 51 dimensions → 2 via PCA so KMeans can cluster in 2D
+                                    pca_tmp = PCA(n_components=2)                              
                                     X_pca_tmp = pca_tmp.fit_transform(X_sc)
-                                    km_tmp = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
+                                    
+                                    # Run KMeans clustering on the 2D projection
+                                    km_tmp = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)            
                                     labels_tmp = km_tmp.fit_predict(X_pca_tmp)
+                                    
+                                    # Silhouette score measures how well-separated the clusters are
+                                    # (ranges from -1 to 1; higher = tighter, more distinct clusters)
                                     sil = silhouette_score(X_pca_tmp, labels_tmp)
+                                    
                                     model_performance_metrics[f"{scaler_name}_train"] = round(sil, 4)
                                     console.log(f"   {scaler_name} silhouette: {sil:.4f}")
                                 
+                                    # Keep whichever scaler produced the best silhouette score,
+                                    # along with its fitted scaler, PCA, and transformed data
                                     if sil > best_sil:
                                         best_sil = sil
                                         best_scaler_name = scaler_name
