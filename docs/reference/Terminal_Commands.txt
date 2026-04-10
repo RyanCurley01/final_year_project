@@ -190,3 +190,6 @@ mysqldump -h localhost -P 3306 -u root -prootpassword Game_Store_System AudioFea
 
 To check Genres for all songs to ensure majority are electronic
 docker exec gamestore_services-db-1 mysql -u root -prootpassword Game_Store_System --table -e "SELECT CASE WHEN ProductID < 0 THEN 'iTunes' ELSE 'Library' END as Source, Genre, COUNT(*) as Count FROM AudioFeatures GROUP BY Source, Genre ORDER BY Source, Count DESC;"
+
+Recreates payments service container with new env values
+docker compose -f docker-compose.services.yml -p gamestore_services up -d --force-recreate payments-service
