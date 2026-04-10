@@ -532,7 +532,7 @@ async def import_itunes_songs_to_database(limit: int = 50, genre: str = "pop"):
                                 features.get('onset_rate', 2.0),
                                 features.get('harmonic_ratio', 0.5),
                                 features.get('percussive_ratio', 0.5),
-                                features.get('mood', derive_mood(features['valence'], features['energy'], features['danceability'], features['acousticness'])),
+                                features.get('mood', derive_mood(features['valence'], features['energy'])),
                                 mfcc_json,
                                 chroma_json,
                                 features.get('key_signature', None),
@@ -592,9 +592,7 @@ async def import_itunes_songs_to_database(limit: int = 50, genre: str = "pop"):
                         chroma_list = _parse_json_list(row.get('ChromaMean'), 12)
                         mood_val = row.get('Mood') or derive_mood(
                             float(row.get('Valence', 0.5)),
-                            float(row.get('Energy', 0.5)),
-                            float(row.get('Danceability', 0.5)),
-                            float(row.get('Acousticness', 0.5))
+                            float(row.get('Energy', 0.5))
                         )
                         ml_service.audio_features_cache[row['ProductID']] = {
                             'id': row['ProductID'],
@@ -1030,7 +1028,7 @@ def _insert_song_row(cursor, song: dict):
         song.get("spectral_contrast_json"),
         f.get('rms_energy', 0.02), f.get('onset_rate', 2.0),
         f.get('harmonic_ratio', 0.5), f.get('percussive_ratio', 0.5),
-        f.get('mood', derive_mood(f['valence'], f['energy'], f['danceability'], f['acousticness'])),
+        f.get('mood', derive_mood(f['valence'], f['energy'])),
         song["mfcc_json"], song["chroma_json"],
         f.get('key_signature'), f.get('time_signature'), f.get('duration')
     ))

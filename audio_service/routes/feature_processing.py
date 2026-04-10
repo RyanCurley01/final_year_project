@@ -325,7 +325,7 @@ async def extract_all_product_features(
                             'acousticness': features['acousticness'],
                             'genre': existing_genre,
                             'genre_cluster': genre_cluster,
-                            'mood': features.get('mood', derive_mood(features['valence'], features['energy'], features['danceability'], features['acousticness'])),
+                            'mood': features.get('mood', derive_mood(features['valence'], features['energy'])),
                             'spectral_centroid': features.get('spectral_centroid', 1500.0),
                             'spectral_rolloff': features.get('spectral_rolloff', 3000.0),
                             'zero_crossing_rate': features.get('zero_crossing_rate', 0.05),
@@ -356,7 +356,7 @@ async def extract_all_product_features(
                                 with get_db_connection() as conn:
                                     if conn:
                                         with conn.cursor() as cursor:
-                                            mood = features.get('mood', derive_mood(features['valence'], features['energy'], features['danceability'], features['acousticness']))
+                                            mood = features.get('mood', derive_mood(features['valence'], features['energy']))
                                             sql = """
                                                 INSERT INTO AudioFeatures (
                                                     ProductID, Tempo, Energy, Danceability, Valence,
@@ -508,9 +508,7 @@ async def backfill_mood():
                 for row in rows:
                     mood = derive_mood(
                         float(row['Valence']),
-                        float(row['Energy']),
-                        float(row.get('Danceability', 0.5) or 0.5),
-                        float(row.get('Acousticness', 0.5) or 0.5)
+                        float(row['Energy'])
                     )
                     cursor.execute(
                         "UPDATE AudioFeatures SET Mood = %s WHERE ProductID = %s",
@@ -525,9 +523,7 @@ async def backfill_mood():
             if not data.get('mood'):
                 data['mood'] = derive_mood(
                     float(data.get('valence', 0.5)),
-                    float(data.get('energy', 0.5)),
-                    float(data.get('danceability', 0.5)),
-                    float(data.get('acousticness', 0.5))
+                    float(data.get('energy', 0.5))
                 )
 
         console.log(f"✅ Backfilled Mood for {updated} rows")

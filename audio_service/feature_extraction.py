@@ -216,7 +216,7 @@ def extract_audio_features_librosa(audio_url: str, product_id: int) -> Optional[
             duration = int(len(y) / sr)  # Duration in seconds
             
             # ===== MOOD (derived from valence + energy) =====
-            mood = derive_mood(valence, energy, danceability, acousticness)
+            mood = derive_mood(valence, energy)
             
             features = {
                 'product_id': product_id,
@@ -393,7 +393,7 @@ def extract_audio_features_from_preview(audio_url: str, track_id: int) -> Option
             duration = int(len(y) / sr)  # Duration in seconds
             
             # ===== MOOD (derived from valence + energy) =====
-            mood = derive_mood(valence, energy, danceability, acousticness)
+            mood = derive_mood(valence, energy)
             
             features = {
                 'track_id': track_id,
