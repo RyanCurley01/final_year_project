@@ -7,8 +7,10 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.core.io.ClassPathResource;
 
 import jakarta.annotation.PostConstruct;
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 
 @Configuration
 public class FirebaseConfig {
@@ -16,9 +18,17 @@ public class FirebaseConfig {
     @PostConstruct
     public void initialize() {
         try {
-            // Check if FirebaseApp is already initialized
             if (FirebaseApp.getApps().isEmpty()) {
-                InputStream serviceAccount = new ClassPathResource("firebase-service-account.json").getInputStream();
+                InputStream serviceAccount = null;
+
+                String firebaseJson = System.getenv("FIREBASE_SERVICE_ACCOUNT_JSON");
+                if (firebaseJson != null && !firebaseJson.isBlank()) {
+                    serviceAccount = new ByteArrayInputStream(firebaseJson.getBytes(StandardCharsets.UTF_8));
+                    System.out.println("Firebase: Using credentials from FIREBASE_SERVICE_ACCOUNT_JSON env var");
+                } else {
+                    serviceAccount = new ClassPathResource("firebase-service-account.json").getInputStream();
+                    System.out.println("Firebase: Using credentials from classpath file");
+                }
 
                 FirebaseOptions options = FirebaseOptions.builder()
                         .setCredentials(GoogleCredentials.fromStream(serviceAccount))
@@ -29,7 +39,6 @@ public class FirebaseConfig {
             }
         } catch (IOException e) {
             System.err.println("Wishlist Service: Firebase initialization failed (Google auth will be unavailable): " + e.getMessage());
-            // Don't throw - allow service to start without Firebase (Basic Auth still works)
         }
     }
 }
