@@ -33,8 +33,8 @@ services:
 
   accounts-service:
     build:
-      context: ../backend
-      dockerfile: ./accounts-service/Dockerfile
+      context: ../backend/accounts-service
+      dockerfile: Dockerfile
     ports:
       - "8080:8080"
     environment:
@@ -55,8 +55,8 @@ services:
 
   products-service:
     build:
-      context: ../backend
-      dockerfile: ./products-service/Dockerfile
+      context: ../backend/products-service
+      dockerfile: Dockerfile
     ports:
       - "8081:8081"
     environment:
@@ -81,8 +81,8 @@ services:
 
   orders-service:
     build:
-      context: ../backend
-      dockerfile: ./orders-service/Dockerfile
+      context: ../backend/orders-service
+      dockerfile: Dockerfile
     ports:
       - "8082:8082"
     environment:
@@ -103,8 +103,8 @@ services:
 
   payments-service:
     build:
-      context: ../backend
-      dockerfile: ./payments-service/Dockerfile
+      context: ../backend/payments-service
+      dockerfile: Dockerfile
     ports:
       - "8083:8083"
     environment:
@@ -128,8 +128,8 @@ services:
 
   stock-service:
     build:
-      context: ../backend
-      dockerfile: ./stock-service/Dockerfile
+      context: ../backend/stock-service
+      dockerfile: Dockerfile
     ports:
       - "8084:8084"
     environment:
@@ -150,8 +150,8 @@ services:
 
   wishlist-service:
     build:
-      context: ../backend
-      dockerfile: ./wishlist-service/Dockerfile
+      context: ../backend/wishlist-service
+      dockerfile: Dockerfile
     ports:
       - "8085:8085"
     environment:
@@ -172,8 +172,8 @@ services:
 
   order-items-service:
     build:
-      context: ../backend
-      dockerfile: ./orderItems-service/Dockerfile
+      context: ../backend/orderItems-service
+      dockerfile: Dockerfile
     ports:
       - "8086:8086"
     environment:
@@ -194,8 +194,8 @@ services:
 
   customer-summary-service:
     build:
-      context: ../backend
-      dockerfile: ./customerSummary-service/Dockerfile
+      context: ../backend/customerSummary-service
+      dockerfile: Dockerfile
     ports:
       - "8087:8087"
     environment:
@@ -216,8 +216,8 @@ services:
 
   purchased-products-service:
     build:
-      context: ../backend
-      dockerfile: ./purchasedProducts-service/Dockerfile
+      context: ../backend/purchasedProducts-service
+      dockerfile: Dockerfile
     ports:
       - "8089:8089"
     environment:
@@ -238,8 +238,8 @@ services:
 
   sold-products-service:
     build:
-      context: ../backend
-      dockerfile: ./soldProducts-service/Dockerfile
+      context: ../backend/soldProducts-service
+      dockerfile: Dockerfile
     ports:
       - "8088:8088"
     environment:
