@@ -337,9 +337,13 @@ const StockSidebar = () => {
                         })
                         .slice(0, replacementCountThisWeek || newThisWeekCandidates.length);
 
+                      // Exclude new-this-week songs from the main list so the two sections together = 272
+                      const newThisWeekIds = new Set(newThisWeek.map((item) => item.productId));
+                      const songsListExcludingNew = songsList.filter((item) => !newThisWeekIds.has(item.productId));
+
                       return (
                         <>
-                          {renderSection("Songs List", songsList, productMap, {
+                          {renderSection("Stock Availability", songsListExcludingNew, productMap, {
                             statusResolver: () => true,
                           })}
                           {renderSection("New Songs This Week", newThisWeek, productMap, {
