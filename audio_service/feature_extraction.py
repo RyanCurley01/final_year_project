@@ -19,16 +19,16 @@ def derive_mood(valence: float, energy: float) -> str:
     Derive mood from audio features using Russell's Circumplex Model of Affect.
     Maps valence (positivity) and energy (arousal) to four mood quadrants.
     
-    Returns one of: 'energetic', 'happy', 'calm', 'sad'
+    Returns one of: 'Energetic', 'Happy', 'Calm', 'Sad'
     """
     if energy >= 0.55 and valence >= 0.45:
-        return "energetic"
+        return "Energetic"
     elif valence >= 0.45 and energy < 0.55:
-        return "happy"
+        return "Happy"
     elif energy < 0.45 and valence < 0.45:
-        return "sad"
+        return "Sad"
     else:
-        return "calm"
+        return "Calm"
 
 
 # EXECUTION ORDER: Can be called any time to analyze a URL.

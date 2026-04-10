@@ -82,6 +82,20 @@ const playerSlice = createSlice({
       state.quantumMode = !state.quantumMode;
     },
 
+    updateQueue: (state, action) => {
+      const { data, currentId } = action.payload;
+      state.currentSongs = data;
+      const newIdx = data.findIndex((s) => String(s.id) === String(currentId));
+      if (newIdx === -1) {
+        // Current song dropped out of the list — mark with sentinel -1
+        // so both next and prev in MusicPlayer resolve to the first song
+        state.currentIndex = -1;
+      } else if (newIdx !== state.currentIndex) {
+        // Song moved position — update index without restarting playback
+        state.currentIndex = newIdx;
+      }
+    },
+
     resetPlayer: (state) => {
       state.currentSongs = [];
       state.currentIndex = 0;
@@ -94,6 +108,6 @@ const playerSlice = createSlice({
   },
 });
 
-export const { setActiveSong, nextSong, prevSong, playPause, setPlaybackRate, songEnded, selectGenreListId, toggleQuantumMode, resetPlayer } = playerSlice.actions;
+export const { setActiveSong, nextSong, prevSong, playPause, setPlaybackRate, songEnded, selectGenreListId, toggleQuantumMode, updateQueue, resetPlayer } = playerSlice.actions;
 
 export default playerSlice.reducer;

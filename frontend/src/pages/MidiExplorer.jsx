@@ -16,7 +16,7 @@ import {
 } from '../config/midiMappings';
 import { analyseNoteWindow } from '../config/noteAnalysis';
 import envConfig from '../config/environment';
-import { setActiveSong, playPause } from '../redux/features/playerSlice';
+import { setActiveSong, playPause, updateQueue } from '../redux/features/playerSlice';
 import { productService } from '../redux/services';
 import { Loader } from '../components';
 import { fixText } from '../utils/fixText';
@@ -27,7 +27,6 @@ const ARTISTS = ['Aphex Twin', 'Boards of Canada', 'Squarepusher'];
 
 export default function MidiExplorer() {
   const dispatch = useDispatch();
-  const { activeSong, isPlaying } = useSelector((s) => s.player);
 
   // MIDI hook
   const { midiSupported, devices, activeDevice, selectDevice, lastCC, lastNote, ccValues, error: midiError, retryAccess, rawMessages, noteHistory } = useMidi();
@@ -48,7 +47,7 @@ export default function MidiExplorer() {
   // The sliders on the screen natively map to the React state variable target. 
   // Any time the user does anything, it updates this central target object with 
   // the new 0-0.1 values and flags it as "dirty".
-  const [target, setTarget] = useState(() => {
+  const [targetFeatures, setTargetFeatures] = useState(() => {
     const t = {};
 
     // Loops through all the AUDIO_FEATURES defined in the midi mappings and sets them to their 
@@ -70,8 +69,8 @@ export default function MidiExplorer() {
 
   // Dirty flag — knobs moved, need to re-query
   const dirtyRef = useRef(false);
-  const targetRef = useRef(target);
-  targetRef.current = target;
+  const targetRef = useRef(targetFeatures);
+  targetRef.current = targetFeatures;
   const allowedIdsRef = useRef(null); // [int] — only these product IDs can be recommended
 
   // ── Persist CC map ──────────────────────────────────────────────
@@ -128,7 +127,7 @@ export default function MidiExplorer() {
   useEffect(() => {
     if (!lastCC) return;
     const newTarget = buildTargetFromCCs(ccValues, ccMap);
-    setTarget(newTarget);
+    setTargetFeatures(newTarget);
     dirtyRef.current = true;
   }, [lastCC, ccValues, ccMap]);
 
@@ -176,7 +175,7 @@ export default function MidiExplorer() {
 
     // Takes the newly calculated math object (e.g., { energy: 0.8, valence: 0.2 ... }) and overwrites the target state. 
     // This literally physically snaps the vertical sliders on your screen to their new calculated position
-    setTarget(derived);
+    setTargetFeatures(derived);
 
     // Timer is looking at dirtyRef.current twice a second.
     // When it sees that it has become true, 
@@ -198,7 +197,7 @@ export default function MidiExplorer() {
     const { rms, dominantFreq, ...features } = audioFeatures;
     // Only update if there's meaningful audio (not silence)
     if (rms > 0.01) {
-      setTarget(features);
+      setTargetFeatures(features);
       dirtyRef.current = true;
     }
   }, [audioFeatures, listening]);
@@ -219,7 +218,7 @@ export default function MidiExplorer() {
     // safely updates its value (val) without erasing the values of the other sliders on the screen.
     // Number Safety (Math.min(...Math.max)): It strictly bounds the incoming mouse value between 0.0 and 1.0. 
     // This prevents bad coordinates from being sent to the database.
-    setTarget((prev) => ({ ...prev, [featureKey]: Math.min(1, Math.max(0, val)) }));
+    setTargetFeatures((prev) => ({ ...prev, [featureKey]: Math.min(1, Math.max(0, val)) }));
 
     dirtyRef.current = true;
   }, []);
@@ -396,33 +395,68 @@ export default function MidiExplorer() {
       (p) => p.albumTitle && p.fileUrl && !p.fileUrl.toLowerCase().includes('.zip'),
     );
     
-    // 2. Search for the recommended song in our pre-loaded Redux store catalog
-    const idx = musicProducts.findIndex((p) => String(p.id) === String(rec.product_id));
-    
-    // 3. Fallback check: If the song is in our standard library (idx not -1), 
-    // we use the full high-quality object. Otherwise (like for iTunes TopCharts), 
-    // we build a temporary "mock" song object using the data provided in the recommendation.
-    const song = idx !== -1
-      ? musicProducts[idx]
-      : {
-          id: rec.product_id,
-          albumTitle: fixText(rec.trackName) || `Song ${rec.product_id}`,
-          albumCoverImageUrl: rec.artworkUrl100,
-          fileUrl: rec.previewUrl,     // Use iTunes 30s preview as the audio source
-          previewUrl: rec.previewUrl,
-        };
+    // 2. Build the playback queue from the current recommendations list.
+    // Each recommendation is converted to a song-like object so the player
+    // can cycle through the MIDI Explorer results (not the full catalog).
+    const recsQueue = recommendations.map((r) => {
+      const catalogIdx = musicProducts.findIndex((p) => String(p.id) === String(r.product_id));
+      return catalogIdx !== -1
+        ? musicProducts[catalogIdx]
+        : {
+            id: r.product_id,
+            albumTitle: fixText(r.trackName) || `Song ${r.product_id}`,
+            albumCoverImageUrl: r.artworkUrl100,
+            fileUrl: r.previewUrl,
+            previewUrl: r.previewUrl,
+          };
+    });
+
+    // 3. Find the clicked song's position within the recommendations queue
+    const queueIdx = recsQueue.findIndex((s) => String(s.id) === String(rec.product_id));
+    const song = queueIdx !== -1 ? recsQueue[queueIdx] : recsQueue[0];
         
-    // 4. Dispatch the selected song to the global Redux audio player. 
-    // It passes the active song, the whole queue of music, and the index to start from.
-    dispatch(setActiveSong({ song, data: musicProducts.length ? musicProducts : [song], i: Math.max(idx, 0) }));
+    // 4. Dispatch the selected song to the global Redux audio player.
+    // The queue is the recommendations list so next/prev stays within MIDI Explorer results.
+    dispatch(setActiveSong({ song, data: recsQueue, i: Math.max(queueIdx, 0) }));
+    midiPlayerRef.current = true; // mark that the player was started from MIDI Explorer
     
     // 5. Instantly force the music player to start playing (toggles 'isPlaying' to true)
     dispatch(playPause(true));
   };
 
+  // ── Keep player queue in sync with latest recommendations ────
+  const { activeSong, isActive, currentSongs } = useSelector((state) => state.player);
+  const midiPlayerRef = useRef(false); // tracks whether the player was started from MIDI Explorer
+  useEffect(() => {
+    if (!isActive || !recommendations.length) return;
+    // Check if the player was originally started from MIDI Explorer
+    // by seeing if the active song exists in either the old or new recommendations
+    const activeId = String(activeSong?.id);
+    const inCurrentRecs = recommendations.some((r) => String(r.product_id) === activeId);
+    const wasFromMidi = midiPlayerRef.current;
+    if (!inCurrentRecs && !wasFromMidi) return;
+
+    const musicProducts = products.filter(
+      (p) => p.albumTitle && p.fileUrl && !p.fileUrl.toLowerCase().includes('.zip'),
+    );
+    const recsQueue = recommendations.map((r) => {
+      const catalogIdx = musicProducts.findIndex((p) => String(p.id) === String(r.product_id));
+      return catalogIdx !== -1
+        ? musicProducts[catalogIdx]
+        : {
+            id: r.product_id,
+            albumTitle: fixText(r.trackName) || `Song ${r.product_id}`,
+            albumCoverImageUrl: r.artworkUrl100,
+            fileUrl: r.previewUrl,
+            previewUrl: r.previewUrl,
+          };
+    });
+    dispatch(updateQueue({ data: recsQueue, currentId: activeSong.id }));
+  }, [recommendations]);
+
   // Uses energy and valence features to create mood string 
   // and emoji from target features
-  const { mood, emoji } = deriveMood(target.energy, target.valence);
+  const { mood, emoji } = deriveMood(targetFeatures.energy, targetFeatures.valence);
 
   // ── Feature list sorted by mapped CCs (mapped first) ─────────
   const featureKeys = Object.keys(AUDIO_FEATURES);
@@ -630,7 +664,7 @@ export default function MidiExplorer() {
             return (
               <div key={fk} className="flex flex-col items-center gap-1">
                 <MidiKnob
-                  value={target[fk]}
+                  value={targetFeatures[fk]}
                   onChange={(val) => handleManualChange(fk, val)}
                   label={meta.label}
                   color={meta.color}
@@ -642,10 +676,10 @@ export default function MidiExplorer() {
                   type="range"
                   min="0"
                   max="100"
-                  value={Math.round(target[fk] * 100)}
+                  value={Math.round(targetFeatures[fk] * 100)}
                   onChange={(e) => handleManualChange(fk, Number(e.target.value) / 100)}
                   className="w-16 h-1 accent-indigo-500 opacity-40 hover:opacity-100 transition-opacity cursor-pointer"
-                  title={`${meta.label}: ${(target[fk] * 100).toFixed(0)}%`}
+                  title={`${meta.label}: ${(targetFeatures[fk] * 100).toFixed(0)}%`}
                 />
               </div>
             );
@@ -844,15 +878,59 @@ export default function MidiExplorer() {
                   ))}
                 </div>
 
-                {/* Genre / mood badges */}
+                {/* Audio Feature Diagnostic Badge Array - Quantifies individual metric congruences */}
                 <div className="flex gap-1.5 mt-2 flex-wrap">
                   {rec.genre && rec.genre !== 'Unknown' && (
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300">{rec.genre}</span>
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300">{rec.genre}</span>
                   )}
+
                   {rec.mood && rec.mood !== 'Unknown' && (
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300">{rec.mood}</span>
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded ${
+                      rec.mood.toLowerCase() === 'energetic' ? 'bg-purple-500/20 text-purple-300' :
+                      rec.mood.toLowerCase() === 'happy' ? 'bg-green-500/20 text-green-300' :
+                      rec.mood.toLowerCase() === 'sad' ? 'bg-red-500/20 text-red-300' :
+                      'bg-blue-500/20 text-blue-300'
+                    }`}>{rec.mood}</span>
                   )}
-                </div>
+                </div>  
+                
+                <div className="flex gap-1.5 mt-2 flex-row">
+                  {/* Specific Tempo metric readout bound to dynamic green/yellow/red styling */}
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded ${
+                    rec.tempo_match >= 0.7 ? 'bg-green-500/30 text-green-300' : 
+                    rec.tempo_match >= 0.5 ? 'bg-yellow-500/30 text-yellow-300' : 
+                    'bg-red-500/30 text-red-300'
+                  }`}>
+                    Tempo:{Math.round(rec.tempo_match * 100)}%
+                  </span>  
+
+                  {/* Specific Energy metric readout bound to dynamic styling */}
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded ${
+                    rec.energy_match >= 0.7 ? 'bg-green-500/30 text-green-300' : 
+                    rec.energy_match >= 0.5 ? 'bg-yellow-500/30 text-yellow-300' : 
+                    'bg-red-500/30 text-red-300'
+                  }`}>
+                    Energy:{Math.round(rec.energy_match * 100)}%
+                  </span>   
+
+                  {/* Specific Valence (Mood) metric readout bound to dynamic styling */}
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded ${
+                    rec.mood_match >= 0.7 ? 'bg-green-500/30 text-green-300' : 
+                    rec.mood_match >= 0.5 ? 'bg-yellow-500/30 text-yellow-300' : 
+                    'bg-red-500/30 text-red-300'
+                  }`}>
+                    Mood:{Math.round(rec.mood_match * 100)}%
+                  </span>   
+
+                  {/* Specific Danceability metric readout bound to dynamic styling */}
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded ${
+                    rec.danceability_match >= 0.7 ? 'bg-green-500/30 text-green-300' : 
+                    rec.danceability_match >= 0.5 ? 'bg-yellow-500/30 text-yellow-300' : 
+                    'bg-red-500/30 text-red-300'
+                  }`}>
+                    Dance:{Math.round(rec.danceability_match * 100)}%
+                  </span>
+                </div>   
               </motion.div>
             ))}
           </AnimatePresence>

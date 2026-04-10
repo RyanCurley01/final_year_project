@@ -117,7 +117,10 @@ const MusicPlayer = () => {
     dispatch(playPause(false));
     dispatch(songEnded()); // Notify that song ended
 
-    if (!shuffle) {
+    if (currentIndex === -1) {
+      // Current song was removed from queue — jump to first song
+      dispatch(nextSong(0));
+    } else if (!shuffle) {
       dispatch(nextSong((currentIndex + 1) % currentSongs.length));
     } else {
       dispatch(nextSong(Math.floor(Math.random() * currentSongs.length)));
@@ -125,7 +128,10 @@ const MusicPlayer = () => {
   };
 
   const handlePrevSong = () => {
-    if (currentIndex === 0) {
+    if (currentIndex === -1) {
+      // Current song was removed from queue — jump to first song
+      dispatch(prevSong(0));
+    } else if (currentIndex === 0) {
       dispatch(prevSong(currentSongs.length - 1));
     } else if (shuffle) {
       dispatch(prevSong(Math.floor(Math.random() * currentSongs.length)));

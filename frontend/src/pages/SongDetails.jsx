@@ -566,8 +566,7 @@ const SongDetails = () => {
   
 
   // Compute ML similarity using the backend
-  // Central ranking pipeline for SongDetails. This function tries very hard to keep the
-  // result set deterministic: first use cached extracted features, then fall back to live
+  // First use cached extracted features, then fall back to live
   // analyser features, then normalize the backend response into one consistent song shape
   // regardless of whether the recommendation came from the local library or iTunes data.
   const computeMLSimilarity = async (targetSong, comparisonSongs, overrideFeatures = null) => {
@@ -654,9 +653,9 @@ const SongDetails = () => {
         throw new Error(`ML Service Error: ${response.status}`);
       }
 
-      const data = fixTextDeep(await response.json());
+      const responseData = fixTextDeep(await response.json());
       
-      if (data.status === 'success') {
+      if (responseData.status === 'success') {
         // Build a lookup table from the comparison songs that were already available in the
         // page context. Backend recommendations sometimes return partial metadata, so this
         // map lets us rehydrate missing names, artwork, preview URLs, and source flags from
@@ -672,7 +671,7 @@ const SongDetails = () => {
           }
         });
 
-        const validRecommendations = (data.recommendations || [])
+        const validRecommendations = (responseData.recommendations || [])
             .filter(song => song.similarity_score > 0)
             .map(song => {
                 const recId = String(song.product_id ?? song.trackId ?? song.id ?? '');
@@ -795,17 +794,17 @@ const SongDetails = () => {
         const top20 = rankedRecommendations.slice(0, 20);
         setSimilarSongs(top20);
         
-        if (data.target_features) {
-          setTargetFeatures(data.target_features);
+        if (responseData.target_features) {
+          setTargetFeatures(responseData.target_features);
             
             // Construct ML info for display
             setMlInfo({
                 algorithm: "Hybrid Audio Analysis",
-            features: data.target_features
+            features: responseData.target_features
             });
         }
       } else {
-        throw new Error(data.message || 'Failed to analyze songs');
+        throw new Error(responseData.message || 'Failed to analyze songs');
       }
     } catch (err) {
       console.error('ML Similarity error:', err);
