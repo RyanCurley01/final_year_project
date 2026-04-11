@@ -51,7 +51,7 @@ const PRESETS = [
   { name: 'Spiral', description: 'Aphex Twin-style spiral' },
   { name: 'Text: AFX', description: 'Write "AFX" in spectrum' },
   { name: 'Einstein Face', description: 'Einstein tongue photo — spectral face', persistKey: 'spectrogram-preset-einstein-bw', bundledSrc: '/Einstein gray.jpg' },
-  { name: 'Male Face', description: 'Your saved face in the spectrum (ΔMi−1 style)', saved: true },
+  { name: 'Male Face', description: 'Your saved face in the spectrum (ΔMi−1 style)', persistKey: 'spectrogram-saved-face', bundledSrc: '/male-face.png' },
   { name: 'Face Capture', description: 'Capture your face with webcam' },
   { name: 'Upload Image', description: 'Load any image into the spectrogram' },
 ];
@@ -333,7 +333,6 @@ const SpectrogramCreator = () => {
 
   // Webcam & image upload
   const [showWebcam, setShowWebcam] = useState(false);
-  const [hasSavedFace, setHasSavedFace] = useState(() => !!localStorage.getItem(SAVED_FACE_KEY));
   const [pendingPresetSave, setPendingPresetSave] = useState(null); // { key } when uploading for a named preset
   const [savedImagePresets, setSavedImagePresets] = useState(() => {
     const found = {};
@@ -2057,7 +2056,6 @@ const SpectrogramCreator = () => {
     // permanently into the browser's memory under a specific key, 
     // so even if the user refreshes the page or closes the tab, their face is remembered.
     localStorage.setItem(SAVED_FACE_KEY, dataUrl);
-    setHasSavedFace(true);
     
     // Also apply it immediately
     const newGrid = imageToGrid(frame);
@@ -2169,16 +2167,12 @@ const SpectrogramCreator = () => {
       startWebcam();
       return;
     }
-    if (presetName === 'Male Face') {
-      loadSavedFace();
-      return;
-    }
     if (presetName === 'Upload Image') {
       setPendingPresetSave(null);
       fileInputRef.current?.click();
       return;
     }
-    // Check for persistent image presets (Einstein B&W, Einstein Color, etc.)
+    // Check for persistent image presets (Einstein, Male Face, etc.)
     const preset = PRESETS.find((p) => p.name === presetName);
     if (preset?.persistKey) {
       loadImagePreset(preset);
@@ -2188,7 +2182,7 @@ const SpectrogramCreator = () => {
     // If the user clicked a standard mathematical preset (like standard Harmonic series or noise functions), it simply generates a new array using generatePreset and sets the canvas to it.
     const newGrid = generatePreset(presetName, synthRef.current);
     setGrid(newGrid);
-  }, [handleStop, startWebcam, loadSavedFace, loadImagePreset]);
+  }, [handleStop, startWebcam, loadImagePreset]);
 
   // ── Clear canvas ──
   const handleClear = useCallback(() => {
@@ -2479,7 +2473,7 @@ const SpectrogramCreator = () => {
       {/* Presets */}
       <div className="flex flex-wrap gap-2 mb-4">
         <span className="text-xs text-gray-500 self-center mr-1">Presets:</span>
-        {PRESETS.filter((p) => !p.saved || hasSavedFace).map((preset) => {
+        {PRESETS.map((preset) => {
           const needsSetup = preset.persistKey && !preset.bundledSrc && !savedImagePresets[preset.persistKey];
           return (
             <button
@@ -2487,13 +2481,11 @@ const SpectrogramCreator = () => {
               onClick={() => handlePreset(preset.name)}
               title={needsSetup ? `${preset.description} (click to upload image)` : preset.description}
               className={`px-2.5 py-1 rounded-md text-xs transition-colors border ${
-                preset.saved
-                  ? 'bg-cyan-900/40 text-cyan-300 hover:bg-cyan-700/40 hover:text-white border-transparent hover:border-purple-500/30'
-                  : preset.persistKey
-                    ? needsSetup
-                      ? 'bg-amber-900/30 text-amber-300 hover:bg-amber-700/40 hover:text-white border-dashed border-amber-500/40 hover:border-amber-400/60'
-                      : 'bg-emerald-900/30 text-emerald-300 hover:bg-emerald-700/40 hover:text-white border-emerald-500/30 hover:border-emerald-400/50'
-                    : 'bg-[#1a1640]/60 text-gray-300 hover:bg-purple-600/40 hover:text-white border-transparent hover:border-purple-500/30'
+                preset.persistKey
+                  ? needsSetup
+                    ? 'bg-amber-900/30 text-amber-300 hover:bg-amber-700/40 hover:text-white border-dashed border-amber-500/40 hover:border-amber-400/60'
+                    : 'bg-emerald-900/30 text-emerald-300 hover:bg-emerald-700/40 hover:text-white border-emerald-500/30 hover:border-emerald-400/50'
+                  : 'bg-[#1a1640]/60 text-gray-300 hover:bg-purple-600/40 hover:text-white border-transparent hover:border-purple-500/30'
               }`}
             >
               {preset.icon} {preset.name}{needsSetup ? ' +' : ''}
