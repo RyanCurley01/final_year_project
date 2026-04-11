@@ -15,6 +15,11 @@ def home():
     return {"message": "Audio Analysis Service Running"}
 
 # EXECUTION ORDER: Router endpoint.
+@router.get("/ping")
+def ping():
+    return {"status": "ok"}
+
+# EXECUTION ORDER: Router endpoint.
 @router.get("/health")
 async def health_check():
     # Check database connectivity
