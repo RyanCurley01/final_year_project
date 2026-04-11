@@ -51,7 +51,7 @@ const PRESETS = [
   { name: 'Spiral', description: 'Aphex Twin-style spiral' },
   { name: 'Text: AFX', description: 'Write "AFX" in spectrum' },
   { name: 'Einstein Face', description: 'Einstein tongue photo — spectral face', persistKey: 'spectrogram-preset-einstein-bw', bundledSrc: '/Einstein gray.jpg' },
-  { name: 'Male Face', description: 'Your saved face in the spectrum (ΔMi−1 style)', persistKey: 'spectrogram-saved-face', bundledSrc: '/male-face.png' },
+  { name: 'Male Face', description: 'Your saved face in the spectrum (ΔMi−1 style)', persistKey: 'spectrogram-preset-male-face', bundledSrc: '/male-face.png' },
   { name: 'Item Capture', description: 'Capture an item with webcam' },
   { name: 'Upload Image', description: 'Load any image into the spectrogram' },
 ];
