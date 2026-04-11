@@ -85,7 +85,7 @@ def get_allowed_origins():
         "http://127.0.0.1:3000",
         
         # Production - Railway (allow all Railway subdomains)
-        "https://final-year-project-p1jf0t5kh-ryancurley01s-projects.vercel.app",
+        "final-year-project-git-main-ryancurley01s-projects.vercel.app",
     ]
 
     # Add Codespaces origins if running in Codespaces
