@@ -92,6 +92,17 @@ export default function Login() {
     } catch (firebaseErr) {
       console.warn("Firebase login failed, attempting legacy login...", firebaseErr);
       
+      // If Firebase rejected the password, show error immediately — don't fall through to legacy login
+      if (firebaseErr.code === 'auth/wrong-password' || 
+          firebaseErr.code === 'auth/invalid-credential' ||
+          firebaseErr.code === 'auth/too-many-requests') {
+        setError(firebaseErr.code === 'auth/too-many-requests' 
+          ? 'Too many failed attempts. Please try again later.' 
+          : 'Invalid email or password');
+        setLoading(false);
+        return;
+      }
+
       try {
         // 4. Fallback to Legacy Backend Login
         // Executes standard web REST logic hitting the legacy backend endpoint skipping Firebase entirely if old rows exist.
