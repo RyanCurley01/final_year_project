@@ -30,7 +30,11 @@ const paypalOptions = {
   "client-id": import.meta.env.VITE_PAYPAL_CLIENT_ID || "test",
   currency: "EUR", // Sets the default checkout currency.
   // "capture" tells PayPal to immediately authorize and capture the funds upon user approval, rather than just pre-authorizing.
-  intent: "capture", 
+  intent: "capture",
+  // Load card-fields component so card entry renders inline instead of a grayed-out full-page overlay.
+  components: "buttons,card-fields",
+  // Explicitly enable card funding source for inline rendering.
+  "enable-funding": "card",
 };
 
 // createRoot mounts the entire React application into the basic <div id="root"> element found in index.html

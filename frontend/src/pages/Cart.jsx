@@ -375,7 +375,7 @@ const Cart = () => {
               {!paypalError && (
                 <PayPalButtons
                   key={paypalKey}
-                  style={{ layout: "vertical" }}
+                  style={{ layout: "vertical", color: "gold", shape: "rect", label: "pay" }}
                   createOrder={handleCreateOrder}
                   onApprove={handleApprove}
                   onCancel={() => {
