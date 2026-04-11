@@ -33,6 +33,9 @@ const Cart = () => {
   // Local state: holds custom error messages returned from the checkout process to display to the user.
   const [paypalError, setPaypalError] = useState(null);
   
+  // Local state: stores the pre-created order so the PayPal createOrder callback only needs one fast API call.
+  const [preparedOrder, setPreparedOrder] = useState(null);
+  
   // Pull the active user session from Context.
   const { currentUser } = useAuth();
   
@@ -52,52 +55,68 @@ const Cart = () => {
     dispatch(updateQuantity({ productId, quantity: newQuantity }));
   };
 
-  // handleCreateOrder: Triggered automatically the moment the user clicks the black or yellow PayPal/Debit button.
-  // It handles staging the database schema *before* redirecting to the actual PayPal authorization popup.
-  const handleCreateOrder = async (data, actions) => {
+  // handleProceedToCheckout: Triggered when user clicks "Proceed to Checkout".
+  // Creates the order and order items upfront so the PayPal createOrder callback only needs one fast API call.
+  // This prevents mobile Safari from timing out the PayPal popup/redirect.
+  const handleProceedToCheckout = async () => {
     if (!user?.accountId) {
       console.error("Cannot create order: User not logged in or Account ID missing");
-      setProcessingPayment(false);
-      return; 
+      return;
     }
 
     try {
-      setProcessingPayment(true); // Disable double-clicking.
-      
+      setProcessingPayment(true);
+      setPaypalError(null);
+
       // Step 1: Create a master 'Order' record attached to the user's account with the computed total.
       const orderData = {
         accountId: user?.accountId,
         totalAmount: totalAmount,
       };
-      
+
       // Await backend Spring Boot orders-service.
       const order = await orderService.createOrder(orderData);
-      
-      // Step 2: Loop through every individual unique song in the Redux items array.
-      for (const item of items) {
-        // Build the sub-schema for the separate OrderItems table.
+
+      // Step 2: Create all order items in parallel for speed.
+      await Promise.all(items.map(item => {
         const orderItemData = {
           orderId: order.id,
           productId: item.id,
           quantity: item.quantity,
           unitPrice: item.albumPrice
         };
-        // Await backend Spring Boot orderItems-service to insert each row.
-        const orderItem = await orderItemService.createOrderItem(orderItemData);
-        
-        // Note: Sold_Products, Purchased_Products, and CustomerSummary tables 
-        // are automatically populated by the MySQL database trigger After_Order_Item_Insert 
-        // whenever an Order_Item is created above.
-      }
-      
-      // Step 3: Format the JSON strictly required by the official PayPal capture API.
+        return orderItemService.createOrderItem(orderItemData);
+      }));
+
+      // Note: Sold_Products, Purchased_Products, and CustomerSummary tables
+      // are automatically populated by the MySQL database trigger After_Order_Item_Insert
+      // whenever an Order_Item is created above.
+
+      // Store the prepared order so createOrder can use it immediately.
+      setPreparedOrder(order);
+      setShowPayPal(true);
+      setProcessingPayment(false);
+    } catch (error) {
+      console.error('Error preparing order:', error);
+      setProcessingPayment(false);
+      setPaypalError('Could not prepare your order. Please try again.');
+    }
+  };
+
+  // handleCreateOrder: Triggered automatically the moment the user clicks the black or yellow PayPal/Debit button.
+  // Now only makes one fast API call since the order was pre-created in handleProceedToCheckout.
+  const handleCreateOrder = async (data, actions) => {
+    try {
+      setProcessingPayment(true);
+
+      // Format the JSON strictly required by the official PayPal capture API.
       const paypalOrderData = {
         amount: totalAmount,
         currency: 'EUR',
         accountId: user?.accountId,
-        orderId: order.id,
+        orderId: preparedOrder.id,
         // The payments table requires a singular productId for legacy indexing logic; we pass the ID of the first item index.
-        productId: items.length > 0 ? items[0].id : null, 
+        productId: items.length > 0 ? items[0].id : null,
         // Mapping Redux array items strictly into PayPal's expected Item syntax format.
         items: items.map(item => ({
           productId: item.id,
@@ -105,10 +124,10 @@ const Cart = () => {
           price: item.albumPrice
         }))
       };
-      
+
       // Send formatting to custom Spring Boot payments-service which generates the official PayPal token ID.
       const response = await paymentService.createPayPalOrder(paypalOrderData);
-      
+
       // This returned string ID automatically pops up the secure PayPal 3rd-party modal.
       return response.id;
     } catch (error) {
@@ -330,11 +349,11 @@ const Cart = () => {
             </Link>
           ) : !showPayPal ? (
             <button
-              onClick={() => setShowPayPal(true)}
+              onClick={handleProceedToCheckout}
               className="w-full py-3 bg-blue-700 hover:bg-blue-800 text-white font-semibold rounded-lg transition"
               disabled={processingPayment}
             >
-              Proceed to Checkout
+              {processingPayment ? 'Preparing Order...' : 'Proceed to Checkout'}
             </button>
           ) : (
             <div className="space-y-3">
@@ -342,7 +361,7 @@ const Cart = () => {
                 <div className="bg-red-500/20 border border-red-500/40 rounded-lg p-3 mb-3">
                   <p className="text-red-300 text-sm">{paypalError}</p>
                   <button
-                    onClick={() => { setPaypalError(null); setShowPayPal(false); setProcessingPayment(false); }}
+                    onClick={() => { setPaypalError(null); setShowPayPal(false); setProcessingPayment(false); setPreparedOrder(null); }}
                     className="text-red-400 hover:text-red-300 text-xs underline mt-1"
                   >
                     Try Again
@@ -357,6 +376,7 @@ const Cart = () => {
                   setShowPayPal(false);
                   setProcessingPayment(false);
                   setPaypalError(null);
+                  setPreparedOrder(null);
                 }}
                 onError={(err) => {
                   console.error('PayPal error:', err);
@@ -366,7 +386,7 @@ const Cart = () => {
                 disabled={processingPayment}
               />
               <button
-                onClick={() => setShowPayPal(false)}
+                onClick={() => { setShowPayPal(false); setPreparedOrder(null); }}
                 className="w-full py-2 bg-gray-600 hover:bg-gray-700 text-white font-semibold rounded-lg transition"
                 disabled={processingPayment}
               >
