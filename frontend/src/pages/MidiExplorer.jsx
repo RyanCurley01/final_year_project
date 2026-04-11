@@ -72,6 +72,7 @@ export default function MidiExplorer() {
   const targetRef = useRef(targetFeatures);
   targetRef.current = targetFeatures;
   const allowedIdsRef = useRef(null); // [int] — only these product IDs can be recommended
+  const itunesMetaRef = useRef({}); // Map<negativeTrackId, {trackName, artistName, artworkUrl100, previewUrl}>
 
   // ── Persist CC map ──────────────────────────────────────────────
   useEffect(() => {
@@ -107,7 +108,15 @@ export default function MidiExplorer() {
               data.results
                 .filter((t) => t.previewUrl && t.artistName?.toLowerCase().includes(artistLower))
                 .slice(0, 50)
-                .forEach((t) => ids.push(-t.trackId)); // negative = DB convention
+                .forEach((t) => {
+                  ids.push(-t.trackId); // negative = DB convention
+                  itunesMetaRef.current[-t.trackId] = {
+                    trackName: t.trackName,
+                    artistName: t.artistName,
+                    artworkUrl100: t.artworkUrl100,
+                    previewUrl: t.previewUrl,
+                  };
+                });
             }
           } catch { /* skip artist on error */ }
         }
@@ -400,14 +409,15 @@ export default function MidiExplorer() {
     // can cycle through the MIDI Explorer results (not the full catalog).
     const recsQueue = recommendations.map((r) => {
       const catalogIdx = musicProducts.findIndex((p) => String(p.id) === String(r.product_id));
-      return catalogIdx !== -1
-        ? musicProducts[catalogIdx]
-        : {
+      if (catalogIdx !== -1) return musicProducts[catalogIdx];
+      const meta = itunesMetaRef.current[r.product_id];
+      return {
             id: r.product_id,
-            albumTitle: fixText(r.trackName) || `Song ${r.product_id}`,
-            albumCoverImageUrl: r.artworkUrl100,
-            fileUrl: r.previewUrl,
-            previewUrl: r.previewUrl,
+            albumTitle: fixText(r.trackName) || fixText(meta?.trackName) || `Song ${r.product_id}`,
+            artistName: meta?.artistName,
+            albumCoverImageUrl: r.artworkUrl100 || meta?.artworkUrl100,
+            fileUrl: r.previewUrl || meta?.previewUrl,
+            previewUrl: r.previewUrl || meta?.previewUrl,
           };
     });
 
@@ -441,14 +451,15 @@ export default function MidiExplorer() {
     );
     const recsQueue = recommendations.map((r) => {
       const catalogIdx = musicProducts.findIndex((p) => String(p.id) === String(r.product_id));
-      return catalogIdx !== -1
-        ? musicProducts[catalogIdx]
-        : {
+      if (catalogIdx !== -1) return musicProducts[catalogIdx];
+      const meta = itunesMetaRef.current[r.product_id];
+      return {
             id: r.product_id,
-            albumTitle: fixText(r.trackName) || `Song ${r.product_id}`,
-            albumCoverImageUrl: r.artworkUrl100,
-            fileUrl: r.previewUrl,
-            previewUrl: r.previewUrl,
+            albumTitle: fixText(r.trackName) || fixText(meta?.trackName) || `Song ${r.product_id}`,
+            artistName: meta?.artistName,
+            albumCoverImageUrl: r.artworkUrl100 || meta?.artworkUrl100,
+            fileUrl: r.previewUrl || meta?.previewUrl,
+            previewUrl: r.previewUrl || meta?.previewUrl,
           };
     });
     dispatch(updateQueue({ data: recsQueue, currentId: activeSong.id }));
@@ -762,16 +773,23 @@ export default function MidiExplorer() {
               className="group bg-cyan-500/10 hover:bg-cyan-500/20 rounded-lg p-3 cursor-pointer border border-cyan-400/30 transition-all"
             >
               <div className="flex items-center gap-3">
-                {melodySeedMatch.artworkUrl100 && !melodySeedMatch.artworkUrl100.toLowerCase().includes('.mp4') ? (
-                  <img src={melodySeedMatch.artworkUrl100} alt="" className="w-12 h-12 rounded-lg object-cover shrink-0" />
-                ) : (
-                  <div className="w-12 h-12 rounded-lg bg-linear-to-br from-cyan-600 to-blue-700 flex items-center justify-center text-white text-lg shrink-0">
-                    🎼
-                  </div>
-                )}
+                {(() => {
+                  const meta = itunesMetaRef.current[melodySeedMatch.product_id];
+                  const artUrl = melodySeedMatch.artworkUrl100 || meta?.artworkUrl100 || null;
+                  const isLibrary = melodySeedMatch.product_id > 0 && melodySeedMatch.product_id < 1000000;
+                  const isBadUrl = artUrl && /\.(mp4|m4v|mov|webm|wmv|wav|mp3|flac|ogg)(\?|$)/i.test(artUrl);
+                  if (isLibrary || !artUrl || isBadUrl) {
+                    return (
+                      <div className="w-12 h-12 rounded-lg bg-linear-to-br from-cyan-600 via-purple-600 to-pink-600 flex items-center justify-center shrink-0">
+                        <svg className="w-7 h-7 text-blue-900" fill="currentColor" viewBox="0 0 24 24"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>
+                      </div>
+                    );
+                  }
+                  return <img src={artUrl.replace('100x100', '200x200')} alt="" className="w-12 h-12 rounded-lg object-cover shrink-0" />;
+                })()}
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-semibold text-white truncate">
-                    {fixText(melodySeedMatch.trackName) || `Song #${melodySeedMatch.product_id}`}
+                    {fixText(melodySeedMatch.trackName) || fixText(itunesMetaRef.current[melodySeedMatch.product_id]?.trackName) || `Song #${melodySeedMatch.product_id}`}
                   </p>
                   <p className="text-xs text-cyan-200/80 truncate">Closest melody contour to your played phrase</p>
                 </div>
@@ -791,7 +809,7 @@ export default function MidiExplorer() {
                       onClick={() => handlePlay(rec)}
                       className="text-left rounded-lg border border-indigo-400/20 bg-indigo-500/10 hover:bg-indigo-500/20 px-3 py-2 transition-colors"
                     >
-                      <p className="text-sm text-white truncate">{fixText(rec.trackName) || `Song #${rec.product_id}`}</p>
+                      <p className="text-sm text-white truncate">{fixText(rec.trackName) || fixText(itunesMetaRef.current[rec.product_id]?.trackName) || `Song #${rec.product_id}`}</p>
                       <p className="text-[11px] text-indigo-200/80 truncate">
                         Reordered-note similarity {((rec.different_order_score || 0) * 100).toFixed(0)}%
                       </p>
@@ -834,16 +852,23 @@ export default function MidiExplorer() {
               >
                 {/* Artwork + title */}
                 <div className="flex items-center gap-3 mb-3">
-                  {rec.artworkUrl100 && !rec.artworkUrl100.toLowerCase().includes('.mp4') ? (
-                    <img src={rec.artworkUrl100} alt="" className="w-12 h-12 rounded-lg object-cover shrink-0" />
-                  ) : (
-                    <div className="w-12 h-12 rounded-lg bg-linear-to-br from-indigo-600 to-purple-700 flex items-center justify-center text-white text-lg shrink-0">
-                      🎵
-                    </div>
-                  )}
+                  {(() => {
+                    const meta = itunesMetaRef.current[rec.product_id];
+                    const artUrl = rec.artworkUrl100 || meta?.artworkUrl100 || null;
+                    const isLibrary = rec.product_id > 0 && rec.product_id < 1000000;
+                    const isBadUrl = artUrl && /\.(mp4|m4v|mov|webm|wmv|wav|mp3|flac|ogg)(\?|$)/i.test(artUrl);
+                    if (isLibrary || !artUrl || isBadUrl) {
+                      return (
+                        <div className="w-12 h-12 rounded-lg bg-linear-to-br from-cyan-600 via-purple-600 to-pink-600 flex items-center justify-center shrink-0">
+                          <svg className="w-7 h-7 text-blue-900" fill="currentColor" viewBox="0 0 24 24"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>
+                        </div>
+                      );
+                    }
+                    return <img src={artUrl.replace('100x100', '200x200')} alt="" className="w-12 h-12 rounded-lg object-cover shrink-0" onError={(e) => { e.target.style.display='none'; e.target.parentElement.innerHTML='<div class="w-12 h-12 rounded-lg bg-linear-to-br from-cyan-600 via-purple-600 to-pink-600 flex items-center justify-center"><svg class="w-7 h-7 text-blue-900" fill="currentColor" viewBox="0 0 24 24"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg></div>'; }} />;
+                  })()}
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-semibold text-white truncate">
-                      {fixText(rec.trackName) || `Song #${rec.product_id}`}
+                      {fixText(rec.trackName) || fixText(itunesMetaRef.current[rec.product_id]?.trackName) || `Song #${rec.product_id}`}
                     </p>
                     <p className="text-xs text-gray-400 truncate">{rec.reason}</p>
                   </div>
