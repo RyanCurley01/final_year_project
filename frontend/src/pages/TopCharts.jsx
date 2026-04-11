@@ -595,14 +595,26 @@ const TopCharts = () => {
     };
 
     if (songToPlay.fileUrl) {
-      // Try to find in current list
-      let index = songs.findIndex(s => String(s.id) === String(songToPlay.id));
+      // Look up the clicked track in the filtered grid so next/prev
+      // advances through the visible song card list.
+      // Try multiple ID fields since recommendations use product_id (DB) while
+      // grid songs use iTunes trackId — the two namespaces rarely overlap.
+      const recNormId = normalizeTrackId(song.product_id || song.id || song.trackId);
+      let index = filteredSongs.findIndex(s =>
+        normalizeTrackId(s.trackId || s.id) === recNormId
+        || (song.trackName && s.trackName && song.trackName === s.trackName
+            && song.artistName && s.artistName && song.artistName === s.artistName)
+      );
       
-      // If not in current list, play as single song context
+      // If found, use filtered list as queue; otherwise append to end
+      // so the player can still advance to the next visible card.
+      const queueData = index !== -1 ? filteredSongs : [...filteredSongs, songToPlay];
+      const queueIndex = index !== -1 ? index : filteredSongs.length;
+      
       dispatch(setActiveSong({ 
           song: songToPlay, 
-          data: index !== -1 ? songs : [songToPlay], 
-          i: index !== -1 ? index : 0 
+          data: queueData, 
+          i: queueIndex 
       }));
       dispatch(playPause(true));
     } else {

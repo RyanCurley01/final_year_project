@@ -1195,20 +1195,30 @@ const SimilarSongs = () => {
 
   // useMemo hook dynamically builds the filtered sub-array of songs displayed in the main grid grid.
   // Using useMemo prevents expensive array filtering operations from re-running unnecessarily upon every render cycle.
+  // Seed changes on every mount so the grid order is different each visit.
+  const [shuffleSeed] = useState(() => Math.random());
+
   const filteredSongs = useMemo(() => {
     let filtered;
     
     // Check if the global 'All' toggle is active.
     if (filter === 'all') {
-      // Create a shallow copy of the full array to satisfy React state immutability patterns.
       filtered = [...songs];
     } else {
-      // Filter out songs unless their standardized artist tag matches the currently defined active filter token.
       filtered = songs.filter(song => song.artistName?.toLowerCase().includes(filter.toLowerCase()));
     }
 
-    return filtered;
-  }, [songs, filter]);
+    // Fisher-Yates shuffle seeded per-mount so order is stable during the session
+    // but different every time the component is navigated to.
+    const seeded = [...filtered];
+    let seed = shuffleSeed;
+    for (let i = seeded.length - 1; i > 0; i--) {
+      seed = (seed * 9301 + 49297) % 233280;
+      const j = Math.floor((seed / 233280) * (i + 1));
+      [seeded[i], seeded[j]] = [seeded[j], seeded[i]];
+    }
+    return seeded;
+  }, [songs, filter, shuffleSeed]);
 
   // Global Audio Player Hooks 
   
@@ -1289,17 +1299,27 @@ const SimilarSongs = () => {
 
     // Validates that MP3 audio metadata actually exists before dispatching playback states.
     if (songToPlay.fileUrl) {
-      // Look up the clicked track inside the actively 
-      // rendered grid array to maintain global playlist indexing.
-      let index = songs.findIndex(s => String(s.id) === String(songToPlay.id));
+      // Look up the clicked track inside the actively rendered filtered grid
+      // so that next/prev advances through the visible song card list.
+      // Try multiple ID fields since recommendations use product_id (DB) while
+      // grid songs use iTunes trackId — the two namespaces rarely overlap.
+      const recNormId = normalizeTrackId(song.product_id || song.id || song.trackId);
+      let index = filteredSongs.findIndex(s =>
+        normalizeTrackId(s.trackId || s.id) === recNormId
+        || (song.trackName && s.trackName && song.trackName === s.trackName
+            && song.artistName && s.artistName && song.artistName === s.artistName)
+      );
       
-      // Dispatch payload to Redux. If the track exists in the main grid, 
-      // pass the full grid context vector. If the track is an isolated 
-      // external library recommendation not visible in the grid, pass it as a singleton array.
+      // If found in the filtered grid, use that list as the queue.
+      // Otherwise append the recommendation to the end of the filtered list
+      // so the player can still advance to the next visible card.
+      const queueData = index !== -1 ? filteredSongs : [...filteredSongs, songToPlay];
+      const queueIndex = index !== -1 ? index : filteredSongs.length;
+      
       dispatch(setActiveSong({ 
           song: songToPlay, 
-          data: index !== -1 ? songs : [songToPlay], 
-          i: index !== -1 ? index : 0 
+          data: queueData, 
+          i: queueIndex 
       }));
       
       // Trigger media playback immediately upon loading state.
