@@ -185,8 +185,15 @@ export const apiCall = async (url, options = {}) => {
     });
 
     if (!response.ok) {
-      const error = await response.json().catch(() => ({}));
-      const errorMessage = error.message || `HTTP ${response.status}: ${response.statusText}`;
+      let errorMessage;
+      try {
+        const error = await response.json();
+        errorMessage = error.message || `HTTP ${response.status}: ${response.statusText}`;
+      } catch {
+        // Backend may return plain text errors (e.g. Spring Boot payment errors)
+        const text = await response.text().catch(() => '');
+        errorMessage = text || `HTTP ${response.status}: ${response.statusText}`;
+      }
       throw new Error(errorMessage);
     }
 

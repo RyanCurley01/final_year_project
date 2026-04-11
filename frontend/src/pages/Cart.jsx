@@ -36,6 +36,9 @@ const Cart = () => {
   // Local state: stores the pre-created order so the PayPal createOrder callback only needs one fast API call.
   const [preparedOrder, setPreparedOrder] = useState(null);
   
+  // Local state: counter used to force PayPal buttons to re-mount after errors (avoids frozen buttons).
+  const [paypalKey, setPaypalKey] = useState(0);
+  
   // Pull the active user session from Context.
   const { currentUser } = useAuth();
   
@@ -131,6 +134,7 @@ const Cart = () => {
       // This returned string ID automatically pops up the secure PayPal 3rd-party modal.
       return response.id;
     } catch (error) {
+      console.error('createPayPalOrder failed:', error.message);
       setProcessingPayment(false);
       throw error;
     }
@@ -361,30 +365,33 @@ const Cart = () => {
                 <div className="bg-red-500/20 border border-red-500/40 rounded-lg p-3 mb-3">
                   <p className="text-red-300 text-sm">{paypalError}</p>
                   <button
-                    onClick={() => { setPaypalError(null); setShowPayPal(false); setProcessingPayment(false); setPreparedOrder(null); }}
+                    onClick={() => { setPaypalError(null); setShowPayPal(false); setProcessingPayment(false); setPreparedOrder(null); setPaypalKey(k => k + 1); }}
                     className="text-red-400 hover:text-red-300 text-xs underline mt-1"
                   >
                     Try Again
                   </button>
                 </div>
               )}
-              <PayPalButtons
-                style={{ layout: "vertical" }}
-                createOrder={handleCreateOrder}
-                onApprove={handleApprove}
-                onCancel={() => {
-                  setShowPayPal(false);
-                  setProcessingPayment(false);
-                  setPaypalError(null);
-                  setPreparedOrder(null);
-                }}
-                onError={(err) => {
-                  console.error('PayPal error:', err);
-                  setProcessingPayment(false);
-                  setPaypalError('Payment could not be completed. Please try again.');
-                }}
-                disabled={processingPayment}
-              />
+              {!paypalError && (
+                <PayPalButtons
+                  key={paypalKey}
+                  style={{ layout: "vertical" }}
+                  createOrder={handleCreateOrder}
+                  onApprove={handleApprove}
+                  onCancel={() => {
+                    setShowPayPal(false);
+                    setProcessingPayment(false);
+                    setPaypalError(null);
+                    setPreparedOrder(null);
+                  }}
+                  onError={(err) => {
+                    console.error('PayPal error:', err);
+                    setProcessingPayment(false);
+                    setPaypalError('Payment could not be completed. Please try again.');
+                  }}
+                  disabled={processingPayment}
+                />
+              )}
               <button
                 onClick={() => { setShowPayPal(false); setPreparedOrder(null); }}
                 className="w-full py-2 bg-gray-600 hover:bg-gray-700 text-white font-semibold rounded-lg transition"
