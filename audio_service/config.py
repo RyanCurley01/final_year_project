@@ -85,7 +85,7 @@ def get_allowed_origins():
         "http://127.0.0.1:3000",
         
         # Production - Vercel
-        "https://final-year-project-git-main-ryancurley01s-projects.vercel.app",
+        "https://music-recommendation-store.vercel.app.vercel.app",
     ]
 
     # Add Codespaces origins if running in Codespaces

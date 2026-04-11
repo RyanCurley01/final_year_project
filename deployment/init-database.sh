@@ -249,13 +249,6 @@ USE Game_Store_System;
         END IF;
     END//
     DELIMITER ;
-    
-
-    -- Insert Accounts (Managers, Employees, Customers)
-    INSERT INTO `Accounts` VALUES (1,'uid_john','John Smith','5551234567','john.smith@store.com','$2a$12$o1bIeFKxF1n9qHMZ7jmfuePFvy151/ELJxASYZTvg8sJiiyLqqBvi','Manager');
-    INSERT INTO `Accounts` VALUES (2,'uid_sarah','Sarah Johnson','5552345678','sarah.j@store.com','$2a$12$o1bIeFKxF1n9qHMZ7jmfuePFvy151/ELJxASYZTvg8sJiiyLqqBvi','Employee');
-    INSERT INTO `Accounts` VALUES (3,'uid_alice','Alice Brown','5554567890','alice.b@gmail.com','$2a$12$o1bIeFKxF1n9qHMZ7jmfuePFvy151/ELJxASYZTvg8sJiiyLqqBvi','Customer');
-    INSERT INTO `Accounts` VALUES (4,'AHxuyzhNGddZ3bCJOHTqpULp1My2','Ryan Curley','','ryancurley21@gmail.com','$2a$10$oNOiwEPwyln7JChoi3ctc.uBx.8MyI5IFmyZBQ0AcGEmTqYFJwDyS','Customer');
 
     -- Insert Products (Games and Music Albums)
     -- Note: albumCoverImageUrl for music uses the cloud animation video from S3

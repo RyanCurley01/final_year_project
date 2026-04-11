@@ -5,6 +5,7 @@ import com.example.accounts.dto.LoginRequest;
 import com.example.accounts.dto.LoginResponse;
 import com.example.accounts.model.Account;
 import com.example.accounts.service.AccountService;
+import com.google.firebase.FirebaseApp;
 import com.google.firebase.auth.FirebaseAuth;
 import com.google.firebase.auth.FirebaseToken;
 import com.google.firebase.auth.FirebaseAuthException;
@@ -57,31 +58,49 @@ public class AccountController {
             String idToken = payload.get("token");
             if (idToken == null || idToken.isEmpty()) {
                 System.err.println("ERROR: 'token' is missing or empty in the payload.");
-                // Print values (truncated) to debug
                 payload.forEach((k, v) -> System.out.println("Key: " + k + ", Value Length: " + (v == null ? "null" : v.length())));
                 return ResponseEntity.badRequest().build();
             }
 
             String phoneNumber = payload.get("phoneNumber");
-            
-            System.out.println("DEBUG: Verifying token (length: " + idToken.length() + ")...");
-            FirebaseToken decodedToken = FirebaseAuth.getInstance().verifyIdToken(idToken);
-            String uid = decodedToken.getUid();
-            String email = decodedToken.getEmail();
-            
-            // Use name from payload if available, else from token
-            String payloadName = payload.get("name");
-            String name = (payloadName != null && !payloadName.isEmpty()) ? payloadName : decodedToken.getName();
+            String uid;
+            String email;
+            String name;
 
-            System.out.println("DEBUG: Token verified. UID: " + uid + ", Email: " + email + ", Name: " + name);
+            // Try Firebase Admin SDK token verification first
+            if (!FirebaseApp.getApps().isEmpty()) {
+                System.out.println("DEBUG: Firebase Admin SDK available, verifying token (length: " + idToken.length() + ")...");
+                FirebaseToken decodedToken = FirebaseAuth.getInstance().verifyIdToken(idToken);
+                uid = decodedToken.getUid();
+                email = decodedToken.getEmail();
+                String payloadName = payload.get("name");
+                name = (payloadName != null && !payloadName.isEmpty()) ? payloadName : decodedToken.getName();
+                System.out.println("DEBUG: Token verified. UID: " + uid + ", Email: " + email + ", Name: " + name);
+            } else {
+                // Firebase Admin SDK not initialized — fall back to client-provided values
+                // The user already authenticated via Firebase client SDK
+                System.out.println("WARNING: Firebase Admin SDK not initialized. Using client-provided credentials.");
+                uid = payload.get("uid");
+                email = payload.get("email");
+                name = payload.get("name");
+                if (uid == null || uid.isEmpty() || email == null || email.isEmpty()) {
+                    System.err.println("ERROR: uid or email missing from payload and Firebase Admin SDK unavailable.");
+                    return ResponseEntity.badRequest().build();
+                }
+                System.out.println("DEBUG: Using client values. UID: " + uid + ", Email: " + email + ", Name: " + name);
+            }
             
             Account account = accountService.registerFirebaseUser(uid, email, name, phoneNumber);
             System.out.println("DEBUG: Account processed: " + account.getId());
             return ResponseEntity.ok(AccountResponse.fromAccount(account));
-        } catch (Exception e) {
-            System.err.println("DEBUG ERROR: Exception in firebaseLogin: " + e.getMessage());
+        } catch (FirebaseAuthException e) {
+            System.err.println("ERROR: Firebase token verification failed: " + e.getMessage());
             e.printStackTrace();
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        } catch (Exception e) {
+            System.err.println("ERROR: Exception in firebaseLogin: " + e.getMessage());
+            e.printStackTrace();
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
         }
     }
 

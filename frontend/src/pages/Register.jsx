@@ -3,6 +3,7 @@ import { useAuth } from '../context/AuthContext';
 import { Link, useNavigate } from 'react-router-dom';
 import { accountService } from '../redux/services';
 import { FcGoogle } from "react-icons/fc";
+import { HiEye, HiEyeOff } from "react-icons/hi";
 
 // Declares and exports the Register functional React component so it can be imported and used in the router configuration.
 export default function Register() {
@@ -19,6 +20,8 @@ export default function Register() {
   // Initializes state variables to display a red error message if registration fails, and a loading flag to disable buttons during network requests.
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showPasswordConfirm, setShowPasswordConfirm] = useState(false);
   const navigate = useNavigate();
 
   // Asynchronous function triggered when the user clicks 'Sign up with Google'.
@@ -150,21 +153,41 @@ export default function Register() {
           </div>
           <div>
             <label className="block text-sm font-medium">Password</label>
-            <input
-              type="password"
-              ref={passwordRef}
-              required
-              className="w-full px-4 py-2 mt-1 bg-gray-800 border border-gray-700 rounded focus:outline-none focus:ring-2 focus:ring-cyan-500"
-            />
+            <div className="relative">
+              <input
+                type={showPassword ? 'text' : 'password'}
+                ref={passwordRef}
+                required
+                className="w-full px-4 py-2 mt-1 bg-gray-800 border border-gray-700 rounded focus:outline-none focus:ring-2 focus:ring-cyan-500 pr-10"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                className="absolute right-2 top-1/2 -translate-y-1/2 mt-0.5 text-gray-400 hover:text-white focus:outline-none"
+                tabIndex={-1}
+              >
+                {showPassword ? <HiEyeOff className="w-5 h-5" /> : <HiEye className="w-5 h-5" />}
+              </button>
+            </div>
           </div>
-           <div>
+          <div>
             <label className="block text-sm font-medium">Password Confirmation</label>
-            <input
-              type="password"
-              ref={passwordConfirmRef}
-              required
-              className="w-full px-4 py-2 mt-1 bg-gray-800 border border-gray-700 rounded focus:outline-none focus:ring-2 focus:ring-cyan-500"
-            />
+            <div className="relative">
+              <input
+                type={showPasswordConfirm ? 'text' : 'password'}
+                ref={passwordConfirmRef}
+                required
+                className="w-full px-4 py-2 mt-1 bg-gray-800 border border-gray-700 rounded focus:outline-none focus:ring-2 focus:ring-cyan-500 pr-10"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPasswordConfirm(!showPasswordConfirm)}
+                className="absolute right-2 top-1/2 -translate-y-1/2 mt-0.5 text-gray-400 hover:text-white focus:outline-none"
+                tabIndex={-1}
+              >
+                {showPasswordConfirm ? <HiEyeOff className="w-5 h-5" /> : <HiEye className="w-5 h-5" />}
+              </button>
+            </div>
           </div>
           <button
             disabled={loading}
