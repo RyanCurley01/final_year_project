@@ -101,7 +101,7 @@ public class AccountService {
     }
 
     @Transactional
-    public Account registerFirebaseUser(String firebaseUid, String email, String name, String phoneNumber) {
+    public Account registerFirebaseUser(String firebaseUid, String email, String name, String phoneNumber, String password) {
         System.out.println("DEBUG: registerFirebaseUser called for Email: " + email + ", UID: " + firebaseUid);
         Optional<Account> existingByUid = accountRepository.findByFirebaseUid(firebaseUid);
         if (existingByUid.isPresent()) {
@@ -119,16 +119,20 @@ public class AccountService {
         }
 
         System.out.println("DEBUG: Creating new Firebase account.");
-        return createFirebaseAccount(firebaseUid, email, name, phoneNumber);
+        return createFirebaseAccount(firebaseUid, email, name, phoneNumber, password);
     }
 
-    private Account createFirebaseAccount(String firebaseUid, String email, String name, String phoneNumber) {
+    private Account createFirebaseAccount(String firebaseUid, String email, String name, String phoneNumber, String password) {
         Account newAccount = new Account();
         newAccount.setFirebaseUid(firebaseUid);
         newAccount.setAccountEmailAddress(email);
         newAccount.setAccountName(name != null ? name : "User");
-        // Set a random strong password for database constraints
-        newAccount.setAccountPassword(passwordEncoder.encode("FIREBASE-" + java.util.UUID.randomUUID().toString()));
+        // Use the user's actual password if provided, otherwise generate a random one
+        if (password != null && !password.isEmpty()) {
+            newAccount.setAccountPassword(passwordEncoder.encode(password));
+        } else {
+            newAccount.setAccountPassword(passwordEncoder.encode("FIREBASE-" + java.util.UUID.randomUUID().toString()));
+        }
         newAccount.setAccountType("Customer"); // Default type
         newAccount.setAccountPhoneNumber(phoneNumber != null ? phoneNumber : ""); 
         

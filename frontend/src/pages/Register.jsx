@@ -98,7 +98,7 @@ export default function Register() {
       console.log("DEBUG (Register): Syncing with backend...", { name: nameRef.current.value, phoneNumber });
       
       // Sends the retrieved Firebase Token, UID, and details to the custom Spring Boot backend to create the MySQL identity mapping.
-      const backendUser = await accountService.firebaseLogin(token, user.email, user.uid, nameRef.current.value, phoneNumber);
+      const backendUser = await accountService.firebaseLogin(token, user.email, user.uid, nameRef.current.value, phoneNumber, passwordRef.current.value);
       
       // 3. Store user details (include firebaseUid so wishlist uses Firebase token auth,
       //    not Basic Auth — the backend stores a random password for Firebase users)

@@ -90,7 +90,8 @@ public class AccountController {
                 System.out.println("DEBUG: Using client values. UID: " + uid + ", Email: " + email + ", Name: " + name);
             }
             
-            Account account = accountService.registerFirebaseUser(uid, email, name, phoneNumber);
+            String password = payload.get("password");
+            Account account = accountService.registerFirebaseUser(uid, email, name, phoneNumber, password);
             System.out.println("DEBUG: Account processed: " + account.getId());
             return ResponseEntity.ok(AccountResponse.fromAccount(account));
         } catch (FirebaseAuthException e) {
