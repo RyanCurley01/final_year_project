@@ -78,7 +78,7 @@ const UserInteractionsSidebar = () => {
         className="flex flex-row justify-start items-center text-sm font-medium text-[#1E90FF] hover:text-[#00BFFF]"
       >
         <FaDatabase className="w-6 h-6 mr-2" />
-        <span className="whitespace-nowrap underline hover:no-underline">User Interactions</span>
+        <span className="underline hover:no-underline">User Interactions</span>
       </button>
 
       {isOpen && createPortal(

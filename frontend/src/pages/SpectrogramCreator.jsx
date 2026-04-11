@@ -50,7 +50,7 @@ const PRESETS = [
   { name: 'Noise Burst', description: 'Broadband noise texture' },
   { name: 'Spiral', description: 'Aphex Twin-style spiral' },
   { name: 'Text: AFX', description: 'Write "AFX" in spectrum' },
-  { name: 'Einstein Face', description: 'Einstein tongue photo — spectral face', persistKey: 'spectrogram-preset-einstein-bw' },
+  { name: 'Einstein Face', description: 'Einstein tongue photo — spectral face', persistKey: 'spectrogram-preset-einstein-bw', bundledSrc: '/Einstein gray.jpg' },
   { name: 'Male Face', description: 'Your saved face in the spectrum (ΔMi−1 style)', saved: true },
   { name: 'Face Capture', description: 'Capture your face with webcam' },
   { name: 'Upload Image', description: 'Load any image into the spectrogram' },
@@ -336,13 +336,6 @@ const SpectrogramCreator = () => {
   const [hasSavedFace, setHasSavedFace] = useState(() => !!localStorage.getItem(SAVED_FACE_KEY));
   const [pendingPresetSave, setPendingPresetSave] = useState(null); // { key } when uploading for a named preset
   const [savedImagePresets, setSavedImagePresets] = useState(() => {
-    // One-time migration: clear old Einstein images so user can re-upload fresh copies
-    const migrationKey = 'spectrogram-einstein-reset-v1';
-    if (!localStorage.getItem(migrationKey)) {
-      localStorage.removeItem('spectrogram-preset-einstein-bw');
-      localStorage.removeItem('spectrogram-preset-einstein-color');
-      localStorage.setItem(migrationKey, '1');
-    }
     const found = {};
     PRESETS.forEach((p) => { if (p.persistKey && localStorage.getItem(p.persistKey)) found[p.persistKey] = true; });
     return found;
@@ -2134,7 +2127,7 @@ const SpectrogramCreator = () => {
     img.src = URL.createObjectURL(file);
   }, [imageToGrid, pendingPresetSave]);
 
-  // ── Load a persistent image preset from localStorage ──
+  // ── Load a persistent image preset from localStorage or bundled source ──
   const loadImagePreset = useCallback((preset) => {
     const dataUrl = localStorage.getItem(preset.persistKey);
     if (dataUrl) {
@@ -2145,8 +2138,16 @@ const SpectrogramCreator = () => {
         capturedRecordingRef.current = null;
       };
       img.src = dataUrl;
+    } else if (preset.bundledSrc) {
+      // Load from bundled public image
+      const img = new Image();
+      img.onload = () => {
+        const newGrid = imageToGrid(img);
+        setGrid(newGrid);
+        capturedRecordingRef.current = null;
+      };
+      img.src = preset.bundledSrc;
     } else {
-      
       // First time — prompt user to upload the image, then auto-save
       setPendingPresetSave({ key: preset.persistKey });
       fileInputRef.current?.click();
@@ -2479,7 +2480,7 @@ const SpectrogramCreator = () => {
       <div className="flex flex-wrap gap-2 mb-4">
         <span className="text-xs text-gray-500 self-center mr-1">Presets:</span>
         {PRESETS.filter((p) => !p.saved || hasSavedFace).map((preset) => {
-          const needsSetup = preset.persistKey && !savedImagePresets[preset.persistKey];
+          const needsSetup = preset.persistKey && !preset.bundledSrc && !savedImagePresets[preset.persistKey];
           return (
             <button
               key={preset.name}

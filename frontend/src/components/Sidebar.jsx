@@ -224,7 +224,7 @@ const Sidebar = () => {
           - hidden md:flex means it is completely invisible on mobile (< 768px) and uses flexbox on desktop.
           - conditionally adds padding bottom ('pb-32') so the bottom links aren't hidden behind the fixed Music Player bar 
             if a song is currently loaded into activeSong. */}
-      <div className={`hidden md:flex flex-col w-[200px] min-w-[200px] bg-gradient-to-br
+      <div className={`hidden md:flex flex-col w-60 min-w-60 bg-linear-to-br
       py-10 px-4 bg-[#252246] relative z-20 overflow-y-auto ${activeSong?.albumTitle ? 'pb-32' : ''}`}>
         <img src={logo} alt="logo" className="rounded w-full h-[100px] object-contain" />
         <NavLinks onResetPlayer={handleResetPlayer} onClearWishlist={handleClearWishlist} />
@@ -244,7 +244,7 @@ const Sidebar = () => {
 
       {/* Mobile Menu Overlay:
           Translates smoothly moving in from the left (-translate-x-full to translate-x-0) when opened. */}
-      <div className={`md:hidden fixed top-0 left-0 w-2/3 max-w-[250px] h-full overflow-y-auto bg-gradient-to-br from-[#252246] to-[#1a1a3e] z-50 transform transition-transform duration-300 ${mobileMenuOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+      <div className={`md:hidden fixed top-0 left-0 w-2/3 max-w-[250px] h-full overflow-y-auto bg-linear-to-br from-[#252246] to-[#1a1a3e] z-50 transform transition-transform duration-300 ${mobileMenuOpen ? 'translate-x-0' : '-translate-x-full'}`}>
         <div className="p-4 pb-20">
           {/* Close button (the 'X') at the top of the mobile menu. */}
           <RiCloseLine 

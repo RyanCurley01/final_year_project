@@ -260,7 +260,7 @@ const StockSidebar = () => {
         className="flex flex-row justify-start items-center text-sm font-medium text-[#1E90FF] hover:text-[#00BFFF]"
       >
         <FaWarehouse className="w-6 h-6 mr-2" />
-        <span className="whitespace-nowrap underline hover:no-underline">
+        <span className="underline hover:no-underline">
           Stock
         </span>
       </button>
