@@ -583,8 +583,18 @@ const SmartRecommendationVisualizer = ({
               // If it could not find it (maybe an iTunes track not loaded), gracefully fallback to the ID string.
               const displayTitle = fixText(rec.trackName || rec.albumTitle || product?.albumTitle || `Track ID: ${rec.product_id}`);
               
-              // Attempts to grab the local high-res image if the mapping successfully returned a product
-              const displayUrl = product?.albumCoverImageUrl || null;
+              // Resolve cover art from multiple sources: product store, then backend rec fields
+              const rawCoverUrl = product?.albumCoverImageUrl
+                || product?.artworkUrl100?.replace('100x100', '200x200')
+                || product?.imageUrl
+                || product?.image
+                || rec.artworkUrl100?.replace('100x100', '200x200')
+                || rec.albumCoverImageUrl
+                || null;
+              // Library songs (low positive IDs) without a usable image should show the music icon gradient
+              const isLibrarySong = rec.product_id > 0 && rec.product_id < 1000000;
+              const isBadUrl = rawCoverUrl && /\.(mp4|m4v|mov|webm|wmv|wav|mp3|flac|ogg)(\?|$)/i.test(rawCoverUrl);
+              const displayUrl = (isLibrarySong && (!rawCoverUrl || isBadUrl)) ? 'library' : rawCoverUrl;
 
               return (
                 // 3. APPLY TO UI: Generates the actual visual Framer Motion card wrapper
@@ -711,17 +721,8 @@ const SmartRecommendationVisualizer = ({
 const AlbumCover = ({ url, title, productId }) => {
   const [error, setError] = useState(false);
   
-  if (error || !url) {
-    return (
-      <div className="w-full h-full flex items-center justify-center text-gray-400 text-xl bg-gray-700">
-        🎵
-      </div>
-    );
-  }
-  
-  // For videos, show a gradient placeholder instead of loading multiple video instances
-  // (Chrome has cache issues with multiple video elements loading the same signed URL)
-  if (url.includes('.mp4')) {
+  // Library songs or video URLs: show purple/pink gradient music note
+  if (!url || url === 'library' || error || (url && /\.(mp4|m4v|mov|webm|wmv|wav|mp3|flac|ogg)(\?|$)/i.test(url))) {
     return (
       <div className="w-full h-full bg-gradient-to-br from-cyan-600 via-purple-600 to-pink-600 flex items-center justify-center">
         <svg className="w-8 h-8 text-blue-900" fill="currentColor" viewBox="0 0 24 24">
