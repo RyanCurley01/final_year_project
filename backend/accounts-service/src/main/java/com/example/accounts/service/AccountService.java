@@ -168,7 +168,10 @@ public class AccountService {
             );
         } else {
             // Check if this is a Firebase/Google-linked account
-            if (account.getFirebaseUid() != null && !account.getFirebaseUid().isEmpty()) {
+            // Real Firebase UIDs are 28+ char alphanumeric strings; ignore placeholder UIDs like "uid_john"
+            String uid = account.getFirebaseUid();
+            boolean isRealFirebaseUid = uid != null && uid.length() >= 20 && !uid.startsWith("uid_");
+            if (isRealFirebaseUid) {
                 System.out.println("Login attempt on Firebase-linked account: " + email);
                 return new LoginResponse(false, "FIREBASE_ACCOUNT", null, null, null, null);
             }

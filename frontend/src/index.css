@@ -1,5 +1,11 @@
 @import "tailwindcss";
 
+/* Hide browser-native password reveal button (Edge/Chrome) */
+input::-ms-reveal,
+input::-ms-clear {
+  display: none;
+}
+
 /* Active Navigation Link */
 .active {
   color: #10b981; 

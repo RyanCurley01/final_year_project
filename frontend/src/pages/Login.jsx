@@ -3,6 +3,7 @@ import { useAuth } from '../context/AuthContext';
 import { Link, useNavigate } from 'react-router-dom';
 import { accountService } from '../redux/services';
 import { FcGoogle } from "react-icons/fc";
+import { HiEye, HiEyeOff } from "react-icons/hi";
 
 // Main Login component executing dual-mode authentication resolving standard DB forms and Firebase SSO popups.
 export default function Login() {
@@ -16,6 +17,7 @@ export default function Login() {
   // Stores error strings indicating to the user why the login execution pipeline failed locally.
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   const navigate = useNavigate();
 
   // Asynchronous wrapper calling Firebase's specialized logic initializing secure external Google authentication loops.
@@ -147,12 +149,22 @@ export default function Login() {
           </div>
           <div>
             <label className="block text-sm font-medium">Password</label>
-            <input
-              type="password"
-              ref={passwordRef}
-              required
-              className="w-full px-4 py-2 mt-1 bg-gray-800 border border-gray-700 rounded focus:outline-none focus:ring-2 focus:ring-cyan-500"
-            />
+            <div className="relative">
+              <input
+                type={showPassword ? 'text' : 'password'}
+                ref={passwordRef}
+                required
+                className="w-full px-4 py-2 mt-1 bg-gray-800 border border-gray-700 rounded focus:outline-none focus:ring-2 focus:ring-cyan-500 pr-10"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                className="absolute right-2 top-1/2 -translate-y-1/2 mt-0.5 text-gray-400 hover:text-white focus:outline-none"
+                tabIndex={-1}
+              >
+                {showPassword ? <HiEyeOff className="w-5 h-5" /> : <HiEye className="w-5 h-5" />}
+              </button>
+            </div>
           </div>
           <button
             disabled={loading}
