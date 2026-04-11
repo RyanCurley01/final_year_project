@@ -6,7 +6,7 @@ import uvicorn
 import os
 
 from utils import console
-from config import executor, EXTERNAL_IMAGE_GENERATION_ENABLED
+from config import executor, EXTERNAL_IMAGE_GENERATION_ENABLED, get_allowed_origins
 import ml_service
 
 # Import Routers
@@ -28,7 +28,8 @@ app = FastAPI(title="Audio Analysis Service", version="2.0.0")
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins for development
+    allow_origins=get_allowed_origins(),
+    allow_origin_regex=r"https://.*\.vercel\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
