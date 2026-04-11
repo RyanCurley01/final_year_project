@@ -52,11 +52,12 @@ const PRESETS = [
   { name: 'Text: AFX', description: 'Write "AFX" in spectrum' },
   { name: 'Einstein Face', description: 'Einstein tongue photo — spectral face', persistKey: 'spectrogram-preset-einstein-bw', bundledSrc: '/Einstein gray.jpg' },
   { name: 'Male Face', description: 'Your saved face in the spectrum (ΔMi−1 style)', persistKey: 'spectrogram-saved-face', bundledSrc: '/male-face.png' },
-  { name: 'Face Capture', description: 'Capture your face with webcam' },
+  { name: 'Item Capture', description: 'Capture an item with webcam' },
   { name: 'Upload Image', description: 'Load any image into the spectrogram' },
 ];
 
 const SAVED_FACE_KEY = 'spectrogram-saved-face';
+const CUSTOM_FACE_PREFIX = 'spectrogram-face-';
 
 // Color palette for painting intensity — matches ΔMi−1 inferno colormap
 const INTENSITY_COLORS = [
@@ -338,6 +339,18 @@ const SpectrogramCreator = () => {
     const found = {};
     PRESETS.forEach((p) => { if (p.persistKey && localStorage.getItem(p.persistKey)) found[p.persistKey] = true; });
     return found;
+  });
+  const [customFacePresets, setCustomFacePresets] = useState(() => {
+    const faces = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith(CUSTOM_FACE_PREFIX)) {
+        const num = parseInt(key.slice(CUSTOM_FACE_PREFIX.length), 10);
+        if (!isNaN(num)) faces.push({ name: `Face ${num}`, persistKey: key });
+      }
+    }
+    faces.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+    return faces;
   });
 
   // dampingFactor: Serves as decay control. It is inverted (1 - dampingFactor)
@@ -2035,27 +2048,32 @@ const SpectrogramCreator = () => {
     stopWebcam();
   }, [captureVideoFrame, imageToGrid, stopWebcam]);
 
-  // Save the current webcam frame as a permanent "My Face" preset
+  // Save the current webcam frame as a new face preset
   const saveWebcamAsPreset = useCallback(() => {
     const frame = captureVideoFrame();
     if (!frame) return;
     
-    // Store as a compact data URL in localStorage
-    // Similar to capturing the webcam normally, but it 
-    // purposefully squashes the image down to exactly 200x256 pixels before doing anything.
     const saveCanvas = document.createElement('canvas');
     saveCanvas.width = NUM_TIME_SLICES;
     saveCanvas.height = NUM_FREQ_BINS;
     const ctx = saveCanvas.getContext('2d');
     ctx.drawImage(frame, 0, 0, NUM_TIME_SLICES, NUM_FREQ_BINS);
     
-    // .toDataURL: Converts the tiny pixelated image into a giant string of Base64 text.
     const dataUrl = saveCanvas.toDataURL('image/png');
     
-    // localStorage.setItem: Saves that massive text string 
-    // permanently into the browser's memory under a specific key, 
-    // so even if the user refreshes the page or closes the tab, their face is remembered.
-    localStorage.setItem(SAVED_FACE_KEY, dataUrl);
+    // Find next available face number
+    let maxNum = 0;
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith(CUSTOM_FACE_PREFIX)) {
+        const num = parseInt(key.slice(CUSTOM_FACE_PREFIX.length), 10);
+        if (!isNaN(num) && num > maxNum) maxNum = num;
+      }
+    }
+    const nextNum = maxNum + 1;
+    const newKey = `${CUSTOM_FACE_PREFIX}${nextNum}`;
+    localStorage.setItem(newKey, dataUrl);
+    setCustomFacePresets((prev) => [...prev, { name: `Face ${nextNum}`, persistKey: newKey }]);
     
     // Also apply it immediately
     const newGrid = imageToGrid(frame);
@@ -2163,7 +2181,7 @@ const SpectrogramCreator = () => {
 
     // Directs logic depending on the button clicked. Note fileInputRef.current?.click() 
     // programmatically forces a click on the hidden HTML file <input>, prompting the OS file chooser window to open.
-    if (presetName === 'Face Capture') {
+    if (presetName === 'Item Capture') {
       startWebcam();
       return;
     }
@@ -2492,6 +2510,38 @@ const SpectrogramCreator = () => {
             </button>
           );
         })}
+        {customFacePresets.map((face) => (
+          <div key={face.persistKey} className="relative group flex items-center">
+            <button
+              onClick={() => {
+                const dataUrl = localStorage.getItem(face.persistKey);
+                if (!dataUrl) return;
+                const img = new Image();
+                img.onload = () => {
+                  const newGrid = imageToGrid(img);
+                  setGrid(newGrid);
+                  capturedRecordingRef.current = null;
+                };
+                img.src = dataUrl;
+              }}
+              title={face.name}
+              className="px-2.5 py-1 rounded-l-md text-xs transition-colors border border-r-0 bg-cyan-900/40 text-cyan-300 hover:bg-cyan-700/40 hover:text-white border-transparent hover:border-purple-500/30"
+            >
+              {face.name}
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                localStorage.removeItem(face.persistKey);
+                setCustomFacePresets((prev) => prev.filter((f) => f.persistKey !== face.persistKey));
+              }}
+              title={`Delete ${face.name}`}
+              className="px-1.5 py-1 rounded-r-md text-xs transition-colors border border-l-0 bg-cyan-900/40 text-red-400 hover:bg-red-600/40 hover:text-white border-transparent hover:border-red-500/30"
+            >
+              ✕
+            </button>
+          </div>
+        ))}
 
       </div>
 
@@ -2572,7 +2622,7 @@ const SpectrogramCreator = () => {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
           <div className="bg-[#0f0d2e] border border-purple-500/30 rounded-2xl p-6 max-w-lg w-full mx-4 shadow-2xl">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-bold text-white">📸 Capture Your Face</h3>
+              <h3 className="text-lg font-bold text-white">📸 Item Capture</h3>
               <button
                 onClick={stopWebcam}
                 className="text-gray-400 hover:text-white text-xl leading-none"
@@ -2581,8 +2631,8 @@ const SpectrogramCreator = () => {
               </button>
             </div>
             <p className="text-xs text-gray-400 mb-3">
-              Position your face in the frame. High contrast + edge detection will give you 
-              the ghostly ΔMi−1 spectral face look — just like Aphex Twin's formula track.
+              Position the item in the frame. High contrast + edge detection will give you 
+              the ghostly ΔMi−1 spectral look — just like Aphex Twin's formula track.
             </p>
             <div className="relative rounded-lg overflow-hidden bg-black mb-4">
               <video
@@ -2596,21 +2646,12 @@ const SpectrogramCreator = () => {
             </div>
             <div className="flex gap-3">
               <button
-                onClick={captureWebcam}
+                onClick={saveWebcamAsPreset}
                 className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl font-semibold text-sm
                            bg-linear-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 
                            text-white shadow-lg shadow-purple-600/20 transition-all"
               >
                 📸 Capture
-              </button>
-              <button
-                onClick={saveWebcamAsPreset}
-                className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl font-semibold text-sm
-                           bg-linear-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 
-                           text-white shadow-lg shadow-cyan-600/20 transition-all"
-                title="Save as a permanent preset you can reload anytime"
-              >
-                👤 Save as Preset
               </button>
               <button
                 onClick={stopWebcam}
