@@ -33,9 +33,6 @@ const Cart = () => {
   // Local state: holds custom error messages returned from the checkout process to display to the user.
   const [paypalError, setPaypalError] = useState(null);
   
-  // Local state: stores the pre-created order so the PayPal createOrder callback only needs one fast API call.
-  const [preparedOrder, setPreparedOrder] = useState(null);
-  
   // Local state: counter used to force PayPal buttons to re-mount after errors (avoids frozen buttons).
   const [paypalKey, setPaypalKey] = useState(0);
   
@@ -70,44 +67,17 @@ const Cart = () => {
   };
 
   // handleCreateOrder: Triggered automatically the moment the user clicks the PayPal button.
-  // Creates the order + order items only once, then creates the PayPal order.
-  // On retry, reuses the already-created order to avoid duplicate DB rows.
+  // Only creates the PayPal order token — no database records yet.
+  // DB writes (Order, Order_Items) are deferred to handleApprove after payment is captured.
   const handleCreateOrder = async (data, actions) => {
     try {
       setProcessingPayment(true);
 
-      // Only create order + order items once. On retry, reuse the existing order
-      // to prevent duplicate rows in Sold_Products / Purchased_Products (DB triggers fire on insert).
-      let order = preparedOrder;
-      if (!order) {
-        // Step 1: Create a master 'Order' record attached to the user's account.
-        const orderData = {
-          accountId: user?.accountId,
-          totalAmount: totalAmount,
-        };
-        order = await orderService.createOrder(orderData);
-
-        // Step 2: Create all order items in parallel.
-        await Promise.all(items.map(item => {
-          const orderItemData = {
-            orderId: order.id,
-            productId: item.id,
-            quantity: item.quantity,
-            unitPrice: item.albumPrice
-          };
-          return orderItemService.createOrderItem(orderItemData);
-        }));
-
-        // Cache so retries don't create duplicates.
-        setPreparedOrder(order);
-      }
-
-      // Step 3: Format the JSON strictly required by the official PayPal capture API.
+      // Format the JSON strictly required by the official PayPal capture API.
       const paypalOrderData = {
         amount: totalAmount,
         currency: 'EUR',
         accountId: user?.accountId,
-        orderId: order.id,
         productId: items.length > 0 ? items[0].id : null,
         items: items.map(item => ({
           productId: item.id,
@@ -128,13 +98,32 @@ const Cart = () => {
     }
   };
 
-  // handleApprove: This runs *only* after the user successfully enters their password and click 'Pay' INSIDE the PayPal popup.
+  // handleApprove: This runs *only* after the user successfully enters their password and clicks 'Pay' INSIDE the PayPal popup.
+  // ALL database records are created here — after real money has been captured.
   const handleApprove = async (data, actions) => {
     try {
-      // Step 4: Tell our backend to formally capture the pre-authorized funds and finalize the table row.
+      // Step 1: Tell our backend to formally capture the pre-authorized funds.
       const response = await paymentService.capturePayPalOrder(data.orderID);
       
-      // Step 5: Save standard purchase details into a separate Redux slice for the "recent transactions" UI views.
+      // Step 2: Create the Order record now that payment is confirmed.
+      const orderData = {
+        accountId: user?.accountId,
+        totalAmount: totalAmount,
+      };
+      const order = await orderService.createOrder(orderData);
+
+      // Step 3: Create all order items (triggers populate Sold_Products, Purchased_Products, CustomerSummary).
+      await Promise.all(items.map(item => {
+        const orderItemData = {
+          orderId: order.id,
+          productId: item.id,
+          quantity: item.quantity,
+          unitPrice: item.albumPrice
+        };
+        return orderItemService.createOrderItem(orderItemData);
+      }));
+      
+      // Step 4: Save purchase details into Redux slice for the "recent transactions" UI views.
       dispatch(addPurchase({
         items: [...items],
         totalAmount,
@@ -370,7 +359,6 @@ const Cart = () => {
                     setShowPayPal(false);
                     setProcessingPayment(false);
                     setPaypalError(null);
-                    setPreparedOrder(null);
                   }}
                   onError={(err) => {
                     console.error('PayPal error:', err);
@@ -381,7 +369,7 @@ const Cart = () => {
                 />
               )}
               <button
-                onClick={() => { setShowPayPal(false); setPreparedOrder(null); }}
+                onClick={() => { setShowPayPal(false); }}
                 className="w-full py-2 bg-gray-600 hover:bg-gray-700 text-white font-semibold rounded-lg transition"
                 disabled={processingPayment}
               >
