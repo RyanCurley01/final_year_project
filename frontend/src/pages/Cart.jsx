@@ -66,7 +66,6 @@ const Cart = () => {
       return;
     }
     setPaypalError(null);
-    setPreparedOrder(null);
     setShowPayPal(true);
   };
 
@@ -354,7 +353,7 @@ const Cart = () => {
                 <div className="bg-red-500/20 border border-red-500/40 rounded-lg p-3 mb-3">
                   <p className="text-red-300 text-sm">{paypalError}</p>
                   <button
-                    onClick={() => { setPaypalError(null); setShowPayPal(false); setProcessingPayment(false); setPreparedOrder(null); setPaypalKey(k => k + 1); }}
+                    onClick={() => { setPaypalError(null); setProcessingPayment(false); setPaypalKey(k => k + 1); }}
                     className="text-red-400 hover:text-red-300 text-xs underline mt-1"
                   >
                     Try Again
