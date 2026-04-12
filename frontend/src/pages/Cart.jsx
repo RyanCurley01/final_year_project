@@ -58,69 +58,58 @@ const Cart = () => {
     dispatch(updateQuantity({ productId, quantity: newQuantity }));
   };
 
-  // handleProceedToCheckout: Triggered when user clicks "Proceed to Checkout".
-  // Creates the order and order items upfront so the PayPal createOrder callback only needs one fast API call.
-  // This prevents mobile Safari from timing out the PayPal popup/redirect.
+  // handleProceedToCheckout: Shows the PayPal buttons. Order creation is deferred
+  // to handleCreateOrder so DB records are only created once per checkout attempt.
   const handleProceedToCheckout = async () => {
     if (!user?.accountId) {
       console.error("Cannot create order: User not logged in or Account ID missing");
       return;
     }
-
-    try {
-      setProcessingPayment(true);
-      setPaypalError(null);
-
-      // Step 1: Create a master 'Order' record attached to the user's account with the computed total.
-      const orderData = {
-        accountId: user?.accountId,
-        totalAmount: totalAmount,
-      };
-
-      // Await backend Spring Boot orders-service.
-      const order = await orderService.createOrder(orderData);
-
-      // Step 2: Create all order items in parallel for speed.
-      await Promise.all(items.map(item => {
-        const orderItemData = {
-          orderId: order.id,
-          productId: item.id,
-          quantity: item.quantity,
-          unitPrice: item.albumPrice
-        };
-        return orderItemService.createOrderItem(orderItemData);
-      }));
-
-      // Note: Sold_Products, Purchased_Products, and CustomerSummary tables
-      // are automatically populated by the MySQL database trigger After_Order_Item_Insert
-      // whenever an Order_Item is created above.
-
-      // Store the prepared order so createOrder can use it immediately.
-      setPreparedOrder(order);
-      setShowPayPal(true);
-      setProcessingPayment(false);
-    } catch (error) {
-      console.error('Error preparing order:', error);
-      setProcessingPayment(false);
-      setPaypalError('Could not prepare your order. Please try again.');
-    }
+    setPaypalError(null);
+    setPreparedOrder(null);
+    setShowPayPal(true);
   };
 
-  // handleCreateOrder: Triggered automatically the moment the user clicks the black or yellow PayPal/Debit button.
-  // Now only makes one fast API call since the order was pre-created in handleProceedToCheckout.
+  // handleCreateOrder: Triggered automatically the moment the user clicks the PayPal button.
+  // Creates the order + order items only once, then creates the PayPal order.
+  // On retry, reuses the already-created order to avoid duplicate DB rows.
   const handleCreateOrder = async (data, actions) => {
     try {
       setProcessingPayment(true);
 
-      // Format the JSON strictly required by the official PayPal capture API.
+      // Only create order + order items once. On retry, reuse the existing order
+      // to prevent duplicate rows in Sold_Products / Purchased_Products (DB triggers fire on insert).
+      let order = preparedOrder;
+      if (!order) {
+        // Step 1: Create a master 'Order' record attached to the user's account.
+        const orderData = {
+          accountId: user?.accountId,
+          totalAmount: totalAmount,
+        };
+        order = await orderService.createOrder(orderData);
+
+        // Step 2: Create all order items in parallel.
+        await Promise.all(items.map(item => {
+          const orderItemData = {
+            orderId: order.id,
+            productId: item.id,
+            quantity: item.quantity,
+            unitPrice: item.albumPrice
+          };
+          return orderItemService.createOrderItem(orderItemData);
+        }));
+
+        // Cache so retries don't create duplicates.
+        setPreparedOrder(order);
+      }
+
+      // Step 3: Format the JSON strictly required by the official PayPal capture API.
       const paypalOrderData = {
         amount: totalAmount,
         currency: 'EUR',
         accountId: user?.accountId,
-        orderId: preparedOrder.id,
-        // The payments table requires a singular productId for legacy indexing logic; we pass the ID of the first item index.
+        orderId: order.id,
         productId: items.length > 0 ? items[0].id : null,
-        // Mapping Redux array items strictly into PayPal's expected Item syntax format.
         items: items.map(item => ({
           productId: item.id,
           quantity: item.quantity,
@@ -128,7 +117,7 @@ const Cart = () => {
         }))
       };
 
-      // Send formatting to custom Spring Boot payments-service which generates the official PayPal token ID.
+      // Send to Spring Boot payments-service which generates the official PayPal token ID.
       const response = await paymentService.createPayPalOrder(paypalOrderData);
 
       // This returned string ID automatically pops up the secure PayPal 3rd-party modal.
