@@ -3,6 +3,7 @@ import { useSelector, useDispatch } from 'react-redux';
 
 import { nextSong, prevSong, playPause, songEnded, toggleQuantumMode } from '../../redux/features/playerSlice';
 import { useRecordInteractionMutation } from '../../redux/services/apiService';
+import { useAuth } from '../../context/AuthContext';
 import globalAudioContext from '../../utils/globalAudioContext';
 import Controls from './Controls';
 import Player from './Player';
@@ -24,7 +25,9 @@ const MusicPlayer = () => {
   
   // Track play interactions
   const [recordInteraction] = useRecordInteractionMutation();
+  const { currentUser } = useAuth();
   const wasPlayingRef = useRef(false); // Track previous playing state
+  const prevSongIdRef = useRef(null); // Track previous song to detect song changes
 
   // Detect device type from user agent
   const getDeviceType = () => {
@@ -39,37 +42,35 @@ const MusicPlayer = () => {
   }, [currentIndex]);
 
   // Record play interaction when playback STARTS (transitions from paused to playing)
+  // or when the song changes while already playing
   useEffect(() => {
-    // Support both ProductID (from backend) and productId (from API response)
     const songProductId = activeSong?.productId || activeSong?.ProductID || activeSong?.id;
+    const accountId = currentUser?.id || currentUser?.accountId;
     
-    // Only record when transitioning from NOT playing to playing
+    // Detect pause→play transition
     const justStartedPlaying = isPlaying && !wasPlayingRef.current;
+    // Detect song change while already playing (e.g. clicking a new song)
+    const songChanged = isPlaying && songProductId && songProductId !== prevSongIdRef.current;
     
-    // Update the ref for next render
+    // Update refs for next render
     wasPlayingRef.current = isPlaying;
+    prevSongIdRef.current = songProductId || null;
     
-    // Record if we just started playing and have a valid song
-    if (justStartedPlaying && activeSong && songProductId) {
-      // Fire and forget - don't wait for response or let errors affect playback
-      // Calculate completion percentage from current playback position
+    // Record if we just started playing OR switched to a new song while playing
+    if ((justStartedPlaying || songChanged) && activeSong && songProductId && accountId) {
       const completionPct = duration > 0 ? parseFloat((appTime / duration).toFixed(4)) : 0.0;
 
-      try {
-        recordInteraction({
-          account_id: 1,
-          product_id: songProductId,
-          interaction_type: 'play',
-          duration_seconds: Math.floor(duration),
-          completion_percentage: completionPct,
-          device_type: getDeviceType(),
-          session_id: sessionStorage.getItem('sessionId') || `session-${Date.now()}`
-        });
-      } catch {
-        // Silently ignore interaction recording errors
-      }
+      recordInteraction({
+        account_id: accountId,
+        product_id: songProductId,
+        interaction_type: 'play',
+        duration_seconds: Math.floor(duration),
+        completion_percentage: completionPct,
+        device_type: getDeviceType(),
+        session_id: sessionStorage.getItem('sessionId') || `session-${Date.now()}`
+      }).unwrap().catch(() => {});
     }
-  }, [isPlaying, activeSong?.productId, activeSong?.ProductID, activeSong?.id, recordInteraction, duration]);
+  }, [isPlaying, activeSong?.productId, activeSong?.ProductID, activeSong?.id, currentUser?.id, recordInteraction]);
 
   // Sync quantum mode state with globalAudioContext and register onset handler
   useEffect(() => {

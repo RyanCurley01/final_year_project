@@ -387,20 +387,23 @@ const OnsetImageCard = ({
     <div
       ref={containerRef}
       className={`relative overflow-hidden ${className || ''}`}
-      style={{ width: '100%', height: '100%' }}
+      style={{ width: '100%', height: '100%', WebkitTransform: 'translateZ(0)', willChange: 'transform' }}
     >
       {/* Image layer — instant swap, no crossfade */}
       {currentImage && (
         <img
           src={currentImage}
           alt={songTitle || 'AI Generated Art'}
+          decoding="sync"
+          fetchPriority="high"
           className="absolute inset-0 w-full h-full object-cover"
           style={{
             borderRadius: 'inherit',
-            transform: activeGlitch.transform,
+            transform: activeGlitch.transform || 'translateZ(0)',
             filter: activeGlitch.filter,
             imageRendering: activeGlitch.imageRendering,
             transition: activeGlitch.transition,
+            WebkitBackfaceVisibility: 'hidden',
           }}
           onError={handleImageError}
         />
