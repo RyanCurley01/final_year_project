@@ -58,7 +58,7 @@ const Track = ({ isPlaying, isActive, activeSong }) => {
   }, [songEnded, isActive, isVideo, videoError]);
 
   return (
-  <div className="flex items-center justify-start flex-shrink-0">
+  <div className="flex items-center justify-start flex-shrink-0 w-[140px] sm:w-[200px]">
     <div className="relative h-12 w-12 sm:h-16 sm:w-16 mr-2 sm:mr-4 flex-shrink-0">
       <div className={`${isPlaying && isActive ? 'animate-spin' : ''} block h-full w-full`} style={{ animationDuration: '3s' }}>
         {showCloudCover ? (

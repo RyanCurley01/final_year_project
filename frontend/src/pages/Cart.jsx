@@ -208,7 +208,7 @@ const Cart = () => {
 
   // Active Cart UI returning main flexible row template
   return (
-    <div className="flex flex-row gap-6">
+    <div className="flex flex-col lg:flex-row gap-6">
       {/* Container: Left side - displaying individual list of cart items */}
       <div className="flex-1">
         <h2 className="text-white text-3xl font-bold mb-6">Shopping Cart ({totalItems} items)</h2>
@@ -313,7 +313,7 @@ const Cart = () => {
       </div>
 
       {/* Order Summary */}
-      <div className="w-80 min-w-[280px]">
+      <div className="w-full lg:w-80 lg:min-w-[280px]">
         <div className="bg-white/5 backdrop-blur-sm rounded-lg p-6 sticky top-4">
           <h3 className="text-white text-2xl font-bold mb-4">Order Summary</h3>
           
