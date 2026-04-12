@@ -500,6 +500,13 @@ class MCPImageOrchestrator {
     // image becomes ready.
     this._pendingOnsetCount = new Map(); // songId -> number
     this._pendingSwapScheduled = new Set(); // songId
+
+    // Thumbnail initialization queue — serializes first-load thumbnail fetches
+    // to avoid overwhelming iOS Safari's connection limit (~6 per domain).
+    // Active (full) mode requests bypass the queue entirely.
+    this._thumbnailQueue = [];
+    this._thumbnailInflight = 0;
+    this._thumbnailMaxConcurrent = 3; // conservative for mobile Safari
   }
 
   /**
@@ -796,6 +803,50 @@ class MCPImageOrchestrator {
       }
       return;
     }
+
+    // Thumbnail requests are queued to avoid saturating mobile Safari's
+    // connection limit on first page load. Active (full) mode bypasses the queue.
+    if (mode === 'thumbnail') {
+      return this._enqueueThumbnailInit(songContext);
+    }
+
+    await this._doInitializeSongContext(songContext, mode);
+  }
+
+  /**
+   * Enqueue a thumbnail-mode initialization to be processed with limited concurrency.
+   * Returns a promise that resolves once this song's thumbnail is ready.
+   */
+  _enqueueThumbnailInit(songContext) {
+    return new Promise((resolve) => {
+      this._thumbnailQueue.push({ songContext, resolve });
+      this._drainThumbnailQueue();
+    });
+  }
+
+  /**
+   * Process the thumbnail queue with bounded concurrency.
+   */
+  _drainThumbnailQueue() {
+    while (this._thumbnailInflight < this._thumbnailMaxConcurrent && this._thumbnailQueue.length > 0) {
+      const { songContext, resolve } = this._thumbnailQueue.shift();
+      this._thumbnailInflight++;
+      this._doInitializeSongContext(songContext, 'thumbnail')
+        .then(resolve)
+        .catch(() => resolve())
+        .finally(() => {
+          this._thumbnailInflight--;
+          this._drainThumbnailQueue();
+        });
+    }
+  }
+
+  /**
+   * Core initialization logic (extracted from initializeSongContext).
+   * Called directly for 'full' mode, or via the queue for 'thumbnail' mode.
+   */
+  async _doInitializeSongContext(songContext, mode) {
+    const songId = songContext.id || songContext.title;
 
     // Fetch missing audio features from backend cache when not supplied.
     let audioFeatures = songContext.audioFeatures || null;

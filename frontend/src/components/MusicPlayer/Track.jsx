@@ -97,7 +97,11 @@ const Track = ({ isPlaying, isActive, activeSong }) => {
         {activeSong?.trackName || activeSong?.albumTitle || 'No active Song'}
       </p>
       <p className="text-gray-300 text-xs sm:text-sm truncate">
-        {activeSong?.artistName === 'Unknown Artist' || (activeSong?.source === 'database') ? ' ' : (activeSong?.artistName || 'Select a song')}
+        {activeSong?.artistName && activeSong.artistName !== 'Unknown Artist' && activeSong?.source !== 'database'
+          ? activeSong.artistName
+          : isLibrarySong && activeSong?.albumTitle
+            ? 'Library Song'
+            : ''}
       </p>
     </div>
     {isPlaying && isActive && (
