@@ -71,13 +71,15 @@ const TopChartCard = ({ song, i, isPlaying, activeSong, handlePauseClick, handle
       </div>
     </div>
     {song.fileUrl && (
-      <PlayPause
-        isPlaying={isPlaying && activeSong?.productId === song.productId}
-        activeSong={activeSong}
-        handlePause={handlePauseClick}
-        handlePlay={() => handlePlayClick(song, i)}
-        song={song}
-      />
+      <div className="flex-shrink-0">
+        <PlayPause
+          isPlaying={isPlaying && isThisSongActive}
+          activeSong={activeSong}
+          handlePause={handlePauseClick}
+          handlePlay={() => handlePlayClick(song, i)}
+          song={song}
+        />
+      </div>
     )}
   </div>
   </>

@@ -492,6 +492,7 @@ const Search = () => {
         
         // Also fetch iTunes songs for the 3 artists (same as TopCharts)
         const allArtistSongs = [];
+        const audioApiUrl = envConfig.getApiBaseUrl();
         
         // Loop through the 3 specific artists (Not the user's search term)
         for (let i = 0; i < ARTISTS.length; i++) {
@@ -501,9 +502,9 @@ const Search = () => {
               await new Promise(resolve => setTimeout(resolve, 300));
             }
             
-            // Search iTunes for THE ARTIST, not the user's typed word
+            // Use our own proxy to avoid CORS/ITP issues from client-side calls to iTunes
             const response = await fetch(
-              `https://itunes.apple.com/search?term=${encodeURIComponent(artist)}&media=music&entity=song&limit=200`,
+              `${audioApiUrl}/api/itunes/search?term=${encodeURIComponent(artist)}&media=music&entity=song&limit=200`,
               { signal: abortController.signal }
             );
 
