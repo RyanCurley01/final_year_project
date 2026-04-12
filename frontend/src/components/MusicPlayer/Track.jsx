@@ -58,7 +58,7 @@ const Track = ({ isPlaying, isActive, activeSong }) => {
   }, [songEnded, isActive, isVideo, videoError]);
 
   return (
-  <div className="flex items-center justify-start flex-shrink-0 w-[140px] sm:w-[200px]">
+  <div className="flex items-center justify-start flex-shrink-0 w-[100px] sm:w-[200px] overflow-hidden">
     <div className="relative h-12 w-12 sm:h-16 sm:w-16 mr-2 sm:mr-4 flex-shrink-0">
       <div className={`${isPlaying && isActive ? 'animate-spin' : ''} block h-full w-full`} style={{ animationDuration: '3s' }}>
         {showCloudCover ? (
@@ -92,11 +92,11 @@ const Track = ({ isPlaying, isActive, activeSong }) => {
         <div className="w-3 h-3 rounded-full bg-gray-900 border border-gray-700"></div>
       </div>
     </div>
-    <div className="min-w-0 flex-1">
-      <p className="text-white font-bold text-sm sm:text-base truncate">
+    <div className="min-w-0 flex-1 overflow-hidden">
+      <p className="text-white font-bold text-xs sm:text-base truncate">
         {activeSong?.trackName || activeSong?.albumTitle || 'No active Song'}
       </p>
-      <p className="text-gray-300 text-xs sm:text-sm truncate">
+      <p className="text-gray-300 text-[10px] sm:text-sm truncate">
         {activeSong?.artistName && activeSong.artistName !== 'Unknown Artist' && activeSong?.source !== 'database'
           ? activeSong.artistName
           : isLibrarySong && activeSong?.albumTitle
