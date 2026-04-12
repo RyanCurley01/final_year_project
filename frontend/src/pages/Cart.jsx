@@ -102,15 +102,19 @@ const Cart = () => {
   // ALL database records are created here — after real money has been captured.
   const handleApprove = async (data, actions) => {
     try {
-      // Step 1: Tell our backend to formally capture the pre-authorized funds.
-      const response = await paymentService.capturePayPalOrder(data.orderID);
-      
-      // Step 2: Create the Order record now that payment is confirmed.
+      // Step 1: Create the Order record (no triggers fire on Orders table itself).
       const orderData = {
         accountId: user?.accountId,
         totalAmount: totalAmount,
       };
       const order = await orderService.createOrder(orderData);
+
+      // Step 2: Capture the pre-authorized PayPal funds and create the Payment record with orderId.
+      const response = await paymentService.capturePayPalOrder(data.orderID, {
+        orderId: order.id,
+        productId: items.length > 0 ? items[0].id : null,
+        accountId: user?.accountId
+      });
 
       // Step 3: Create all order items (triggers populate Sold_Products, Purchased_Products, CustomerSummary).
       await Promise.all(items.map(item => {

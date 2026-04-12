@@ -133,10 +133,15 @@ public class PaymentController {
 
     // POST endpoint: Secure funds and finalized completed state once the frontend user validates the charge
     @PostMapping("/paypal/capture-order/{orderId}")
-    public ResponseEntity<?> capturePayPalOrder(@PathVariable String orderId) {
+    public ResponseEntity<?> capturePayPalOrder(@PathVariable String orderId, @RequestBody(required = false) CapturePayPalOrderRequest captureRequest) {
         try {
+            // Extract optional metadata from the request body
+            Long internalOrderId = captureRequest != null ? captureRequest.getOrderId() : null;
+            Long productId = captureRequest != null ? captureRequest.getProductId() : null;
+            Long accountId = captureRequest != null ? captureRequest.getAccountId() : null;
+
             // Force capture action
-            com.paypal.orders.Order order = paymentService.capturePayPalOrder(orderId);
+            com.paypal.orders.Order order = paymentService.capturePayPalOrder(orderId, internalOrderId, productId, accountId);
             
             // Return structured success confirmation identical to the schema used in create
             com.example.payments.dto.PayPalOrderResponse response = new com.example.payments.dto.PayPalOrderResponse();
@@ -239,6 +244,37 @@ public class PaymentController {
         public void setCurrency(String currency) {
             this.currency = currency;
         }
+
+        public Long getOrderId() {
+            return orderId;
+        }
+
+        public void setOrderId(Long orderId) {
+            this.orderId = orderId;
+        }
+
+        public Long getProductId() {
+            return productId;
+        }
+
+        public void setProductId(Long productId) {
+            this.productId = productId;
+        }
+
+        public Long getAccountId() {
+            return accountId;
+        }
+
+        public void setAccountId(Long accountId) {
+            this.accountId = accountId;
+        }
+    }
+
+    // Inner DTO class for the capture-order request body (optional metadata)
+    public static class CapturePayPalOrderRequest {
+        private Long orderId;
+        private Long productId;
+        private Long accountId;
 
         public Long getOrderId() {
             return orderId;

@@ -166,18 +166,8 @@ public class PaymentService {
             Order paypalOrder = response.result();
             log.info("Created PayPal order: {}", paypalOrder.id());
 
-            // Initialize a local DB record to track this new transaction's status
-            Payment payment = new Payment();
-            payment.setPaypalOrderId(paypalOrder.id());
-            payment.setPaymentAmount(amount);
-            payment.setPaymentStatus("PENDING");
-            payment.setOrderId(orderId);
-            payment.setProductId(productId);
-            payment.setAccountId(accountId);
-            
-            // Save the PENDING payment locally for future reconciliation
-            paymentRepository.save(payment);
-            log.info("Saved Payment record for PayPal order: {}", paypalOrder.id());
+            // No DB record created here — Payment row is only created after successful capture
+            // in capturePayPalOrder() to avoid orphaned PENDING rows when users cancel.
 
             // Return the PayPal order details to the frontend to trigger the checkout popup
             return paypalOrder;
@@ -188,12 +178,15 @@ public class PaymentService {
     }
 
     /**
-     * Sent to PayPal after the user approves payment to finalize the charge
+     * Sent to PayPal after the user approves payment to finalize the charge.
+     * Creates the Payment DB record only after successful capture.
      * @param paypalOrderId The assigned PayPal order identifier
+     * @param productId Product ID from the original create-order request (optional)
+     * @param accountId Account ID from the original create-order request (optional)
      * @return Captured order details verifying the charge was successful
      */
     @Transactional
-    public Order capturePayPalOrder(String paypalOrderId) throws IOException {
+    public Order capturePayPalOrder(String paypalOrderId, Long orderId, Long productId, Long accountId) throws IOException {
         // Create request signaling to PayPal that we are ready to capture funds
         OrdersCaptureRequest request = new OrdersCaptureRequest(paypalOrderId);
         request.prefer("return=representation");
@@ -201,21 +194,28 @@ public class PaymentService {
         try {
             // Trigger capture
             HttpResponse<Order> response = payPalHttpClient.execute(request);
+            Order capturedOrder = response.result();
             log.info("Captured PayPal order: {}", paypalOrderId);
 
-            // Locate the matching pending DB record
-            Optional<Payment> paymentOpt = paymentRepository.findByPaypalOrderId(paypalOrderId);
-            if (paymentOpt.isPresent()) {
-                // If found, mark the local payment record as COMPLETED
-                Payment payment = paymentOpt.get();
-                payment.setPaymentStatus("COMPLETED");
-                paymentRepository.save(payment);
-                log.info("Updated Payment record to COMPLETED for PayPal order: {}", paypalOrderId);
-            } else {
-                log.warn("No Payment record found for PayPal order: {}", paypalOrderId);
+            // Extract the captured amount from the PayPal response
+            BigDecimal capturedAmount = BigDecimal.ZERO;
+            if (capturedOrder.purchaseUnits() != null && !capturedOrder.purchaseUnits().isEmpty()) {
+                String amountValue = capturedOrder.purchaseUnits().get(0).amountWithBreakdown().value();
+                capturedAmount = new BigDecimal(amountValue);
             }
 
-            return response.result();
+            // Create the Payment record now that funds are confirmed captured
+            Payment payment = new Payment();
+            payment.setPaypalOrderId(paypalOrderId);
+            payment.setPaymentAmount(capturedAmount);
+            payment.setPaymentStatus("COMPLETED");
+            payment.setOrderId(orderId);
+            payment.setProductId(productId);
+            payment.setAccountId(accountId);
+            paymentRepository.save(payment);
+            log.info("Created COMPLETED Payment record for PayPal order: {}", paypalOrderId);
+
+            return capturedOrder;
         } catch (IOException e) {
             log.error("Error capturing PayPal order: {}", paypalOrderId, e);
             throw e;

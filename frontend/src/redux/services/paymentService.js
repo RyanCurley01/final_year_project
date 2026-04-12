@@ -63,9 +63,10 @@ export const paymentService = {
   },
 
   // Capture PayPal Order
-  capturePayPalOrder: async (paypalOrderId, email, password) => {
+  capturePayPalOrder: async (paypalOrderId, captureData, email, password) => {
     const options = {
       method: 'POST',
+      body: JSON.stringify(captureData || {}),
     };
     if (email && password) {
       options.headers = getBasicAuthHeaders(email, password);
