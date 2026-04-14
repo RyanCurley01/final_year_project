@@ -13,6 +13,7 @@ import { customerSummaryService } from '../redux/services/customerSummaryService
 import { soldProductsService } from '../redux/services/soldProductsService';
 import placeholders from '../utils/placeholderImage';
 import OnsetImageCard from '../components/OnsetImageCard';
+import { useActionToast } from '../components/CartToast';
 import { downloadMultipleFiles, generateFilename } from '../utils/downloadHelper';
 
 import { useAuth } from '../context/AuthContext';
@@ -45,9 +46,12 @@ const Cart = () => {
     email: currentUser.email || currentUser.accountEmailAddress 
   } : null;
 
+  const [showActionToast, ActionToast] = useActionToast();
+
   // Dispatches the ID to the cartSlice to remove the entire row from the array.
-  const handleRemove = (productId) => {
+  const handleRemove = (productId, productName) => {
     dispatch(removeFromCart(productId));
+    showActionToast(productName, 'cart-remove');
   };
 
   // Dispatches the new integer amount to the cartSlice to overwrite the previous quantity.
@@ -202,6 +206,7 @@ const Cart = () => {
   // Active Cart UI returning main flexible row template
   return (
     <div className="flex flex-col lg:flex-row gap-6">
+      {ActionToast}
       {/* Container: Left side - displaying individual list of cart items */}
       <div className="flex-1">
         <h2 className="text-white text-3xl font-bold mb-6">Shopping Cart ({totalItems} items)</h2>
@@ -268,7 +273,7 @@ const Cart = () => {
                 {/* Product specific UI functionality mapping (remove icon, negative/positive quantity increments) */}
                 <div className="flex flex-col items-end justify-between">
                   <button
-                    onClick={() => handleRemove(item.id)}
+                    onClick={() => handleRemove(item.id, productName)}
                     className="text-red-500 hover:text-red-600 transition"
                     title="Remove from cart"
                   >

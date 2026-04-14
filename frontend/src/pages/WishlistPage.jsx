@@ -35,6 +35,7 @@ import placeholders from '../utils/placeholderImage';
 import OnsetImageCard from '../components/OnsetImageCard';
 import Loader from '../components/Loader';
 import SongCard from '../components/SongCard';
+import { useActionToast } from '../components/CartToast';
 
 // ─── Price Drop Notification Card ────────────────────────────────────
 const PriceDropCard = ({ alert, product, onDismiss }) => {
@@ -177,6 +178,7 @@ const WishlistPage = () => {
 
   const [copied, setCopied] = useState(false);
   const [activeTab, setActiveTab] = useState('wishlist'); // 'wishlist' | 'alerts' | 'tracking'
+  const [showActionToast, ActionToast] = useActionToast();
 
   const isManager = currentUser?.accountType === 'Manager';
 
@@ -328,7 +330,7 @@ const WishlistPage = () => {
   }, [isManager, allWishlistItems, allProducts]);
 
   // ─── Handlers ──────────────────────────────────────────────────────
-  const handleRemove = async (product) => {
+  const handleRemove = async (product, { silent } = {}) => {
     // removeFromWishlistLocal clears price alert + marks as pending removal
     dispatch(removeFromWishlistLocal({ productId: product.id, accountId: currentUser?.id }));
     if (product.wishlistEntryId) {
@@ -342,11 +344,15 @@ const WishlistPage = () => {
         );
       }
     }
+    if (!silent) {
+      showActionToast(product.albumTitle || product.trackName, 'wish-remove');
+    }
   };
 
   const handleMoveToCart = (product) => {
     dispatch(addToCart(product));
-    handleRemove(product);
+    showActionToast(product.albumTitle || product.trackName, 'cart-add');
+    handleRemove(product, { silent: true });
   };
 
   const handleShare = () => {
@@ -387,6 +393,7 @@ const WishlistPage = () => {
 
   return (
     <div className="flex flex-col max-w-6xl mx-auto">
+      {ActionToast}
       {/* Header */}
       <div className="mb-6">
         <h1 className="font-bold text-2xl md:text-3xl text-white flex items-center gap-3">
@@ -506,6 +513,9 @@ const WishlistPage = () => {
                     product={product}
                     data={wishlistProducts}
                     i={i}
+                    onWishlistToggle={(prod, variant) => {
+                      showActionToast(prod.albumTitle || prod.trackName, variant);
+                    }}
                   />
 
                   {/* Remove Button - Inline with Star but on left */}

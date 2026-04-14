@@ -14,8 +14,9 @@ import { useAuth } from '../context/AuthContext';
 import { auth as firebaseAuth } from '../firebase';
 import placeholders from '../utils/placeholderImage';
 import envConfig from '../config/environment';
+import { useActionToast } from './CartToast';
 
-const SongCard = ({ product, payment, i, data }) => {
+const SongCard = ({ product, payment, i, data, onWishlistToggle }) => {
   const isPaid = payment !== null && payment !== undefined;
 
   const productName = product.albumTitle;
@@ -135,6 +136,7 @@ const SongCard = ({ product, payment, i, data }) => {
     // dispatch forwards that action to the reducer so the cart state updates 
     // (add item or increase quantity, then recalc totals) in cartSlice.js:13.
     dispatch(addToCart(cartProduct));
+    showActionToast(product.albumTitle || product.trackName, 'cart-add');
   };
 
   const handleToggleWishlist = async (e) => {
@@ -171,6 +173,11 @@ const SongCard = ({ product, payment, i, data }) => {
         if (hasAuth) {
           dispatch(removeWishlistItem({ id: entry.id, ...authParams }));
         }
+        if (onWishlistToggle) {
+          onWishlistToggle(product, 'wish-remove');
+        } else {
+          showActionToast(product.albumTitle || product.trackName, 'wish-remove');
+        }
       }
     } else {
       dispatch(addToWishlistLocal({ ...product, accountId }));
@@ -182,6 +189,11 @@ const SongCard = ({ product, payment, i, data }) => {
             ...authParams,
           })
         );
+      }
+      if (onWishlistToggle) {
+        onWishlistToggle(product, 'wish-add');
+      } else {
+        showActionToast(product.albumTitle || product.trackName, 'wish-add');
       }
     }
   };
@@ -381,10 +393,14 @@ const SongCard = ({ product, payment, i, data }) => {
   };
 
 
+  const [showActionToast, ActionToast] = useActionToast();
+
   return (
     /**
      * Shows the cover image with song and game details
      */
+    <>
+    {ActionToast}
     <div className="flex flex-col h-full p-4 bg-white/5 backdrop-blur-sm animate-slideup rounded-lg cursor-pointer hover:bg-white/10 transition-all">
       <div 
         className="relative w-full aspect-square rounded-lg overflow-hidden outline-none border-none"
@@ -675,6 +691,7 @@ const SongCard = ({ product, payment, i, data }) => {
         )}
       </div>
     </div>
+    </>
   );
 };
 

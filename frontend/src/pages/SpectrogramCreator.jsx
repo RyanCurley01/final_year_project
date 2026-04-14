@@ -559,8 +559,10 @@ const SpectrogramCreator = () => {
     // Deep clones the 2D grid using typed Float64Arrays for extremely fast mathematical computation.
     const evolved = grid.map((slice) => Float64Array.from(slice));
     
-    // passes: Dictates how many times the blur/smoothing loop will run. A larger radius forces more mathematical passes.
-    const passes = Math.max(1, Math.round(couplingRadius));
+    // passes: Dictates how many times the blur/smoothing loop will run.
+    // Capped at 3 to prevent UI freezes at high radius values; the full radius
+    // is still used as the neighbor search window within each pass.
+    const passes = Math.min(3, Math.max(1, Math.round(couplingRadius)));
 
     // Iterates column by column globally across the screen (NUM_TIME_SLICES).
     for (let t = 0; t < NUM_TIME_SLICES; t++) {
@@ -788,9 +790,10 @@ const SpectrogramCreator = () => {
       const extGain = externalForceGainRef.current;
       const liveInt = intensityRef.current;
       
-      // Number of spatial smoothing passes — more passes = wider spread
-      // Calculates passes: The larger the coupling "radius", the more smoothing loops the engine runs.
-      const passes = Math.max(1, Math.round(radius));
+      // Number of spatial smoothing passes — more passes = wider spread.
+      // Capped at 3 to keep the per-frame render budget constant regardless of radius.
+      // The full radius is still used within each pass for the neighbor search window.
+      const passes = Math.min(3, Math.max(1, Math.round(radius)));
 
       // Begins the loop to process the 200 Time frames visible on screen. 
       // Handles reversing the visual index (outIdx) if the reverse toggle is enabled.
@@ -1621,6 +1624,20 @@ const SpectrogramCreator = () => {
       // Map arbitrary duration intervals precisely into raw sample window intervals allocating drawing resolutions.
       const samplesPerSlice = totalSamples / numSlices;
 
+      // Read physics parameters once per buffer (not per sample) to avoid redundant ref lookups.
+      const liveIntensity = intensityRef.current;
+      const liveForceGain = externalForceGainRef.current;
+      const liveDamping = dampingFactorRef.current;
+      const liveCoupling = couplingStrengthRef.current;
+      const liveRadius = Math.round(couplingRadiusRef.current);
+      const simOn = simulationEnabledRef.current;
+      const isReversed = useCaptured && reversedRef.current;
+
+      // Cache the simulated amps per time-slice so the expensive physics coupling
+      // loop only runs once when the slice changes, not for every audio sample.
+      let cachedSliceIdx = -1;
+      let cachedAmps = null;
+
       // Instantiate dense calculation blocks processing sound frames sequentially across hardware buffer window lengths.
       for (let s = 0; s < output.length; s++) {
         
@@ -1649,68 +1666,73 @@ const SpectrogramCreator = () => {
         else if (posInSlice > sliceLen - fadeSamples) envelope = (sliceLen - posInSlice) / fadeSamples;
 
         // Perform complex logic checks reversing output timelines flipping explicit playbacks generating "rewind" functionality.
-        const sliceIdx = (useCaptured && reversedRef.current) ? (numSlices - 1 - t) : t;
+        const sliceIdx = isReversed ? (numSlices - 1 - t) : t;
+
+        // Only recompute the physics simulation when the time-slice actually changes.
+        // Multiple consecutive audio samples share the same slice — this avoids
+        // re-running O(radius² × 256) coupling math thousands of times per buffer.
+        if (sliceIdx !== cachedSliceIdx) {
+          cachedSliceIdx = sliceIdx;
         
-        // Dynamically shift targeted data pools pointing specifically to internal snapshot columns vs active realtime grids.
-        const sliceData = useCaptured ? capturedColumns[sliceIdx] : (currentGrid?.[t] || null);
+          // Dynamically shift targeted data pools pointing specifically to internal snapshot columns vs active realtime grids.
+          const sliceData = useCaptured ? capturedColumns[sliceIdx] : (currentGrid?.[t] || null);
+
+          // Preallocate static memory banks guaranteeing Javascript Garbage Collectors remain untouched generating frames rapidly.
+          const amps = new Float64Array(NUM_FREQ_BINS);
+          for (let i = 0; i < NUM_FREQ_BINS; i++) {
+            
+            // Flatten visual representation scales specifically manipulating mathematical node powers instantly into matrices.
+            amps[i] = (sliceData?.[i] || 0) * liveIntensity * liveForceGain;
+          }
+
+          // Process conditional branching paths specifically triggering explicit physics ripple solvers.
+          if (simOn && liveCoupling > 0.001) {
+            
+            // Evaluate minimum mathematical cycle executions forcing propagation rendering effects smoothing frequency borders.
+            // Capped at 3 passes to keep the audio callback real-time safe at any radius.
+            const passes = Math.min(3, Math.max(1, liveRadius));
+            let state = amps;
+            for (let p = 0; p < passes; p++) {
+              
+              // Allocate mutable temporary arrays caching modified properties during current internal evaluation sweeps.
+              const next = new Float64Array(NUM_FREQ_BINS);
+              for (let i = 0; i < NUM_FREQ_BINS; i++) {
+                let coupForce = 0;
+                
+                // Iterate internal loops identifying exact cross-talk interactions pushing adjacent nodes vertically scaling values.
+                for (let r = -liveRadius; r <= liveRadius; r++) {
+                  if (r === 0) continue;
+                  const j = i + r;
+                  if (j < 0 || j >= NUM_FREQ_BINS) continue;
+                  
+                  // Add positive coupling bias dragging current cell dynamics explicitly towards parallel target differences precisely.
+                  coupForce += (liveCoupling / Math.abs(r)) * (state[j] - state[i]);
+                }
+                
+                // Enforce rigid [0,1] normalization matrices stopping aggressive cascade interactions mathematically scaling into oblivion.
+                next[i] = Math.max(0, Math.min(1, state[i] + (1 - liveDamping) * coupForce));
+              }
+              state = next;
+            }
+            
+            // Clone complete final generation block properties directly back into standard amplitude processing vectors sequentially.
+            for (let i = 0; i < NUM_FREQ_BINS; i++) amps[i] = state[i];
+          }
+
+          // If simulation is off, apply damping directly to the amps.
+          if (!simOn) {
+            for (let i = 0; i < NUM_FREQ_BINS; i++) amps[i] = amps[i] * (1 - liveDamping);
+          }
+
+          cachedAmps = amps;
+        }
 
         // Blank pure wave accumulators avoiding residual mathematical clipping overlaps destroying sine calculation results.
         let sample = 0;
-        
-        // Stream direct hardware control readings dynamically manipulating final envelope variables mid-calculation blocks.
-        const liveIntensity = intensityRef.current;
-        const liveForceGain = externalForceGainRef.current;
-        const liveDamping = dampingFactorRef.current;
-        const liveCoupling = couplingStrengthRef.current;
-        const liveRadius = Math.round(couplingRadiusRef.current);
-        const simOn = simulationEnabledRef.current;
-
-        // Preallocate static memory banks guaranteeing Javascript Garbage Collectors remain untouched generating frames rapidly.
-        const amps = new Float64Array(NUM_FREQ_BINS);
-        for (let i = 0; i < NUM_FREQ_BINS; i++) {
-          
-          // Flatten visual representation scales specifically manipulating mathematical node powers instantly into matrices.
-          amps[i] = (sliceData?.[i] || 0) * liveIntensity * liveForceGain;
-        }
-
-        // Process conditional branching paths specifically triggering explicit physics ripple solvers.
-        if (simOn && liveCoupling > 0.001) {
-          
-          // Evaluate minimum mathematical cycle executions forcing propagation rendering effects smoothing frequency borders.
-          const passes = Math.max(1, liveRadius);
-          let state = amps;
-          for (let p = 0; p < passes; p++) {
-            
-            // Allocate mutable temporary arrays caching modified properties during current internal evaluation sweeps.
-            const next = new Float64Array(NUM_FREQ_BINS);
-            for (let i = 0; i < NUM_FREQ_BINS; i++) {
-              let coupForce = 0;
-              
-              // Iterate internal loops identifying exact cross-talk interactions pushing adjacent nodes vertically scaling values.
-              for (let r = -liveRadius; r <= liveRadius; r++) {
-                if (r === 0) continue;
-                const j = i + r;
-                if (j < 0 || j >= NUM_FREQ_BINS) continue;
-                
-                // Add positive coupling bias dragging current cell dynamics explicitly towards parallel target differences precisely.
-                coupForce += (liveCoupling / Math.abs(r)) * (state[j] - state[i]);
-              }
-              
-              // Enforce rigid [0,1] normalization matrices stopping aggressive cascade interactions mathematically scaling into oblivion.
-              next[i] = Math.max(0, Math.min(1, state[i] + (1 - liveDamping) * coupForce));
-            }
-            state = next;
-          }
-          
-          // Clone complete final generation block properties directly back into standard amplitude processing vectors sequentially.
-          for (let i = 0; i < NUM_FREQ_BINS; i++) amps[i] = state[i];
-        }
 
         // Conclude final raw algorithm sequences resolving independent frequency cycles linearly aggregating ultimate output floats.
         for (let i = 0; i < NUM_FREQ_BINS; i++) {
-          
-          // Implement physical damping variables manipulating raw sound pressures overriding external simulation constraints seamlessly.
-          const amp = simOn ? amps[i] : amps[i] * (1 - liveDamping);
+          const amp = cachedAmps[i];
           
           // Exit early skipping silent frequency blocks optimizing global frame-times avoiding meaningless multiplying iterations entirely.
           if (amp < 0.001) {

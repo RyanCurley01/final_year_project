@@ -13,6 +13,7 @@ import { useAuth } from '../context/AuthContext';
 import { auth as firebaseAuth } from '../firebase';
 import Loader from '../components/Loader';
 import AudioReactiveVideo from '../components/AudioReactiveVideo';
+import { useActionToast } from '../components/CartToast';
 import OnsetImageCard from '../components/OnsetImageCard';
 import envConfig from '../config/environment';
 import { productService } from '../redux/services';
@@ -72,6 +73,7 @@ const firstRealArtistName = (...values) => {
 const SimilarSongCard = ({ song, isPlaying, activeSong, onPlay, onPause, rank, playbackRate, allSimilarSongs, targetSongName }) => {
   const dispatch = useDispatch();
   const navigate = useNavigate();
+  const [showActionToast, ActionToast] = useActionToast();
   const isThisSongActive = (activeSong?.trackId && String(activeSong.trackId) === String(song.trackId)) || 
                            (activeSong?.id && String(activeSong.id) === String(song.trackId));
   const albumArt = getSafeCoverUrl(song, '600x600');
@@ -121,10 +123,12 @@ const SimilarSongCard = ({ song, isPlaying, activeSong, onPlay, onPause, rank, p
       if (entry) {
         dispatch(removeFromWishlistLocal({ productId: songId, accountId }));
         if (hasAuth) dispatch(removeWishlistItem({ id: entry.id, ...authParams }));
+        showActionToast(song.trackName || song.albumTitle, 'wish-remove');
       }
     } else {
       dispatch(addToWishlistLocal({ ...song, id: songId, accountId }));
       if (hasAuth) dispatch(addWishlistItem({ wishlistData: { accountId, productId: songId }, ...authParams }));
+      showActionToast(song.trackName || song.albumTitle, 'wish-add');
     }
   };
 
@@ -136,6 +140,7 @@ const SimilarSongCard = ({ song, isPlaying, activeSong, onPlay, onPause, rank, p
 
   return (
     <div className="flex flex-col h-full p-4 bg-white/5 backdrop-blur-sm rounded-lg cursor-pointer hover:bg-white/10 transition-all">
+      {ActionToast}
       <div 
         className="relative w-full aspect-square rounded-lg overflow-hidden"
         onMouseEnter={() => setIsHovered(true)}
@@ -369,6 +374,7 @@ const SimilarSongCard = ({ song, isPlaying, activeSong, onPlay, onPause, rank, p
                   ? { ...song, id: songId, albumPrice: discountedPrice, albumTitle: song.trackName }
                   : { ...song, id: songId, albumPrice: songPrice, albumTitle: song.trackName };
                 dispatch(addToCart(cartProduct));
+                showActionToast(song.trackName || song.albumTitle, 'cart-add');
               }}
               className="px-3 py-2 bg-blue-700 hover:bg-blue-800 rounded font-semibold text-white text-sm leading-none flex items-center gap-2"
             >

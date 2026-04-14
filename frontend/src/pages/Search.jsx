@@ -18,6 +18,7 @@ import { FiShoppingCart, FiMaximize2, FiMinimize2 } from 'react-icons/fi';
 import envConfig from '../config/environment';
 import blissImage from '../assets/bliss.png';
 import { fixTextDeep } from '../utils/fixText';
+import { useActionToast } from '../components/CartToast';
 
 const ARTISTS = ['Aphex Twin', 'Boards of Canada', 'Squarepusher'];
 
@@ -27,6 +28,7 @@ const fallbackImage = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="ht
 
 const SongCard = ({ song, isPlaying, activeSong, onPlay, onPause, index, onSongNameClick, onArtistClick, onAlbumClick, playbackRate }) => {
   const dispatch = useDispatch();
+  const [showActionToast, ActionToast] = useActionToast();
   // Resolves direct identity equality checks verifying global playback pointers against local references.
   const isThisSongActive = activeSong?.id === song.id;
   
@@ -106,10 +108,12 @@ const SongCard = ({ song, isPlaying, activeSong, onPlay, onPause, index, onSongN
       if (entry) {
         dispatch(removeFromWishlistLocal({ productId: songId, accountId }));
         if (hasAuth) dispatch(removeWishlistItem({ id: entry.id, ...authParams }));
+        showActionToast(songTitle, 'wish-remove');
       }
     } else {
       dispatch(addToWishlistLocal({ ...(song.matchedDbSong || song), accountId }));
       if (hasAuth) dispatch(addWishlistItem({ wishlistData: { accountId, productId: songId }, ...authParams }));
+      showActionToast(songTitle, 'wish-add');
     }
   };
 
@@ -149,6 +153,7 @@ const SongCard = ({ song, isPlaying, activeSong, onPlay, onPause, index, onSongN
 
   return (
     <div className="flex flex-col h-full p-4 bg-white/5 backdrop-blur-sm animate-slideup rounded-lg cursor-pointer hover:bg-white/10 transition-all">
+      {ActionToast}
       <div 
         className="relative w-full aspect-square rounded-lg overflow-hidden outline-none border-none"
         onMouseEnter={() => setIsHovered(true)}
@@ -342,6 +347,7 @@ const SongCard = ({ song, isPlaying, activeSong, onPlay, onPause, index, onSongN
                 ? { ...(song.matchedDbSong || song), albumPrice: discountedPrice }
                 : (song.matchedDbSong || song);
               dispatch(addToCart(cartProduct));
+              showActionToast(song.trackName || song.albumTitle, 'cart-add');
             }}
             className="w-full mt-2 px-3 py-2 bg-blue-700 hover:bg-blue-800 rounded font-semibold text-white text-sm leading-none flex items-center justify-center gap-2"
           >
