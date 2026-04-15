@@ -41,11 +41,11 @@ export function useActionToast() {
           className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[9999] pointer-events-none"
         >
           <div className={`flex items-center gap-2 px-4 py-3 rounded-lg ${cfg.bg} text-white text-sm font-semibold shadow-lg shadow-black/40 whitespace-nowrap`}>
-            {Icon && <Icon className="text-white text-base flex-shrink-0" />}
+            {Icon && <Icon className="text-white text-base shrink-0" />}
             <span className="truncate max-w-xs">
               {toast.productName ? `${toast.productName} ${cfg.verb}` : cfg.verb.charAt(0).toUpperCase() + cfg.verb.slice(1)}
             </span>
-            {Trail && <Trail className="text-white/80 text-base flex-shrink-0" />}
+            {Trail && <Trail className="text-white/80 text-base shrink-0" />}
           </div>
         </motion.div>
       )}

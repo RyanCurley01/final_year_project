@@ -168,7 +168,7 @@ const SongCard = ({ song, isPlaying, activeSong, onPlay, onPause, index, onSongN
         </div>
 
         {/* Popularity Rank Number */}
-        <div className="absolute top-2 right-2 w-8 h-8 bg-gradient-to-br from-yellow-400 to-orange-500 rounded-full flex items-center justify-center text-white font-bold text-sm shadow-lg border-2 border-white/30">
+        <div className="absolute top-2 right-2 w-8 h-8 bg-linear-to-br from-yellow-400 to-orange-500 rounded-full flex items-center justify-center text-white font-bold text-sm shadow-lg border-2 border-white/30">
           {index + 1}
         </div>
 
@@ -716,8 +716,8 @@ const TopCharts = () => {
             <span className="w-2 h-2 rounded-full bg-cyan-400"></span>
             Squarepusher ({songs.filter(s => s.artistName?.toLowerCase().includes('squarepusher')).length})
           </button>
-          <button onClick={() => setFilter('visualizer')} className={`px-4 py-2 rounded-full text-sm font-medium transition-all flex items-center gap-2 ${filter === 'visualizer' ? 'bg-gradient-to-r from-cyan-500 to-blue-500 text-white' : 'bg-white/10 text-white hover:bg-gradient-to-r hover:from-cyan-500/30 hover:to-blue-500/30'}`}>
-            <span className="w-2 h-2 rounded-full bg-gradient-to-r from-cyan-400 to-blue-400 animate-pulse"></span>
+          <button onClick={() => setFilter('visualizer')} className={`px-4 py-2 rounded-full text-sm font-medium transition-all flex items-center gap-2 ${filter === 'visualizer' ? 'bg-linear-to-r from-cyan-500 to-blue-500 text-white' : 'bg-white/10 text-white hover:bg-linear-to-r hover:from-cyan-500/30 hover:to-blue-500/30'}`}>
+            <span className="w-2 h-2 rounded-full bg-linear-to-r from-cyan-400 to-blue-400 animate-pulse"></span>
             Visualiser
           </button>
         </div>
@@ -744,14 +744,14 @@ const TopCharts = () => {
         )}
         {/* Empty State - when no song is playing */}
         {(!activeSong || Object.keys(activeSong).length === 0) && (
-          <div className="bg-gradient-to-br from-gray-900 to-black p-4 rounded-lg border border-gray-800">
+          <div className="bg-linear-to-br from-gray-900 to-black p-4 rounded-lg border border-gray-800">
             <p className="text-gray-400 text-center text-sm">Play a song to see recommendations</p>
           </div>
         )}
 
         {/* Active State - when a song is playing */}
         {activeSong && Object.keys(activeSong).length > 0 && (
-        <div className="bg-gradient-to-br from-gray-900 to-black p-4 rounded-lg border border-gray-800 overflow-x-hidden">
+        <div className="bg-linear-to-br from-gray-900 to-black p-4 rounded-lg border border-gray-800 overflow-x-hidden">
           <h3 className="text-sm font-bold text-white mb-1">Similar Artist Tracks</h3>
           <p className="text-[12px] text-gray-400 leading-tight">
             Based on <span className="text-cyan-400 font-semibold truncate">{activeSong.trackName || activeSong.albumTitle}</span>
@@ -761,7 +761,7 @@ const TopCharts = () => {
             <div className="mb-3 p-2 bg-gray-800/50 rounded-lg border border-gray-700">
               <div className="flex items-center gap-2 mb-2">
                 {/* Spinning Album Cover */}
-                <div className="relative w-12 h-16 flex-shrink-0">
+                <div className="relative w-12 h-16 shrink-0">
                   {(() => {
                     const activeMedia = activeSong?.albumCoverImageUrl || activeSong?.artworkUrl100;
                     const activeIsVideo = activeMedia && activeMedia.toLowerCase().includes('.mp4');
@@ -837,7 +837,7 @@ const TopCharts = () => {
                   >
                     <div className="flex items-center gap-2">
                       {/* Album Cover - Support both URL formats */}
-                      <div className="w-12 h-12 rounded-md overflow-hidden flex-shrink-0 border border-gray-600 group-hover:border-cyan-500 transition-colors">
+                      <div className="w-12 h-12 rounded-md overflow-hidden shrink-0 border border-gray-600 group-hover:border-cyan-500 transition-colors">
                         {(() => {
                           const recMedia = rec.albumCoverImageUrl || rec.artworkUrl100;
                           const recIsVideo = recMedia && recMedia.toLowerCase().includes('.mp4');
@@ -856,7 +856,7 @@ const TopCharts = () => {
                           }
                           if (isLibrarySong && !recHasArt) {
                             return (
-                              <div className="w-full h-full bg-gradient-to-br from-cyan-600 via-purple-600 to-pink-600 flex items-center justify-center">
+                              <div className="w-full h-full bg-linear-to-br from-cyan-600 via-purple-600 to-pink-600 flex items-center justify-center">
                                 <svg className="w-8 h-8 text-blue-900" fill="currentColor" viewBox="0 0 24 24">
                                   <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/>
                                 </svg>
@@ -880,7 +880,7 @@ const TopCharts = () => {
                           <h4 className="text-white font-semibold truncate group-hover:text-cyan-400 transition-colors text-sm leading-tight flex-1">
                             {rec.trackName}
                           </h4>
-                          <span className={`px-1.5 py-0.5 rounded-full text-xs font-bold text-white flex-shrink-0 ${
+                          <span className={`px-1.5 py-0.5 rounded-full text-xs font-bold text-white shrink-0 ${
                             rec.similarity_score >= 0.7 ? 'bg-green-500' : 
                             rec.similarity_score >= 0.5 ? 'bg-yellow-500' : 
                             'bg-red-500'

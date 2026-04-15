@@ -12,7 +12,7 @@ import { setActiveSong, playPause } from '../redux/features/playerSlice';
 
 
 
-const CustomerScreen = () => {
+const Discover = () => {
   const [user, setUser] = useState(null);
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -92,7 +92,7 @@ const CustomerScreen = () => {
               }}
             />
           ) : (
-            <div className="bg-gradient-to-br from-gray-900 to-black p-5 rounded-lg border border-gray-800">
+            <div className="bg-linear-to-br from-gray-900 to-black p-5 rounded-lg border border-gray-800">
               <p className="text-gray-400 text-center">Play a song to see audio-based recommendations</p>
             </div>
           )}
@@ -117,8 +117,8 @@ const CustomerScreen = () => {
         <button onClick={() => setViewMode('discover')} className={`px-4 py-2 rounded-full text-sm font-medium transition-all ${viewMode === 'discover' ? 'bg-white text-black' : 'bg-white/10 text-white hover:bg-white/20'}`}>
           Discover
         </button>
-        <button onClick={() => setViewMode('visualizer')} className={`px-4 py-2 rounded-full text-sm font-medium transition-all flex items-center gap-2 ${viewMode === 'visualizer' ? 'bg-gradient-to-r from-cyan-500 to-blue-500 text-white' : 'bg-white/10 text-white hover:bg-gradient-to-r hover:from-cyan-500/30 hover:to-blue-500/30'}`}>
-          <span className="w-2 h-2 rounded-full bg-gradient-to-r from-cyan-400 to-blue-400 animate-pulse"></span>
+        <button onClick={() => setViewMode('visualizer')} className={`px-4 py-2 rounded-full text-sm font-medium transition-all flex items-center gap-2 ${viewMode === 'visualizer' ? 'bg-linear-to-r from-cyan-500 to-blue-500 text-white' : 'bg-white/10 text-white hover:bg-linear-to-r hover:from-cyan-500/30 hover:to-blue-500/30'}`}>
+          <span className="w-2 h-2 rounded-full bg-linear-to-r from-cyan-400 to-blue-400 animate-pulse"></span>
           Visualiser
         </button>
       </div>
@@ -144,4 +144,4 @@ const CustomerScreen = () => {
   );
 };
 
-export default CustomerScreen;
+export default Discover;

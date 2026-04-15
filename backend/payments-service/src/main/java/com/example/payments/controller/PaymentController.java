@@ -3,7 +3,6 @@ package com.example.payments.controller;
 // Import the local Payment model and Payment Service
 import com.example.payments.model.Payment;
 import com.example.payments.service.PaymentService;
-import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 // Import Spring web classes and annotations
 import org.springframework.http.HttpStatus;

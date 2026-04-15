@@ -6,10 +6,10 @@ const Seekbar = ({ value, min, max, onInput, setSeekTime, appTime, onSeekStart, 
 
   return (
     <div className="flex flex-row items-center flex-1 min-w-0">
-      <button type="button" onClick={() => setSeekTime(appTime - 5)} className="mr-2 text-white text-sm flex-shrink-0">
+      <button type="button" onClick={() => setSeekTime(appTime - 5)} className="mr-2 text-white text-sm shrink-0">
         -
       </button>
-      <p className="text-white text-xs sm:text-sm flex-shrink-0">{value === 0 ? '0:00' : getTime(value)}</p>
+      <p className="text-white text-xs sm:text-sm shrink-0">{value === 0 ? '0:00' : getTime(value)}</p>
       <input
         type="range"
         step="any"
@@ -23,8 +23,8 @@ const Seekbar = ({ value, min, max, onInput, setSeekTime, appTime, onSeekStart, 
         onChange={onInput}
         className="flex-1 min-w-[60px] h-1 mx-2 rounded-lg cursor-pointer"
       />
-      <p className="text-white text-xs sm:text-sm flex-shrink-0">{max === 0 ? '0:00' : getTime(max)}</p>
-      <button type="button" onClick={() => setSeekTime(appTime + 5)} className="ml-2 text-white text-sm flex-shrink-0">
+      <p className="text-white text-xs sm:text-sm shrink-0">{max === 0 ? '0:00' : getTime(max)}</p>
+      <button type="button" onClick={() => setSeekTime(appTime + 5)} className="ml-2 text-white text-sm shrink-0">
         +
       </button>
     </div>

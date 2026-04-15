@@ -5,19 +5,19 @@ import { TbAtom2Filled } from 'react-icons/tb';
 
 const Controls = ({ isPlaying, repeat, setRepeat, shuffle, setShuffle, currentSongs, handlePlayPause, handlePrevSong, handleNextSong, quantumMode, handleQuantumToggle, quantumState }) => (
   <div className="flex items-center justify-around w-full max-w-xs gap-1">
-    <div className="flex items-center justify-center min-w-[44px] min-h-[44px] flex-shrink-0">
+    <div className="flex items-center justify-center min-w-[44px] min-h-[44px] shrink-0">
       <BsArrowRepeat size={20} color={repeat ? 'red' : 'white'} onClick={() => setRepeat((prev) => !prev)} className="cursor-pointer" />
     </div>
-    {currentSongs?.length && <div className="flex items-center justify-center min-w-[44px] min-h-[44px] flex-shrink-0"><MdSkipPrevious size={30} color="#FFF" className="cursor-pointer" onClick={handlePrevSong} /></div>}
-    <div className="flex items-center justify-center w-[45px] h-[45px] flex-shrink-0">
+    {currentSongs?.length && <div className="flex items-center justify-center min-w-[44px] min-h-[44px] shrink-0"><MdSkipPrevious size={30} color="#FFF" className="cursor-pointer" onClick={handlePrevSong} /></div>}
+    <div className="flex items-center justify-center w-[45px] h-[45px] shrink-0">
       {isPlaying ? (
         <BsFillPauseFill size={45} color="#FFF" onClick={handlePlayPause} className="cursor-pointer" />
       ) : (
         <BsFillPlayFill size={45} color="#FFF" onClick={handlePlayPause} className="cursor-pointer" />
       )}
     </div>
-    {currentSongs?.length && <div className="flex items-center justify-center min-w-[44px] min-h-[44px] flex-shrink-0"><MdSkipNext size={30} color="#FFF" className="cursor-pointer" onClick={handleNextSong} /></div>}
-    <div className="flex items-center justify-center min-w-[44px] min-h-[44px] flex-shrink-0">
+    {currentSongs?.length && <div className="flex items-center justify-center min-w-[44px] min-h-[44px] shrink-0"><MdSkipNext size={30} color="#FFF" className="cursor-pointer" onClick={handleNextSong} /></div>}
+    <div className="flex items-center justify-center min-w-[44px] min-h-[44px] shrink-0">
       <BsShuffle size={20} color={shuffle ? 'red' : 'white'} onClick={() => setShuffle((prev) => !prev)} className="cursor-pointer" />
     </div>
     <div className="relative group">

@@ -58,8 +58,8 @@ const Track = ({ isPlaying, isActive, activeSong }) => {
   }, [songEnded, isActive, isVideo, videoError]);
 
   return (
-  <div className="flex items-center justify-start flex-shrink-0 w-[100px] sm:w-[200px] overflow-hidden">
-    <div className="relative h-12 w-12 sm:h-16 sm:w-16 mr-2 sm:mr-4 flex-shrink-0">
+  <div className="flex items-center justify-start shrink-0 w-[100px] sm:w-[200px] overflow-hidden">
+    <div className="relative h-12 w-12 sm:h-16 sm:w-16 mr-2 sm:mr-4 shrink-0">
       <div className={`${isPlaying && isActive ? 'animate-spin' : ''} block h-full w-full`} style={{ animationDuration: '3s' }}>
         {showCloudCover ? (
           <img 
@@ -105,7 +105,7 @@ const Track = ({ isPlaying, isActive, activeSong }) => {
       </p>
     </div>
     {isPlaying && isActive && (
-      <div className="flex gap-0.5 ml-2 flex-shrink-0">
+      <div className="flex gap-0.5 ml-2 shrink-0">
         <span className="w-1 h-2 bg-cyan-400 rounded-full animate-pulse"></span>
         <span className="w-1 h-3 bg-cyan-400 rounded-full animate-pulse" style={{ animationDelay: '150ms' }}></span>
         <span className="w-1 h-2 bg-cyan-400 rounded-full animate-pulse" style={{ animationDelay: '300ms' }}></span>

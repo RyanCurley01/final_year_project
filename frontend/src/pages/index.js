@@ -1,4 +1,4 @@
-import CustomerScreen from './CustomerScreen';
+import Discover from './Discover';
 import ArtistDetails from './ArtistDetails';
 import SongDetails from './SongDetails';
 import Search from './Search';
@@ -14,7 +14,7 @@ import WishlistPage from './WishlistPage';
 import MidiExplorer from './MidiExplorer';
 
 export {
-  CustomerScreen,
+  Discover,
   Search,
   ArtistDetails,
   SongDetails,

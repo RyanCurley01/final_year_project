@@ -13,7 +13,7 @@ const VideoModal = ({ isOpen, onClose, videoSrc, title, isPlaying, isActive, son
 
   return createPortal(
     <div
-      className="fixed bg-gradient-to-br from-gray-900 to-black rounded-lg shadow-2xl border border-gray-700 z-0"
+      className="fixed bg-linear-to-br from-gray-900 to-black rounded-lg shadow-2xl border border-gray-700 z-0"
       style={{
         width: '400px',
         maxWidth: 'calc(100vw - 2rem)',
@@ -25,12 +25,12 @@ const VideoModal = ({ isOpen, onClose, videoSrc, title, isPlaying, isActive, son
     >
         {/* Header */}
         <div
-          className="flex items-center justify-between p-2 bg-gradient-to-r from-purple-900/50 to-blue-900/50 rounded-t-lg border-b border-gray-700"
+          className="flex items-center justify-between p-2 bg-linear-to-r from-purple-900/50 to-blue-900/50 rounded-t-lg border-b border-gray-700"
         >
           <h3 className="text-white font-semibold text-sm truncate mr-2">{title}</h3>
           <button
             onClick={onClose}
-            className="p-1 hover:bg-white/10 rounded-full transition-colors flex-shrink-0"
+            className="p-1 hover:bg-white/10 rounded-full transition-colors shrink-0"
             title="Close"
           >
             <MdClose className="text-white text-xl" />

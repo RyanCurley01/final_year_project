@@ -288,7 +288,7 @@ const SongCard = ({ song, isPlaying, activeSong, onPlay, onPause, index, onSongN
       {/* Fullscreen overlay portal */}
       {(isVideo || useOnsetImages) && isFullscreen && createPortal(
         <div className="fixed inset-0 bg-black flex flex-col items-center justify-center" style={{ zIndex: 99999 }}>
-          <div className="absolute top-0 left-0 right-0 flex items-center justify-between px-6 py-4 bg-gradient-to-b from-black/80 to-transparent z-10">
+          <div className="absolute top-0 left-0 right-0 flex items-center justify-between px-6 py-4 bg-linear-to-b from-black/80 to-transparent z-10">
             <h3 className="text-white font-semibold text-lg truncate">{song.trackName || song.albumTitle}</h3>
             <button onClick={() => setIsFullscreen(false)} className="p-2 rounded-full bg-white/10 hover:bg-white/20 transition-all hover:scale-110" title="Minimise">
               <FiMinimize2 className="w-6 h-6 text-white" />
@@ -871,8 +871,8 @@ const Search = () => {
           </button>
           
           {/* Visualiser button commented out
-          <button onClick={() => setFilter('visualizer')} className={`px-4 py-2 rounded-full text-sm font-medium transition-all flex items-center gap-2 ${filter === 'visualizer' ? 'bg-gradient-to-r from-cyan-500 to-blue-500 text-white' : 'bg-white/10 text-white hover:bg-gradient-to-r hover:from-cyan-500/30 hover:to-blue-500/30'}`}>
-            <span className="w-2 h-2 rounded-full bg-gradient-to-r from-cyan-400 to-blue-400 animate-pulse"></span>
+          <button onClick={() => setFilter('visualizer')} className={`px-4 py-2 rounded-full text-sm font-medium transition-all flex items-center gap-2 ${filter === 'visualizer' ? 'bg-linear-to-r from-cyan-500 to-blue-500 text-white' : 'bg-white/10 text-white hover:bg-linear-to-r hover:from-cyan-500/30 hover:to-blue-500/30'}`}>
+            <span className="w-2 h-2 rounded-full bg-linear-to-r from-cyan-400 to-blue-400 animate-pulse"></span>
             Visualiser
           </button>
           */}
@@ -900,7 +900,7 @@ const Search = () => {
         
         {/* Single Song Mode - when only 1 song found, show its analysis only */}
         {songs.length === 1 && activeSong && Object.keys(activeSong).length > 0 && (
-          <div className="bg-gradient-to-br from-gray-900 to-black p-4 rounded-lg border border-gray-800 overflow-x-hidden">
+          <div className="bg-linear-to-br from-gray-900 to-black p-4 rounded-lg border border-gray-800 overflow-x-hidden">
             <h3 className="text-sm font-bold text-white mb-1">Now Playing</h3>
             <p className="text-[12px] text-gray-400 leading-tight mb-3">
               Analyzing <span className="text-cyan-400 font-semibold truncate">{activeSong.trackName || activeSong.albumTitle}</span>
@@ -917,7 +917,7 @@ const Search = () => {
                   const useOnsetImages = isVideo && !isTeddyEmotion;
                   
                   return (
-                    <div className="relative w-16 h-16 flex-shrink-0">
+                    <div className="relative w-16 h-16 shrink-0">
                       {useOnsetImages ? (
                         <div className={`w-16 h-16 rounded-full overflow-hidden border-2 border-cyan-500/50 ${isPlaying ? 'animate-spin' : ''}`} style={{ animationDuration: '3s' }}>
                           <OnsetImageCard
@@ -966,14 +966,14 @@ const Search = () => {
         
         {/* Empty State - when no song is playing */}
         {(!activeSong || Object.keys(activeSong).length === 0) && (
-          <div className="bg-gradient-to-br from-gray-900 to-black p-4 rounded-lg border border-gray-800">
+          <div className="bg-linear-to-br from-gray-900 to-black p-4 rounded-lg border border-gray-800">
             <p className="text-gray-400 text-center text-sm">Play a song to see recommendations</p>
           </div>
         )}
 
         {/* Active State - when a song is playing AND more than 1 result */}
         {activeSong && Object.keys(activeSong).length > 0 && songs.length > 1 && (
-        <div className="bg-gradient-to-br from-gray-900 to-black p-4 rounded-lg border border-gray-800 overflow-x-hidden">
+        <div className="bg-linear-to-br from-gray-900 to-black p-4 rounded-lg border border-gray-800 overflow-x-hidden">
           <h3 className="text-sm font-bold text-white mb-1">Similar Artist Tracks</h3>
           <p className="text-[12px] text-gray-400 leading-tight">
             Based on <span className="text-cyan-400 font-semibold truncate">{activeSong.trackName || activeSong.albumTitle}</span>
@@ -990,7 +990,7 @@ const Search = () => {
                   const useOnsetImages = isVideo && !isTeddyEmotion;
                   
                   return (
-                    <div className="relative w-12 h-16 flex-shrink-0">
+                    <div className="relative w-12 h-16 shrink-0">
                       {useOnsetImages ? (
                         <div className={`w-12 h-12 rounded-full overflow-hidden border-2 border-cyan-500/50 ${isPlaying ? 'animate-spin' : ''}`} style={{ animationDuration: '3s' }}>
                           <OnsetImageCard
@@ -1049,7 +1049,7 @@ const Search = () => {
                   >
                     <div className="flex items-center gap-2">
                       {/* Album Cover - Use real cover if available, otherwise gradient matches Discover page */}
-                      <div className="w-12 h-12 rounded-md overflow-hidden flex-shrink-0 border border-gray-600 group-hover:border-cyan-500 transition-colors">
+                      <div className="w-12 h-12 rounded-md overflow-hidden shrink-0 border border-gray-600 group-hover:border-cyan-500 transition-colors">
                         {(() => {
                           const recMedia = rec.albumCoverImageUrl || rec.artworkUrl100;
                           const recIsVideo = recMedia && recMedia.toLowerCase().includes('.mp4');
@@ -1078,7 +1078,7 @@ const Search = () => {
                           }
                           return null;
                         })()}
-                         <div className="w-full h-full bg-gradient-to-br from-cyan-600 via-purple-600 to-pink-600 flex items-center justify-center" style={{ display: (rec.albumCoverImageUrl || rec.artworkUrl100) ? 'none' : 'flex' }}>
+                         <div className="w-full h-full bg-linear-to-br from-cyan-600 via-purple-600 to-pink-600 flex items-center justify-center" style={{ display: (rec.albumCoverImageUrl || rec.artworkUrl100) ? 'none' : 'flex' }}>
                           <svg className="w-8 h-8 text-blue-900" fill="currentColor" viewBox="0 0 24 24">
                             <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/>
                           </svg>
@@ -1091,7 +1091,7 @@ const Search = () => {
                           <h4 className="text-white font-semibold truncate group-hover:text-cyan-400 transition-colors text-[12px]">
                             {rec.trackName}
                           </h4>
-                          <span className={`px-1.5 py-0.5 rounded-full text-[12px] font-bold text-white flex-shrink-0 ${
+                          <span className={`px-1.5 py-0.5 rounded-full text-[12px] font-bold text-white shrink-0 ${
                             rec.similarity_score >= 0.7 ? 'bg-green-500' : 
                             rec.similarity_score >= 0.5 ? 'bg-yellow-500' : 
                             'bg-red-500'

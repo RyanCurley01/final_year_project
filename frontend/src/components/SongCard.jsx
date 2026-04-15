@@ -566,7 +566,7 @@ const SongCard = ({ product, payment, i, data, onWishlistToggle }) => {
           style={{ zIndex: 99999 }}
         >
           {/* Header bar with title and minimise button */}
-          <div className="absolute top-0 left-0 right-0 flex items-center justify-between px-6 py-4 bg-gradient-to-b from-black/80 to-transparent z-10">
+          <div className="absolute top-0 left-0 right-0 flex items-center justify-between px-6 py-4 bg-linear-to-b from-black/80 to-transparent z-10">
             <h3 className="text-white font-semibold text-lg truncate">{productName}</h3>
             <button
               onClick={() => setIsFullscreen(false)}

@@ -45,8 +45,8 @@ const PriceDropCard = ({ alert, product, onDismiss }) => {
   const useOnsetImages = isVideo && !isTeddyEmotion;
 
   return (
-    <div className="flex items-center gap-4 p-4 bg-gradient-to-r from-green-900/40 to-emerald-900/30 border border-green-500/30 rounded-xl backdrop-blur-sm animate-slideup">
-      <div className="relative w-14 h-14 rounded-lg overflow-hidden flex-shrink-0">
+    <div className="flex items-center gap-4 p-4 bg-linear-to-r from-green-900/40 to-emerald-900/30 border border-green-500/30 rounded-xl backdrop-blur-sm animate-slideup">
+      <div className="relative w-14 h-14 rounded-lg overflow-hidden shrink-0">
         {useOnsetImages ? (
           <OnsetImageCard
             songTitle={product.albumTitle}
@@ -160,7 +160,7 @@ const ManagerTrackingRow = ({ product, wishlistCount }) => {
     <td className="py-3 px-4 text-center">
       <div className="w-full bg-gray-700 rounded-full h-2">
         <div
-          className="bg-gradient-to-r from-yellow-400 to-orange-500 h-2 rounded-full transition-all"
+          className="bg-linear-to-r from-yellow-400 to-orange-500 h-2 rounded-full transition-all"
           style={{ width: `${Math.min(wishlistCount * 10, 100)}%` }}
         ></div>
       </div>

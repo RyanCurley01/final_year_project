@@ -47,7 +47,7 @@ const SidebarSearchFilter = ({
     <>
       {/* Search input — same visual style as Searchbar.jsx */}
       <div className="mb-3 flex items-center bg-[#1a1a1a] rounded-lg border border-gray-700 focus-within:border-cyan-500 transition-colors">
-        <FiSearch className="w-4 h-4 ml-3 text-gray-400 flex-shrink-0" />
+        <FiSearch className="w-4 h-4 ml-3 text-gray-400 shrink-0" />
         <input
           type="text"
           value={searchTerm}

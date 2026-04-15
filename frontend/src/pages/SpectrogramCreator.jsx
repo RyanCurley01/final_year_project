@@ -2404,7 +2404,7 @@ const SpectrogramCreator = () => {
         {isSongPlaying && (activeSong?.title || activeSong?.albumTitle) && (
           <div className="flex items-center gap-1.5 bg-[#1a1640]/60 rounded-lg px-3 py-1 text-xs text-gray-300">
             <span className="inline-block w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-            <span className="truncate max-w-[160px]">{activeSong?.title || activeSong?.albumTitle}</span>
+            <span className="truncate max-w-40">{activeSong?.title || activeSong?.albumTitle}</span>
           </div>
         )}
         {!isSongPlaying && isLiveMode && (

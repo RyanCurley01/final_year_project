@@ -285,7 +285,7 @@ const PurchaseHistory = () => {
                     {/* Render logic depending on product media type */}
                     {useOnsetImages ? (
                       // 1. Dynamic Onset Image
-                      <div className="w-16 h-16 flex-shrink-0">
+                      <div className="w-16 h-16 shrink-0">
                         <OnsetImageCard
                           songTitle={productName}
                           songId={item.productId}

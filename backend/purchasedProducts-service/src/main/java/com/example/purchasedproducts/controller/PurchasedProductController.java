@@ -2,9 +2,7 @@ package com.example.purchasedproducts.controller;
 
 import com.example.purchasedproducts.model.PurchasedProduct;
 import com.example.purchasedproducts.service.PurchasedProductService;
-import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 

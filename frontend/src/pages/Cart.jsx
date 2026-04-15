@@ -229,7 +229,7 @@ const Cart = () => {
               <div key={item.id} className="bg-white/5 backdrop-blur-sm rounded-lg p-4 flex gap-4">
                 
                 {/* Product Image Component logic map */}
-                <div className="w-24 h-24 flex-shrink-0">
+                <div className="w-24 h-24 shrink-0">
                   {useOnsetImages ? (
                     <OnsetImageCard
                       songTitle={productName}

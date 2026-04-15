@@ -7,7 +7,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Searchbar, Sidebar, MusicPlayer, TopPlay } from './components';
 
 // Page-level components used in Routing.
-import { ArtistDetails, CustomerScreen, Search, SongDetails, TopCharts, SimilarSongs, MLVisualization, SpectrogramCreator, Login, Register, WishlistPage, MidiExplorer } from './pages';
+import { ArtistDetails, Discover, Search, SongDetails, TopCharts, SimilarSongs, MLVisualization, SpectrogramCreator, Login, Register, WishlistPage, MidiExplorer } from './pages';
 import AlbumDetails from './pages/AlbumDetails';
 import Cart from './pages/Cart';
 import PurchaseHistory from './pages/PurchaseHistory';
@@ -112,12 +112,12 @@ const AuthenticatedApp = () => {
       <div className="flex-1 flex flex-col overflow-hidden relative">
         
         {/* Base blue background container spanning the main content area. */}
-        <div className="absolute inset-0 bg-gradient-to-br from-[#041529] to-[#2970c2]" />
+        <div className="absolute inset-0 bg-linear-to-br from-[#041529] to-[#2970c2]" />
         
         {/* Conditional Quantum Background overlay implementation. */}
         {quantumBg !== 'off' && (
           <div
-            className="absolute inset-0 bg-gradient-to-br from-[#290404] to-[#c22929]"
+            className="absolute inset-0 bg-linear-to-br from-[#290404] to-[#c22929]"
             style={{
               zIndex: 1, // Sits above blue bg, beneath text content.
               // Dynamic inline style applying the CSS keyframe animations defined elsewhere based on state.
@@ -133,7 +133,7 @@ const AuthenticatedApp = () => {
         )}
         
         {/* Main Content scrollable area. If song is playing, reduces height to make room for bottom MusicPlayer bar. */}
-        <div className={`relative z-[2] px-6 flex flex-col lg:flex-row ${(activeSong?.albumTitle) ? 'h-[calc(100vh-7rem)]' : 'h-screen'} overflow-y-auto`}>
+        <div className={`relative z-2 px-6 flex flex-col lg:flex-row ${(activeSong?.albumTitle) ? 'h-[calc(100vh-7rem)]' : 'h-screen'} overflow-y-auto`}>
           
           {/* Main center column containing the Searchbar and the dynamic Route pages. */}
           <div className="flex-1 pb-4">
@@ -141,7 +141,7 @@ const AuthenticatedApp = () => {
 
             {/* React Router standard mapping: matches URL path to the corresponding Component. */}
             <Routes>
-              <Route path="/" element={<CustomerScreen />} />
+              <Route path="/" element={<Discover />} />
               <Route path="/top-charts" element={<TopCharts />} />
               <Route path="/similar-songs" element={<SimilarSongs />} />
               <Route path="/ml-visualization" element={<MLVisualization />} />
@@ -170,7 +170,7 @@ const AuthenticatedApp = () => {
                   {activeSong?.albumTitle ? (
                     <SmartRecommendationVisualizer currentProduct={activeSong} products={musicProducts} sessionId={sessionId} onRecommendationClick={handleRecommendationClick} />
                   ) : (
-                    <div className="bg-gradient-to-br from-gray-900 to-black p-5 rounded-lg border border-gray-800">
+                    <div className="bg-linear-to-br from-gray-900 to-black p-5 rounded-lg border border-gray-800">
                       <p className="text-gray-400 text-center">Play a song to see audio-based recommendations</p>
                     </div>
                   )}
@@ -194,7 +194,7 @@ const AuthenticatedApp = () => {
                   {activeSong?.albumTitle ? (
                     <SmartRecommendationVisualizer currentProduct={activeSong} products={musicProducts} sessionId={sessionId} onRecommendationClick={handleRecommendationClick}/>
                   ) : (
-                    <div className="bg-gradient-to-br from-gray-900 to-black p-5 rounded-lg border border-gray-800">
+                    <div className="bg-linear-to-br from-gray-900 to-black p-5 rounded-lg border border-gray-800">
                       <p className="text-gray-400 text-center">Play a song to see audio-based recommendations</p>
                     </div>
                   )}
@@ -207,7 +207,7 @@ const AuthenticatedApp = () => {
 
       {/* Global Music Player Bar: Appears fixed at the very bottom of the screen if a song is loaded. */}
       {(activeSong?.albumTitle) && (
-        <div className="absolute h-28 bottom-0 left-0 right-0 flex animate-slideup bg-gradient-to-br from-white/10 to-[#cf616a] backdrop-blur-lg block-t-3xl z-50">
+        <div className="absolute h-28 bottom-0 left-0 right-0 flex animate-slideup bg-linear-to-br from-white/10 to-[#cf616a] backdrop-blur-lg block-t-3xl z-50">
           <MusicPlayer />
         </div>
       )}

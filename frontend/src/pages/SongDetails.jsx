@@ -88,7 +88,7 @@ const SimilarSongCard = ({ song, isPlaying, activeSong, onPlay, onPause, rank, p
   const simUseOnsetImages = isVideo && !simIsTeddyEmotion;
   const isLibrarySong = isLibraryContextSong(song);
 
-  // Discount logic matching CustomerScreen SongCard (even IDs get 50% off)
+  // Discount logic matching Discover SongCard (even IDs get 50% off)
   const songPrice = song.price || song.albumPrice || 0;
   const songId = song.trackId || song.id;
   const hasDiscount = isLibrarySong && songId != null && songId % 2 === 0;
@@ -196,7 +196,7 @@ const SimilarSongCard = ({ song, isPlaying, activeSong, onPlay, onPause, rank, p
         )}
 
         {/* Rank badge */}
-        <div className="absolute top-2 left-2 w-7 h-7 bg-gradient-to-br from-cyan-400 to-blue-500 rounded-full flex items-center justify-center text-white font-bold text-xs shadow-lg border-2 border-white/30">
+        <div className="absolute top-2 left-2 w-7 h-7 bg-linear-to-br from-cyan-400 to-blue-500 rounded-full flex items-center justify-center text-white font-bold text-xs shadow-lg border-2 border-white/30">
           {rank}
         </div>
 
@@ -274,7 +274,7 @@ const SimilarSongCard = ({ song, isPlaying, activeSong, onPlay, onPause, rank, p
       {/* Fullscreen video overlay portal */}
       {isVideo && isFullscreen && createPortal(
         <div className="fixed inset-0 bg-black flex flex-col items-center justify-center" style={{ zIndex: 99999 }}>
-          <div className="absolute top-0 left-0 right-0 flex items-center justify-between px-6 py-4 bg-gradient-to-b from-black/80 to-transparent z-10">
+          <div className="absolute top-0 left-0 right-0 flex items-center justify-between px-6 py-4 bg-linear-to-b from-black/80 to-transparent z-10">
             <h3 className="text-white font-semibold text-lg truncate">{song.trackName}</h3>
             <button onClick={() => setIsFullscreen(false)} className="p-2 rounded-full bg-white/10 hover:bg-white/20 transition-all hover:scale-110" title="Minimise video">
               <FiMinimize2 className="w-6 h-6 text-white" />
@@ -913,7 +913,7 @@ const SongDetails = () => {
         </button>
 
         {/* Header Section - Target Song */}
-        <div className="bg-gradient-to-r from-gray-900/80 to-gray-800/50 rounded-xl p-6 border border-gray-700">
+        <div className="bg-linear-to-r from-gray-900/80 to-gray-800/50 rounded-xl p-6 border border-gray-700">
           <div className="flex flex-col md:flex-row gap-1">
             {/* Song Info */}
             <div className="flex-1">
@@ -925,7 +925,7 @@ const SongDetails = () => {
 
             {/* Album Art with Play */}
             <div 
-              className="relative w-48 h-48 flex-shrink-0 mx-auto md:mx-0"
+              className="relative w-48 h-48 shrink-0 mx-auto md:mx-0"
               onMouseEnter={() => setIsHeaderHovered(true)}
               onMouseLeave={() => setIsHeaderHovered(false)}
             >

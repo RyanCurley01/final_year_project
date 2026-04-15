@@ -287,7 +287,7 @@ const MLVisualization = () => {
   ];
 
   return (
-    <div className="flex flex-col p-6 min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-black">
+    <div className="flex flex-col p-6 min-h-screen bg-linear-to-br from-gray-900 via-gray-800 to-black">
       <div className="max-w-6xl mx-auto w-full">
         <h1 className="text-3xl font-bold text-white mb-2">Audio Feature Clusters</h1>
         <p className="text-gray-400 mb-6">2D PCA Projection — Best Scaler: {scaler}</p>

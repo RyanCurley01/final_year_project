@@ -438,14 +438,14 @@ const SmartRecommendationVisualizer = ({
 
   if (!currentProduct) {
     return (
-      <div className="bg-gradient-to-br from-gray-900 to-black p-5 rounded-lg border border-gray-800">
+      <div className="bg-linear-to-br from-gray-900 to-black p-5 rounded-lg border border-gray-800">
         <p className="text-gray-400 text-center">Play a song to see audio-based recommendations</p>
       </div>
     );
   }
 
   return (
-    <div className="bg-gradient-to-br from-gray-900 to-black p-4 rounded-lg border border-gray-800 overflow-x-hidden">
+    <div className="bg-linear-to-br from-gray-900 to-black p-4 rounded-lg border border-gray-800 overflow-x-hidden">
       {/* Header */}
       <div className="mb-3">
         <h5 className="text-sm font-bold text-white mb-1">Smart Audio Recommendations</h5>
@@ -466,7 +466,7 @@ const SmartRecommendationVisualizer = ({
             const useCloudCover = isVideo || (prodIsLibrary && !hasValidImage);
             
             return (
-              <div className="relative w-12 h-16 flex-shrink-0">
+              <div className="relative w-12 h-16 shrink-0">
                 <img 
                   key={useCloudCover ? `cloud-${currentProduct.id}` : (coverMedia || 'no-cover')}
                   src={useCloudCover ? '/cloud-cover.webp' : (coverMedia || placeholders.music)}
@@ -625,7 +625,7 @@ const SmartRecommendationVisualizer = ({
 
                   <div className="flex items-start gap-2">
                     {/* Album Cover */}
-                    <div className="w-12 h-12 rounded-lg overflow-hidden flex-shrink-0 border border-gray-600 group-hover:border-cyan-500 transition-colors">
+                    <div className="w-12 h-12 rounded-lg overflow-hidden shrink-0 border border-gray-600 group-hover:border-cyan-500 transition-colors">
                       <AlbumCover url={displayUrl} title={displayTitle} productId={rec.product_id} />
                     </div>
 
@@ -724,7 +724,7 @@ const AlbumCover = ({ url, title, productId }) => {
   // Library songs or video URLs: show purple/pink gradient music note
   if (!url || url === 'library' || error || (url && /\.(mp4|m4v|mov|webm|wmv|wav|mp3|flac|ogg)(\?|$)/i.test(url))) {
     return (
-      <div className="w-full h-full bg-gradient-to-br from-cyan-600 via-purple-600 to-pink-600 flex items-center justify-center">
+      <div className="w-full h-full bg-linear-to-br from-cyan-600 via-purple-600 to-pink-600 flex items-center justify-center">
         <svg className="w-8 h-8 text-blue-900" fill="currentColor" viewBox="0 0 24 24">
           <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/>
         </svg>
