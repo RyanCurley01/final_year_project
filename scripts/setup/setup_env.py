@@ -38,8 +38,8 @@ def setup_environment():
                     env_vars[key.strip()] = value.strip()
     
     # Set database URL based on environment
-    db_user = os.getenv('DB_USERNAME', 'gamestore_user')
-    db_pass = os.getenv('DB_PASSWORD', 'your_db_password_here')
+    db_user = os.getenv('DB_USERNAME')
+    db_pass = os.getenv('DB_PASSWORD')
     
     if in_devcontainer:
         # Inside devcontainer - always use 'db' service name

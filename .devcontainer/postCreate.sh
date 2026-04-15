@@ -8,9 +8,9 @@ echo "Waiting for MySQL to be ready..."
 max_attempts=30
 attempt=0
 # Try different connection methods for Codespaces and local devcontainer compatibility
-until mysql -h db -u gamestore_user -pgamestore_pass -e "SELECT 1" >/dev/null 2>&1 || \
-      mysql -h localhost -u gamestore_user -pgamestore_pass -e "SELECT 1" >/dev/null 2>&1 || \
-      mysql --protocol=TCP -h 127.0.0.1 -P 3306 -u gamestore_user -pgamestore_pass -e "SELECT 1" >/dev/null 2>&1; do
+until mysql -h db -u "${MYSQL_USER}" -p"${MYSQL_PASSWORD}" -e "SELECT 1" >/dev/null 2>&1 || \
+      mysql -h localhost -u "${MYSQL_USER}" -p"${MYSQL_PASSWORD}" -e "SELECT 1" >/dev/null 2>&1 || \
+      mysql --protocol=TCP -h 127.0.0.1 -P 3306 -u "${MYSQL_USER}" -p"${MYSQL_PASSWORD}" -e "SELECT 1" >/dev/null 2>&1; do
   attempt=$((attempt + 1))
   if [ $attempt -ge $max_attempts ]; then
     echo "MySQL did not become ready in time"
@@ -20,20 +20,19 @@ until mysql -h db -u gamestore_user -pgamestore_pass -e "SELECT 1" >/dev/null 2>
   sleep 2
 done
 
-#if mysql -h localhost -u gamestore_user -pgamestore_pass -e "SELECT 1" >/dev/null 2>&1; then
 # Try db service first, then localhost, then TCP 127.0.0.1
-if mysql -h db -u gamestore_user -pgamestore_pass -e "SELECT 1" >/dev/null 2>&1 || \
-   mysql -h localhost -u gamestore_user -pgamestore_pass -e "SELECT 1" >/dev/null 2>&1 || \
-   mysql --protocol=TCP -h 127.0.0.1 -P 3306 -u gamestore_user -pgamestore_pass -e "SELECT 1" >/dev/null 2>&1; then
+if mysql -h db -u "${MYSQL_USER}" -p"${MYSQL_PASSWORD}" -e "SELECT 1" >/dev/null 2>&1 || \
+   mysql -h localhost -u "${MYSQL_USER}" -p"${MYSQL_PASSWORD}" -e "SELECT 1" >/dev/null 2>&1 || \
+   mysql --protocol=TCP -h 127.0.0.1 -P 3306 -u "${MYSQL_USER}" -p"${MYSQL_PASSWORD}" -e "SELECT 1" >/dev/null 2>&1; then
   echo "MySQL is ready!"
   
   # Run the database initialization script
   echo "Initializing database schema and data..."
   
   # Determine which connection method works
-  if mysql -h db -u root -prootpassword -e "SELECT 1" >/dev/null 2>&1; then
+  if mysql -h db -u root -p"${MYSQL_ROOT_PASSWORD}" -e "SELECT 1" >/dev/null 2>&1; then
     DB_HOST="db"
-  elif mysql -h localhost -u root -prootpassword -e "SELECT 1" >/dev/null 2>&1; then
+  elif mysql -h localhost -u root -p"${MYSQL_ROOT_PASSWORD}" -e "SELECT 1" >/dev/null 2>&1; then
     DB_HOST="localhost"
   else
     DB_HOST="127.0.0.1"
@@ -45,11 +44,11 @@ if mysql -h db -u gamestore_user -pgamestore_pass -e "SELECT 1" >/dev/null 2>&1 
   sed 's/\r$//' /workspaces/final_year_project/init-database.sh | \
     sed -n '/<<-.*EOSQL/,/^EOSQL/p' | \
     sed '1d;$d' | \
-    MYSQL_PWD=rootpassword mysql -h "$DB_HOST" -u root Game_Store_System
+    MYSQL_PWD="${MYSQL_ROOT_PASSWORD}" mysql -h "$DB_HOST" -u root Game_Store_System
   
   echo "Database initialization complete!"
   echo "Verifying database setup..."
-  mysql -h "$DB_HOST" -u gamestore_user -pgamestore_pass -e "USE Game_Store_System; SHOW TABLES;" || true
+  mysql -h "$DB_HOST" -u "${MYSQL_USER}" -p"${MYSQL_PASSWORD}" -e "USE Game_Store_System; SHOW TABLES;" || true
 else
   echo "Warning: Could not connect to MySQL"
 fi

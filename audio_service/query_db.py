@@ -8,8 +8,8 @@ try:
     conn = pymysql.connect(
         host="gamestore_services-db-1",
         port=3306,
-        user=os.getenv("MYSQL_USER", "gamestore_user"),
-        password=os.getenv("MYSQL_PASSWORD", "gamestore_pass"),
+        user=os.getenv("MYSQL_USER"),
+        password=os.getenv("MYSQL_PASSWORD"),
         database=os.getenv("MYSQL_DATABASE", "Game_Store_System"),
         cursorclass=pymysql.cursors.DictCursor
     )
@@ -30,8 +30,8 @@ except Exception as e:
         conn = pymysql.connect(
             host="127.0.0.1",
             port=3306,
-            user=os.getenv("MYSQL_USER", "gamestore_user"),
-            password=os.getenv("MYSQL_PASSWORD", "gamestore_pass"),
+            user=os.getenv("MYSQL_USER"),
+            password=os.getenv("MYSQL_PASSWORD"),
             database=os.getenv("MYSQL_DATABASE", "Game_Store_System"),
             cursorclass=pymysql.cursors.DictCursor
         )

@@ -354,8 +354,8 @@ USE Game_Store_System;
 
 
 
-    -- Grant privileges to gamestore_user
-    GRANT ALL PRIVILEGES ON Game_Store_System.* TO 'gamestore_user'@'%';
+    -- Grant privileges to application user
+    GRANT ALL PRIVILEGES ON Game_Store_System.* TO '${MYSQL_USER}'@'%';
     FLUSH PRIVILEGES;
 EOSQL
 )

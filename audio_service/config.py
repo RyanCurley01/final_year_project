@@ -17,7 +17,7 @@ executor = ThreadPoolExecutor(max_workers=4)
 DB_CONFIG = {
     'host': os.getenv('MYSQL_HOST', os.getenv('DB_HOST', 'host.docker.internal')),
     'port': int(os.getenv('MYSQL_PORT', os.getenv('DB_PORT', '3306'))),
-    'user': os.getenv('MYSQL_USER', os.getenv('DB_USER', 'root')),
+    'user': os.getenv('MYSQL_USER', os.getenv('DB_USER')),
     'password': os.getenv('MYSQL_PASSWORD', os.getenv('MYSQL_ROOT_PASSWORD', os.getenv('DB_PASSWORD'))),
     'database': os.getenv('MYSQL_DATABASE', os.getenv('DB_NAME', 'Game_Store_System')),
     'charset': 'utf8mb4',

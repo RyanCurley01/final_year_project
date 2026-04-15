@@ -3,24 +3,20 @@
 Configure CORS policy for S3 bucket to allow frontend access
 """
 import boto3
-import yaml
 import json
+import os
 from pathlib import Path
+from dotenv import load_dotenv
 
-# Configuration
-BACKEND_CONFIG_PATH = Path(__file__).parent.parent / "backend" / "products-service" / "src" / "main" / "resources" / "application.yml"
+load_dotenv()
 
 def load_aws_config():
-    """Load AWS configuration from application.yml"""
-    with open(BACKEND_CONFIG_PATH, 'r') as f:
-        config = yaml.safe_load(f)
-    
-    aws = config['aws']
+    """Load AWS configuration from environment variables"""
     return {
-        'bucket_name': aws['s3']['bucket-name'],
-        'region': aws['region'],
-        'access_key_id': aws['access-key-id'],
-        'secret_access_key': aws['secret-access-key']
+        'bucket_name': os.getenv('AWS_S3_BUCKET_NAME', 'game-and-music-files'),
+        'region': os.getenv('AWS_REGION', 'eu-west-1'),
+        'access_key_id': os.getenv('AWS_ACCESS_KEY_ID'),
+        'secret_access_key': os.getenv('AWS_SECRET_ACCESS_KEY')
     }
 
 def configure_cors():

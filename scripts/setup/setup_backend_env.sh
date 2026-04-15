@@ -44,11 +44,11 @@ if [ "$CODESPACES" = "true" ] && [ -n "$CODESPACE_NAME" ] && [ -n "$GITHUB_CODES
 # Database Configuration
 DB_HOST=$DB_HOST
 DB_URL=$DB_URL
-DB_USERNAME=gamestore_user
-DB_PASSWORD=gamestore_pass
+DB_USERNAME=\${DB_USERNAME}
+DB_PASSWORD=\${DB_PASSWORD}
 
 # Service URLs
-ACCOUNTS_SERVICE_URL=https://${CODESPACE_NAME}-8080.${GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN}
+ACCOUNTS_SERVICE_URL=https://\${CODESPACE_NAME}-8080.\${GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN}
 PRODUCTS_SERVICE_URL=https://${CODESPACE_NAME}-8081.${GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN}
 ORDERS_SERVICE_URL=https://${CODESPACE_NAME}-8082.${GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN}
 PAYMENTS_SERVICE_URL=https://${CODESPACE_NAME}-8083.${GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN}
@@ -75,8 +75,8 @@ spring:
   
   datasource:
     url: \${DB_URL:$DB_URL}
-    username: \${DB_USERNAME:gamestore_user}
-    password: \${DB_PASSWORD:gamestore_pass}
+    username: \${DB_USERNAME}
+    password: \${DB_PASSWORD}
     driver-class-name: com.mysql.cj.jdbc.Driver
   
   jpa:
@@ -126,8 +126,8 @@ else
 # Database Configuration
 DB_HOST=$DB_HOST
 DB_URL=$DB_URL
-DB_USERNAME=${DB_USERNAME:-REPLACE_WITH_YOUR_DB_USERNAME}
-DB_PASSWORD=${DB_PASSWORD:-REPLACE_WITH_YOUR_DB_PASSWORD}
+DB_USERNAME=${DB_USERNAME}
+DB_PASSWORD=${DB_PASSWORD}
 
 # Service URLs
 ACCOUNTS_SERVICE_URL=http://localhost:8080
@@ -157,8 +157,8 @@ spring:
   
   datasource:
     url: \${DB_URL:$DB_URL}
-    username: \${DB_USERNAME:gamestore_user}
-    password: \${DB_PASSWORD:gamestore_pass}
+    username: \${DB_USERNAME}
+    password: \${DB_PASSWORD}
     driver-class-name: com.mysql.cj.jdbc.Driver
   
   jpa:

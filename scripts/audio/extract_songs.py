@@ -32,7 +32,7 @@ STOCK_QUANTITY = 200
 # Database configuration
 DB_CONFIG = {
     'host': os.getenv('MYSQL_HOST', 'localhost'),
-    'user': os.getenv('MYSQL_USER', 'root'),
+    'user': os.getenv('MYSQL_USER'),
     'password': os.getenv('MYSQL_ROOT_PASSWORD', os.getenv('DB_PASSWORD')),
     'database': os.getenv('MYSQL_DATABASE', 'Game_Store_System')
 }
@@ -296,7 +296,7 @@ def main():
             print(f"   You can manually run: mysql ... < {sql_file}")
     else:
         print(f"\n📝 Songs not inserted. You can manually run:")
-        print(f"   mysql -h localhost -u root -prootpassword Game_Store_System < {sql_file}")
+        print(f"   mysql -h localhost -u root -p\"$MYSQL_ROOT_PASSWORD\" Game_Store_System < {sql_file}")
     
     print("\n✅ Done!")
 

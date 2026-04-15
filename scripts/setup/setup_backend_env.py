@@ -70,8 +70,8 @@ def create_backend_env_file(is_codespaces, codespace_name, github_domain):
         env_vars['STOCK_SERVICE_URL'] = 'http://localhost:8084'
     
     # Common configuration - Get from environment or use placeholders
-    env_vars['DB_USERNAME'] = os.getenv('DB_USERNAME', 'REPLACE_WITH_YOUR_DB_USERNAME')
-    env_vars['DB_PASSWORD'] = os.getenv('DB_PASSWORD', 'REPLACE_WITH_YOUR_DB_PASSWORD')
+    env_vars['DB_USERNAME'] = os.getenv('DB_USERNAME')
+    env_vars['DB_PASSWORD'] = os.getenv('DB_PASSWORD')
     
     # Write .env file
     with open('.env', 'w') as f:
@@ -157,8 +157,8 @@ def update_application_yml(file_path, is_codespaces, codespace_name, github_doma
     
     config['spring']['datasource'].update({
         'url': db_url,
-        'username': os.getenv('DB_USERNAME', 'gamestore_user'),
-        'password': os.getenv('DB_PASSWORD', 'your_password_here'),
+        'username': os.getenv('DB_USERNAME'),
+        'password': os.getenv('DB_PASSWORD'),
         'driver-class-name': 'com.mysql.cj.jdbc.Driver'
     })
     
