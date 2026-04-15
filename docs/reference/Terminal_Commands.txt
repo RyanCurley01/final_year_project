@@ -194,10 +194,10 @@ Recreates payments service container with new env values
 docker compose -f docker-compose.services.yml -p gamestore_services up -d --force-recreate payments-service
 
 To import railway database into local docker database. 
-docker exec gamestore_services-db-1 mysqldump -h <RAILWAY_HOST> -P <RAILWAY_PORT> -u root -p"$RAILWAY_DB_PASSWORD" --single-transaction railway | docker exec -i gamestore_services-db-1 mysql -u root -p"$MYSQL_ROOT_PASSWORD" Game_Store_System
+docker exec gamestore_services-db-1 mysqldump -h "$RAILWAY_DB_HOST" -P "$RAILWAY_DB_PORT" -u root -p"$RAILWAY_DB_PASSWORD" --single-transaction railway | docker exec -i gamestore_services-db-1 mysql -u root -p"$MYSQL_ROOT_PASSWORD" Game_Store_System
 
 To setup env variables in git bash from VS Code so they are persisted
-~/.bash_profile
+nano ~/.bash_profile
 
 Loads env variables in git bash from VS Code so they are persisted
 source ~/.bash_profile
