@@ -40,11 +40,11 @@ Create a `.env` file with:
 ```
 MYSQL_HOST=host.docker.internal
 MYSQL_PORT=3306
-MYSQL_USER=root
-MYSQL_PASSWORD=<your_password_here>
+MYSQL_USER=
+MYSQL_PASSWORD=
 MYSQL_DATABASE=Game_Store_System
-AWS_ACCESS_KEY_ID=<your_access_key>
-AWS_SECRET_ACCESS_KEY=<your_secret_key>
+AWS_ACCESS_KEY_ID=
+AWS_SECRET_ACCESS_KEY=
 AWS_REGION=eu-west-1
 AWS_S3_BUCKET_NAME=game-and-music-files
 ```
