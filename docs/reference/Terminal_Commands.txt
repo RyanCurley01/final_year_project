@@ -11,7 +11,7 @@ To kill a port
 lsof -i :8086 2>/dev/null | grep -v COMMAND | awk '{print $2}' | xargs kill -9 2>/dev/null && echo "✓ Killed port 8086" || echo "Port 8086 is already free"
 
 Runs MySql queries in the terminal with a remote host
-mysql --protocol=TCP -h db -P 3306 -u root -pYOUR_PASSWORD Game_Store_System -e "SELECT * FROM Accounts;"
+mysql --protocol=TCP -h db -P 3306 -u root -p"$MYSQL_ROOT_PASSWORD" Game_Store_System -e "SELECT * FROM Accounts;"
 
 install all dependencies first, then run the dev server
 npm install 
@@ -88,7 +88,7 @@ docker volume rm gamestore_services_mysql-data
 sleep 30
 
 # Verify it worked
-docker exec gamestore_services-db-1 mysql -u root -pYOUR_PASSWORD Game_Store_System -e "SHOW TABLES;"
+docker exec gamestore_services-db-1 mysql -u root -p"$MYSQL_ROOT_PASSWORD" Game_Store_System -e "SHOW TABLES;"
 
 # song features extraction and database insert
 python3 extract_audio_features.py --sql-only --output audio_features_insert.sql
@@ -100,28 +100,28 @@ python3 extract_audio_features.py --sql-only --output audio_features_insert.sql
 docker exec gamestore_services-db-1 mysql -u root -p"$MYSQL_ROOT_PASSWORD" Game_Store_System --table -e "SELECT * FROM Accounts;" | column -t -s $'\t'
 
 # Option 2: Use less -S for horizontal scrolling on wide tables (recommended for many columns)
-docker exec gamestore_services-db-1 mysql -u root -pYOUR_PASSWORD Game_Store_System --table -e "SELECT * FROM Accounts;" | less -S
+docker exec gamestore_services-db-1 mysql -u root -p"$MYSQL_ROOT_PASSWORD" Game_Store_System --table -e "SELECT * FROM Accounts;" | less -S
 
 # Option 3: Format with specific columns for better control
-docker exec gamestore_services-db-1 mysql -u root -pYOUR_PASSWORD Game_Store_System --table -e "SELECT AccountID, AccountName, AccountEmail FROM Accounts;"
+docker exec gamestore_services-db-1 mysql -u root -p"$MYSQL_ROOT_PASSWORD" Game_Store_System --table -e "SELECT AccountID, AccountName, AccountEmail FROM Accounts;"
 
 # Option 4: Pretty print with vertical bars (best for narrow terminals)
-docker exec gamestore_services-db-1 mysql -u root -pYOUR_PASSWORD Game_Store_System -e "SELECT * FROM Accounts;" | sed 's/\t/  |  /g'
+docker exec gamestore_services-db-1 mysql -u root -p"$MYSQL_ROOT_PASSWORD" Game_Store_System -e "SELECT * FROM Accounts;" | sed 's/\t/  |  /g'
 
 # Show tables with better formatting
-docker exec gamestore_services-db-1 mysql -u root -pYOUR_PASSWORD Game_Store_System --table -e "SHOW TABLES;"
+docker exec gamestore_services-db-1 mysql -u root -p"$MYSQL_ROOT_PASSWORD" Game_Store_System --table -e "SHOW TABLES;"
 
 # Query Order_Items table (shows which products are in each order)
-docker exec gamestore_services-db-1 mysql -u root -pYOUR_PASSWORD Game_Store_System --table -e "SELECT * FROM Order_Items;"
+docker exec gamestore_services-db-1 mysql -u root -p"$MYSQL_ROOT_PASSWORD" Game_Store_System --table -e "SELECT * FROM Order_Items;"
 
 # Query Order_Items with joined product info
-docker exec gamestore_services-db-1 mysql -u root -pYOUR_PASSWORD Game_Store_System --table -e "SELECT oi.*, p.GameTitle, p.AlbumTitle FROM Order_Items oi LEFT JOIN Products p ON oi.ProductID = p.ProductID;"
+docker exec gamestore_services-db-1 mysql -u root -p"$MYSQL_ROOT_PASSWORD" Game_Store_System --table -e "SELECT oi.*, p.GameTitle, p.AlbumTitle FROM Order_Items oi LEFT JOIN Products p ON oi.ProductID = p.ProductID;"
 
 # Query Payments with Order_Items relationship
-docker exec gamestore_services-db-1 mysql -u root -pYOUR_PASSWORD Game_Store_System --table -e "SELECT p.PaymentID, p.OrderID, p.PaymentAmount, p.PaymentStatus, COUNT(oi.OrderItemID) as ItemCount FROM Payments p LEFT JOIN Order_Items oi ON p.OrderID = oi.OrderID GROUP BY p.PaymentID;"
+docker exec gamestore_services-db-1 mysql -u root -p"$MYSQL_ROOT_PASSWORD" Game_Store_System --table -e "SELECT p.PaymentID, p.OrderID, p.PaymentAmount, p.PaymentStatus, COUNT(oi.OrderItemID) as ItemCount FROM Payments p LEFT JOIN Order_Items oi ON p.OrderID = oi.OrderID GROUP BY p.PaymentID;"
 
 # Interactive mode for best experience (allows scrolling and formatting)
-docker exec -it gamestore_services-db-1 mysql -u root -pYOUR_PASSWORD Game_Store_System
+docker exec -it gamestore_services-db-1 mysql -u root -p"$MYSQL_ROOT_PASSWORD" Game_Store_System
 
 # Tips:
 # - In less: Use arrow keys to scroll, 'q' to quit, Left/Right for horizontal scroll
@@ -195,3 +195,15 @@ docker compose -f docker-compose.services.yml -p gamestore_services up -d --forc
 
 To import railway database into local docker database. 
 docker exec gamestore_services-db-1 mysqldump -h <RAILWAY_HOST> -P <RAILWAY_PORT> -u root -p"$RAILWAY_DB_PASSWORD" --single-transaction railway | docker exec -i gamestore_services-db-1 mysql -u root -p"$MYSQL_ROOT_PASSWORD" Game_Store_System
+
+To setup env variables in git bash from VS Code so they are persisted
+~/.bash_profile
+
+Loads env variables in git bash from VS Code so they are persisted
+source ~/.bash_profile
+
+To test the sync between AWS and local database image pools together and remove overflowing ones
+$ AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" python scripts/s3/sync_image_pools.py --target-size 80
+
+To apply the sync between AWS and local database image pools together and remove overflowing ones
+$ AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" python scripts/s3/sync_image_pools.py --target-size 80
