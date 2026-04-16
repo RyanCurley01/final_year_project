@@ -73,7 +73,7 @@ jacocoTestReport {
 		classDirectories.setFrom(files(classDirectories.files.collect {
 			fileTree(dir: it, exclude: [
 				'**/config/**',           // Exclude configuration classes
-				'**/Application.class',    // Exclude main application class
+				'**/*Application.class',    // Exclude main application class
 				'**/model/**',            // Exclude entity/model classes
 				'**/dto/**'               // Exclude DTOs if any
 			])
@@ -82,13 +82,24 @@ jacocoTestReport {
 }
 
 jacocoTestCoverageVerification {
+	afterEvaluate {
+		classDirectories.setFrom(files(classDirectories.files.collect {
+			fileTree(dir: it, exclude: [
+				'**/config/**',
+				'**/*Application.class',
+				'**/model/**',
+				'**/dto/**'
+			])
+		}))
+	}
+
 	violationRules {
 		rule {
 			limit {
 				minimum = 0.70 // Require 70% coverage
 			}
 		}
-		
+
 		rule {
 			element = 'CLASS'
 			limit {
@@ -103,6 +114,6 @@ jacocoTestCoverageVerification {
 			]
 		}
 	}
-}
+	}
 
 check.dependsOn jacocoTestCoverageVerification

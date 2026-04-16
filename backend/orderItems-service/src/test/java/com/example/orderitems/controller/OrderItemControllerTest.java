@@ -88,6 +88,18 @@ class OrderItemControllerTest {
     }
 
     @Test
+    @DisplayName("GET /api/order-items/order/{orderId} - Should return items by orderId path")
+    void testGetOrderItemsByOrderIdPath() throws Exception {
+        List<OrderItem> items = Arrays.asList(testOrderItem);
+        when(orderItemService.getOrderItemsByOrderId(1L)).thenReturn(items);
+
+        mockMvc.perform(get("/api/order-items/order/1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(1)))
+                .andExpect(jsonPath("$[0].orderId", is(1)));
+    }
+
+    @Test
     @DisplayName("GET /api/order-items/{id} - Should return order item by id")
     void testGetOrderItemById() throws Exception {
         when(orderItemService.getOrderItemById(1L)).thenReturn(Optional.of(testOrderItem));

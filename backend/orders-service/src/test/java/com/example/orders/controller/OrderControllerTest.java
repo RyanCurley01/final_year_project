@@ -179,4 +179,19 @@ class OrderControllerTest {
                 .content(objectMapper.writeValueAsString(updateDetails)))
                 .andExpect(status().isNotFound());
     }
+
+    @Test
+    @DisplayName("GET /api/orders/account/{accountId} - Should return orders by account id")
+    void testGetOrdersByAccountId() throws Exception {
+        // ARRANGE
+        List<Order> orders = Arrays.asList(testOrder);
+        when(orderService.getOrdersByCustomerId(4L)).thenReturn(orders);
+
+        // ACT & ASSERT
+        mockMvc.perform(get("/api/orders/account/4")
+                .contentType(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(1)))
+                .andExpect(jsonPath("$[0].accountId", is(4)));
+    }
 }

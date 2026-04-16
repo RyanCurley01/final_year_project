@@ -133,6 +133,25 @@ class OrderServiceTest {
     }
 
     @Test
+    @DisplayName("updateOrder - Should update only orderDate when other fields null")
+    void testUpdateOrderPartialOrderDate() {
+        // ARRANGE
+        Order updateDetails = new Order();
+        LocalDateTime newDate = LocalDateTime.of(2026, 5, 1, 12, 0);
+        updateDetails.setOrderDate(newDate);
+
+        when(orderRepository.findById(1L)).thenReturn(Optional.of(testOrder));
+        when(orderRepository.save(any(Order.class))).thenReturn(testOrder);
+
+        // ACT
+        Order result = orderService.updateOrder(1L, updateDetails);
+
+        // ASSERT
+        assertThat(result.getOrderDate()).isEqualTo(newDate);
+        verify(orderRepository).save(testOrder);
+    }
+
+    @Test
     @DisplayName("deleteOrder - Should delete existing order")
     void testDeleteOrder() {
         // ARRANGE

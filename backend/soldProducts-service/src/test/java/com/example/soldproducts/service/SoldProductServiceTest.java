@@ -14,6 +14,8 @@ import java.util.Arrays;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -67,5 +69,36 @@ class SoldProductServiceTest {
         when(soldProductRepository.findByProductId(5L)).thenReturn(Arrays.asList(testSoldProduct));
 
         assertThat(soldProductService.getSoldProductsByProductId(5L)).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("createSoldProduct - Should save and return sold product")
+    void testCreateSoldProduct() {
+        when(soldProductRepository.save(any(SoldProduct.class))).thenReturn(testSoldProduct);
+
+        SoldProduct result = soldProductService.createSoldProduct(testSoldProduct);
+
+        assertThat(result).isNotNull();
+        assertThat(result.getId()).isEqualTo(1L);
+        verify(soldProductRepository).save(testSoldProduct);
+    }
+
+    @Test
+    @DisplayName("deleteSoldProduct - Should delete when exists")
+    void testDeleteSoldProduct() {
+        when(soldProductRepository.existsById(1L)).thenReturn(true);
+
+        soldProductService.deleteSoldProduct(1L);
+
+        verify(soldProductRepository).deleteById(1L);
+    }
+
+    @Test
+    @DisplayName("deleteSoldProduct - Should throw when not found")
+    void testDeleteSoldProductNotFound() {
+        when(soldProductRepository.existsById(99L)).thenReturn(false);
+
+        assertThatThrownBy(() -> soldProductService.deleteSoldProduct(99L))
+                .isInstanceOf(IllegalArgumentException.class);
     }
 }

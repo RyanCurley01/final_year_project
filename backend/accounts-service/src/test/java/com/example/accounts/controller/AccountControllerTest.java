@@ -6,9 +6,15 @@ import com.example.accounts.dto.LoginResponse;
 import com.example.accounts.model.Account;
 import com.example.accounts.service.AccountService;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.google.firebase.ErrorCode;
+import com.google.firebase.FirebaseApp;
+import com.google.firebase.auth.FirebaseAuth;
+import com.google.firebase.auth.FirebaseAuthException;
+import com.google.firebase.auth.FirebaseToken;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.DisplayName;
+import org.mockito.MockedStatic;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -17,7 +23,10 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.hamcrest.Matchers.hasSize;
@@ -259,11 +268,210 @@ class AccountControllerTest {
                 .thenReturn(loginResponse);
 
         // ACT & ASSERT
+        // Controller always returns 200 OK with success=false in body for failed login
         mockMvc.perform(post("/api/accounts/login")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(loginRequest)))
-                .andExpect(status().isUnauthorized())
+                .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success", is(false)))
                 .andExpect(jsonPath("$.message", is("Invalid password")));
+    }
+
+    @Test
+    @DisplayName("POST /api/accounts/firebase-login - Should return 400 when token is missing")
+    void testFirebaseLoginMissingToken() throws Exception {
+        Map<String, String> payload = new HashMap<>();
+        payload.put("email", "test@example.com");
+
+        mockMvc.perform(post("/api/accounts/firebase-login")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(payload)))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @DisplayName("POST /api/accounts/firebase-login - Should return 400 when token is empty")
+    void testFirebaseLoginEmptyToken() throws Exception {
+        Map<String, String> payload = new HashMap<>();
+        payload.put("token", "");
+
+        mockMvc.perform(post("/api/accounts/firebase-login")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(payload)))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @DisplayName("POST /api/accounts/firebase-login - Should use fallback when Firebase SDK not initialized")
+    void testFirebaseLoginFallback() throws Exception {
+        Map<String, String> payload = new HashMap<>();
+        payload.put("token", "some-token");
+        payload.put("uid", "firebase-uid-123");
+        payload.put("email", "test@example.com");
+        payload.put("name", "Test User");
+        payload.put("phoneNumber", "1234567890");
+        payload.put("password", "password123");
+
+        Account account = new Account();
+        account.setId(1L);
+        account.setFirebaseUid("firebase-uid-123");
+        account.setAccountEmailAddress("test@example.com");
+        account.setAccountName("Test User");
+        account.setAccountPhoneNumber("1234567890");
+        account.setAccountType("Customer");
+
+        when(accountService.registerFirebaseUser("firebase-uid-123", "test@example.com", "Test User", "1234567890", "password123"))
+                .thenReturn(account);
+
+        try (MockedStatic<FirebaseApp> firebaseAppMock = mockStatic(FirebaseApp.class)) {
+            firebaseAppMock.when(FirebaseApp::getApps).thenReturn(Collections.emptyList());
+
+            mockMvc.perform(post("/api/accounts/firebase-login")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(objectMapper.writeValueAsString(payload)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.id", is(1)))
+                    .andExpect(jsonPath("$.accountEmailAddress", is("test@example.com")));
+        }
+    }
+
+    @Test
+    @DisplayName("POST /api/accounts/firebase-login - Should return 400 when fallback uid/email missing")
+    void testFirebaseLoginFallbackMissingUid() throws Exception {
+        Map<String, String> payload = new HashMap<>();
+        payload.put("token", "some-token");
+        payload.put("name", "Test User");
+
+        try (MockedStatic<FirebaseApp> firebaseAppMock = mockStatic(FirebaseApp.class)) {
+            firebaseAppMock.when(FirebaseApp::getApps).thenReturn(Collections.emptyList());
+
+            mockMvc.perform(post("/api/accounts/firebase-login")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(objectMapper.writeValueAsString(payload)))
+                    .andExpect(status().isBadRequest());
+        }
+    }
+
+    @Test
+    @DisplayName("POST /api/accounts/firebase-login - Should return 500 on unexpected exception")
+    void testFirebaseLoginInternalError() throws Exception {
+        Map<String, String> payload = new HashMap<>();
+        payload.put("token", "some-token");
+        payload.put("uid", "firebase-uid-123");
+        payload.put("email", "test@example.com");
+        payload.put("name", "Test User");
+
+        when(accountService.registerFirebaseUser(any(), any(), any(), any(), any()))
+                .thenThrow(new RuntimeException("Unexpected error"));
+
+        try (MockedStatic<FirebaseApp> firebaseAppMock = mockStatic(FirebaseApp.class)) {
+            firebaseAppMock.when(FirebaseApp::getApps).thenReturn(Collections.emptyList());
+
+            mockMvc.perform(post("/api/accounts/firebase-login")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(objectMapper.writeValueAsString(payload)))
+                    .andExpect(status().isInternalServerError());
+        }
+    }
+
+    @Test
+    @DisplayName("POST /api/accounts/firebase-login - Should verify token when Firebase SDK initialized")
+    void testFirebaseLoginWithSdkInitialized() throws Exception {
+        Map<String, String> payload = new HashMap<>();
+        payload.put("token", "valid-firebase-token");
+        payload.put("name", "Payload Name");
+        payload.put("phoneNumber", "5551234");
+        payload.put("password", "pass123");
+
+        Account account = new Account();
+        account.setId(2L);
+        account.setFirebaseUid("decoded-uid-123");
+        account.setAccountEmailAddress("decoded@example.com");
+        account.setAccountName("Payload Name");
+        account.setAccountPhoneNumber("5551234");
+        account.setAccountType("Customer");
+
+        FirebaseToken mockToken = mock(FirebaseToken.class);
+        when(mockToken.getUid()).thenReturn("decoded-uid-123");
+        when(mockToken.getEmail()).thenReturn("decoded@example.com");
+        when(mockToken.getName()).thenReturn("Decoded Name");
+
+        FirebaseAuth mockAuth = mock(FirebaseAuth.class);
+        when(mockAuth.verifyIdToken("valid-firebase-token")).thenReturn(mockToken);
+
+        when(accountService.registerFirebaseUser("decoded-uid-123", "decoded@example.com", "Payload Name", "5551234", "pass123"))
+                .thenReturn(account);
+
+        try (MockedStatic<FirebaseApp> firebaseAppMock = mockStatic(FirebaseApp.class);
+             MockedStatic<FirebaseAuth> firebaseAuthMock = mockStatic(FirebaseAuth.class)) {
+            firebaseAppMock.when(FirebaseApp::getApps).thenReturn(List.of(mock(FirebaseApp.class)));
+            firebaseAuthMock.when(FirebaseAuth::getInstance).thenReturn(mockAuth);
+
+            mockMvc.perform(post("/api/accounts/firebase-login")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(objectMapper.writeValueAsString(payload)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.id", is(2)))
+                    .andExpect(jsonPath("$.accountEmailAddress", is("decoded@example.com")));
+        }
+    }
+
+    @Test
+    @DisplayName("POST /api/accounts/firebase-login - Should use decoded name when payload name is empty")
+    void testFirebaseLoginWithSdkNoPayloadName() throws Exception {
+        Map<String, String> payload = new HashMap<>();
+        payload.put("token", "valid-firebase-token");
+
+        Account account = new Account();
+        account.setId(3L);
+        account.setFirebaseUid("uid-456");
+        account.setAccountEmailAddress("user@example.com");
+        account.setAccountName("Decoded Name");
+        account.setAccountType("Customer");
+
+        FirebaseToken mockToken = mock(FirebaseToken.class);
+        when(mockToken.getUid()).thenReturn("uid-456");
+        when(mockToken.getEmail()).thenReturn("user@example.com");
+        when(mockToken.getName()).thenReturn("Decoded Name");
+
+        FirebaseAuth mockAuth = mock(FirebaseAuth.class);
+        when(mockAuth.verifyIdToken("valid-firebase-token")).thenReturn(mockToken);
+
+        when(accountService.registerFirebaseUser("uid-456", "user@example.com", "Decoded Name", null, null))
+                .thenReturn(account);
+
+        try (MockedStatic<FirebaseApp> firebaseAppMock = mockStatic(FirebaseApp.class);
+             MockedStatic<FirebaseAuth> firebaseAuthMock = mockStatic(FirebaseAuth.class)) {
+            firebaseAppMock.when(FirebaseApp::getApps).thenReturn(List.of(mock(FirebaseApp.class)));
+            firebaseAuthMock.when(FirebaseAuth::getInstance).thenReturn(mockAuth);
+
+            mockMvc.perform(post("/api/accounts/firebase-login")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(objectMapper.writeValueAsString(payload)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.accountName", is("Decoded Name")));
+        }
+    }
+
+    @Test
+    @DisplayName("POST /api/accounts/firebase-login - Should return 401 on FirebaseAuthException")
+    void testFirebaseLoginAuthException() throws Exception {
+        Map<String, String> payload = new HashMap<>();
+        payload.put("token", "invalid-token");
+
+        FirebaseAuth mockAuth = mock(FirebaseAuth.class);
+        when(mockAuth.verifyIdToken("invalid-token")).thenThrow(
+                new FirebaseAuthException(ErrorCode.UNAUTHENTICATED, "Token has expired", null, null, null));
+
+        try (MockedStatic<FirebaseApp> firebaseAppMock = mockStatic(FirebaseApp.class);
+             MockedStatic<FirebaseAuth> firebaseAuthMock = mockStatic(FirebaseAuth.class)) {
+            firebaseAppMock.when(FirebaseApp::getApps).thenReturn(List.of(mock(FirebaseApp.class)));
+            firebaseAuthMock.when(FirebaseAuth::getInstance).thenReturn(mockAuth);
+
+            mockMvc.perform(post("/api/accounts/firebase-login")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(objectMapper.writeValueAsString(payload)))
+                    .andExpect(status().isUnauthorized());
+        }
     }
 }

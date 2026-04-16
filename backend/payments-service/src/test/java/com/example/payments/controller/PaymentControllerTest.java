@@ -25,6 +25,8 @@ import java.util.Optional;
 
 import static org.hamcrest.Matchers.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
@@ -273,7 +275,7 @@ class PaymentControllerTest {
         List<LinkDescription> links = Arrays.asList(selfLink);
         when(mockOrder.links()).thenReturn(links);
 
-        when(paymentService.capturePayPalOrder("PAYPAL-ORDER-123")).thenReturn(mockOrder);
+        when(paymentService.capturePayPalOrder(eq("PAYPAL-ORDER-123"), isNull(), isNull(), isNull())).thenReturn(mockOrder);
 
         mockMvc.perform(post("/api/payments/paypal/capture-order/PAYPAL-ORDER-123"))
                 .andExpect(status().isOk())
@@ -282,13 +284,13 @@ class PaymentControllerTest {
                 .andExpect(jsonPath("$.links", hasSize(1)))
                 .andExpect(jsonPath("$.links[0].rel", is("self")));
 
-        verify(paymentService).capturePayPalOrder("PAYPAL-ORDER-123");
+        verify(paymentService).capturePayPalOrder(eq("PAYPAL-ORDER-123"), isNull(), isNull(), isNull());
     }
 
     @Test
     @DisplayName("POST /api/payments/paypal/capture-order/{orderId} - Should handle capture error")
     void testCapturePayPalOrderError() throws Exception {
-        when(paymentService.capturePayPalOrder("INVALID-ORDER"))
+        when(paymentService.capturePayPalOrder(eq("INVALID-ORDER"), isNull(), isNull(), isNull()))
                 .thenThrow(new IOException("Order not found"));
 
         mockMvc.perform(post("/api/payments/paypal/capture-order/INVALID-ORDER"))
@@ -403,7 +405,7 @@ class PaymentControllerTest {
         when(mockOrder.status()).thenReturn("COMPLETED");
         when(mockOrder.links()).thenReturn(Arrays.asList());
 
-        when(paymentService.capturePayPalOrder("PAYPAL-ORDER-789")).thenReturn(mockOrder);
+        when(paymentService.capturePayPalOrder(eq("PAYPAL-ORDER-789"), isNull(), isNull(), isNull())).thenReturn(mockOrder);
 
         mockMvc.perform(post("/api/payments/paypal/capture-order/PAYPAL-ORDER-789"))
                 .andExpect(status().isOk())

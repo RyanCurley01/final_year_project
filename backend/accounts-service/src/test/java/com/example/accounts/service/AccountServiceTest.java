@@ -19,7 +19,6 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
 
 /**
@@ -282,6 +281,25 @@ class AccountServiceTest {
     }
 
     @Test
+    @DisplayName("Should update email and account type")
+    void testUpdateAccountEmailAndType() {
+        // ARRANGE
+        Account updates = new Account();
+        updates.setAccountEmailAddress("newemail@example.com");
+        updates.setAccountType("SELLER");
+
+        when(accountRepository.findById(1L)).thenReturn(Optional.of(testAccount));
+        when(accountRepository.save(any(Account.class))).thenReturn(testAccount);
+
+        // ACT
+        Account result = accountService.updateAccount(1L, updates);
+
+        // ASSERT
+        assertNotNull(result);
+        verify(accountRepository).save(any(Account.class));
+    }
+
+    @Test
     @DisplayName("Should throw exception when updating non-existent account")
     void testUpdateAccountNotFound() {
         // ARRANGE
@@ -391,4 +409,96 @@ class AccountServiceTest {
         assertEquals("Invalid password", result.getMessage());
         assertNull(result.getAccountId());
     }
-}
+
+    @Test
+    @DisplayName("Should return FIREBASE_ACCOUNT when password wrong on Firebase-linked account")
+    void testAuthenticateUserFirebaseAccount() {
+        // ARRANGE - set a real Firebase UID (length >= 20, not starting with "uid_")
+        testAccount.setFirebaseUid("abcdefghijklmnopqrstuvwxyz1234");
+        when(accountRepository.findByAccountEmailAddress("john@example.com"))
+                .thenReturn(Optional.of(testAccount));
+        when(passwordEncoder.matches("wrongPassword", "hashedPassword")).thenReturn(false);
+
+        // ACT
+        LoginResponse result = accountService.authenticateUser("john@example.com", "wrongPassword");
+
+        // ASSERT
+        assertFalse(result.isSuccess());
+        assertEquals("FIREBASE_ACCOUNT", result.getMessage());
+    }
+
+    @Test
+    @DisplayName("Should return existing account when firebase UID exists")
+    void testRegisterFirebaseUserExistingUid() {
+        // ARRANGE
+        testAccount.setFirebaseUid("firebase-uid-123");
+        when(accountRepository.findByFirebaseUid("firebase-uid-123")).thenReturn(Optional.of(testAccount));
+
+        // ACT
+        Account result = accountService.registerFirebaseUser("firebase-uid-123", "test@example.com", "Test", null, null);
+
+        // ASSERT
+        assertEquals(testAccount.getId(), result.getId());
+        verify(accountRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("Should link firebase UID to existing email account")
+    void testRegisterFirebaseUserExistingEmail() {
+        // ARRANGE
+        when(accountRepository.findByFirebaseUid("firebase-uid-456")).thenReturn(Optional.empty());
+        when(accountRepository.findByAccountEmailAddress("john@example.com")).thenReturn(Optional.of(testAccount));
+        when(accountRepository.save(any(Account.class))).thenReturn(testAccount);
+
+        // ACT
+        accountService.registerFirebaseUser("firebase-uid-456", "john@example.com", "John", null, null);
+
+        // ASSERT
+        verify(accountRepository).save(testAccount);
+        assertEquals("firebase-uid-456", testAccount.getFirebaseUid());
+    }
+
+    @Test
+    @DisplayName("Should create new account for new firebase user")
+    void testRegisterFirebaseUserNewAccount() {
+        // ARRANGE
+        when(accountRepository.findByFirebaseUid("firebase-uid-789")).thenReturn(Optional.empty());
+        when(accountRepository.findByAccountEmailAddress("new@example.com")).thenReturn(Optional.empty());
+        when(passwordEncoder.encode(any(String.class))).thenReturn("encodedPassword");
+        when(accountRepository.save(any(Account.class))).thenAnswer(invocation -> {
+            Account a = invocation.getArgument(0);
+            a.setId(2L);
+            return a;
+        });
+
+        // ACT
+        Account result = accountService.registerFirebaseUser("firebase-uid-789", "new@example.com", "New User", "555-1234", "mypassword");
+
+        // ASSERT
+        assertNotNull(result);
+        assertEquals("new@example.com", result.getAccountEmailAddress());
+        assertEquals("New User", result.getAccountName());
+        assertEquals("Customer", result.getAccountType());
+        verify(accountRepository).save(any(Account.class));
+    }
+
+    @Test
+    @DisplayName("Should create firebase account with null name using default")
+    void testRegisterFirebaseUserNullName() {
+        // ARRANGE
+        when(accountRepository.findByFirebaseUid("firebase-uid-000")).thenReturn(Optional.empty());
+        when(accountRepository.findByAccountEmailAddress("noname@example.com")).thenReturn(Optional.empty());
+        when(passwordEncoder.encode(any(String.class))).thenReturn("encodedPassword");
+        when(accountRepository.save(any(Account.class))).thenAnswer(invocation -> {
+            Account a = invocation.getArgument(0);
+            a.setId(3L);
+            return a;
+        });
+
+        // ACT
+        Account result = accountService.registerFirebaseUser("firebase-uid-000", "noname@example.com", null, null, null);
+
+        // ASSERT
+        assertEquals("User", result.getAccountName());
+    }
+}

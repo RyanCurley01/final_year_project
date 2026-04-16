@@ -1,6 +1,8 @@
 package com.example.wishlist.controller;
 
+import com.example.wishlist.config.FirebaseTokenFilter;
 import com.example.wishlist.model.Wishlist;
+import com.example.wishlist.service.CustomUserDetailsService;
 import com.example.wishlist.service.WishlistService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -19,8 +21,9 @@ import java.util.Optional;
 
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.is;
-import static org.mockito.Mockito.when;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.*;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -34,6 +37,12 @@ class WishlistControllerTest {
 
     @MockitoBean
     private WishlistService wishlistService;
+
+    @MockitoBean
+    private CustomUserDetailsService customUserDetailsService;
+
+    @MockitoBean
+    private FirebaseTokenFilter firebaseTokenFilter;
 
     @Autowired
     private ObjectMapper objectMapper;
@@ -126,6 +135,75 @@ class WishlistControllerTest {
         // ACT & ASSERT
         mockMvc.perform(get("/api/wishlist/99")
                 .contentType(MediaType.APPLICATION_JSON))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    @DisplayName("POST /api/wishlist - Should create wishlist item")
+    void testCreateWishlist() throws Exception {
+        Wishlist newWishlist = new Wishlist();
+        newWishlist.setId(2L);
+        newWishlist.setAccountId(10L);
+        newWishlist.setProductId(20L);
+
+        when(wishlistService.createWishlist(any(Wishlist.class))).thenReturn(newWishlist);
+
+        mockMvc.perform(post("/api/wishlist")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(newWishlist)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.id", is(2)))
+                .andExpect(jsonPath("$.accountId", is(10)))
+                .andExpect(jsonPath("$.productId", is(20)));
+    }
+
+    @Test
+    @DisplayName("PUT /api/wishlist/{id} - Should update wishlist item")
+    void testUpdateWishlist() throws Exception {
+        Wishlist updated = new Wishlist();
+        updated.setId(1L);
+        updated.setAccountId(4L);
+        updated.setProductId(99L);
+
+        when(wishlistService.updateWishlist(any(Long.class), any(Wishlist.class))).thenReturn(updated);
+
+        mockMvc.perform(put("/api/wishlist/1")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(updated)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.productId", is(99)));
+    }
+
+    @Test
+    @DisplayName("PUT /api/wishlist/{id} - Should return 404 when not found")
+    void testUpdateWishlistNotFound() throws Exception {
+        when(wishlistService.updateWishlist(any(Long.class), any(Wishlist.class)))
+                .thenThrow(new IllegalArgumentException("Not found"));
+
+        mockMvc.perform(put("/api/wishlist/99")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(testWishlist)))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    @DisplayName("DELETE /api/wishlist/{id} - Should delete wishlist item")
+    void testDeleteWishlist() throws Exception {
+        doNothing().when(wishlistService).deleteWishlist(1L);
+
+        mockMvc.perform(delete("/api/wishlist/1"))
+                .andExpect(status().isNoContent());
+
+        verify(wishlistService).deleteWishlist(1L);
+    }
+
+    @Test
+    @DisplayName("DELETE /api/wishlist/{id} - Should return 404 when not found")
+    void testDeleteWishlistNotFound() throws Exception {
+        doThrow(new IllegalArgumentException("Not found"))
+                .when(wishlistService).deleteWishlist(99L);
+
+        mockMvc.perform(delete("/api/wishlist/99"))
                 .andExpect(status().isNotFound());
     }
 }

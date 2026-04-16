@@ -43,7 +43,7 @@ class StockControllerTest {
         testStock = new Stock();
         testStock.setId(1L);
         testStock.setProductId(5L);
-        testStock.setStockQuantity(100);
+        testStock.setIsAvailable(true);
     }
 
     @Test
@@ -53,7 +53,8 @@ class StockControllerTest {
 
         mockMvc.perform(get("/api/stock/getAllStock"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$", hasSize(1)));
+                .andExpect(jsonPath("$", hasSize(1)))
+                .andExpect(jsonPath("$[0].isAvailable", is(true)));
     }
 
     @Test
@@ -67,13 +68,33 @@ class StockControllerTest {
     }
 
     @Test
+    @DisplayName("GET /api/stock/getAllStock - Should return empty when productId not found")
+    void testGetStockByProductIdNotFound() throws Exception {
+        when(stockService.getStockByProductId(99L)).thenReturn(Optional.empty());
+
+        mockMvc.perform(get("/api/stock/getAllStock").param("productId", "99"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(0)));
+    }
+
+    @Test
     @DisplayName("GET /api/stock/{id} - Should return stock by id")
     void testGetStockById() throws Exception {
         when(stockService.getStockById(1L)).thenReturn(Optional.of(testStock));
 
         mockMvc.perform(get("/api/stock/1"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.id", is(1)));
+                .andExpect(jsonPath("$.id", is(1)))
+                .andExpect(jsonPath("$.productId", is(5)));
+    }
+
+    @Test
+    @DisplayName("GET /api/stock/{id} - Should return 404 when not found")
+    void testGetStockByIdNotFound() throws Exception {
+        when(stockService.getStockById(99L)).thenReturn(Optional.empty());
+
+        mockMvc.perform(get("/api/stock/99"))
+                .andExpect(status().isNotFound());
     }
 
     @Test
@@ -84,7 +105,8 @@ class StockControllerTest {
         mockMvc.perform(post("/api/stock")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(testStock)))
-                .andExpect(status().isCreated());
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.productId", is(5)));
     }
 
     @Test
@@ -111,9 +133,31 @@ class StockControllerTest {
     }
 
     @Test
+    @DisplayName("PUT /api/stock/{id} - Should return 404 when not found")
+    void testUpdateStockNotFound() throws Exception {
+        when(stockService.updateStock(any(Long.class), any(Stock.class)))
+                .thenThrow(new IllegalArgumentException("Stock not found"));
+
+        mockMvc.perform(put("/api/stock/99")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(testStock)))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
     @DisplayName("DELETE /api/stock/{id} - Should delete stock")
     void testDeleteStock() throws Exception {
         mockMvc.perform(delete("/api/stock/1"))
                 .andExpect(status().isNoContent());
+    }
+
+    @Test
+    @DisplayName("DELETE /api/stock/{id} - Should return 404 when not found")
+    void testDeleteStockNotFound() throws Exception {
+        doThrow(new IllegalArgumentException("Stock not found"))
+                .when(stockService).deleteStock(99L);
+
+        mockMvc.perform(delete("/api/stock/99"))
+                .andExpect(status().isNotFound());
     }
 }

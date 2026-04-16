@@ -14,6 +14,8 @@ import java.util.Arrays;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -67,5 +69,36 @@ class PurchasedProductServiceTest {
         when(purchasedProductRepository.findByProductId(5L)).thenReturn(Arrays.asList(testPurchasedProduct));
 
         assertThat(purchasedProductService.getPurchasedProductsByProductId(5L)).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("createPurchasedProduct - Should save and return purchased product")
+    void testCreatePurchasedProduct() {
+        when(purchasedProductRepository.save(any(PurchasedProduct.class))).thenReturn(testPurchasedProduct);
+
+        PurchasedProduct result = purchasedProductService.createPurchasedProduct(testPurchasedProduct);
+
+        assertThat(result).isNotNull();
+        assertThat(result.getId()).isEqualTo(1L);
+        verify(purchasedProductRepository).save(testPurchasedProduct);
+    }
+
+    @Test
+    @DisplayName("deletePurchasedProduct - Should delete when exists")
+    void testDeletePurchasedProduct() {
+        when(purchasedProductRepository.existsById(1L)).thenReturn(true);
+
+        purchasedProductService.deletePurchasedProduct(1L);
+
+        verify(purchasedProductRepository).deleteById(1L);
+    }
+
+    @Test
+    @DisplayName("deletePurchasedProduct - Should throw when not found")
+    void testDeletePurchasedProductNotFound() {
+        when(purchasedProductRepository.existsById(99L)).thenReturn(false);
+
+        assertThatThrownBy(() -> purchasedProductService.deletePurchasedProduct(99L))
+                .isInstanceOf(IllegalArgumentException.class);
     }
 }

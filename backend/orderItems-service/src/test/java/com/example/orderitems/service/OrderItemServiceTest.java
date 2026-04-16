@@ -123,6 +123,25 @@ class OrderItemServiceTest {
     }
 
     @Test
+    @DisplayName("updateOrderItem - Should update orderId and productId fields")
+    void testUpdateOrderItemAllFields() {
+        OrderItem updates = new OrderItem();
+        updates.setOrderId(10L);
+        updates.setProductId(20L);
+        updates.setQuantity(3);
+        updates.setUnitPrice(new BigDecimal("29.99"));
+
+        when(orderItemRepository.findById(1L)).thenReturn(Optional.of(testOrderItem));
+        when(orderItemRepository.save(any(OrderItem.class))).thenReturn(testOrderItem);
+
+        orderItemService.updateOrderItem(1L, updates);
+
+        assertThat(testOrderItem.getOrderId()).isEqualTo(10L);
+        assertThat(testOrderItem.getProductId()).isEqualTo(20L);
+        verify(orderItemRepository).save(testOrderItem);
+    }
+
+    @Test
     @DisplayName("deleteOrderItem - Should delete order item")
     void testDeleteOrderItem() {
         when(orderItemRepository.existsById(1L)).thenReturn(true);

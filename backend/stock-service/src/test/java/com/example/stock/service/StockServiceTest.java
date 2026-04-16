@@ -16,7 +16,6 @@ import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -39,7 +38,7 @@ class StockServiceTest {
         testStock = new Stock();
         testStock.setId(1L);
         testStock.setProductId(5L);
-        testStock.setStockQuantity(100);
+        testStock.setIsAvailable(true);
     }
 
     @Test
@@ -74,7 +73,6 @@ class StockServiceTest {
 
         assertThat(stockService.createStock(testStock).getId()).isEqualTo(1L);
         
-        // Verify WebSocket broadcast was called (2 times: global + product-specific)
         verify(messagingTemplate, times(2)).convertAndSend(any(String.class), any(Object.class));
     }
 
@@ -88,10 +86,10 @@ class StockServiceTest {
     }
 
     @Test
-    @DisplayName("updateStock - Should update stock")
+    @DisplayName("updateStock - Should update stock availability")
     void testUpdateStock() {
         Stock updates = new Stock();
-        updates.setStockQuantity(50);
+        updates.setIsAvailable(false);
 
         when(stockRepository.findById(1L)).thenReturn(Optional.of(testStock));
         when(stockRepository.save(any(Stock.class))).thenReturn(testStock);
@@ -99,7 +97,6 @@ class StockServiceTest {
         stockService.updateStock(1L, updates);
 
         verify(stockRepository).save(testStock);
-        // Verify WebSocket broadcast was called (2 times: global + product-specific)
         verify(messagingTemplate, times(2)).convertAndSend(any(String.class), any(Object.class));
     }
 
@@ -107,7 +104,7 @@ class StockServiceTest {
     @DisplayName("updateStock - Should throw exception when stock not found")
     void testUpdateStockNotFound() {
         Stock updates = new Stock();
-        updates.setStockQuantity(50);
+        updates.setIsAvailable(false);
 
         when(stockRepository.findById(999L)).thenReturn(Optional.empty());
 
@@ -121,17 +118,16 @@ class StockServiceTest {
     void testUpdateStockWithNewProductId() {
         Stock updates = new Stock();
         updates.setProductId(10L);
-        updates.setStockQuantity(75);
+        updates.setIsAvailable(true);
 
         when(stockRepository.findById(1L)).thenReturn(Optional.of(testStock));
         when(stockRepository.existsByProductId(10L)).thenReturn(false);
         when(stockRepository.save(any(Stock.class))).thenReturn(testStock);
 
-        Stock result = stockService.updateStock(1L, updates);
+        stockService.updateStock(1L, updates);
 
         verify(stockRepository).save(testStock);
         assertThat(testStock.getProductId()).isEqualTo(10L);
-        assertThat(testStock.getStockQuantity()).isEqualTo(75);
     }
 
     @Test
@@ -157,7 +153,6 @@ class StockServiceTest {
         stockService.deleteStock(1L);
 
         verify(stockRepository).deleteById(1L);
-        // Verify WebSocket broadcast was called (2 times: global + product-specific)
         verify(messagingTemplate, times(2)).convertAndSend(any(String.class), any(Object.class));
     }
 
@@ -171,5 +166,36 @@ class StockServiceTest {
                 .hasMessageContaining("Stock not found with id: 999");
 
         verify(stockRepository, never()).deleteById(any());
+    }
+
+    @Test
+    @DisplayName("updateStock - Should skip productId update when same as current")
+    void testUpdateStockSameProductId() {
+        Stock updates = new Stock();
+        updates.setProductId(5L); // Same as testStock.productId
+        updates.setIsAvailable(false);
+
+        when(stockRepository.findById(1L)).thenReturn(Optional.of(testStock));
+        when(stockRepository.save(any(Stock.class))).thenReturn(testStock);
+
+        stockService.updateStock(1L, updates);
+
+        // productId should remain 5L (no change), existsByProductId should NOT be called
+        assertThat(testStock.getProductId()).isEqualTo(5L);
+        verify(stockRepository, never()).existsByProductId(any());
+    }
+
+    @Test
+    @DisplayName("createStock - Should succeed even when WebSocket broadcast fails")
+    void testCreateStockBroadcastFailure() {
+        when(stockRepository.existsByProductId(5L)).thenReturn(false);
+        when(stockRepository.save(any(Stock.class))).thenReturn(testStock);
+        doThrow(new RuntimeException("WebSocket error"))
+                .when(messagingTemplate).convertAndSend(any(String.class), any(Object.class));
+
+        // Should not throw — broadcastStockUpdate catches exceptions
+        Stock result = stockService.createStock(testStock);
+
+        assertThat(result.getId()).isEqualTo(1L);
     }
 }

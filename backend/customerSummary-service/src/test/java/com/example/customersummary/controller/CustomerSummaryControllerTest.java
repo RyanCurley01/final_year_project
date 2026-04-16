@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -16,8 +17,10 @@ import java.util.Arrays;
 import java.util.Optional;
 
 import static org.hamcrest.Matchers.*;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 @WebMvcTest(CustomerSummaryController.class)
@@ -27,6 +30,9 @@ class CustomerSummaryControllerTest {
 
     @Autowired
     private MockMvc mockMvc;
+
+    @Autowired
+    private ObjectMapper objectMapper;
 
     @MockitoBean
     private CustomerSummaryService customerSummaryService;
@@ -99,5 +105,26 @@ class CustomerSummaryControllerTest {
 
         mockMvc.perform(get("/api/customer-summary/99"))
                 .andExpect(status().isNotFound());
+    }
+
+    @Test
+    @DisplayName("POST /api/customer-summary - Should create customer summary")
+    void testCreateCustomerSummary() throws Exception {
+        CustomerSummary newSummary = new CustomerSummary();
+        newSummary.setId(2L);
+        newSummary.setAccountId(10L);
+        newSummary.setProductId(20L);
+        newSummary.setOrderId(5L);
+
+        when(customerSummaryService.createCustomerSummary(any(CustomerSummary.class))).thenReturn(newSummary);
+
+        mockMvc.perform(post("/api/customer-summary")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(newSummary)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.id", is(2)))
+                .andExpect(jsonPath("$.accountId", is(10)))
+                .andExpect(jsonPath("$.productId", is(20)))
+                .andExpect(jsonPath("$.orderId", is(5)));
     }
 }

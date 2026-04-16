@@ -1,6 +1,5 @@
 package com.example.accounts.config;
 
-import com.example.accounts.service.CustomUserDetailsService;
 import org.springframework.http.HttpMethod;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
@@ -17,14 +16,11 @@ import org.springframework.security.config.Customizer;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
-import lombok.RequiredArgsConstructor;
 
 @Configuration
 @EnableWebSecurity(debug = true) // Enable debug logs
-@RequiredArgsConstructor
 public class SecurityConfig
 {
-    private final CustomUserDetailsService customUserDetailsService;
     
     // To return hashed password
     @Bean
@@ -88,4 +84,4 @@ public class SecurityConfig
 
         return http.build();
     }
-}
+}
