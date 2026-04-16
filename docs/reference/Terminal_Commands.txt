@@ -7,6 +7,12 @@ cd /workspaces/final_year_project/backend && ./gradlew clean build --no-daemon 2
 Generates code coverage report
 ./gradlew :accounts-service:jacocoTestReport
 
+Generates code coverage report summary
+cd /workspaces/final_year_project/backend && for svc in */build/reports/jacoco/test/jacocoTestReport.xml; 
+do s=${svc%%/*}; line=$(grep -o '<counter type="LINE"[^/]*/>' "$svc" | tail -1); m=$(echo "$line" | 
+grep -oP 'missed="\K[0-9]+'); c=$(echo "$line" | grep -oP 'covered="\K[0-9]+'); t=$((m+c)); 
+printf "%-35s %3d%%  (%d/%d)\n" "$s" $((c*100/t)) "$c" "$t"; done
+
 To kill a port
 lsof -i :8086 2>/dev/null | grep -v COMMAND | awk '{print $2}' | xargs kill -9 2>/dev/null && echo "✓ Killed port 8086" || echo "Port 8086 is already free"
 
@@ -203,7 +209,7 @@ Loads env variables in git bash from VS Code so they are persisted
 source ~/.bash_profile
 
 To test the sync between AWS and local database image pools together and remove overflowing ones
-$ AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" python scripts/s3/sync_image_pools.py --target-size 80
+AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" python scripts/s3/sync_image_pools.py --target-size 80
 
 To apply the sync between AWS and local database image pools together and remove overflowing ones
-$ AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" python scripts/s3/sync_image_pools.py --target-size 80
+AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" python scripts/s3/sync_image_pools.py --target-size 80 --apply
