@@ -1,0 +1,121 @@
+% POST Endpoints Table for Dissertation
+% Requires: \usepackage{longtable}, \usepackage{tabularx}, \usepackage{multirow} in preamble
+
+\begin{longtable}{|l|c|p{4.8cm}|p{5.5cm}|}
+\caption{POST Request Endpoints with Sample JSON Data} \label{tab:post-endpoints} \\
+\hline
+\textbf{Service} & \textbf{Port} & \textbf{Endpoint} & \textbf{Sample Request Body} \\
+\hline\hline
+\endfirsthead
+
+\multicolumn{4}{c}{\tablename\ \thetable{} -- \textit{Continued from previous page}} \\
+\hline
+\textbf{Service} & \textbf{Port} & \textbf{Endpoint} & \textbf{Sample Request Body} \\
+\hline
+\endhead
+
+\hline
+\multicolumn{4}{r}{\textit{Continued on next page}} \\
+\endfoot
+
+\hline
+\endlastfoot
+
+% ===== ACCOUNTS =====
+\multirow{3}{*}{Accounts}
+ & \multirow{3}{*}{8080}
+ & POST /api/accounts/login &
+  \texttt{\{"email": "john.smith @store.com", "password": "password"\}} \\
+\cline{3-4}
+ & & POST /api/accounts/firebase-login &
+  \texttt{\{"idToken": "<firebase\_token>"\}} \\
+\cline{3-4}
+ & & POST /api/accounts &
+  \texttt{\{"accountName": "Jane Manager", "accountPhoneNumber": "5559998888", "accountEmailAddress": "jane.manager @store.com", "accountPassword": "securePass123", "accountType": "Manager"\}} \\
+\hline
+
+% ===== PRODUCTS =====
+\multirow{2}{*}{Products}
+ & \multirow{2}{*}{8081}
+ & POST /api/products \newline (Game) &
+  \texttt{\{"gameTitle": "Cyber Wars", "platform": "PC", "gamePrice": 49.99, "genre": "Shooter", "fileUrl": "https://cdn...", "previewUrl": "https://cdn...", "stockQuantity": 100\}} \\
+\cline{3-4}
+ & & POST /api/products \newline (Album) &
+  \texttt{\{"albumTitle": "Rock Legends", "albumPrice": 14.99, "artist": "The Band", "genre": "Rock", "fileUrl": "https://cdn...", "previewUrl": "https://cdn...", "stockQuantity": 200\}} \\
+\hline
+
+% ===== ORDERS =====
+Orders & 8082
+ & POST /api/orders &
+  \texttt{\{"accountId": 4, "totalAmount": 119.98\}} \newline
+  \textit{Note: orderDate auto-set to current timestamp} \\
+\hline
+
+% ===== PAYMENTS =====
+\multirow{2}{*}{Payments}
+ & \multirow{2}{*}{8083}
+ & POST /api/payments/paypal/ create-order &
+  \texttt{\{"orderId": 1, "productId": 1, "accountId": 4, "paymentAmount": 59.99\}} \\
+\cline{3-4}
+ & & POST /api/payments/paypal/ capture-order/\{id\} &
+  \texttt{\{"paypalOrderId": "<paypal\_order\_id>"\}} \newline
+  \textit{Note: paymentStatus set to COMPLETED on capture} \\
+\hline
+
+% ===== STOCK =====
+Stock & 8084
+ & POST /api/stock &
+  \texttt{\{"productId": 1, "stockQuantity": 75\}} \newline
+  \textit{Note: stockQuantity must be $\geq$ 0} \\
+\hline
+
+% ===== WISHLIST =====
+Wishlist & 8085
+ & POST /api/wishlist &
+  \texttt{\{"accountId": 4, "productId": 5\}} \\
+\hline
+
+% ===== ORDER ITEMS =====
+Order Items & 8086
+ & POST /api/order-items &
+  \texttt{\{"orderId": 1, "productId": 1, "quantity": 2, "unitPrice": 59.99\}} \\
+\hline
+
+% ===== CUSTOMER SUMMARY =====
+\shortstack[l]{Customer\\Summary} & 8087
+ & POST /api/customer-summary &
+  \texttt{\{"accountId": 4, "productId": 1, "orderId": 1\}} \\
+\hline
+
+% ===== SOLD PRODUCTS =====
+\shortstack[l]{Sold\\Products} & 8088
+ & POST /api/sold-products &
+  \texttt{\{"orderItemId": 1, "productId": 1\}} \\
+\hline
+
+% ===== AUDIO SERVICE =====
+\multirow{7}{*}{\shortstack[l]{Audio\\Service}}
+ & \multirow{7}{*}{5000}
+ & POST /api/audio/ unified-recommendations &
+  \texttt{\{"song\_id": 1, "limit": 10\}} \\
+\cline{3-4}
+ & & POST /api/audio/ midi-recommendations &
+  \texttt{\{"notes": [60, 64, 67], "limit": 10\}} \\
+\cline{3-4}
+ & & POST /api/audio/ melody-finder &
+  \texttt{\{"melody": [60, 62, 64, 65, 67], "limit": 10\}} \\
+\cline{3-4}
+ & & POST /api/audio/ match-library &
+  \texttt{\{"audio\_url": "https://...", "limit": 10\}} \\
+\cline{3-4}
+ & & POST /api/interactions/record &
+  \texttt{\{"song\_id": 1, "action": "play", "user\_id": 4\}} \\
+\cline{3-4}
+ & & POST /api/itunes/ import-top-songs &
+  \texttt{?limit=150} (query param) \\
+\cline{3-4}
+ & & POST /api/itunes/ refresh-topcharts &
+  \textit{No body required} \\
+\hline
+
+\end{longtable}
