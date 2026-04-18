@@ -1,38 +1,90 @@
 flowchart TD
+    %% ===== Authentication =====
     A[User visits Store Website] --> B{Is user logged in?}
     B -- No --> C[Show Login/Register Form]
-    C --> D[Authenticate User]
-    D -->|Success| E[Show Storefront]
+    C --> D[Authenticate via Firebase]
+    D -->|Google SSO| E[Sync Account with Backend]
+    D -->|Email/Password| E
     D -->|Fail| C
-    B -- Yes --> E[Show Storefront]
-    E --> F[Browse Games/Music]
-    F --> G{Add to Cart or Wishlist?}
-    G -- Add to Cart --> H[Add Item to Cart]
-    G -- Add to Wishlist --> I[Add Item to Wishlist]
-    H --> J[Proceed to Checkout]
-    J --> K[Enter Payment Details]
-    K --> L[Place Order]
-    L --> M[Order Sent to Backend]
-    M --> N[Order Validated]
-    N -->|Valid| O[Update Stock]
-    N -->|Invalid| J
-    O --> P[Order Confirmation Sent to User]
-    P --> Q[Show Recommendations]
-    Q --> R[AI Recommendation Service]
-    R --> S[Display Recommended Games/Music]
-    I --> T[Wishlist Updated]
-    T --> F
-    
-    %% Backend/DevOps Flow
-    M --> U[Backend Microservices]
-    U --> V[Database Operations]
-    V --> W[Update Cloud Database]
-    W --> X[Send Confirmation]
-    X --> P
-    
-    %% DevOps
+    E --> F[Show Discover Page]
+    B -- Yes --> F
+
+    %% ===== Music Discovery =====
+    F --> G{Choose Discovery Method}
+    G --> H[Browse Music Grid]
+    G --> I[Top Charts]
+    G --> J[Similar Songs Search]
+    G --> K[MIDI Explorer]
+    G --> L[Search by Artist/Song]
+
+    H --> M[Select Song]
+    I --> M
+    J --> M
+    K -->|Adjust Audio Feature Knobs| K1[Real-Time Recommendations]
+    K -->|Melody Matching| K2[Find Similar Melodies]
+    K1 --> M
+    K2 --> M
+    L --> M
+
+    %% ===== Song Details & Audio Features =====
+    M --> N[Song Details Page]
+    N --> N1[Play Song in Audio Player]
+    N1 --> N2[Onset-Reactive Image Generation]
+    N2 --> N2a[Procedural Visuals]
+    N2 --> N2b[AI Image Pool from S3]
+    N --> N3[View Smart Recommendation Visualiser]
+    N3 -->|Click Recommended Song| M
+
+    %% ===== Shopping Actions =====
+    N --> O{Add to Cart or Wishlist?}
+    O -- Add to Cart --> P[Add Item to Cart]
+    O -- Add to Wishlist --> Q[Add Item to Wishlist]
+    Q --> Q1[Wishlist Updated]
+    Q1 --> F
+
+    %% ===== Checkout & Payment =====
+    P --> R[View Cart]
+    R --> S[Proceed to Checkout]
+    S --> T[PayPal Payment Buttons]
+    T --> U[User Authorises via PayPal]
+    U --> V[Backend Captures Payment]
+    V --> W[Create Order & Order Items]
+    W --> X[Update Stock Inventory]
+    X --> Y[Order Confirmation]
+    Y --> Z[Purchase History Page]
+    Z --> Z1[Download Songs as ZIP]
+
+    %% ===== Creative Tools =====
+    F --> CT{Creative Tools}
+    CT --> SP[Spectrogram Creator]
+    SP --> SP1[Draw on Canvas / Upload Image]
+    SP1 --> SP2[Real-Time Audio Synthesis]
+    SP2 --> SP3[Download as WAV]
+    CT --> VIS[ML Visualisation]
+    VIS --> VIS1[Genre Classification Boundaries]
+
+    %% ===== Backend Microservices =====
+    W --> MS[Backend Microservices]
+    MS --> MS1[Accounts Service :8080]
+    MS --> MS2[Products Service :8081]
+    MS --> MS3[Orders Service :8082]
+    MS --> MS4[Payments Service :8083]
+    MS --> MS5[Stock Service :8084]
+    MS1 & MS2 & MS3 & MS4 & MS5 --> DB[(MySQL Database)]
+
+    %% ===== Audio Service =====
+    N3 --> AS[Python Audio Service :5000]
+    AS --> AS1[ML Recommendation Engine]
+    AS --> AS2[Audio Feature Extraction]
+    AS --> AS3[iTunes Integration]
+    AS --> AS4[Image Pool Generation]
+    AS1 --> DB
+
+    %% ===== DevOps =====
     subgraph DevOps
-      Y[Code Commit] --> Z[CI/CD Pipeline]
-      Z --> AA[Automated Tests]
-      AA --> AB[Deploy to Cloud]
+      Y1[Code Commit to GitHub] --> Y2[GitHub Actions CI/CD]
+      Y2 --> Y3[Build & Test Backend - Java 21]
+      Y2 --> Y4[Lint & Build Frontend - Node 20]
+      Y2 --> Y5[Test Audio Service - Python 3.11]
+      Y3 & Y4 & Y5 --> Y6[Deploy to Railway & Vercel]
     end

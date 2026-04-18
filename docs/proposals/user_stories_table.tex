@@ -1,0 +1,200 @@
+% User Stories Table for Dissertation
+% Requires: \usepackage{longtable}, \usepackage{array} in preamble
+
+\begin{longtable}{|c|l|p{5cm}|p{5.5cm}|}
+\caption{User Stories and Acceptance Criteria} \label{tab:user-stories} \\
+\hline
+\textbf{\#} & \textbf{Role} & \textbf{User Story} & \textbf{Acceptance Criteria} \\
+\hline\hline
+\endfirsthead
+
+\multicolumn{4}{c}{\tablename\ \thetable{} -- \textit{Continued from previous page}} \\
+\hline
+\textbf{\#} & \textbf{Role} & \textbf{User Story} & \textbf{Acceptance Criteria} \\
+\hline
+\endhead
+
+\hline
+\multicolumn{4}{r}{\textit{Continued on next page}} \\
+\endfoot
+
+\hline
+\endlastfoot
+
+% ===== ACCOUNTS: Manager =====
+1 & Admin & As an admin, I want to create a manager account, so I can add new account details. &
+  \textbullet\ Manager account is created \newline
+  \textbullet\ Name created (0--10 chars) \newline
+  \textbullet\ Phone number created (0--10 chars) \newline
+  \textbullet\ Email created (0--20 chars) \newline
+  \textbullet\ Password created (0--10 chars) \\
+\hline
+
+2 & Admin & As an admin, I want to read manager account details, so I can view them. &
+  \textbullet\ Manager account details are read \newline
+  \textbullet\ Name, phone, email, password are read \\
+\hline
+
+3 & Admin & As an admin, I want to update manager account details, so I can change existing data. &
+  \textbullet\ Manager account details are updated \newline
+  \textbullet\ Name, phone, email, password are updated \\
+\hline
+
+4 & Admin & As an admin, I want to delete manager account details, so I can remove unwanted items. &
+  \textbullet\ Unwanted manager account details are deleted \newline
+  \textbullet\ Name, phone, email, password are deleted \\
+\hline
+
+% ===== ACCOUNTS: Employee =====
+5 & Admin & As an admin, I want to create an employee account, so I can add new account details. &
+  \textbullet\ Employee account is created \newline
+  \textbullet\ Name created (0--10 chars) \newline
+  \textbullet\ Phone number created (0--10 chars) \newline
+  \textbullet\ Email created (0--20 chars) \newline
+  \textbullet\ Password created (0--10 chars) \\
+\hline
+
+6 & Admin & As an admin, I want to read employee account details, so I can view them. &
+  \textbullet\ Employee account is read \newline
+  \textbullet\ Name, phone, email, password are read \\
+\hline
+
+7 & Admin & As an admin, I want to update employee account details, so I can change existing data. &
+  \textbullet\ Employee account is updated \newline
+  \textbullet\ Name, phone, email, password are updated \\
+\hline
+
+8 & Admin & As an admin, I want to delete employee account details, so I can remove unwanted items. &
+  \textbullet\ Employee account is deleted \newline
+  \textbullet\ Name, phone, email, password are deleted \\
+\hline
+
+% ===== ACCOUNTS: Customer =====
+9 & Admin & As an admin, I want to create a customer account, so I can add new account details. &
+  \textbullet\ Customer account is created \newline
+  \textbullet\ Name created (0--10 chars) \newline
+  \textbullet\ Phone number created (0--10 chars) \newline
+  \textbullet\ Email created (0--20 chars) \newline
+  \textbullet\ Password created (0--10 chars) \\
+\hline
+
+10 & Admin & As an admin, I want to read customer account details, so I can view them. &
+  \textbullet\ Customer account is read \newline
+  \textbullet\ Name, phone, email, password are read \\
+\hline
+
+11 & Admin & As an admin, I want to update customer account details, so I can change existing data. &
+  \textbullet\ Customer account is updated \newline
+  \textbullet\ Name, phone, email, password are updated \\
+\hline
+
+12 & Admin & As an admin, I want to delete customer account details, so I can remove unwanted items. &
+  \textbullet\ Customer account is deleted \newline
+  \textbullet\ Name, phone, email, password are deleted \\
+\hline
+
+% ===== ORDERS =====
+13 & Employee & As an employee, I want to create customer order information, so I can get their details. &
+  \textbullet\ Order number is created \newline
+  \textbullet\ Customer ID created (0--9 chars) \newline
+  \textbullet\ Order date is created \newline
+  \textbullet\ Total amount created (0--10,000,000.00) \newline
+  \textbullet\ Game/album title, platform, price, artist, genre, URLs, stock quantity are created \\
+\hline
+
+14 & Employee & As an employee, I want to read customer order information, so I can save their details. &
+  \textbullet\ Order number, customer ID, order date, total amount are read \newline
+  \textbullet\ Game/album title, platform, price, artist, genre, URLs, stock quantity are read \\
+\hline
+
+15 & Employee & As an employee, I want to update customer order information, so I can not use outdated information. &
+  \textbullet\ Order number, customer ID, order date, total amount are updated \newline
+  \textbullet\ Game/album title, platform, price, artist, genre, URLs, stock quantity are updated \\
+\hline
+
+16 & Employee & As an employee, I want to delete customer order information, so I can not have unneeded information. &
+  \textbullet\ Order number, customer ID, order date, total amount are deleted \newline
+  \textbullet\ Game/album title, platform, price, artist, genre, URLs, stock quantity are deleted \\
+\hline
+
+% ===== CUSTOMER SUMMARY =====
+17 & Manager & As a manager, I want to know customer history, so I can ensure delivery. &
+  \textbullet\ System prints customer summary \newline
+  \textbullet\ Customer's game, album, ID, platform, product number, order number are displayed \\
+\hline
+
+% ===== STOCK =====
+18 & Manager & As a manager, I want to create products for stock, so I can sell them. &
+  \textbullet\ Game/album title is created \newline
+  \textbullet\ Stock quantity created (0--1000) \newline
+  \textbullet\ Product number is created \\
+\hline
+
+19 & Manager & As a manager, I want to read stock details, so I can report it. &
+  \textbullet\ Game/album title, stock quantities, product number are read \\
+\hline
+
+20 & Manager & As a manager, I want to update stock, so I can sell new products. &
+  \textbullet\ Game/album title, stock quantities, product number are updated \\
+\hline
+
+21 & Manager & As a manager, I want to delete stock, so I can not sell old products. &
+  \textbullet\ Game/album title, stock quantities, product number are deleted \\
+\hline
+
+% ===== SOLD PRODUCTS =====
+22 & Manager & As a manager, I want to have payments computed automatically, so I can calculate sales. &
+  \textbullet\ Game sold cost is displayed \newline
+  \textbullet\ Album sold cost is displayed \newline
+  \textbullet\ Order number is displayed \\
+\hline
+
+% ===== PURCHASED PRODUCTS =====
+23 & Customer & As a customer, I want to view my purchases, so I can view the games I've bought. &
+  \textbullet\ Purchased game title is displayed \newline
+  \textbullet\ Purchased music title is displayed \newline
+  \textbullet\ Platform type is displayed \newline
+  \textbullet\ Order number is displayed \\
+\hline
+
+% ===== WISHLIST =====
+24 & Customer & As a customer, I want to create a list of my favourite games, so I can not have to search them later. &
+  \textbullet\ Wishlist is created \newline
+  \textbullet\ Wishlist for a game title is created \\
+\hline
+
+25 & Customer & As a customer, I want to read a list of my favourite games, so I can view which game I like better. &
+  \textbullet\ Wishlist is read \newline
+  \textbullet\ Wishlist for a game title is read \\
+\hline
+
+26 & Customer & As a customer, I want to update a list of my favourite games, so I can swap games I no longer want. &
+  \textbullet\ Wishlist is updated \newline
+  \textbullet\ Wishlist for a game title is updated \\
+\hline
+
+27 & Customer & As a customer, I want to delete a list of my favourite games, so I can remove games I don't want to buy anymore. &
+  \textbullet\ Wishlist is deleted \newline
+  \textbullet\ Wishlist for a game title is deleted \\
+\hline
+
+% ===== PAYMENTS =====
+28 & Admin & As an admin, I want to create payments, so I can let customers buy games and music. &
+  \textbullet\ Payment cost created for games (\$0--\$10.00) \newline
+  \textbullet\ Payment cost created for albums (\$0--\$5.00) \newline
+  \textbullet\ Order ID, game/album title, payment status, date/time are created \\
+\hline
+
+29 & Admin & As an admin, I want to read payments, so I can ensure payment confirmation. &
+  \textbullet\ Payment cost, order ID, game/album title, payment status, date/time are read \\
+\hline
+
+30 & Admin & As an admin, I want to update payments, so I can change payment status. &
+  \textbullet\ Payment cost, order ID, game/album title, payment status, date/time are updated \\
+\hline
+
+31 & Admin & As an admin, I want to delete payments, so I can remove unneeded payment information. &
+  \textbullet\ Payment cost, order ID, game/album title, payment status, date/time are deleted \\
+\hline
+
+\end{longtable}
