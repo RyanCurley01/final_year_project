@@ -34,6 +34,8 @@ ITUNES_SEARCH_TERMS = [
     "top pop hits", "hip hop hits", "rock classics",
     "R&B soul", "country hits", "jazz standards",
     "indie alternative", "latin reggaeton", "classical piano",
+    "folk acoustic", "metal heavy", "funk groove",
+    "blues guitar", "reggae dub", "K-pop hits",
 ]
 
 # Track the background task so we can cancel it on shutdown
@@ -105,27 +107,27 @@ async def clear_imported_songs():
         with get_db_connection() as conn:
             if conn:
                 with conn.cursor() as cursor:
-                    # 1. Delete from UserInteractions (references Products)
-                    # We might need to delete by ProductID where ProductID < 0
-                    cursor.execute("DELETE FROM UserInteractions WHERE ProductID < 0")
-                    interactions_deleted = cursor.rowcount
+                    # Delete from all dependent tables first (some may not exist).
+                    _safe_execute(cursor, "DELETE FROM UserInteractions WHERE ProductID < 0")
+                    _safe_execute(cursor, "DELETE FROM UserRecommendations WHERE ProductID < 0")
+                    _safe_execute(cursor, "DELETE FROM Wishlist WHERE ProductID < 0")
+                    _safe_execute(cursor, "DELETE FROM Sold_Products WHERE ProductID < 0")
+                    _safe_execute(cursor, "DELETE FROM Purchased_Products WHERE ProductID < 0")
+                    _safe_execute(cursor, "DELETE FROM CustomerSummary WHERE ProductID < 0")
+                    _safe_execute(cursor, "DELETE FROM Payments WHERE ProductID < 0")
+                    _safe_execute(cursor, "DELETE FROM Order_Items WHERE ProductID < 0")
+                    _safe_execute(cursor, "DELETE FROM Stock WHERE ProductID < 0")
                     
-                    # 2. Delete from UserRecommendations (references Products)
-                    cursor.execute("DELETE FROM UserRecommendations WHERE ProductID < 0")
-                    recommendations_deleted = cursor.rowcount
-                    
-                    # 3. Delete from AudioFeatures (references Products)
                     cursor.execute("DELETE FROM AudioFeatures WHERE ProductID < 0")
                     audio_deleted = cursor.rowcount
                     
-                    # 4. Delete from Products
                     cursor.execute("DELETE FROM Products WHERE ProductID < 0")
                     products_deleted = cursor.rowcount
                     
                     conn.commit()
                     deleted_count = products_deleted
                     
-                    console.log(f"   ✅ Deleted {products_deleted} products, {audio_deleted} features, {interactions_deleted} interactions")
+                    console.log(f"   ✅ Deleted {products_deleted} products, {audio_deleted} features")
         
         # Reload cache after cleanup
         ml_service.cache_loaded = False
@@ -1056,36 +1058,44 @@ async def _fetch_current_chart_ids() -> tuple[dict[int, dict], dict[int, dict]]:
     # Single shared HTTP client with a 30-second timeout for all iTunes API calls in this function
     async with httpx.AsyncClient(timeout=30.0) as client:
 
-        # ── PHASE 1: RSS FEEDS ────────────────────────────────────────
-        # Fetch up to 150 currently charting Electronic and Dance songs from Apple's public RSS feeds.
-        # Genre ID 7 = Electronic, Genre ID 17 = Dance (Apple's internal genre classification).
-        # We request 200 per feed to maximise yield, but stop collecting once we hit 150 unique songs.
-        electronic_rss_feeds = [
-            f"https://itunes.apple.com/us/rss/topsongs/limit=200/genre=7/json",   # Electronic
-            f"https://itunes.apple.com/us/rss/topsongs/limit=200/genre=17/json",  # Dance
+        # ── PHASE 1: IDM SEARCH ────────────────────────────────────
+        # Fetch up to 150 IDM (Intelligent Dance Music) songs via the iTunes Search API.
+        # Apple's RSS genre taxonomy has no dedicated IDM category, so we search directly.
+        # Broad list of IDM artists + related subgenre terms to ensure we hit 150.
+        idm_search_terms = [
+            # Core IDM artists
+            "Aphex Twin", "Squarepusher", "Boards of Canada", "Autechre",
+            "Clark Warp Records", "Plaid electronic", "Venetian Snares",
+            "Four Tet", "Amon Tobin", "Telefon Tel Aviv",
+            "Bibio electronic", "Luke Vibert", "Mu-Ziq",
+            "Machinedrum", "Floating Points", "Jon Hopkins",
+            # Subgenre / style searches
+            "IDM", "intelligent dance music", "electronica",
+            "ambient electronic", "glitch electronic", "braindance",
+            "downtempo electronic", "experimental electronic",
+            "Warp Records",
         ]
-        for rss_url in electronic_rss_feeds:
-            # Stop fetching additional feeds once we've already reached the 150-song target
+        for term in idm_search_terms:
             if len(rss_entries) >= TOPCHARTS_TARGET_COUNT:
                 break
             try:
-                resp = await client.get(rss_url)
+                params = {"term": term, "limit": 200, "media": "music", "entity": "song"}
+                resp = await client.get(f"{ITUNES_API_BASE_URL}/search", params=params)
                 if resp.status_code == 200:
-                    # Apple's RSS JSON nests song entries under feed.entry as an array of dicts
-                    entries = resp.json().get('feed', {}).get('entry', [])
-                    for entry in entries:
-                        # Each entry's unique iTunes track ID is buried in id.attributes.im:id
-                        tid_str = entry.get('id', {}).get('attributes', {}).get('im:id')
-                        if tid_str:
-                            # Negate the track ID to create our negative ProductID convention
-                            pid = -int(tid_str)
-                            # Skip duplicates (same song can appear on both Electronic and Dance charts)
-                            if pid not in rss_entries:
-                                rss_entries[pid] = entry
-                                if len(rss_entries) >= TOPCHARTS_TARGET_COUNT:
-                                    break
+                    for track in resp.json().get('results', []):
+                        tid = track.get('trackId')
+                        pid = -int(tid) if tid else None
+                        if (
+                            pid
+                            and track.get('previewUrl')
+                            and pid not in rss_entries
+                        ):
+                            rss_entries[pid] = track
+                            if len(rss_entries) >= TOPCHARTS_TARGET_COUNT:
+                                break
+                await asyncio.sleep(3)  # Apple rate-limit: ~20 calls/min
             except Exception as e:
-                console.log(f"   ⚠️ Electronic RSS fetch failed: {e}")
+                console.log(f"   ⚠️ IDM search failed for '{term}': {e}")
 
         # ── PHASE 2: ARTIST / GENRE SEARCH ────────────────────────────
         # If RSS didn't fill the full catalogue, increase the search target to compensate.
@@ -1159,8 +1169,8 @@ async def _fetch_current_chart_ids() -> tuple[dict[int, dict], dict[int, dict]]:
                 console.log(f"   ⚠️ Genre RSS feed failed: {e}")
 
         # ── PHASE 3: ITUNES SEARCH API ────────────────────────────────
-        # Iterate through curated search terms (artist names like "Aphex Twin", "Squarepusher",
-        # and genre keywords like "IDM", "electronica") to fill the remaining 75 slots.
+        # Iterate through curated search terms (artist names like "hip hop hits", "rock classics",
+        # and genre keywords like "Pop", "Jazz") to fill the remaining 75 slots.
         # Each term queries up to 200 results from the iTunes Search API.
         for term in ITUNES_SEARCH_TERMS:
             # Stop searching once we've collected enough songs for the search pool
@@ -1185,7 +1195,8 @@ async def _fetch_current_chart_ids() -> tuple[dict[int, dict], dict[int, dict]]:
                         ):
                             search_tracks[pid] = track
                             if len(search_tracks) >= search_target:
-                                break           
+                                break
+                await asyncio.sleep(3)  # Apple rate-limit: ~20 calls/min
             except Exception as e:
                 console.log(f"   ⚠️ Search fetch failed for term '{term}': {e}")
 
@@ -1306,7 +1317,7 @@ async def refresh_topcharts():
             try:
                 song: dict | None = None
                 if pid in rss_entries:
-                    song = await _import_single_song_rss(rss_entries[pid], loop)
+                    song = await _import_single_song_search(rss_entries[pid], loop)
                 elif pid in search_tracks:
                     song = await _import_single_song_search(search_tracks[pid], loop)
 

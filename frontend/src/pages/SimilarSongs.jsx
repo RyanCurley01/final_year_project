@@ -618,6 +618,7 @@ const SimilarSongs = () => {
     const updateRecs = async () => {
       try {
         const apiBaseUrl = envConfig.getApiBaseUrl();
+        console.log('[SimilarSongs] updateRecs tick — cachedAudioFeatures:', cachedAudioFeatures ? Object.keys(cachedAudioFeatures).length + ' keys' : 'null');
 
         // Snapshot the current live audio analysis features and playback rate from mutable refs.
         const live = audioFeaturesRef.current;
@@ -626,8 +627,27 @@ const SimilarSongs = () => {
         // Update the visual component state with the current playback speed.
         setDisplayedPlaybackRate(liveRate);
         
-        // If live analysis features exist, securely cast and push them into state for real-time visual UI rendering.
-        if (live) {
+        // Update displayed features for the sidebar badges.
+        // Blend: use cached (librosa) tempo for accuracy since Web Audio estimates
+        // tempo from energy (inaccurate), but use LIVE energy/valence/danceability
+        // so the badges and recommendation scores update dynamically during playback.
+        const songIdStr = String(targetSong.trackId || targetSong.id);
+        const cachedForDisplay = cachedAudioFeatures?.[songIdStr] || cachedAudioFeatures?.[String(-Math.abs(Number(songIdStr)))];
+        if (cachedForDisplay && live) {
+          setDisplayedFeatures({
+            tempo: cachedForDisplay.tempo ? Number(cachedForDisplay.tempo) : (live.tempo ? Number(live.tempo) : null),
+            energy: live.energy != null ? Number(live.energy) : (cachedForDisplay.energy ? Number(cachedForDisplay.energy) : null),
+            valence: live.valence != null ? Number(live.valence) : (cachedForDisplay.valence ? Number(cachedForDisplay.valence) : null),
+            danceability: live.danceability != null ? Number(live.danceability) : (cachedForDisplay.danceability ? Number(cachedForDisplay.danceability) : null),
+          });
+        } else if (cachedForDisplay) {
+          setDisplayedFeatures({
+            tempo: cachedForDisplay.tempo ? Number(cachedForDisplay.tempo) : null,
+            energy: cachedForDisplay.energy ? Number(cachedForDisplay.energy) : null,
+            valence: cachedForDisplay.valence ? Number(cachedForDisplay.valence) : null,
+            danceability: cachedForDisplay.danceability ? Number(cachedForDisplay.danceability) : null,
+          });
+        } else if (live) {
           setDisplayedFeatures({
             tempo: live.tempo ? Number(live.tempo) : null,
             energy: live.energy ? Number(live.energy) : null,
@@ -640,9 +660,6 @@ const SimilarSongs = () => {
         // For SimilarSongs, always prefer deterministic, static cache features over volatile live analysis.
         // This prevents the AI recommendation list from continuously shuffling due to live audio processing fluctuations.
         let featuresToSend = null;
-        
-        // Ensure the reference song ID is parsed into a standardized string format.
-        const songIdStr = String(targetSong.trackId || targetSong.id);
         
         // Lookup previously computed feature sets in local cache memory (checking both normal and matched negative ID keys).
         const cached = cachedAudioFeatures?.[songIdStr] || cachedAudioFeatures?.[String(-Math.abs(Number(songIdStr)))];
@@ -831,15 +848,14 @@ const SimilarSongs = () => {
                });
            }
         }
-      } catch {
-         // console.warn("ML Similarity update failed", err);
+      } catch (err) {
+         console.warn("[SimilarSongs] ML Similarity update failed:", err);
       }
     };
 
     // Trigger an immediate UI update the first time the hook runs.
     setRecLoading(true);
-    updateRecs();
-    setRecLoading(false);
+    updateRecs().finally(() => setRecLoading(false));
 
     // Set up continuous polling interval (3 seconds) to handle active playback modifications
     // (e.g., pulling fresh live analyser features or adjusting to playback rate changes).
@@ -854,7 +870,7 @@ const SimilarSongs = () => {
         intervalRef.current = null;
       }
     };
-  }, [activeSong?.trackId || activeSong?.id, songs.length > 0, dbSongs.length > 0]);
+  }, [activeSong?.trackId || activeSong?.id, songs.length > 0, dbSongs.length > 0, cachedAudioFeatures]);
 
 
   // --- Bulk Match Hook: Correlate external iTunes songs with internal Database tracks ---
