@@ -31,9 +31,9 @@ TOPCHARTS_TARGET_COUNT = 150
 ITUNES_SEARCH_TARGET_COUNT = 75
 LIBRARY_TARGET_COUNT = 47
 ITUNES_SEARCH_TERMS = [
-    "Aphex Twin", "Squarepusher", "Boards of Canada",
-    "Autechre", "Four Tet", "Brian Eno",
-    "ambient electronic", "IDM", "electronica",
+    "top pop hits", "hip hop hits", "rock classics",
+    "R&B soul", "country hits", "jazz standards",
+    "indie alternative", "latin reggaeton", "classical piano",
 ]
 
 # Track the background task so we can cancel it on shutdown
@@ -1048,26 +1048,38 @@ async def _fetch_current_chart_ids() -> tuple[dict[int, dict], dict[int, dict]]:
         plus artist-specific searches (Aphex Twin, Squarepusher, Boards of Canada),
         followed by genre fallback terms if still under target.
     """
+    # Two separate buckets: one for RSS chart songs, one for artist/genre search results.
+    # Both use negative product IDs (e.g. -12345) to distinguish imported songs from library songs.
     rss_entries: dict[int, dict] = {}
     search_tracks: dict[int, dict] = {}
 
+    # Single shared HTTP client with a 30-second timeout for all iTunes API calls in this function
     async with httpx.AsyncClient(timeout=30.0) as client:
-        # --- Top 150 charting songs via Electronic genre RSS ---
+
+        # ── PHASE 1: RSS FEEDS ────────────────────────────────────────
+        # Fetch up to 150 currently charting Electronic and Dance songs from Apple's public RSS feeds.
+        # Genre ID 7 = Electronic, Genre ID 17 = Dance (Apple's internal genre classification).
+        # We request 200 per feed to maximise yield, but stop collecting once we hit 150 unique songs.
         electronic_rss_feeds = [
             f"https://itunes.apple.com/us/rss/topsongs/limit=200/genre=7/json",   # Electronic
             f"https://itunes.apple.com/us/rss/topsongs/limit=200/genre=17/json",  # Dance
         ]
         for rss_url in electronic_rss_feeds:
+            # Stop fetching additional feeds once we've already reached the 150-song target
             if len(rss_entries) >= TOPCHARTS_TARGET_COUNT:
                 break
             try:
                 resp = await client.get(rss_url)
                 if resp.status_code == 200:
+                    # Apple's RSS JSON nests song entries under feed.entry as an array of dicts
                     entries = resp.json().get('feed', {}).get('entry', [])
                     for entry in entries:
+                        # Each entry's unique iTunes track ID is buried in id.attributes.im:id
                         tid_str = entry.get('id', {}).get('attributes', {}).get('im:id')
                         if tid_str:
+                            # Negate the track ID to create our negative ProductID convention
                             pid = -int(tid_str)
+                            # Skip duplicates (same song can appear on both Electronic and Dance charts)
                             if pid not in rss_entries:
                                 rss_entries[pid] = entry
                                 if len(rss_entries) >= TOPCHARTS_TARGET_COUNT:
@@ -1075,15 +1087,16 @@ async def _fetch_current_chart_ids() -> tuple[dict[int, dict], dict[int, dict]]:
             except Exception as e:
                 console.log(f"   ⚠️ Electronic RSS fetch failed: {e}")
 
-        # --- Top 75 popular songs via additional RSS genre feeds + artist/genre search ---
-        # Dynamic target: if RSS returned fewer than expected, let search fill the gap
+        # ── PHASE 2: ARTIST / GENRE SEARCH ────────────────────────────
+        # If RSS didn't fill the full catalogue, increase the search target to compensate.
+        # Minimum 75 search songs, but can grow if RSS underdelivered.
         search_target = max(
             ITUNES_SEARCH_TARGET_COUNT,
             AUDIO_FEATURES_MAX_IMPORTED_ROWS - len(rss_entries),
         )
 
-        # Skip genre RSS sub-feeds (iTunes sub-genre IDs are unreliable).
-        # Fill entirely from artist search terms for accurate electronic content.
+        # Genre RSS sub-feeds are intentionally disabled — Apple's sub-genre IDs are unreliable
+        # and returned wrong genres in testing. Artist search terms produce more accurate results.
         rss_genre_feeds = []
         genre_rss_budget = 0
         for feed_url in rss_genre_feeds:
@@ -1093,29 +1106,43 @@ async def _fetch_current_chart_ids() -> tuple[dict[int, dict], dict[int, dict]]:
                 resp = await client.get(feed_url)
                 if resp.status_code == 200:
                     feed_entries = resp.json().get('feed', {}).get('entry', [])
+                    
                     for entry in feed_entries:
                         tid_str = entry.get('id', {}).get('attributes', {}).get('im:id')
+                        
                         if not tid_str:
                             continue
                         pid = -int(tid_str)
+                        
+                        # Only add if not already captured from RSS or a previous genre feed
                         if pid not in rss_entries and pid not in search_tracks:
-                            # Convert RSS entry to search-like dict for _import_single_song_search compat
+                            # RSS entries have a different structure to Search API results,
+                            # so we reshape them into a Search-compatible dict for downstream processing
                             links = entry.get('link', [])
                             preview_url = None
+                            
                             if isinstance(links, list):
+                                # Look for an audio/video link type first (the actual preview clip)
                                 for link in links:
                                     link_type = link.get('attributes', {}).get('type', '')
+                                    
                                     if 'audio' in link_type or 'video' in link_type:
                                         preview_url = link.get('attributes', {}).get('href')
                                         break
+                                
+                                # Fallback: the second link in the array is often the preview
                                 if not preview_url and len(links) >= 2:
                                     preview_url = links[1].get('attributes', {}).get('href')
+                            
                             if preview_url:
-                                # Look up real genre via iTunes Lookup API
+                                # RSS category labels reflect the chart, not the track — call the
+                                # Lookup API to get the actual genre for this specific track
                                 real_genre = await _lookup_real_genre(
                                     int(tid_str),
                                     fallback=entry.get('category', {}).get('attributes', {}).get('label', 'Unknown')
                                 )
+                                # Reshape into the same dict format that the Search API returns,
+                                # so _import_single_song_search can process it without special-casing
                                 search_tracks[pid] = {
                                     'trackId': int(tid_str),
                                     'trackName': entry.get('im:name', {}).get('label', 'Unknown'),
@@ -1125,22 +1152,31 @@ async def _fetch_current_chart_ids() -> tuple[dict[int, dict], dict[int, dict]]:
                                     'trackPrice': float(entry.get('im:price', {}).get('attributes', {}).get('amount', '0.99') or '0.99'),
                                     'primaryGenreName': real_genre,
                                 }
+                                
                                 if len(search_tracks) >= genre_rss_budget:
                                     break
             except Exception as e:
                 console.log(f"   ⚠️ Genre RSS feed failed: {e}")
 
-        # Then fill remaining slots with artist-specific and genre search terms
+        # ── PHASE 3: ITUNES SEARCH API ────────────────────────────────
+        # Iterate through curated search terms (artist names like "Aphex Twin", "Squarepusher",
+        # and genre keywords like "IDM", "electronica") to fill the remaining 75 slots.
+        # Each term queries up to 200 results from the iTunes Search API.
         for term in ITUNES_SEARCH_TERMS:
+            # Stop searching once we've collected enough songs for the search pool
             if len(search_tracks) >= search_target:
                 break
             try:
                 params = {"term": term, "limit": 200, "media": "music", "entity": "song"}
                 resp = await client.get(f"{ITUNES_API_BASE_URL}/search", params=params)
+                
                 if resp.status_code == 200:
                     for track in resp.json().get('results', []):
                         tid = track.get('trackId')
+                        # Negate the iTunes track ID to create a negative ProductID
                         pid = -int(tid) if tid else None
+                        
+                        # Only keep tracks that have a preview URL and aren't already in either bucket
                         if (
                             pid
                             and track.get('previewUrl')
@@ -1149,10 +1185,11 @@ async def _fetch_current_chart_ids() -> tuple[dict[int, dict], dict[int, dict]]:
                         ):
                             search_tracks[pid] = track
                             if len(search_tracks) >= search_target:
-                                break
+                                break           
             except Exception as e:
                 console.log(f"   ⚠️ Search fetch failed for term '{term}': {e}")
 
+    # Return both pools separately so the caller can prioritise RSS chart songs over search songs
     return rss_entries, search_tracks
 
 
