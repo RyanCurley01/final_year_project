@@ -220,6 +220,6 @@ SELECT
   CASE WHEN ProductID > 0 THEN 'Library' ELSE 'iTunes' END AS Source,
   Genre,
   COUNT(*) AS Count
-FROM AudioFeatures
+FROM AudioFeaturess
 GROUP BY Source, Genre
-ORDER BY Source, Count DESC;
+ORDER BY Source, Count DESC;"

@@ -11,7 +11,7 @@ import { ArtistDetails, Discover, Search, SongDetails, TopCharts, SimilarSongs, 
 import AlbumDetails from './pages/AlbumDetails';
 import Cart from './pages/Cart';
 import PurchaseHistory from './pages/PurchaseHistory';
-import SmartRecommendationVisualizer from './components/SmartRecommendationVisualizer';
+import DiscoverVisualizer from './components/DiscoverVisualizer';
 
 // Global Context Providers for feature-specific state that doesn't live in Redux.
 import { VideoModalProvider, useVideoModal } from './context/VideoModalContext';
@@ -168,7 +168,7 @@ const AuthenticatedApp = () => {
                 <div className="mb-4">
                   {/* Shows interactive recommendation visualizer ONLY if a song is actively playing, else shows placeholder UI. */}
                   {activeSong?.albumTitle ? (
-                    <SmartRecommendationVisualizer currentProduct={activeSong} products={musicProducts} sessionId={sessionId} onRecommendationClick={handleRecommendationClick} />
+                    <DiscoverVisualizer currentProduct={activeSong} products={musicProducts} sessionId={sessionId} onRecommendationClick={handleRecommendationClick} />
                   ) : (
                     <div className="bg-linear-to-br from-gray-900 to-black p-5 rounded-lg border border-gray-800">
                       <p className="text-gray-400 text-center">Play a song to see audio-based recommendations</p>
@@ -192,7 +192,7 @@ const AuthenticatedApp = () => {
                 </div>
                 <div className="mb-4">
                   {activeSong?.albumTitle ? (
-                    <SmartRecommendationVisualizer currentProduct={activeSong} products={musicProducts} sessionId={sessionId} onRecommendationClick={handleRecommendationClick}/>
+                    <DiscoverVisualizer currentProduct={activeSong} products={musicProducts} sessionId={sessionId} onRecommendationClick={handleRecommendationClick}/>
                   ) : (
                     <div className="bg-linear-to-br from-gray-900 to-black p-5 rounded-lg border border-gray-800">
                       <p className="text-gray-400 text-center">Play a song to see audio-based recommendations</p>

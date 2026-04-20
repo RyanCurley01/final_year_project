@@ -909,7 +909,7 @@ const Search = () => {
             {/* Current Track Analysis */}
             <div className="p-3 bg-gray-800/50 rounded-lg border border-gray-700">
               <div className="flex items-center gap-3 mb-3">
-                {/* Spinning Album Cover - handle video covers like SmartRecommendationVisualizer */}
+                {/* Spinning Album Cover - handle video covers like DiscoverVisualizer */}
                 {(() => {
                   const coverMedia = activeSong.albumCoverImageUrl || activeSong.artworkUrl100?.replace('100x100', '200x200');
                   const isVideo = coverMedia && coverMedia.toLowerCase().includes('.mp4');
@@ -982,7 +982,7 @@ const Search = () => {
           {/* Current Track Analysis */}
             <div className="mb-3 p-2 bg-gray-800/50 rounded-lg border border-gray-700">
               <div className="flex items-center gap-2 mb-2">
-                {/* Spinning Album Cover - handle video covers like SmartRecommendationVisualizer */}
+                {/* Spinning Album Cover - handle video covers like DiscoverVisualizer */}
                 {(() => {
                   const coverMedia = activeSong.albumCoverImageUrl || activeSong.artworkUrl100?.replace('100x100', '200x200');
                   const isVideo = coverMedia && coverMedia.toLowerCase().includes('.mp4');

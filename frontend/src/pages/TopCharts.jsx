@@ -49,7 +49,7 @@ const isPlaceholderArtist = (name) => {
   return !n || n === 'unknown artist' || n === 'library artist';
 };
 
-// Helper function for mood-based colors - same as SmartRecommendationVisualizer
+// Helper function for mood-based colors - same as DiscoverVisualizer
 const getFeatureColor = (label, value) => {
   const numericValue = parseInt(value);
   
@@ -553,7 +553,7 @@ const TopCharts = () => {
     updateRecs();
     setRecLoading(false);
 
-    // Set up polling interval (3 seconds) - same as SmartRecommendationVisualizer
+    // Set up polling interval (3 seconds) - same as DiscoverVisualizer
     intervalRef.current = setInterval(updateRecs, 3000);
 
     // Cleanup

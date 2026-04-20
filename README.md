@@ -94,7 +94,7 @@ The system is composed of three tiers:
 ### Key Components
 
 - **MusicPlayer** — Full in-browser player with play/pause, seek, volume, next/prev, playback rate, and "Quantum Mode"
-- **SmartRecommendationVisualizer** — Real-time recommendation node graph driven by audio features
+- **DiscoverVisualizer** — Real-time recommendation node graph driven by audio features
 - **AudioReactiveVideo** — TensorFlow.js sky segmentation with color shifts on drum onsets
 - **OnsetImageCard** — AI-generated mood-matched images that swap in sync with audio onsets
 - **MidiKnob / MidiMappingPanel** — Web MIDI API controls for hardware knob integration

@@ -7,7 +7,7 @@ import { useGetAllProductsQuery } from '../redux/services/productsApi';
 import SongCard from '../components/SongCard';
 import Loader from '../components/Loader';
 import Error from '../components/Error';
-import SmartRecommendationVisualizer from '../components/SmartRecommendationVisualizer';
+import DiscoverVisualizer from '../components/DiscoverVisualizer';
 import { setActiveSong, playPause } from '../redux/features/playerSlice';
 
 
@@ -82,7 +82,7 @@ const Discover = () => {
         {/* Full-width Visualizer */}
         <div className="w-full">
           {activeSong?.albumTitle ? (
-            <SmartRecommendationVisualizer 
+            <DiscoverVisualizer 
               currentProduct={activeSong}
               products={music}
               sessionId={sessionId}

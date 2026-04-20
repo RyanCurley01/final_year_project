@@ -16,11 +16,10 @@ const toFiniteNumber = (value) => {
 };
 
 /**
- * SmartRecommendationVisualizer (formerly PersonalRecommendations)
- * Displays real-time audio-based recommendations with visual similarity indicators
- * Now uses shared AudioFeaturesContext for audio features
+ * DiscoverVisualizer displays real-time audio-based recommendations with visual similarity indicators
+ * that uses shared AudioFeaturesContext for audio features
  */
-const SmartRecommendationVisualizer = ({ 
+const DiscoverVisualizer = ({ 
   currentProduct, 
   products,
   sessionId,
@@ -746,4 +745,4 @@ const AlbumCover = ({ url, title, productId }) => {
   );
 };
 
-export default SmartRecommendationVisualizer;
+export default DiscoverVisualizer;
