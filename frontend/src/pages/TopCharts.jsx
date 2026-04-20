@@ -220,7 +220,7 @@ const TopCharts = () => {
   const [recLoading, setRecLoading] = useState(false);
   const [displayedFeatures, setDisplayedFeatures] = useState(null);
   const [displayedPlaybackRate, setDisplayedPlaybackRate] = useState(1);
-  const [cachedAudioFeatures, setCachedAudioFeatures] = useState({});
+  const [cachedAudioFeatures, setCachedAudioFeatures] = useState(null);
   
   const intervalRef = useRef(null);
   const dispatch = useDispatch();
@@ -244,16 +244,23 @@ const TopCharts = () => {
         const response = await fetch(`${audioApiUrl}/api/audio/cached-features?artist_only=false`);
         if (response.ok) {
           const data = fixTextDeep(await response.json());
-          // Backend returns a dictionary/object mapped by ID, use it directly
-          setCachedAudioFeatures(data.features);
+          setCachedAudioFeatures(data.features || {});
           console.log(`[TopCharts] Loaded ${data.count} cached audio features for artist songs`);
         }
       } catch (err) {
         console.warn('[TopCharts] Could not fetch cached audio features:', err.message);
+        setCachedAudioFeatures({});
       }
     };
     fetchCachedFeatures();
   }, []);
+
+  // Reset UI state when the user switches to a different track
+  useEffect(() => {
+    setDisplayedFeatures(null);
+    setDisplayedPlaybackRate(Number(playbackRateRef.current || 1));
+    setRecommendations([]);
+  }, [activeSong?.trackId || activeSong?.id]);
 
   // Initial data fetch
   useEffect(() => {
@@ -375,45 +382,66 @@ const TopCharts = () => {
     const updateRecs = async () => {
       try {
         const apiBaseUrl = envConfig.getApiBaseUrl();
-        
-        // Construct live features but merge with cache if available for stability
-        let featuresToSend = null;
-        if (audioFeaturesRef.current) {
-            featuresToSend = {
-                 tempo: audioFeaturesRef.current.tempo ? parseFloat(audioFeaturesRef.current.tempo) : null,
-                 energy: audioFeaturesRef.current.energy ? parseFloat(audioFeaturesRef.current.energy) : null,
-                 valence: audioFeaturesRef.current.valence ? parseFloat(audioFeaturesRef.current.valence) : null,
-                 danceability: audioFeaturesRef.current.danceability ? parseFloat(audioFeaturesRef.current.danceability) : null,
-                 acousticness: audioFeaturesRef.current.acousticness ? parseFloat(audioFeaturesRef.current.acousticness) : null,
-                 effective_tempo: audioFeaturesRef.current.tempo ? (parseFloat(audioFeaturesRef.current.tempo) * parseFloat(playbackRateRef.current || 1)) : null,
-                 playback_rate: parseFloat(playbackRateRef.current || 1)
-            };
-            
-            // Merge with cache if available
-            const songIdStr = String(activeSong.trackId || activeSong.id);
-            const cached = cachedAudioFeatures[songIdStr] || cachedAudioFeatures[String(-Math.abs(Number(songIdStr)))];
-            
-            if (cached) {
-                // Lock stable features to cache
-                featuresToSend.tempo = Number(cached.tempo) || featuresToSend.tempo;
-                featuresToSend.acousticness = Number(cached.acousticness);
-                // Keep energy/valence live for pulse
-            }
+
+        // Snapshot live audio analysis and playback rate from mutable refs
+        const live = audioFeaturesRef.current;
+        const liveRate = Number(playbackRateRef.current || 1);
+
+        setDisplayedPlaybackRate(liveRate);
+
+        // Blend displayed features: use cached (librosa) tempo for accuracy since
+        // Web Audio estimates tempo from energy (inaccurate), but use LIVE
+        // energy/valence/danceability so the badges update dynamically during playback.
+        const songIdStr = String(activeSong.trackId || activeSong.id);
+        const cachedForDisplay = cachedAudioFeatures?.[songIdStr] || cachedAudioFeatures?.[String(-Math.abs(Number(songIdStr)))];
+        if (cachedForDisplay && live) {
+          setDisplayedFeatures({
+            tempo: cachedForDisplay.tempo ? Number(cachedForDisplay.tempo) : (live.tempo ? Number(live.tempo) : null),
+            energy: live.energy != null ? Number(live.energy) : (cachedForDisplay.energy ? Number(cachedForDisplay.energy) : null),
+            valence: live.valence != null ? Number(live.valence) : (cachedForDisplay.valence ? Number(cachedForDisplay.valence) : null),
+            danceability: live.danceability != null ? Number(live.danceability) : (cachedForDisplay.danceability ? Number(cachedForDisplay.danceability) : null),
+          });
+        } else if (cachedForDisplay) {
+          setDisplayedFeatures({
+            tempo: cachedForDisplay.tempo ? Number(cachedForDisplay.tempo) : null,
+            energy: cachedForDisplay.energy ? Number(cachedForDisplay.energy) : null,
+            valence: cachedForDisplay.valence ? Number(cachedForDisplay.valence) : null,
+            danceability: cachedForDisplay.danceability ? Number(cachedForDisplay.danceability) : null,
+          });
+        } else if (live) {
+          setDisplayedFeatures({
+            tempo: live.tempo ? Number(live.tempo) : null,
+            energy: live.energy ? Number(live.energy) : null,
+            valence: live.valence ? Number(live.valence) : null,
+            danceability: live.danceability ? Number(live.danceability) : null,
+          });
         }
-        
-        // If no live features but we have cache, use cache
-        if (!featuresToSend) {
-            const songIdStr = String(activeSong.trackId || activeSong.id);
-            const cached = cachedAudioFeatures[songIdStr] || cachedAudioFeatures[String(-Math.abs(Number(songIdStr)))];
-            if (cached) {
-                featuresToSend = {
-                    ...cached,
-                    tempo: Number(cached.tempo),
-                    energy: Number(cached.energy),
-                    valence: Number(cached.valence),
-                    playback_rate: parseFloat(playbackRateRef.current || 1)
-                };
-            }
+
+        // Determine features to send to backend for similarity scoring.
+        // Prefer full cached features for stable recommendations.
+        let featuresToSend = null;
+        const cached = cachedAudioFeatures?.[songIdStr] || cachedAudioFeatures?.[String(-Math.abs(Number(songIdStr)))];
+
+        if (cached) {
+          featuresToSend = {
+            ...cached,
+            tempo: Number(cached.tempo),
+            energy: Number(cached.energy),
+            valence: Number(cached.valence),
+            danceability: Number(cached.danceability),
+            acousticness: Number(cached.acousticness),
+            playback_rate: 1,
+          };
+        } else if (activeSong && live) {
+          featuresToSend = {
+            tempo: live.tempo ? parseFloat(live.tempo) : null,
+            energy: live.energy ? parseFloat(live.energy) : null,
+            valence: live.valence ? parseFloat(live.valence) : null,
+            danceability: live.danceability ? parseFloat(live.danceability) : null,
+            acousticness: live.acousticness ? parseFloat(live.acousticness) : null,
+            effective_tempo: live.tempo ? (parseFloat(live.tempo) * liveRate) : null,
+            playback_rate: liveRate,
+          };
         }
 
         const payload = {
@@ -505,7 +533,8 @@ const TopCharts = () => {
 
                setRecommendations(enrichedRecommendations);
            }
-           if (data.target_features) {
+           // Only use backend target_features as fallback if no live features available
+           if (data.target_features && !live) {
                setDisplayedFeatures({
                    tempo: data.target_features.tempo,
                    energy: data.target_features.energy,
@@ -534,7 +563,7 @@ const TopCharts = () => {
         intervalRef.current = null;
       }
     };
-  }, [activeSong?.trackId || activeSong?.id, songs]); // Only restart loop if song effectively changes
+  }, [activeSong?.trackId || activeSong?.id, songs.length > 0, cachedAudioFeatures]);
 
   const filteredSongs = useMemo(() => {
     if (filter === 'all') return songs;

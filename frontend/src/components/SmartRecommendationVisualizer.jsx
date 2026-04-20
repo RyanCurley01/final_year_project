@@ -32,7 +32,7 @@ const SmartRecommendationVisualizer = ({
   const [displayedFeatures, setDisplayedFeatures] = useState(null);
   const [displayedPlaybackRate, setDisplayedPlaybackRate] = useState(1);
   const [hoveredRec, setHoveredRec] = useState(null);
-  const [cachedAudioFeatures, setCachedAudioFeatures] = useState({});
+  const [cachedAudioFeatures, setCachedAudioFeatures] = useState(null);
   const isInitialLoad = useRef(true);
   const intervalRef = useRef(null);
   const lastSongIdRef = useRef(null);
@@ -155,22 +155,12 @@ const SmartRecommendationVisualizer = ({
       
         // Reads the exact audio feature mathematical values (Tempo, Energy, etc.) 
         // the backend used as its "Target".
+        // Only use backend target_features as fallback if no live features available
         const backendFeatures = response.data.target_features;
 
-        // Checks if backend returned actually valid feature objects
-        if (backendFeatures) {
-          // Calls the React hook to update the displayedFeatures state 
-          // (which powers the four visual badges showing Tempo/Energy/Mood/Dance 
+        if (backendFeatures && !audioFeaturesRef.current) {
           setDisplayedFeatures(prev => ({
-
-            // Uses the JavaScript spread operator (...) to instantly copy every 
-            // single property and value from the backendFeatures object directly into this new 
-            // React state object, saving time from having 
-            // to map them manually (e.g. tempo: backendFeatures.tempo, etc).
             ...backendFeatures,
-
-            // A boolean dictating whether the UI should show a green "✓ Verified" badge 
-            // (meaning the math came from the high-quality database) or a "Live Analysis" pulsing dot.
             using_cached: backendFeatures.using_cached_features
           }));
       }
@@ -215,6 +205,8 @@ const SmartRecommendationVisualizer = ({
         }
       } catch (err) {
         console.warn('Could not fetch cached audio features:', err.message);
+        // Mark as loaded (empty) so hooks can proceed without waiting forever.
+        setCachedAudioFeatures({});
       }
     };
 
@@ -248,59 +240,75 @@ const SmartRecommendationVisualizer = ({
       const songId = currentProduct?.id || currentProduct?.productId || currentProduct?.ProductID;
       console.log(`[Visualizer] doing fetch for song ${songId}.`);
 
-      // ALWAYS prefer live features for the "Source" of the recommendation
-      // This ensures the visualizer updates dynamically every 3 seconds based on the
-      // real-time audio analysis of what is actually playing.
-      // We only use cached features if live features are completely unavailable (e.g. before playback starts)
-      
-      let featuresToUse = liveFeatures;
-      
-      // FIX: If we have high-quality cached features for the current song, use them to stabilize the values
-      // (especially Tempo which shouldn't fluctuate).
-      // We merge Cached (Stable) + Live (Dynamic Energy for Visuals)
-      if (songId) {
-          const songIdStr = String(songId);
-          const cached = cachedFeatures[songIdStr] || cachedFeatures[String(-Math.abs(Number(songIdStr)))];
-          
-          if (cached) {
-             if (featuresToUse) {
-                 // Hybrid: Keep live energy/valence for pulse, but fix Tempo/Acousticness from Cache
-                 featuresToUse = {
-                     ...featuresToUse,
-                     tempo: Number(cached.tempo) || featuresToUse.tempo, // Lock Tempo to Cache
-                     acousticness: Number(cached.acousticness),
-                     instrumentalness: Number(cached.instrumentalness),
-                     speechiness: Number(cached.speechiness),
-                     loudness: Number(cached.loudness),
-                 };
-             } else {
-                 // No live features yet, fully use cache
-                 console.log(`[Visualizer] No live features yet, using cache for ${songIdStr}`);
-                 featuresToUse = {
-                    ...cached,
-                    tempo: Number(cached.tempo),
-                    energy: Number(cached.energy),
-                    valence: Number(cached.valence),
-                    using_cached: true
-                 };
-             }
-          }
+      // Update displayed playback rate
+      setDisplayedPlaybackRate(rate);
+
+      // Blend displayed features: use cached (librosa) tempo for accuracy since
+      // Web Audio estimates tempo from energy (inaccurate), but use LIVE
+      // energy/valence/danceability so the badges update dynamically during playback.
+      const songIdStr = String(songId);
+      const cachedForDisplay = cachedFeatures?.[songIdStr] || cachedFeatures?.[String(-Math.abs(Number(songIdStr)))];
+      if (cachedForDisplay && liveFeatures) {
+        setDisplayedFeatures({
+          tempo: cachedForDisplay.tempo ? Number(cachedForDisplay.tempo) : (liveFeatures.tempo ? Number(liveFeatures.tempo) : null),
+          energy: liveFeatures.energy != null ? Number(liveFeatures.energy) : (cachedForDisplay.energy ? Number(cachedForDisplay.energy) : null),
+          valence: liveFeatures.valence != null ? Number(liveFeatures.valence) : (cachedForDisplay.valence ? Number(cachedForDisplay.valence) : null),
+          danceability: liveFeatures.danceability != null ? Number(liveFeatures.danceability) : (cachedForDisplay.danceability ? Number(cachedForDisplay.danceability) : null),
+        });
+      } else if (cachedForDisplay) {
+        setDisplayedFeatures({
+          tempo: cachedForDisplay.tempo ? Number(cachedForDisplay.tempo) : null,
+          energy: cachedForDisplay.energy ? Number(cachedForDisplay.energy) : null,
+          valence: cachedForDisplay.valence ? Number(cachedForDisplay.valence) : null,
+          danceability: cachedForDisplay.danceability ? Number(cachedForDisplay.danceability) : null,
+        });
+      } else if (liveFeatures) {
+        setDisplayedFeatures({
+          tempo: liveFeatures.tempo ? Number(liveFeatures.tempo) : null,
+          energy: liveFeatures.energy ? Number(liveFeatures.energy) : null,
+          valence: liveFeatures.valence ? Number(liveFeatures.valence) : null,
+          danceability: liveFeatures.danceability ? Number(liveFeatures.danceability) : null,
+        });
       }
-      
-      // If no live features yet, try cache as fallback
-      if (!featuresToUse && songId) {
-          const songIdStr = String(songId);
-          const cached = cachedFeatures[songIdStr] || cachedFeatures[String(-Math.abs(songId))];
-          if (cached) {
-            console.log(`[Visualizer] No live features yet, using cache for ${songIdStr}`);
-            featuresToUse = {
-                ...cached,
-                tempo: Number(cached.tempo),
-                energy: Number(cached.energy),
-                valence: Number(cached.valence),
-                using_cached: true
-            };
-          }
+
+      // Determine features to send to backend for similarity scoring.
+      // Prefer full cached features for stable recommendations.
+      let featuresToUse = null;
+      const cached = cachedFeatures?.[songIdStr] || cachedFeatures?.[String(-Math.abs(Number(songIdStr)))];
+
+      if (cached) {
+        featuresToUse = {
+          ...cached,
+          tempo: Number(cached.tempo),
+          energy: Number(cached.energy),
+          valence: Number(cached.valence),
+          danceability: Number(cached.danceability),
+          acousticness: Number(cached.acousticness),
+          playback_rate: 1,
+        };
+      } else if (liveFeatures) {
+        featuresToUse = {
+          ...liveFeatures,
+          tempo: liveFeatures.tempo ? parseFloat(liveFeatures.tempo) : null,
+          energy: liveFeatures.energy ? parseFloat(liveFeatures.energy) : null,
+          valence: liveFeatures.valence ? parseFloat(liveFeatures.valence) : null,
+          danceability: liveFeatures.danceability ? parseFloat(liveFeatures.danceability) : null,
+          acousticness: liveFeatures.acousticness ? parseFloat(liveFeatures.acousticness) : null,
+          effective_tempo: liveFeatures.tempo ? (parseFloat(liveFeatures.tempo) * rate) : null,
+          playback_rate: rate,
+        };
+      } else if (songId) {
+        // Try cache one more time as absolute fallback
+        const fallbackCached = cachedFeatures?.[songIdStr] || cachedFeatures?.[String(-Math.abs(songId))];
+        if (fallbackCached) {
+          featuresToUse = {
+            ...fallbackCached,
+            tempo: Number(fallbackCached.tempo),
+            energy: Number(fallbackCached.energy),
+            valence: Number(fallbackCached.valence),
+            using_cached: true,
+          };
+        }
       }
 
       // If we have no features at all (no live, no cache), we can't do anything
@@ -309,16 +317,12 @@ const SmartRecommendationVisualizer = ({
          return;
       }
       
-      // Update display immediately with what we are about to send
-      setDisplayedFeatures(featuresToUse);
-      setDisplayedPlaybackRate(rate);
-      
       fetchRecommendations(currentProduct, featuresToUse, rate, sessionId, forceRefresh);
     };
 
     // Immediate fetch if features available
     // OR if we just loaded cached features (even if live features aren't ready)
-    if (audioFeaturesRef.current || Object.keys(cachedAudioFeaturesRef.current).length > 0) {
+    if (audioFeaturesRef.current || (cachedAudioFeaturesRef.current && Object.keys(cachedAudioFeaturesRef.current).length > 0)) {
       doFetch(true);
     }
 
