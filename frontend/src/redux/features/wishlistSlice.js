@@ -215,6 +215,19 @@ const wishlistSlice = createSlice({
       state.shareToken = loadFromStorage(BASE_TOKEN_KEY, null);
     },
 
+    // Reset in-memory state only (preserves localStorage for rehydration)
+    resetWishlistMemory: (state) => {
+      state.items = [];
+      state.products = [];
+      state.allWishlistItems = [];
+      state.totalItems = 0;
+      state.priceAlerts = {};
+      state.shareToken = null;
+      state.pendingRemovals = [];
+      state.loading = false;
+      state.error = null;
+    },
+
     clearWishlist: (state) => {
       state.items = [];
       state.products = [];
@@ -335,6 +348,7 @@ export const {
   clearPriceAlert,
   generateShareToken,
   rehydrateForUser,
+  resetWishlistMemory,
   clearWishlist,
 } = wishlistSlice.actions;
 

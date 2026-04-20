@@ -24,7 +24,7 @@ import {
   generateShareToken,
   updatePriceAlert,
   clearPriceAlert,
-  clearWishlist,
+  resetWishlistMemory,
   rehydrateForUser,
 } from '../redux/features/wishlistSlice';
 import { addToCart } from '../redux/features/cartSlice';
@@ -214,9 +214,9 @@ const WishlistPage = () => {
   });
   const allProducts = productsData || [];
 
-  // Clear old user data and rehydrate from localStorage whenever the logged-in user changes
+  // Clear in-memory state and rehydrate from localStorage whenever the logged-in user changes
   useEffect(() => {
-    dispatch(clearWishlist());
+    dispatch(resetWishlistMemory());
     dispatch(rehydrateForUser());
   }, [dispatch, currentUser?.id]);
 
