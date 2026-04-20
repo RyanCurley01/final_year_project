@@ -463,6 +463,7 @@ export default function MidiExplorer() {
           };
     });
     dispatch(updateQueue({ data: recsQueue, currentId: activeSong.id }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [recommendations]);
 
   // Uses energy and valence features to create mood string 

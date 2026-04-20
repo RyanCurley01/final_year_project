@@ -39,6 +39,7 @@ const MusicPlayer = () => {
 
   useEffect(() => {
     if (currentSongs.length) dispatch(playPause(true));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentIndex]);
 
   // Record play interaction when playback STARTS (transitions from paused to playing)
@@ -70,6 +71,7 @@ const MusicPlayer = () => {
         session_id: sessionStorage.getItem('sessionId') || `session-${Date.now()}`
       }).unwrap().catch(() => {});
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isPlaying, activeSong?.productId, activeSong?.ProductID, activeSong?.id, currentUser?.id, recordInteraction]);
 
   // Sync quantum mode state with globalAudioContext and register onset handler

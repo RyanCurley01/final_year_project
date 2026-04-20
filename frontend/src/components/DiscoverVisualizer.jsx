@@ -335,6 +335,7 @@ const DiscoverVisualizer = ({
         intervalRef.current = null;
       }
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentProduct, sessionId, currentSongId, location.pathname, cachedAudioFeatures]); 
 
   

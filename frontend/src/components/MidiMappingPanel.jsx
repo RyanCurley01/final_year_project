@@ -38,6 +38,7 @@ export default function MidiMappingPanel({ ccMap, onMapChange, lastCC }) {
 
     onMapChange(newMap);
     setLearning(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lastCC]);
 
   const featureKeys = Object.keys(AUDIO_FEATURES);

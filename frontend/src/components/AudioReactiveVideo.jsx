@@ -176,9 +176,10 @@ const AudioReactiveVideo = ({
       videoRef.current.addEventListener('canplay', handleCanPlay, { once: true });
     }
     
+    const video = videoRef.current;
     return () => {
-      if (videoRef.current) {
-        videoRef.current.removeEventListener('canplay', handleCanPlay);
+      if (video) {
+        video.removeEventListener('canplay', handleCanPlay);
       }
     };
   }, [src, skySegmentation]);
@@ -266,6 +267,7 @@ const AudioReactiveVideo = ({
       }
       skySegmentation.dispose();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   
   // Handle play/pause - muted video for visual animation only

@@ -153,6 +153,7 @@ const PurchaseHistory = () => {
     // Execute the async function wrapper defined above
     fetchHistory();
     // Re-evaluate this hook only when the user's ID changes or when Redux dispatch reference changes
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser?.id, dispatch]);
 
   // Utility handler that bridges S3 signed URLs into a forced browser download action

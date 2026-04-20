@@ -1,3 +1,4 @@
+/* global THREE */
 /**
  * Cloud Animation using Three.js
  * Simpler approach: Static background with scrolling cloud overlay

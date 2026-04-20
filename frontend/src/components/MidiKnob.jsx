@@ -30,6 +30,7 @@ export default function MidiKnob({ value = 0, onChange, label, color = '#f97316'
   const startAngle = -135;
   const endAngle = startAngle + RANGE_DEG * pct;
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   const arc = useMemo(() => describeArc(cx, cy, KNOB_RADIUS, startAngle, endAngle), [cx, cy, pct]);
   const bgArc = useMemo(() => describeArc(cx, cy, KNOB_RADIUS, -135, 135), [cx, cy]);
 

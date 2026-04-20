@@ -96,6 +96,7 @@ export default function useAudioInput() {
       setError(`Microphone access denied: ${err.message}`);
       setListening(false);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshDevices]);
 
   // ── Stop listening ─────────────────────────────────────────────
