@@ -65,4 +65,12 @@ public class WishlistController {
             return ResponseEntity.notFound().build();
         }
     }
+
+    @DeleteMapping("/remove")
+    public ResponseEntity<Void> deleteByAccountAndProduct(
+            @RequestParam Long accountId,
+            @RequestParam Long productId) {
+        wishlistService.deleteByAccountAndProduct(accountId, productId);
+        return ResponseEntity.noContent().build();
+    }
 }

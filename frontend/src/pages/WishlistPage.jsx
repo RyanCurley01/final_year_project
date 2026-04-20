@@ -18,7 +18,7 @@ import { FiShoppingCart } from 'react-icons/fi';
 
 import {
   removeFromWishlistLocal,
-  removeWishlistItem,
+  removeWishlistByProduct,
   fetchWishlist,
   fetchAllWishlists,
   generateShareToken,
@@ -331,18 +331,16 @@ const WishlistPage = () => {
 
   // ─── Handlers ──────────────────────────────────────────────────────
   const handleRemove = async (product, { silent } = {}) => {
-    // removeFromWishlistLocal clears price alert + marks as pending removal
     dispatch(removeFromWishlistLocal({ productId: product.id, accountId: currentUser?.id }));
-    if (product.wishlistEntryId) {
-      const authParams = await getAuthParams();
-      if (authParams) {
-        dispatch(
-          removeWishlistItem({
-            id: product.wishlistEntryId,
-            ...authParams,
-          })
-        );
-      }
+    const authParams = await getAuthParams();
+    if (authParams) {
+      dispatch(
+        removeWishlistByProduct({
+          accountId: currentUser?.id,
+          productId: product.id,
+          ...authParams,
+        })
+      );
     }
     if (!silent) {
       showActionToast(product.albumTitle || product.trackName, 'wish-remove');

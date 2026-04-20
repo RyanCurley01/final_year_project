@@ -9,7 +9,7 @@ import AudioReactiveVideo from './AudioReactiveVideo';
 import OnsetImageCard from './OnsetImageCard';
 import { playPause, setActiveSong, setPlaybackRate } from '../redux/features/playerSlice';
 import { addToCart } from '../redux/features/cartSlice';
-import { addToWishlistLocal, removeFromWishlistLocal, addWishlistItem, removeWishlistItem } from '../redux/features/wishlistSlice';
+import { addToWishlistLocal, removeFromWishlistLocal, addWishlistItem, removeWishlistByProduct } from '../redux/features/wishlistSlice';
 import { useAuth } from '../context/AuthContext';
 import { auth as firebaseAuth } from '../firebase';
 import placeholders from '../utils/placeholderImage';
@@ -163,21 +163,13 @@ const SongCard = ({ product, payment, i, data, onWishlistToggle }) => {
     const hasAuth = !!(authParams.password || authParams.firebaseToken);
 
     if (isWishlisted) {
-      // Find the wishlist entry for this product
-      const entry = wishlistItems.find(
-        (item) => item.productId === product.id || item.product?.id === product.id
-      );
-      if (entry) {
-        dispatch(removeFromWishlistLocal({ productId: product.id, accountId }));
-        // Only attempt backend sync when credentials exist
-        if (hasAuth) {
-          dispatch(removeWishlistItem({ id: entry.id, ...authParams }));
-        }
-        if (onWishlistToggle) {
-          onWishlistToggle(product, 'wish-remove');
-        } else {
-          showActionToast(product.albumTitle || product.trackName, 'wish-remove');
-        }
+      // Remove all entries for this product (handles duplicates)
+      dispatch(removeFromWishlistLocal({ productId: product.id, accountId }));
+      dispatch(removeWishlistByProduct({ accountId, productId: product.id, ...authParams }));
+      if (onWishlistToggle) {
+        onWishlistToggle(product, 'wish-remove');
+      } else {
+        showActionToast(product.albumTitle || product.trackName, 'wish-remove');
       }
     } else {
       dispatch(addToWishlistLocal({ ...product, accountId }));

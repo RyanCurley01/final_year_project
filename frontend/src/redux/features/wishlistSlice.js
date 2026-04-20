@@ -82,6 +82,22 @@ export const removeWishlistItem = createAsyncThunk(
   }
 );
 
+// Remove by (accountId, productId) — cleans up all duplicates at once
+export const removeWishlistByProduct = createAsyncThunk(
+  'wishlist/removeByProduct',
+  async ({ accountId, productId, email, password, firebaseToken }) => {
+    const hasAuth = !!(password || firebaseToken);
+    if (hasAuth) {
+      try {
+        await wishlistService.removeByAccountAndProduct(accountId, productId, email, password, firebaseToken);
+      } catch {
+        // Local removal still sticks
+      }
+    }
+    return { accountId, productId };
+  }
+);
+
 // Fetch ALL wishlists across all users (for manager tracking)
 export const fetchAllWishlists = createAsyncThunk(
   'wishlist/fetchAllWishlists',
@@ -294,6 +310,19 @@ const wishlistSlice = createSlice({
       })
       .addCase(fetchAllWishlists.rejected, (state) => {
         state.allWishlistItems = [];
+      })
+      // Remove by (accountId, productId) — removes all duplicates
+      .addCase(removeWishlistByProduct.fulfilled, (state, action) => {
+        const { accountId, productId } = action.payload;
+        state.items = state.items.filter((item) => item.productId !== productId && item.product?.id !== productId);
+        state.totalItems = state.items.length;
+        state.allWishlistItems = state.allWishlistItems.filter(
+          (item) => !(item.productId === productId && item.accountId === accountId)
+        );
+        state.pendingRemovals = state.pendingRemovals.filter((pid) => pid !== productId);
+        delete state.priceAlerts[productId];
+        saveToStorage(BASE_ALERTS_KEY, state.priceAlerts);
+        saveToStorage(BASE_STORAGE_KEY, state.items);
       });
   },
 });

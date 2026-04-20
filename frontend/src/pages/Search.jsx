@@ -9,7 +9,7 @@ import OnsetImageCard from '../components/OnsetImageCard';
 import { useAudioFeatures } from '../context/AudioFeaturesContext';
 import { setActiveSong, playPause, setPlaybackRate } from '../redux/features/playerSlice';
 import { addToCart } from '../redux/features/cartSlice';
-import { addToWishlistLocal, removeFromWishlistLocal, addWishlistItem, removeWishlistItem } from '../redux/features/wishlistSlice';
+import { addToWishlistLocal, removeFromWishlistLocal, addWishlistItem, removeWishlistByProduct } from '../redux/features/wishlistSlice';
 import { useAuth } from '../context/AuthContext';
 import { auth as firebaseAuth } from '../firebase';
 import { productService } from '../redux/services';
@@ -104,12 +104,9 @@ const SongCard = ({ song, isPlaying, activeSong, onPlay, onPause, index, onSongN
     // Overwrites current relational sets applying explicitly bound structural payloads mapped 
     // against globally available context identifiers executing dual local and remote mutations.
     if (isWishlisted) {
-      const entry = wishlistItems.find((item) => item.productId === songId || item.product?.id === songId);
-      if (entry) {
-        dispatch(removeFromWishlistLocal({ productId: songId, accountId }));
-        if (hasAuth) dispatch(removeWishlistItem({ id: entry.id, ...authParams }));
-        showActionToast(songTitle, 'wish-remove');
-      }
+      dispatch(removeFromWishlistLocal({ productId: songId, accountId }));
+      dispatch(removeWishlistByProduct({ accountId, productId: songId, ...authParams }));
+      showActionToast(songTitle, 'wish-remove');
     } else {
       dispatch(addToWishlistLocal({ ...(song.matchedDbSong || song), accountId }));
       if (hasAuth) dispatch(addWishlistItem({ wishlistData: { accountId, productId: songId }, ...authParams }));

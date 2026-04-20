@@ -68,4 +68,12 @@ export const wishlistService = {
       headers: getWishlistAuthHeaders(email, password, firebaseToken),
     });
   },
+
+  // Remove from wishlist by account + product (removes all duplicates)
+  removeByAccountAndProduct: async (accountId, productId, email, password, firebaseToken) => {
+    return apiCall(`${BASE_URL}/remove?accountId=${accountId}&productId=${productId}`, {
+      method: 'DELETE',
+      headers: getWishlistAuthHeaders(email, password, firebaseToken),
+    });
+  },
 };

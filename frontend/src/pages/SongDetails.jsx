@@ -8,7 +8,7 @@ import { createPortal } from 'react-dom';
 
 import { setActiveSong, playPause, setPlaybackRate } from '../redux/features/playerSlice';
 import { addToCart } from '../redux/features/cartSlice';
-import { addToWishlistLocal, removeFromWishlistLocal, addWishlistItem, removeWishlistItem } from '../redux/features/wishlistSlice';
+import { addToWishlistLocal, removeFromWishlistLocal, addWishlistItem, removeWishlistByProduct } from '../redux/features/wishlistSlice';
 import { useAuth } from '../context/AuthContext';
 import { auth as firebaseAuth } from '../firebase';
 import Loader from '../components/Loader';
@@ -119,12 +119,9 @@ const SimilarSongCard = ({ song, isPlaying, activeSong, onPlay, onPause, rank, p
     }
     const hasAuth = !!(authParams.password || authParams.firebaseToken);
     if (isWishlisted) {
-      const entry = wishlistItems.find((item) => item.productId === songId || item.product?.id === songId);
-      if (entry) {
-        dispatch(removeFromWishlistLocal({ productId: songId, accountId }));
-        if (hasAuth) dispatch(removeWishlistItem({ id: entry.id, ...authParams }));
-        showActionToast(song.trackName || song.albumTitle, 'wish-remove');
-      }
+      dispatch(removeFromWishlistLocal({ productId: songId, accountId }));
+      dispatch(removeWishlistByProduct({ accountId, productId: songId, ...authParams }));
+      showActionToast(song.trackName || song.albumTitle, 'wish-remove');
     } else {
       dispatch(addToWishlistLocal({ ...song, id: songId, accountId }));
       if (hasAuth) dispatch(addWishlistItem({ wishlistData: { accountId, productId: songId }, ...authParams }));

@@ -33,7 +33,10 @@ public class WishlistService {
 
     @Transactional
     public Wishlist createWishlist(Wishlist wishlist) {
-        return wishlistRepository.save(wishlist);
+        // Prevent duplicates: return existing entry if already wishlisted
+        return wishlistRepository.findByAccountIdAndProductId(
+                wishlist.getAccountId(), wishlist.getProductId())
+            .orElseGet(() -> wishlistRepository.save(wishlist));
     }
 
     @Transactional
@@ -57,5 +60,10 @@ public class WishlistService {
             throw new IllegalArgumentException("Wishlist not found with id: " + id);
         }
         wishlistRepository.deleteById(id);
+    }
+
+    @Transactional
+    public void deleteByAccountAndProduct(Long accountId, Long productId) {
+        wishlistRepository.deleteByAccountIdAndProductId(accountId, productId);
     }
 }

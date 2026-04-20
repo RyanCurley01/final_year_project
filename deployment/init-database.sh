@@ -119,7 +119,8 @@ USE Game_Store_System;
         AccountID BIGINT,
         ProductID INT,
         FOREIGN KEY(AccountID) REFERENCES Accounts(AccountID),
-        FOREIGN KEY(ProductID) REFERENCES Products(ProductID)
+        FOREIGN KEY(ProductID) REFERENCES Products(ProductID),
+        UNIQUE KEY uq_account_product (AccountID, ProductID)
     );
 
     -- ============================================
