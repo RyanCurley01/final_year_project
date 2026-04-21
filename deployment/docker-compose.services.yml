@@ -158,6 +158,7 @@ services:
       SPRING_DATASOURCE_URL: jdbc:mysql://db:3306/Game_Store_System?createDatabaseIfNotExist=true
       SPRING_DATASOURCE_USERNAME: ${MYSQL_USER}
       SPRING_DATASOURCE_PASSWORD: ${MYSQL_PASSWORD}
+      FIREBASE_SERVICE_ACCOUNT_JSON: ${FIREBASE_SERVICE_ACCOUNT_JSON}
       JAVA_OPTS: "-Xmx256m -Xms128m -XX:MaxMetaspaceSize=128m -XX:+UseSerialGC"
     depends_on:
       db:

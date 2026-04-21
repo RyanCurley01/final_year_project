@@ -67,6 +67,7 @@ export const productsApi = createApi({
   reducerPath: 'productsApi',
   baseQuery: dynamicBaseQuery,
   tagTypes: ['Products'],
+  keepUnusedDataFor: 1800, // Cache for 30 minutes (presigned URLs valid for 1 hour)
   endpoints: (builder) => ({
     getAllProducts: builder.query({
       query: (auth) => ({

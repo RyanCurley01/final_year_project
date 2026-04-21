@@ -17,7 +17,7 @@ import java.time.Duration;
 @Service
 public class S3Service {
 
-    private static final Duration URL_EXPIRATION = Duration.ofHours(1); // URLs valid for 1 hour
+    private static final Duration URL_EXPIRATION = Duration.ofDays(7); // URLs valid for 7 days
 
     @Value("${aws.s3.bucket-name}")
     private String bucketName;
