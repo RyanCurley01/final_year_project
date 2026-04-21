@@ -10,6 +10,7 @@ import com.paypal.orders.*;
 // Import Lombok and SLF4J annotations
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -32,6 +33,9 @@ public class PaymentService {
     private final PaymentRepository paymentRepository;
     // Inject the configured PayPal HTTP Client context
     private final PayPalHttpClient payPalHttpClient;
+
+    @Value("${app.frontend.base-url}")
+    private String frontendBaseUrl;
 
     // Fetch all payments in the database
     public List<Payment> getAllPayments() {
@@ -150,8 +154,8 @@ public class PaymentService {
 
         // Provide return URLs used if the user completes or cancels the PayPal flow
         ApplicationContext applicationContext = new ApplicationContext()
-            .returnUrl("https://www.example.com/payment/success")
-            .cancelUrl("https://www.example.com/payment/cancel");
+            .returnUrl(frontendBaseUrl + "/payment/success")
+            .cancelUrl(frontendBaseUrl + "/payment/cancel");
         orderRequest.applicationContext(applicationContext);
 
         // Build the HTTP POST request to PayPal's API
