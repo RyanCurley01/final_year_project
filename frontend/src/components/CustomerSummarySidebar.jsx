@@ -5,6 +5,7 @@ import { customerSummaryService } from "../redux/services/customerSummaryService
 import { accountService } from "../redux/services/accountService";
 import { productService } from "../redux/services/productService";
 import { orderService } from "../redux/services/orderService";
+import { orderItemService } from "../redux/services/orderItemService";
 import { FaUserFriends } from "react-icons/fa";
 import OnsetImageCard from './OnsetImageCard';
 import SidebarSearchFilter from './SidebarSearchFilter';
@@ -16,6 +17,7 @@ const CustomerSummarySidebar = () => {
   const [accountMap, setAccountMap] = useState({});
   const [productMap, setProductMap] = useState({});
   const [orderMap, setOrderMap] = useState({});
+  const [orderItemsMap, setOrderItemsMap] = useState({});
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
 
@@ -69,17 +71,24 @@ const CustomerSummarySidebar = () => {
           // Enrich with order details
           const uniqueOrderIds = [...new Set(res.map((r) => r.orderId))];
           const oMap = {};
+          const oiMap = {};
           await Promise.all(
             uniqueOrderIds.map(async (oid) => {
               try {
                 const order = await orderService.getOrderById(oid);
                 oMap[oid] = order;
+                
+                // Fetch order items for this order
+                const orderItems = await orderItemService.getOrderItemsByOrderId(oid, email, currentUser?.password);
+                oiMap[oid] = orderItems;
               } catch {
                 oMap[oid] = null;
+                oiMap[oid] = [];
               }
             })
           );
           setOrderMap(oMap);
+          setOrderItemsMap(oiMap);
 
           setIsLoading(false);
         })
@@ -147,7 +156,7 @@ const CustomerSummarySidebar = () => {
                       <th className="px-4 py-2">Product</th>
                       <th className="px-4 py-2">Cover</th>
                       <th className="px-4 py-2">Order Date</th>
-                      <th className="px-4 py-2">Order Total</th>
+                      <th className="px-4 py-2">Price</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -155,6 +164,10 @@ const CustomerSummarySidebar = () => {
                       const account = accountMap[item.accountId];
                       const product = productMap[item.productId];
                       const order = orderMap[item.orderId];
+                      const orderItems = orderItemsMap[item.orderId] || [];
+                      const orderItem = orderItems.find(oi => oi.productId === item.productId);
+                      const actualPrice = orderItem?.unitPrice;
+                      
                       return (
                         <tr
                           key={i}
@@ -205,7 +218,8 @@ const CustomerSummarySidebar = () => {
                             {order?.orderDate ? new Date(order.orderDate).toLocaleDateString() : "—"}
                           </td>
                           <td className="px-4 py-2">
-                            {order?.totalAmount != null ? `$${Number(order.totalAmount).toFixed(2)}` : "—"}
+                            {actualPrice != null ? `$${Number(actualPrice).toFixed(2)}` : 
+                             product?.albumPrice != null ? `$${Number(product.albumPrice).toFixed(2)}` : "—"}
                           </td>
                         </tr>
                       );
