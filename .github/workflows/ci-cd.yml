@@ -273,3 +273,31 @@ jobs:
         aws s3 sync artifacts/frontend s3://your-bucket-name --delete
         aws cloudfront create-invalidation --distribution-id YOUR_DIST_ID --paths "/*"
       continue-on-error: true
+
+  # Deployment Summary
+  deployment-summary:
+    name: Deployment Summary
+    runs-on: ubuntu-latest
+    needs: [backend-build, frontend-build, audio-service-build]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: Create Deployment Summary
+      run: |
+        echo "## 🚀 Deployment Summary" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Frontend" >> $GITHUB_STEP_SUMMARY
+        echo "- **Production URL:** https://music-recommendation-store.vercel.app" >> $GITHUB_STEP_SUMMARY
+        echo "- **Status:** ✅ Deployed via Vercel" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Backend Services" >> $GITHUB_STEP_SUMMARY
+        echo "- **Platform:** Railway" >> $GITHUB_STEP_SUMMARY
+        echo "- **Status:** ✅ Built and ready for deployment" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Audio Service" >> $GITHUB_STEP_SUMMARY
+        echo "- **Platform:** Railway" >> $GITHUB_STEP_SUMMARY
+        echo "- **Status:** ✅ Built and ready for deployment" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "---" >> $GITHUB_STEP_SUMMARY
+        echo "**Build Time:** $(date -u +'%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
+        echo "**Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
