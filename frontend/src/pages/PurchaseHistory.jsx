@@ -243,9 +243,8 @@ const PurchaseHistory = () => {
                     <FaCalendar />
                     <span>{new Date(purchase.purchaseDate).toLocaleDateString()}</span>
                   </div>
-                  {/* Dollar Icon + Amount */}
+                  {/* Euro Icon + Amount */}
                   <div className="flex items-center gap-2">
-                    <FaDollarSign />
                     <span className="text-white font-semibold">
                       €{purchase.totalAmount.toFixed(2)}
                     </span>
