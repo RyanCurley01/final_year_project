@@ -149,11 +149,11 @@ const ManagerTrackingRow = ({ product, wishlistCount }) => {
       <div className="flex items-center justify-end gap-1.5">
         {hasDiscount && (
           <span className="text-gray-500 line-through text-xs">
-            ${product.albumPrice?.toFixed(2)}
+            €{product.albumPrice?.toFixed(2)}
           </span>
         )}
         <span className={`font-bold ${hasDiscount ? 'text-green-400' : 'text-white'}`}>
-          ${effectivePrice?.toFixed(2) || '0.00'}
+          €{effectivePrice?.toFixed(2) || '0.00'}
         </span>
       </div>
     </td>
@@ -634,11 +634,11 @@ const WishlistPage = () => {
                       <div className="flex items-center gap-1.5">
                         {hasDiscount && (
                           <span className="text-gray-500 line-through text-xs">
-                            ${product.albumPrice?.toFixed(2)}
+                            €{product.albumPrice?.toFixed(2)}
                           </span>
                         )}
                         <p className={`font-bold text-sm ${hasDiscount ? 'text-green-400' : 'text-white'}`}>
-                          ${effectivePrice?.toFixed(2)}
+                          €{effectivePrice?.toFixed(2)}
                         </p>
                       </div>
                       <FaBell className="text-yellow-400 w-3.5 h-3.5" />

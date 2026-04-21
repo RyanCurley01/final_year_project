@@ -267,7 +267,7 @@ const Cart = () => {
                   <p className="text-gray-400 text-sm mb-2">
                     Music
                   </p>
-                  <p className="text-white font-bold">${price?.toFixed(2)}</p>
+                  <p className="text-white font-bold">€{price?.toFixed(2)}</p>
                 </div>
 
                 {/* Product specific UI functionality mapping (remove icon, negative/positive quantity increments) */}
@@ -301,7 +301,7 @@ const Cart = () => {
                   </div>
 
                   <p className="text-white font-semibold">
-                    ${(price * item.quantity).toFixed(2)}
+                    €{(price * item.quantity).toFixed(2)}
                   </p>
                 </div>
               </div>
@@ -318,7 +318,7 @@ const Cart = () => {
           <div className="space-y-3 mb-6">
             <div className="flex justify-between text-gray-300">
               <span>Items ({totalItems}):</span>
-              <span>${totalAmount.toFixed(2)}</span>
+              <span>€{totalAmount.toFixed(2)}</span>
             </div>
             <div className="flex justify-between text-gray-300">
               <span>Shipping:</span>
@@ -326,7 +326,7 @@ const Cart = () => {
             </div>
             <div className="border-t border-gray-600 pt-3 flex justify-between text-white text-xl font-bold">
               <span>Total:</span>
-              <span>${totalAmount.toFixed(2)}</span>
+              <span>€{totalAmount.toFixed(2)}</span>
             </div>
           </div>
 

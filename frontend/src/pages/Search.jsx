@@ -324,16 +324,16 @@ const SongCard = ({ song, isPlaying, activeSong, onPlay, onPause, index, onSongN
                 </span>
                 <div className="flex flex-row items-center gap-1.5">
                   <p className="text-sm text-gray-400 line-through">
-                    ${songPrice.toFixed(2)}
+                    €{songPrice.toFixed(2)}
                   </p>
                   <p className="text-sm font-bold text-green-400">
-                    ${discountedPrice.toFixed(2)}
+                    €{discountedPrice.toFixed(2)}
                   </p>
                 </div>
               </div>
             ) : (
               <p className="text-sm font-bold text-white">
-                ${songPrice.toFixed(2)}
+                €{songPrice.toFixed(2)}
               </p>
             )}
           </div>

@@ -357,11 +357,11 @@ const SimilarSongCard = ({ song, isPlaying, activeSong, onPlay, onPause, rank, p
                   <span className="px-1.5 py-0.5 bg-green-500/90 rounded text-[10px] font-bold text-white">
                     50% OFF
                   </span>
-                  <p className="text-sm text-gray-400 line-through">${songPrice.toFixed(2)}</p>
-                  <p className="text-sm font-bold text-green-400">${discountedPrice.toFixed(2)}</p>
+                  <p className="text-sm text-gray-400 line-through">€{songPrice.toFixed(2)}</p>
+                  <p className="text-sm font-bold text-green-400">€{discountedPrice.toFixed(2)}</p>
                 </div>
               ) : (
-                <p className="text-sm font-bold text-white">${songPrice.toFixed(2)}</p>
+                <p className="text-sm font-bold text-white">€{songPrice.toFixed(2)}</p>
               )}
             </div>
             <button 

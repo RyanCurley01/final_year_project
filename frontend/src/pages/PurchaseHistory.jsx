@@ -247,7 +247,7 @@ const PurchaseHistory = () => {
                   <div className="flex items-center gap-2">
                     <FaDollarSign />
                     <span className="text-white font-semibold">
-                      ${purchase.totalAmount.toFixed(2)}
+                      €{purchase.totalAmount.toFixed(2)}
                     </span>
                   </div>
                 </div>
@@ -331,13 +331,13 @@ const PurchaseHistory = () => {
                     <div className="flex-1">
                       <p className="text-white font-semibold">{productName}</p>
                       <p className="text-gray-400 text-sm">
-                        Quantity: {item.quantity} × ${price.toFixed(2)}
+                        Quantity: {item.quantity} × €{price.toFixed(2)}
                       </p>
                     </div>
                     
                     {/* Aggregated Total Price for this specific line item setup */}
                     <div className="text-white font-semibold mr-4">
-                      ${(price * item.quantity).toFixed(2)}
+                      €{(price * item.quantity).toFixed(2)}
                     </div>
                     
                     {/* Render a Download Button IF AND ONLY IF the API provided a valid source download Url */}

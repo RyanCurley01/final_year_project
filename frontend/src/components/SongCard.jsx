@@ -615,10 +615,10 @@ const SongCard = ({ product, payment, i, data, onWishlistToggle }) => {
               </span>
               <div className="flex flex-row items-center gap-1.5">
                 <p className="text-sm text-gray-400 line-through">
-                  ${price?.toFixed(2) || '0.00'}
+                  €{price?.toFixed(2) || '0.00'}
                 </p>
                 <p className="text-sm font-bold text-green-400">
-                  ${discountedPrice?.toFixed(2)}
+                  €{discountedPrice?.toFixed(2)}
                 </p>
               </div>
             </div>
@@ -628,7 +628,7 @@ const SongCard = ({ product, payment, i, data, onWishlistToggle }) => {
                 &nbsp;
               </span>
               <p className="text-sm font-bold text-white">
-                ${price?.toFixed(2) || '0.00'}
+                €{price?.toFixed(2) || '0.00'}
               </p>
             </div>
           )}
