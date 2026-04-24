@@ -102,42 +102,6 @@ export default function Login() {
         setLoading(false);
         return;
       }
-
-      try {
-        // 4. Fallback to Legacy Backend Login
-        // Executes standard web REST logic hitting the legacy backend endpoint skipping Firebase entirely if old rows exist.
-        const response = await accountService.login(email, password);
-        
-        if (response.success) {
-          // Re-maps explicit primitive properties bridging structural legacy Account payloads correctly for modern application states.
-          const legacyUser = {
-            id: response.accountId,
-            accountName: response.accountName,
-            accountType: response.accountType,
-            accountEmailAddress: response.email,
-            password,
-            // Legacy users have no firebaseUid
-          };
-          setUser(legacyUser);
-          navigate('/');
-        } else if (response.message === 'FIREBASE_ACCOUNT') {
-          // Catches specific fail codes preventing valid linked SSO users from using legacy text password overrides explicitly.
-          setError('Email already associated with a Google account. Please login with your Google account.');
-        } else {
-          setError(response.message || 'Failed to log in');
-        }
-      } catch (backendErr) {
-        console.error("Backend login failed:", backendErr);
-        
-        let errorMessage = 'Failed to log in';
-        if (backendErr.message && backendErr.message.includes('401')) {
-             errorMessage = 'Invalid email or password';
-        } else if (backendErr.message) {
-             errorMessage = backendErr.message;
-        }
-        
-        setError(errorMessage);
-      }
     }
     
     setLoading(false);

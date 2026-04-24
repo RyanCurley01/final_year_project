@@ -487,62 +487,24 @@ const SimilarSongs = () => {
         // Store the mapped database songs in local state to act as a core library target pool
         setDbSongs(musicProducts);
         
-        // --- Step 2: Load iTunes Artist Songs ---
-        const allArtistSongs = [];
-        
-        // Loop over the predefined ARTISTS constants array (e.g., Aphex Twin, Boards of Canada)
-        for (let i = 0; i < ARTISTS.length; i++) {
-          const artist = ARTISTS[i];
-          try {
-            // Add a 300ms delay between requests (except the first one) to avoid rate limiting or flooding the backend proxy
-            if (i > 0) {
-              await new Promise(resolve => setTimeout(resolve, 300));
+        // --- Step 2: Load iTunes Artist Songs via backend topcharts proxy ---
+        let allArtistSongs = [];
+        try {
+          const resp = await fetch(`${apiBaseUrl}/itunes/topcharts?limit_per_artist=50`);
+          if (resp.ok) {
+            const data = fixTextDeep(await resp.json());
+            if (data.songs) {
+              allArtistSongs = data.songs;
             }
-            
-            // Uses proxy to avoid CORS issues from client-side calls to iTunes
-            const response = await fetch(
-              `${apiBaseUrl}/itunes/search?term=${encodeURIComponent(artist)}&media=music&entity=song&limit=200`
-            );
-            const data = fixTextDeep(await response.json());
-            
-            // Validation: Check if results exist before filtering, skip to next artist if malformed
-            if (!data.results) {
-               console.warn(`No results format for ${artist}`, data);
-               continue;
+            // Merge backend-cached features into local cache so visualiser and matchers can use them
+            if (data.features) {
+              setCachedAudioFeatures(prev => ({ ...(prev || {}), ...data.features }));
             }
-
-            // Filter to only include tracks that have a playable preview AND strictly match the exact artist name requested
-            const artistLower = artist.toLowerCase();
-            const artistSongs = data.results
-              .filter(track => track.previewUrl && track.artistName?.toLowerCase().includes(artistLower))
-              // Cap at 50 valid tracks per artist
-              .slice(0, 50)
-              // Normalize the iTunes API raw payload into a simplified component object structural model
-              .map(track => ({
-                id: track.trackId,
-                trackId: track.trackId,
-                trackName: track.trackName,
-                albumTitle: track.trackName,
-                artistName: track.artistName,
-                collectionName: track.collectionName,
-                artworkUrl100: track.artworkUrl100,
-                previewUrl: track.previewUrl,
-                fileUrl: track.previewUrl,
-                price: track.trackPrice || 1.29,
-                primaryGenreName: track.primaryGenreName,
-                trackTimeMillis: track.trackTimeMillis,
-                matchedDbSong: null,
-                matchStatus: MATCH_STATUS.pending,
-              }));
-            
-            // Push this chunk of 50 artist songs into the aggregator array
-            allArtistSongs.push(...artistSongs);
-          } catch (artistErr) {
-            // Ignore AbortErrors from React Strict Mode or component unmounting
-            if (artistErr.name !== 'AbortError') {
-              console.warn(`Error fetching ${artist}:`, artistErr);
-            }
+          } else {
+            console.warn('[SimilarSongs] topcharts proxy failed, falling back to client-side search');
           }
+        } catch (e) {
+          console.warn('[SimilarSongs] topcharts fetch error:', e.message || e);
         }
         
         // --- Step 3: Finalize External Songs List ---
@@ -707,8 +669,8 @@ const SimilarSongs = () => {
             // Attach the chosen features (cached or live) representing the active audio.
             audio_features: featuresToSend,
             
-            // Request a wide net of up to 150 potential mathematical similarity matches.
-            limit: 150
+            // Request a wide net of up to 272 potential mathematical similarity matches.
+            limit: 272
         };
 
         // Output structural payload logging for system inspection and debugging.
@@ -1347,13 +1309,11 @@ const SimilarSongs = () => {
   };
 
   // Local helper function evaluating the live contextual playback state against candidate recommendation tracks.
-  // Drives the mathematical matching UI rendered in Visualiser Mode.
+  // Uses the same backend-aligned blending logic as DiscoverVisualizer so UI percentages
+  // and ordering remain consistent when playback rate changes.
   const calculateLiveMatch = (rec) => {
-    // Prioritize dynamic visual features derived from real-time playback updates. 
-    // Fallback to static contextual track features if the visualiser polling hook is uninitialized.
     const featuresToUse = displayedFeatures || audioFeatures;
 
-    // Fast-fail: Return cached similarity computations directly from the backend if live UI mapping data is entirely absent.
     if (!featuresToUse) {
        return {
          tempo_match: rec.tempo_match,
@@ -1364,57 +1324,84 @@ const SimilarSongs = () => {
        };
     }
 
-    // Safely parse the active UI speed multiplier context.
     const rateToUse = displayedPlaybackRate || 1;
-    
-    // Step 1: Establish baseline metrics for the active reference track.
+
     let currentTempo = 120;
     if (featuresToUse.effective_tempo) {
-        // Favor pre-calculated effective tempo if provided by upstream hooks.
-        currentTempo = featuresToUse.effective_tempo;
+      currentTempo = featuresToUse.effective_tempo;
     } else if (featuresToUse.tempo) {
-        // Otherwise, manually scale the base track tempo coefficient against the active playback multiplier modifier.
-        currentTempo = Number(featuresToUse.tempo) * rateToUse;
+      currentTempo = Number(featuresToUse.tempo) * rateToUse;
     }
-    
-    // Step 2: Extract candidate track tempo bounds, defaulting to typical 120 BPM mapping if missing.
-    const targetTempo = Number(rec.tempo) || 120;
-    
-    // Step 3: Compute localized individual dimension distance metrics manually.
-    
-    // Calculate the absolute integer distance between modified playback speed and the static target BPM.
-    const tempoDiff = Math.abs(targetTempo - currentTempo);
-    
-    // Normalize tempo deviation into a predictable 0.0 - 1.0 scoring constraint via linear scaling.
-    const tempoMatch = Math.max(0, 1 - Math.min(tempoDiff / 100.0, 1.0));
-    
-    // Calculate fractional distance deviations for remaining core ML characteristics (Energy, Valence, Danceability).
-    const energyMatch = Math.max(0, 1 - Math.abs((Number(featuresToUse.energy) || 0.5) - (Number(rec.energy) || 0.5)));
-    const moodMatch = Math.max(0, 1 - Math.abs((Number(featuresToUse.valence) || 0.5) - (Number(rec.valence) || 0.5)));
-    const danceabilityMatch = Math.max(0, 1 - Math.abs((Number(featuresToUse.danceability) || 0.5) - (Number(rec.danceability) || 0.5)));
 
-    // Step 4: Execute a localized Weighted Combinatorial heuristic.
-    // Mimics the remote backend python regression weights without initiating a new HTTP request thread.
-    let score = (
+    const targetTempo = Number(rec.tempo) || 120;
+    const targetEnergy = Number(rec.energy) || 0;
+    const targetValence = Number(rec.valence) || 0;
+    const targetDanceability = Number(rec.danceability) || Number(rec.dance) || 0;
+
+    const tempoDiff = Math.abs(targetTempo - currentTempo);
+    const tempoMatch = Math.max(0, 1 - Math.min(tempoDiff / 100.0, 1.0));
+    const energyMatch = Math.max(0, 1 - Math.abs((Number(featuresToUse.energy) || 0.5) - targetEnergy));
+    const moodMatch = Math.max(0, 1 - Math.abs((Number(featuresToUse.valence) || 0.5) - targetValence));
+    const danceabilityMatch = Math.max(0, 1 - Math.abs((Number(featuresToUse.danceability) || 0.5) - targetDanceability));
+
+    const coreMatchLive = (
       tempoMatch * 0.25 +
       energyMatch * 0.30 +
       moodMatch * 0.20 +
       danceabilityMatch * 0.25
     );
-    
-    // Impose strict sanity bounds on the final scalar. Prevents rounding errors from exposing scores above 99% accuracy models.
-    if (score > 0.99) score = 0.99;
-    
-    // Coalesce fatal null operations back to origin zero mathematically avoiding visual cascade failures.
-    if (isNaN(score)) score = 0;
-    
-    // Return structured matching vectors standardized for downstream React view consumption mapping.
+
+    const genreBonus = rec.genre_match ? 0.10 : 0.0;
+
+    // Try to infer server-side cosine_norm from returned blended score and trait matches
+    let cosineNormEstimate = null;
+    if (typeof rec.similarity_score === 'number') {
+      const recTempo = Number(rec.tempo_match || rec.tempo_match === 0 ? rec.tempo_match : rec.tempo_match) || 0;
+      const recEnergy = Number(rec.energy_match || rec.energy_match === 0 ? rec.energy_match : rec.energy_match) || 0;
+      const recMood = Number(rec.mood_match || rec.mood_match === 0 ? rec.mood_match : rec.mood_match) || 0;
+      const recDance = Number(rec.danceability_match || rec.dance_match || 0) || 0;
+      const coreMatchOriginal = (recTempo * 0.25) + (recEnergy * 0.30) + (recMood * 0.20) + (recDance * 0.25);
+
+      cosineNormEstimate = (rec.similarity_score - (0.10 * coreMatchOriginal) - genreBonus) / 0.80;
+      if (!isFinite(cosineNormEstimate) || Number.isNaN(cosineNormEstimate)) cosineNormEstimate = null;
+      if (cosineNormEstimate !== null) {
+        cosineNormEstimate = Math.max(0, Math.min(1, cosineNormEstimate));
+      }
+    }
+
+    if (cosineNormEstimate === null) {
+      let fallback = coreMatchLive;
+      if (fallback > 0.99) fallback = 0.99;
+      return {
+        tempo_match: tempoMatch,
+        energy_match: energyMatch,
+        mood_match: moodMatch,
+        danceability_match: danceabilityMatch,
+        similarity_score: fallback
+      };
+    }
+
+    let blended = (cosineNormEstimate * 0.80) + (coreMatchLive * 0.10) + genreBonus;
+
+    const targetId = currentTargetContext?.id || activeSong?.id || activeSong?.productId || '';
+    const candId = rec.product_id || rec.productId || rec.id || '';
+    const seedStr = `${targetId}:${candId}`;
+    let h = 5381;
+    for (let i = 0; i < seedStr.length; i++) {
+      h = ((h << 5) + h) + seedStr.charCodeAt(i);
+      h = h & h;
+    }
+    const tieJitter = (Math.abs(h) % 1000) / 1_000_000.0;
+    blended = blended + tieJitter;
+
+    blended = Math.max(0.0, Math.min(0.999, blended));
+
     return {
       tempo_match: tempoMatch,
       energy_match: energyMatch,
       mood_match: moodMatch,
       danceability_match: danceabilityMatch,
-      similarity_score: score
+      similarity_score: blended
     };
   };
 

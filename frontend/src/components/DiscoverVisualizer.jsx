@@ -133,8 +133,7 @@ const DiscoverVisualizer = ({
         // Passes the fully numerical, rate-adjusted property object for Priority 2 live-extraction fallback
         audio_features: adjustedFeatures, 
         
-        // Requests exactly 5 responses to cap network payload sizes and prevent UI visual clutter
-        limit: 5
+        limit: 272
       };
 
       console.log('[Visualizer] Sending Unified Payload:', JSON.stringify(payload, null, 2));
@@ -396,25 +395,77 @@ const DiscoverVisualizer = ({
     // Real-Time Danceability Math: Calculates difference between current active rhythm constraints and candidate track groove
     const danceabilityMatch = Math.max(0, 1 - Math.abs((Number(featuresToUse.danceability) || 0.5) - targetDanceability));
 
-    // Reconstructs the master linear scoring algorithm identically to the backend service calculation weighting
-    // Tempo (25%), Energy (30%), Mood (20%), Danceability (25%) representing human-audible importance
-    let score = (
+    // Reconstructs the core_match exactly like the backend (Tempo 25%, Energy 30%, Mood 20%, Dance 25%)
+    const coreMatchLive = (
       tempoMatch * 0.25 +
       energyMatch * 0.30 +
       moodMatch * 0.20 +
       danceabilityMatch * 0.25
     );
-    
-    // Caps the visual UI meter at a strict 99% max to prevent mathematical float overflow rendering errors
-    if (score > 0.99) score = 0.99;
-    
-    // Returns a re-calculated metrics block that immediately overrides the React component's UI radar bars
+
+    // Determine genre bonus approximation. Backend uses a small +/- factor (genre_agree * 0.10).
+    // Frontend receives only a boolean `genre_match`, so approximate by awarding +0.10 when true.
+    const genreBonus = rec.genre_match ? 0.10 : 0.0;
+
+    // If the backend returned an already-blended similarity_score and per-trait matches,
+    // it can be infered that the original cosine_norm used server-side and reuse it so that
+    // only the core-match portion changes when the user adjusts playback rate.
+    let cosineNormEstimate = null;
+    if (typeof rec.similarity_score === 'number') {
+      // Reconstruct original core match from backend-provided trait matches
+      const recTempo = Number(rec.tempo_match || rec.tempo_match === 0 ? rec.tempo_match : rec.tempo_match) || 0;
+      const recEnergy = Number(rec.energy_match || rec.energy_match === 0 ? rec.energy_match : rec.energy_match) || 0;
+      const recMood = Number(rec.mood_match || rec.mood_match === 0 ? rec.mood_match : rec.mood_match) || 0;
+      const recDance = Number(rec.danceability_match || rec.dance_match || 0) || 0;
+      const coreMatchOriginal = (recTempo * 0.25) + (recEnergy * 0.30) + (recMood * 0.20) + (recDance * 0.25);
+
+      // Solve for cosine_norm: similarity = 0.80*cosine_norm + 0.10*coreMatchOriginal + genreBonus (+ tiny tie jitter)
+      cosineNormEstimate = (rec.similarity_score - (0.10 * coreMatchOriginal) - genreBonus) / 0.80;
+      if (!isFinite(cosineNormEstimate) || Number.isNaN(cosineNormEstimate)) cosineNormEstimate = null;
+      if (cosineNormEstimate !== null) {
+        cosineNormEstimate = Math.max(0, Math.min(1, cosineNormEstimate));
+      }
+    }
+
+    // If we couldn't infer a cosine norm, fall back to treating core-only match as the displayed similarity
+    if (cosineNormEstimate === null) {
+      let fallback = coreMatchLive;
+      if (fallback > 0.99) fallback = 0.99;
+      return {
+        tempo_match: tempoMatch,
+        energy_match: energyMatch,
+        mood_match: moodMatch,
+        danceability_match: danceabilityMatch,
+        similarity_score: fallback
+      };
+    }
+
+    // Re-blend using the inferred cosine_norm and the live core match (affected by playback rate)
+    let blended = (cosineNormEstimate * 0.80) + (coreMatchLive * 0.10) + genreBonus;
+
+    // Deterministic tie jitter to match backend ordering (small sub-decimal)
+    const targetId = currentSongId || currentProduct?.id || currentProduct?.productId || '';
+    const candId = rec.product_id || rec.productId || rec.id || '';
+    const seedStr = `${targetId}:${candId}`;
+    // Simple stable string hash (djb2-like)
+    let h = 5381;
+    for (let i = 0; i < seedStr.length; i++) {
+      h = ((h << 5) + h) + seedStr.charCodeAt(i);
+      h = h & h;
+    }
+    const tieJitter = (Math.abs(h) % 1000) / 1_000_000.0;
+    blended = blended + tieJitter;
+
+    // Clamp to backend bounds
+    blended = Math.max(0.0, Math.min(0.999, blended));
+
+    // Return the live-updated metrics
     return {
       tempo_match: tempoMatch,
       energy_match: energyMatch,
       mood_match: moodMatch,
       danceability_match: danceabilityMatch,
-      similarity_score: score
+      similarity_score: blended
     };
   };
 

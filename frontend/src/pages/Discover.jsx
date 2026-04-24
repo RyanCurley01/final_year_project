@@ -31,8 +31,8 @@ const Discover = () => {
     }
   }, [navigate]);
 
-  // Construct auth object if user exists (Note: password usually not in localStorage, but if it is, we use it)
-  // If not, we pass undefined, and the API calls public endpoint
+  // Construct auth object if user exists 
+  // If not, pass undefined, and the API calls public endpoint
   const auth = user?.email && user?.password ? { email: user.email, password: user.password } : undefined;
 
   const { data: productsData, isLoading: loading, error } = useGetAllProductsQuery(auth, {

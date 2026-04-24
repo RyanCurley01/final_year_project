@@ -18,6 +18,8 @@ from database import get_db_connection
 from feature_extraction import extract_audio_features_from_preview, derive_mood
 from ml_service import _parse_json_list
 import ml_service
+import json
+import ml_service
 
 router = APIRouter()
 
@@ -36,6 +38,13 @@ ITUNES_SEARCH_TERMS = [
     "indie alternative", "latin reggaeton", "classical piano",
     "folk acoustic", "metal heavy", "funk groove",
     "blues guitar", "reggae dub", "K-pop hits",
+]
+
+# Default artist list used for TopCharts proxy and frontend parity
+ARTISTS = [
+    "Aphex Twin",
+    "Boards of Canada",
+    "Squarepusher",
 ]
 
 # Track the background task so we can cancel it on shutdown
@@ -65,6 +74,89 @@ async def _lookup_real_genre(track_id: int, fallback: str = "Unknown") -> str:
     except Exception:
         pass
     return fallback
+
+
+@router.get("/api/itunes/topcharts")
+async def get_topcharts(artists: str | None = None, limit_per_artist: int = 50):
+    """
+    Proxy endpoint: fetch TopCharts-style artist songs from iTunes and return
+    them together with any cached audio features (from ml_service.audio_features_cache)
+    so the frontend can display songs with their ML features when available.
+
+    Query params:
+      - artists: optional comma-separated artist list (defaults to configured ARTISTS)
+      - limit_per_artist: how many tracks per artist to return (default 50)
+    """
+    try:
+        artist_list = ARTISTS if not artists else [a.strip() for a in artists.split(',') if a.strip()]
+
+        songs = []
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            for artist in artist_list:
+                try:
+                    resp = await client.get(f"{ITUNES_API_BASE_URL}/search", params={"term": artist, "limit": 200, "media": "music", "entity": "song"})
+                    if resp.status_code != 200:
+                        continue
+                    data = resp.json()
+                    results = data.get('results', []) or []
+                    artist_lower = artist.lower()
+                    artist_songs = [
+                        {
+                            'id': track.get('trackId'),
+                            'trackId': track.get('trackId'),
+                            'trackName': track.get('trackName'),
+                            'albumTitle': track.get('trackName'),
+                            'artistName': track.get('artistName'),
+                            'collectionName': track.get('collectionName'),
+                            'artworkUrl100': track.get('artworkUrl100'),
+                            'previewUrl': track.get('previewUrl'),
+                            'fileUrl': track.get('previewUrl'),
+                            'primaryGenreName': track.get('primaryGenreName'),
+                            'trackTimeMillis': track.get('trackTimeMillis')
+                        }
+                        for track in results
+                        if track.get('previewUrl') and track.get('artistName') and artist_lower in track.get('artistName','').lower()
+                    ][: max(0, int(limit_per_artist))]
+
+                    songs.extend(artist_songs)
+                    # small polite pause to avoid accidental rate-limit bursts
+                    await asyncio.sleep(0.05)
+                except Exception:
+                    continue
+
+        # Build a features mapping for any cached entries we have for these tracks
+        features_map = {}
+        for s in songs:
+            try:
+                tid = s.get('trackId')
+                if not tid:
+                    continue
+                # Check both import-key (-trackId) and absolute trackId keys in cache
+                cache_key_neg = int(-abs(int(tid)))
+                cache_key_pos = int(abs(int(tid)))
+                cached = None
+                if cache_key_neg in ml_service.audio_features_cache:
+                    cached = ml_service.audio_features_cache[cache_key_neg]
+                elif cache_key_pos in ml_service.audio_features_cache:
+                    cached = ml_service.audio_features_cache[cache_key_pos]
+                if cached:
+                    # Ensure JSON-serializable types (floats/ints/strings)
+                    features_map[str(cache_key_pos)] = {
+                        'tempo': float(cached.get('tempo', 0)),
+                        'energy': float(cached.get('energy', 0)),
+                        'valence': float(cached.get('valence', 0)),
+                        'danceability': float(cached.get('danceability', 0)),
+                        'acousticness': float(cached.get('acousticness', 0)) if cached.get('acousticness') is not None else None,
+                    }
+                    # Also expose negative-key for compatibility with frontend lookups
+                    features_map[str(cache_key_neg)] = features_map[str(cache_key_pos)]
+            except Exception:
+                continue
+
+        return {"status": "success", "count": len(songs), "songs": songs, "features": features_map}
+    except Exception as e:
+        console.log(f"❌ TopCharts proxy error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ============================================

@@ -214,12 +214,12 @@ AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS
 To apply the sync between AWS and local database image pools together and remove overflowing ones
 AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" python scripts/s3/sync_image_pools.py --target-size 80 --apply
 
-to find genre for all songs
+to find genre for all songs by genre
 docker exec -i gamestore_services-db-1 mysql -u root -p Game_Store_System -e "
 SELECT
   CASE WHEN ProductID > 0 THEN 'Library' ELSE 'iTunes' END AS Source,
   Genre,
   COUNT(*) AS Count
-FROM AudioFeaturess
+FROM AudioFeatures
 GROUP BY Source, Genre
 ORDER BY Source, Count DESC;"
