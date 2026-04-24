@@ -1,4 +1,4 @@
-# Game & Music Store — Final Year Project
+# Music Recommendation Store — Final Year Project
 
 A full-stack music store and discovery platform built with a microservices architecture. Users can browse, stream, and purchase music while exploring audio-reactive visuals, ML-powered recommendations, a spectrogram synthesizer, and MIDI-driven feature-space navigation.
 
