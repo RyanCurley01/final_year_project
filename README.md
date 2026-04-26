@@ -38,7 +38,7 @@ A full-stack music store and discovery platform built with a microservices archi
                   ▼
         ┌─────────────────┐
         │   MySQL 8.0     │
-        │ Game_Store_System│
+        │    Database     │
         └─────────────────┘
 ```
 
