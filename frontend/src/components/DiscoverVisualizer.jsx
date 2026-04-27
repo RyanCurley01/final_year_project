@@ -627,6 +627,7 @@ const DiscoverVisualizer = ({
               };
             })
             .sort((a, b) => (b.similarity_score || 0) - (a.similarity_score || 0))
+            .slice(0, 5)
             // 2nd Map: The actual visual rendering loop for the UI cards mapping backend IDs to frontend components
             .map((rec, index) => {
               
