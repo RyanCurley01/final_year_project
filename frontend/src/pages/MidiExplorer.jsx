@@ -408,9 +408,49 @@ export default function MidiExplorer() {
         // 4. Overwrite the `recommendations` array with the 12 new songs returned
         if (resp.ok) {
           const data = await resp.json();
-          // Enrich recs with catalog / iTunes metadata so titles render immediately
-          const enriched = enrichRecommendations(data.recommendations || []);
-          setRecommendations(enriched);
+          const recs = data.recommendations || [];
+          // First-pass enrichment from local catalog / cached iTunes meta
+          const enriched = enrichRecommendations(recs);
+
+          // Identify missing iTunes metadata for negative (iTunes) IDs
+          const missingIds = Array.from(new Set(
+            enriched
+              .filter((r) => {
+                const pid = r.product_id;
+                return (pid < 0) && !itunesMetaRef.current[pid];
+              })
+              .map((r) => Math.abs(r.product_id))
+          ));
+
+          // If any missing, fetch them directly from iTunes lookup API, store in ref, and re-enrich
+          if (missingIds.length > 0) {
+            try {
+              await Promise.all(missingIds.map(async (tid) => {
+                try {
+                  const itResp = await fetch(`https://itunes.apple.com/lookup?id=${tid}`);
+                  if (!itResp.ok) return;
+                  const itData = await itResp.json();
+                  const item = (itData.results && itData.results[0]) || null;
+                  if (item) {
+                    itunesMetaRef.current[-tid] = {
+                      trackName: item.trackName,
+                      artistName: item.artistName,
+                      artworkUrl100: item.artworkUrl100,
+                      previewUrl: item.previewUrl,
+                    };
+                  }
+                } catch (err) {
+                  /* ignore single lookup failures */
+                }
+              }));
+            } catch (err) {
+              /* ignore overall lookup failures */
+            }
+            const reEnriched = enrichRecommendations(recs);
+            setRecommendations(reEnriched);
+          } else {
+            setRecommendations(enriched);
+          }
         }
       } catch (err) {
         console.error('MIDI recs fetch failed', err);
