@@ -74,6 +74,30 @@ export default function MidiExplorer() {
   const allowedIdsRef = useRef(null); // [int] — only these product IDs can be recommended
   const itunesMetaRef = useRef({}); // Map<negativeTrackId, {trackName, artistName, artworkUrl100, previewUrl}>
 
+  // enriches incoming recommendation objects with available catalog or iTunes metadata
+  // to stop iTunes id's from showing
+  const enrichRecommendations = (recs) => {
+    if (!recs || !Array.isArray(recs)) return [];
+    const musicProducts = products || [];
+    return recs.map((r) => {
+      try {
+        const pid = r.product_id;
+        const catalog = musicProducts.find((p) => String(p.id) === String(pid));
+        const meta = itunesMetaRef.current && itunesMetaRef.current[pid];
+
+        return {
+          ...r,
+          // Prefer already-provided backend fields, then catalog, then iTunes metadata
+          trackName: r.trackName || catalog?.albumTitle || meta?.trackName || r.trackName,
+          artistName: r.artistName || catalog?.artistName || meta?.artistName || r.artistName,
+          artworkUrl100: r.artworkUrl100 || catalog?.albumCoverImageUrl || meta?.artworkUrl100 || r.artworkUrl100,
+          previewUrl: r.previewUrl || catalog?.previewUrl || meta?.previewUrl || r.previewUrl,
+        };
+      } catch (err) {
+        return r;
+      }
+    });
+  };
   // ── Persist CC map ──────────────────────────────────────────────
   useEffect(() => {
     localStorage.setItem('midi_cc_map', JSON.stringify(ccMap));
@@ -384,7 +408,9 @@ export default function MidiExplorer() {
         // 4. Overwrite the `recommendations` array with the 12 new songs returned
         if (resp.ok) {
           const data = await resp.json();
-          setRecommendations(data.recommendations || []);
+          // Enrich recs with catalog / iTunes metadata so titles render immediately
+          const enriched = enrichRecommendations(data.recommendations || []);
+          setRecommendations(enriched);
         }
       } catch (err) {
         console.error('MIDI recs fetch failed', err);
