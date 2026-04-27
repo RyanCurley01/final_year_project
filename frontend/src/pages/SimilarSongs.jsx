@@ -669,8 +669,8 @@ const SimilarSongs = () => {
             // Attach the chosen features (cached or live) representing the active audio.
             audio_features: featuresToSend,
             
-            // Request a wide net of up to 272 potential mathematical similarity matches.
-            limit: 272
+            // Request top 50 recommendations to avoid timeout (only top 5 are rendered anyway)
+            limit: 50
         };
 
         // Output structural payload logging for system inspection and debugging.

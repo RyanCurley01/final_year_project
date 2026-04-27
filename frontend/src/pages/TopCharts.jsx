@@ -414,7 +414,7 @@ const TopCharts = () => {
             current_product_id: String(activeSong.trackId || activeSong.id),
             preview_url: String(activeSong.previewUrl || activeSong.fileUrl || ''),
             audio_features: featuresToSend,
-            limit: 272
+            limit: 50
         };
 
         console.log('[TopCharts] Sending Unified Payload:', JSON.stringify(payload, null, 2));
@@ -858,6 +858,7 @@ const TopCharts = () => {
                       return { ...rec, ...liveMatch };
                   })
                   .sort((a, b) => b.similarity_score - a.similarity_score)
+                  .slice(0, 5)
                   .map((rec) => {
                   const isLibrarySong = rec.product_id > 0 && rec.product_id < 1000000;
                   const recArtistName = isLibrarySong ? (rec.artistName && rec.artistName !== 'Unknown Artist' ? rec.artistName : 'Library Song') : (rec.artistName || 'Unknown Artist');

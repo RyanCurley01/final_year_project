@@ -133,7 +133,8 @@ const DiscoverVisualizer = ({
         // Passes the fully numerical, rate-adjusted property object for Priority 2 live-extraction fallback
         audio_features: adjustedFeatures, 
         
-        limit: 272
+        // Request top 50 recommendations to avoid timeout (only top 5 are rendered anyway)
+        limit: 50
       };
 
       console.log('[Visualizer] Sending Unified Payload:', JSON.stringify(payload, null, 2));
