@@ -986,7 +986,7 @@ export default function MidiExplorer() {
                   )}
                 </div>  
                 
-                <div className="flex gap-1.5 mt-2 flex-row">
+                <div className="flex gap-1.5 mt-2 flex-wrap">
                   {/* Specific Tempo metric readout bound to dynamic green/yellow/red styling */}
                   <span className={`text-[10px] px-1.5 py-0.5 rounded ${
                     rec.tempo_match >= 0.7 ? 'bg-green-500/30 text-green-300' : 

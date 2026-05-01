@@ -38,7 +38,7 @@ export function useActionToast() {
           animate={{ opacity: 1, y: 0, scale: 1 }}
           exit={{ opacity: 0, y: -20, scale: 0.95 }}
           transition={{ duration: 0.25 }}
-          className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[9999] pointer-events-none"
+          className="fixed bottom-6 left-1/2 -translate-x-1/2 z-9999 pointer-events-none"
         >
           <div className={`flex items-center gap-2 px-4 py-3 rounded-lg ${cfg.bg} text-white text-sm font-semibold shadow-lg shadow-black/40 whitespace-nowrap`}>
             {Icon && <Icon className="text-white text-base shrink-0" />}

@@ -393,6 +393,10 @@ const SimilarSongs = () => {
   // Starts as null (not yet loaded) to distinguish "not fetched yet" from "fetched but empty".
   const [cachedAudioFeatures, setCachedAudioFeatures] = useState(null);
   
+  // For separating state for bulk match data so the recommendations poll can 
+  // never overwrite it.
+  const [songMatchData, setSongMatchData] = useState(new Map());
+
   // --- Refs & External Hooks ---
   // Stores the polling interval ID so it can be reliably cleared on unmount
   const intervalRef = useRef(null);
@@ -762,8 +766,8 @@ const SimilarSongs = () => {
                // Update the component state with the finalized recommendations list.
                setRecommendations(enrichedRecommendations);
                
-               // Map the freshly fetched similarity scores directly back into the master iTunes 'songs' array.
-               // This ensures UI components updating via the master array reflect newly discovered matches.
+               // Only update similarity scores in songs state so to
+               // never touch matchedDbSong or matchStatus here.
                setSongs((currentSongs) => {              
                 // Build a lookup map holding the specific similarity scores and tags.
                  const recMap = new Map(
@@ -771,8 +775,9 @@ const SimilarSongs = () => {
                  );
 
                  return currentSongs.map((song) => {
-                   const matchedRec = recMap.get(normalizeTrackId(song.trackId || song.id));
-                   
+                   const key = normalizeTrackId(song.trackId || song.id);
+                   const matchedRec = recMap.get(key);
+
                    // If this master song has no match in the new recommendation payload, clear its similarity UI stats.
                    if (!matchedRec) {
                      return {
@@ -832,7 +837,7 @@ const SimilarSongs = () => {
         intervalRef.current = null;
       }
     };
-  }, [activeSong?.trackId || activeSong?.id, songs.length > 0, dbSongs.length > 0, cachedAudioFeatures]);
+  }, [activeSong?.trackId || activeSong?.id, songs.length > 0, dbSongs.length > 0]);
 
 
   // --- Bulk Match Hook: Correlate external iTunes songs with internal Database tracks ---
@@ -894,20 +899,16 @@ const SimilarSongs = () => {
         // pending label to the resolved library title immediately, instead of making the
         // user wait for the entire multi-batch run to complete first.
         const applyResolvedMatches = () => {
-          setSongs((currentSongs) =>
-            currentSongs.map((song) => {
-              const resolved = matchedByTrack.get(normalizeTrackId(song.trackId || song.id));
-              if (!resolved) {
-                return song;
-              }
-
-              return {
-                ...song,
+          setSongMatchData(prev => {
+            const next = new Map(prev);
+            matchedByTrack.forEach((resolved, key) => {
+              next.set(key, {
                 matchedDbSong: resolved,
                 matchStatus: MATCH_STATUS.resolved,
-              };
-            })
-          );
+              });
+            });
+            return next;
+          });
         };
 
         // Sub-function orchestrating the chunking protocol constraints and network calls.
@@ -1028,7 +1029,17 @@ const SimilarSongs = () => {
         // Retry only genuine network failures (not cache misses — those will never resolve without warm-up).
         if (networkFailures.length > 0) {
           console.warn(`[SimilarSongs] Retrying library match for ${networkFailures.length} network failures`);
-          await runMatchPass(networkFailures);
+          setSongMatchData(prev => {
+            const next = new Map(prev);
+            newlyMatched.forEach((s) => {
+              const key = normalizeTrackId(s.trackId || s.id);
+              const resolved = matchedByTrack.get(key);
+              if (resolved) {
+                next.set(key, { matchedDbSong: resolved, matchStatus: MATCH_STATUS.resolved });
+              }
+            });
+            return next;
+          });
         }
 
         // Call warm-cache to:
@@ -1080,21 +1091,19 @@ const SimilarSongs = () => {
               const newlyMatched = remaining.filter((s) => matchedByTrack.has(normalizeTrackId(s.trackId || s.id)));
               if (newlyMatched.length > 0) {
                 console.log(`[SimilarSongs] Poll ${attempt}: ${newlyMatched.length} new matches found!`);
-
-                setSongs((currentSongs) =>
-                  currentSongs.map((song) => {
-                    const key = normalizeTrackId(song.trackId || song.id);
+                
+                // Writes only to songMatchData, not songs
+                setSongMatchData(prev => {
+                  const next = new Map(prev);
+                  newlyMatched.forEach((s) => {
+                    const key = normalizeTrackId(s.trackId || s.id);
                     const resolved = matchedByTrack.get(key);
-                    if (resolved && song.matchStatus !== MATCH_STATUS.resolved) {
-                      return {
-                        ...song,
-                        matchedDbSong: resolved,
-                        matchStatus: MATCH_STATUS.resolved,
-                      };
+                    if (resolved) {
+                      next.set(key, { matchedDbSong: resolved, matchStatus: MATCH_STATUS.resolved });
                     }
-                    return song;
-                  })
-                );
+                  });
+                  return next;
+                });
               }
 
               remaining = remaining.filter((s) => pollSkipped.has(normalizeTrackId(s.trackId || s.id)));
@@ -1108,20 +1117,20 @@ const SimilarSongs = () => {
               console.log(`[SimilarSongs] Polling ended with ${remaining.length} songs still unresolved after ${attempt} attempts.`);
 
               // Flip any remaining "warming" songs to "not found" since polling is done.
-              const remainingIds = new Set(remaining.map((s) => normalizeTrackId(s.trackId || s.id)));
-              setSongs((currentSongs) =>
-                currentSongs.map((song) => {
-                  const key = normalizeTrackId(song.trackId || song.id);
-                  if (remainingIds.has(key) && song.matchStatus === MATCH_STATUS.warming) {
-                    return {
-                      ...song,
+              setSongMatchData(prev => {
+                const next = new Map(prev);
+                remaining.forEach((s) => {
+                  const key = normalizeTrackId(s.trackId || s.id);
+                  const existing = next.get(key);
+                  if (!existing || existing.matchStatus === MATCH_STATUS.warming) {
+                    next.set(key, {
                       matchedDbSong: { ...MATCH_NOT_FOUND_STATE },
                       matchStatus: MATCH_STATUS.notFound,
-                    };
+                    });
                   }
-                  return song;
-                })
-              );
+                });
+                return next;
+              });
             }
           };
 
@@ -1134,29 +1143,21 @@ const SimilarSongs = () => {
         // instead of "not found" while the backend extracts their features in-memory.
         const warmingTrackIds = new Set(cacheMisses.map((s) => normalizeTrackId(s.trackId || s.id)));
 
-        // Commit the final resolution matrix back to the master song array in component state.
-        setSongs((currentSongs) =>
-          currentSongs.map((song) => {
-            const key = normalizeTrackId(song.trackId || song.id);
+        setSongMatchData(prev => {
+          const next = new Map(prev);
+          candidateSongs.forEach((s) => {
+            const key = normalizeTrackId(s.trackId || s.id);
             const resolved = matchedByTrack.get(key);
-            
             if (resolved) {
-              return { ...song, matchedDbSong: resolved, matchStatus: MATCH_STATUS.resolved };
+              next.set(key, { matchedDbSong: resolved, matchStatus: MATCH_STATUS.resolved });
+            } else if (warmingTrackIds.has(key)) {
+              next.set(key, { matchedDbSong: { ...MATCH_WARMING_STATE }, matchStatus: MATCH_STATUS.warming });
+            } else if (!next.has(key)) {
+              next.set(key, { matchedDbSong: { ...MATCH_NOT_FOUND_STATE }, matchStatus: MATCH_STATUS.notFound });
             }
-
-            // Songs whose features are being extracted in-memory show a warming state.
-            if (warmingTrackIds.has(key)) {
-              return { ...song, matchedDbSong: { ...MATCH_WARMING_STATE }, matchStatus: MATCH_STATUS.warming };
-            }
-
-            // Everything else is definitively not found.
-            return {
-              ...song,
-              matchedDbSong: song.matchedDbSong || { ...MATCH_NOT_FOUND_STATE },
-              matchStatus: MATCH_STATUS.notFound,
-            };
-          })
-        );
+          });
+          return next;
+        });
 
         // Remove the visual loading flag indicating network bulk-analysis completion.
         await finishAnalyzing();
@@ -1484,10 +1485,27 @@ const SimilarSongs = () => {
         {/* Dynamic Song Grid Map Rendering - Hidden entirely when the user clicks the "Visualiser" button. */}
         {filter !== 'visualizer' && (
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6">
-          {filteredSongs.map((song, i) => (
-            // Passes necessary state bindings and click router handlers to independent reusable child components.
-            <SongCard key={song.id} song={song} isPlaying={isPlaying} activeSong={activeSong} onPlay={handlePlay} onPause={handlePause} index={i} onSongNameClick={handleSongNameClick} onArtistClick={handleArtistClick} onAlbumClick={handleAlbumClick} />
-          ))}
+          {filteredSongs.map((song, i) => {
+            // Merges match data from songMatchData into the song object at render time.
+            // This is the only place matchedDbSong and matchStatus enter the song
+            const key = normalizeTrackId(song.trackId || song.id);
+            const matchData = songMatchData.get(key);
+            const songWithMatch = matchData ? { ...song, ...matchData } : song;
+            return (
+              <SongCard
+                key={song.id}
+                song={songWithMatch}
+                isPlaying={isPlaying}
+                activeSong={activeSong}
+                onPlay={handlePlay}
+                onPause={handlePause}
+                index={i}
+                onSongNameClick={handleSongNameClick}
+                onArtistClick={handleArtistClick}
+                onAlbumClick={handleAlbumClick}
+              />
+            );
+          })}
         </div>
         )}
       </div>

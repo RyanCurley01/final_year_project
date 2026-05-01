@@ -598,7 +598,7 @@ const SongCard = ({ product, payment, i, data, onWishlistToggle }) => {
         <p className="font-semibold text-lg text-gray-300 h-7 overflow-hidden">
           <span 
             onClick={handleSongTitleClick}
-            className="block hover:text-cyan-400 transition-colors cursor-pointer line-clamp-2"
+            className="block truncate hover:text-cyan-400 transition-colors cursor-pointer line-clamp-2"
             title={productName || 'Unknown'}
           >
             {productName || 'Unknown'}
