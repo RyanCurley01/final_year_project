@@ -1146,6 +1146,24 @@ def _host_loremflickr_images_to_s3(
                 ext = _ext_from_content_type(content_type)
                 storage_key = f"{IMAGE_POOL_S3_PREFIX}/{product_id}/{url_hash}{ext}"
 
+                # Evict old S3 object if this UrlHash already exists with a different key
+                # to prevents orphaned S3 objects when a row's StorageKey changes via upsert.
+                try:
+                    with get_db_connection() as evict_conn:
+                        if evict_conn:
+                            with evict_conn.cursor() as evict_cursor:
+                                evict_cursor.execute(
+                                    "SELECT StorageKey FROM ImageGeneration WHERE ProductID = %s AND UrlHash = %s LIMIT 1",
+                                    (product_id, url_hash),
+                                )
+                                old_row = evict_cursor.fetchone()
+                                if old_row:
+                                    old_key = (old_row.get("StorageKey") or "").strip()
+                                    if old_key and old_key != storage_key:
+                                        delete_object(IMAGE_POOL_S3_BUCKET, old_key)
+                except Exception as evict_err:
+                    console.log(f"⚠️ Could not evict old S3 key for ProductID={product_id}: {evict_err}")
+                    
                 ok = upload_bytes(
                     IMAGE_POOL_S3_BUCKET,
                     storage_key,

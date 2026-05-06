@@ -172,50 +172,36 @@ def db_insert_hosted_images(
 ) -> int:
     """Insert hosted (S3) image rows with storage metadata."""
     # Ignore empty payloads so callers can safely batch without pre-checks.
-    if not images:
-        return 0
-
-    payload = []
+    inserted = 0
     for img in images:
-        url = (img.get("url") or "").strip()
-        if not url:
+        url = img.get("url") or ""
+        if not url or contains_banned_figure_terms(img.get("tags")):
             continue
-        tags = (img.get("tags") or "").strip()
-        source_url = (img.get("sourceUrl") or "").strip()
-        # Re-run safety checks at write time to keep DB clean even if upstream
-        # filtering changes or is bypassed.
-        if contains_banned_figure_terms(tags) or contains_banned_figure_terms(source_url) or contains_banned_figure_terms(url):
-            continue
-        payload.append(
-            (
-                product_id,
-                "s3",
-                (tags or None),
-                (source_url or None),
-                (img.get("storageKey") or None),
-                (img.get("contentType") or None),
-                int(img.get("byteSize") or 0) or None,
-                url,
-                (img.get("urlHash") or hash_url(url)),
-                int(img.get("width") or 1980),
-                int(img.get("height") or 1280),
-                int(img.get("lock_id") or 0) or None,
-            )
+
+        url_hash = img.get("urlHash") or hash_url(url)
+        storage_key = img.get("storageKey") or ""
+        content_type = img.get("contentType") or "image/jpeg"
+        byte_size = int(img.get("byteSize") or 0)
+        tags = img.get("tags") or ""
+        source_url = img.get("sourceUrl") or ""
+
+        cursor.execute(
+            """
+            INSERT INTO ImageGeneration
+                (ProductID, Url, UrlHash, StorageKey, ContentType, ByteSize, Tags, SourceUrl, Provider, CreatedAt)
+            VALUES
+                (%s, %s, %s, %s, %s, %s, %s, %s, 'S3', NOW())
+            ON DUPLICATE KEY UPDATE
+                Url         = VALUES(Url),
+                StorageKey  = VALUES(StorageKey),
+                ContentType = VALUES(ContentType),
+                ByteSize    = VALUES(ByteSize),
+                Tags        = VALUES(Tags),
+                SourceUrl   = VALUES(SourceUrl),
+                UpdatedAt   = NOW()
+            """,
+            (product_id, url, url_hash, storage_key, content_type, byte_size, tags, source_url),
         )
+        inserted += cursor.rowcount  
 
-    if not payload:
-        return 0
-
-    cursor.executemany(
-        """
-        INSERT IGNORE INTO ImageGeneration
-            (ProductID, Provider, KeywordTag, SourceUrl, StorageKey, ContentType, ByteSize,
-             ImageUrl, UrlHash, Width, Height, LockId)
-        VALUES
-            (%s, %s, %s, %s, %s, %s, %s,
-             %s, %s, %s, %s, %s)
-        """,
-        payload,
-    )
-    # executemany rowcount reflects inserted (non-ignored) rows.
-    return cursor.rowcount
+    return inserted
