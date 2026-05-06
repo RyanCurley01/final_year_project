@@ -48,11 +48,6 @@ const normalizeProductId = (value) => {
   return Number.isFinite(parsed) ? parsed : null;
 };
 
-const isImportedReplacementSong = (item) => {
-  const productId = normalizeProductId(item?.productId);
-  return productId !== null && productId < 0;
-};
-
 const StockSidebar = () => {
   const { currentUser } = useAuth();
   const [isOpen, setIsOpen] = useState(false);
@@ -310,19 +305,17 @@ const StockSidebar = () => {
 
                       const songsList = filteredData.filter((item) => !!isAvailable(item));
 
-                      const replacementPool = filteredData.filter(isImportedReplacementSong);
-
-                      const unavailableLastWeek = replacementPool.filter((item) => {
+                      const unavailableLastWeek = filteredData.filter((item) => {
                         const available = isAvailable(item);
                         return !available && inRange(item.unavailableSince, lastWeekStart, thisWeekStart);
                       });
 
-                      const unavailableThisWeek = replacementPool.filter((item) => {
+                      const unavailableThisWeek = filteredData.filter((item) => {
                         const available = isAvailable(item);
                         return !available && inRange(item.unavailableSince, thisWeekStart, nextWeekStart);
                       });
 
-                      const newThisWeekCandidates = replacementPool.filter((item) => {
+                      const newThisWeekCandidates = filteredData.filter((item) => {
                         const available = isAvailable(item);
                         if (!available) return false;
                         return inRange(item.availableSince, thisWeekStart, nextWeekStart);
@@ -338,8 +331,7 @@ const StockSidebar = () => {
                         .slice(0, replacementCountThisWeek || newThisWeekCandidates.length);
 
                       // Exclude new-this-week songs from the main list so the two sections together = 272
-                      const newThisWeekIds = new Set(newThisWeek.map((item) => item.productId));
-                      const songsListExcludingNew = songsList.filter((item) => !newThisWeekIds.has(item.productId));
+                      const songsListExcludingNew = songsList;
 
                       return (
                         <>

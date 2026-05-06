@@ -104,7 +104,7 @@ const Discover = () => {
   return (
     <div className="flex flex-col pb-10 sm:pb-14">
       <div className="mb-4 sm:mb-8">
-        <h1 className="font-bold text-xl sm:text-2xl md:text-3xl text-white mb-4 sm:mb-6">Music Information Store</h1>
+        <h1 className="font-bold text-xl sm:text-2xl md:text-3xl text-white mb-4 sm:mb-6">Music Recommendation Store</h1>
       </div>
 
       <div className="mb-4 sm:mb-6">
