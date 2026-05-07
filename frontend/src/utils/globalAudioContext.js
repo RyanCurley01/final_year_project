@@ -138,6 +138,12 @@ class GlobalAudioContext {
     }
   }
 
+  // To get the current audio element for the current song
+  getCurrentSrc() {
+    if (!this.audioElement) return null;
+    return this.audioElement.src || this.audioElement.currentSrc;
+  }
+
   /**
    * Register a callback for onset events
    */

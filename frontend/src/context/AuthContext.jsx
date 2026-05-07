@@ -51,10 +51,10 @@ export function AuthProvider({ children }) {
   }
 
 
-  function logout() {
+  async function logout() {
+    await signOut(auth);
     localStorage.removeItem('currentUser');
     setCurrentUser(null);
-    return signOut(auth);
   }
 
   // Allow manual update of user (e.g. after backend sync or legacy login)

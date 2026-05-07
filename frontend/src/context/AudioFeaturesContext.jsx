@@ -13,8 +13,12 @@ export const AudioFeaturesProvider = ({ children }) => {
   const animationRef = useRef(null);
   const analyserRef = useRef(null);
   const { isPlaying, activeSong } = useSelector((state) => state.player);
+  const timeoutRef = useRef(null);
+  const songId = activeSong?.key || activeSong?.id || activeSong?.title;
 
   useEffect(() => {
+    setAudioFeatures(null); 
+
     if (!isPlaying) {
       if (animationRef.current) {
         cancelAnimationFrame(animationRef.current);
@@ -26,7 +30,19 @@ export const AudioFeaturesProvider = ({ children }) => {
     // Wait for global audio context to be initialized, then branch off from it
     const connectToGlobalContext = () => {
       if (!globalAudioContext.isInitialized || !globalAudioContext.mediaSource) {
-        setTimeout(connectToGlobalContext, 200);
+        timeoutRef.current = setTimeout(connectToGlobalContext, 200);
+        return;
+      }
+
+      // Verifies the audio element actually matches the active song
+      const currentSrc = globalAudioContext.getCurrentSrc() || '';
+      const activeSrc = activeSong?.hub?.actions?.[1]?.uri || 
+                        activeSong?.preview || 
+                        activeSong?.previewUrl || '';
+
+      if (activeSrc && currentSrc && !currentSrc.includes(activeSrc.split('/').pop())) {
+        console.log("DEBUG: mediaSource is stale, waiting for new song to load...", { currentSrc, activeSrc });
+        timeoutRef.current = setTimeout(connectToGlobalContext, 200);
         return;
       }
 
@@ -97,8 +113,12 @@ export const AudioFeaturesProvider = ({ children }) => {
         cancelAnimationFrame(animationRef.current);
         animationRef.current = null;
       }
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
+      }
     };
-  }, [isPlaying, activeSong?.id]);
+  }, [isPlaying, songId]);
 
   return (
     <AudioFeaturesContext.Provider value={{ audioFeatures, isPlaying }}>

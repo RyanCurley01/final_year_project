@@ -89,6 +89,7 @@ export default function Login() {
       });
 
       navigate('/');
+      
     } catch (firebaseErr) {
       console.warn("Firebase login failed, attempting legacy login...", firebaseErr);
       
