@@ -469,6 +469,7 @@ const Search = () => {
   const [recommendations, setRecommendations] = useState([]);
   const [recLoading, setRecLoading] = useState(false);
   const [recommendationPool, setRecommendationPool] = useState([]);
+  const [songMatchData, setSongMatchData] = useState(new Map());
 
   const intervalRef = useRef(null);
   const dispatch = useDispatch();
@@ -547,7 +548,8 @@ const Search = () => {
                 trackTimeMillis: track.trackTimeMillis,
                 artistRank: artistIndex + 1,
                 popularityScore: 51 - artistIndex,
-                source: 'itunes'
+                source: 'itunes',
+                matchStatus: MATCH_STATUS.warming,
               }));
             
             allArtistSongs.push(...artistSongs);
@@ -616,7 +618,17 @@ const Search = () => {
         });
         
         uniqueResults.sort((a, b) => b.relevance - a.relevance);
+        
+        const initialMatchMap = new Map();
+        uniqueResults.forEach(s => {
+          if (s.source === 'itunes') {
+            initialMatchMap.set(String(s.trackId || s.id), { matchStatus: MATCH_STATUS.warming });
+          }
+        });
         setSongs(uniqueResults);
+        setSongMatchData(initialMatchMap); 
+
+        await new Promise(resolve => setTimeout(resolve, 0));
 
         // Match iTunes songs against library
         const itunesSongs = uniqueResults.filter(s => s.source === 'itunes');
@@ -628,11 +640,6 @@ const Search = () => {
               artistName: s.artistName || '',
               previewUrl: s.previewUrl || s.fileUrl || '',
             }));
-
-            // Show loading state on all iTunes cards
-            setSongs(prev => prev.map(s =>
-              s.source !== 'itunes' ? s : { ...s, matchStatus: MATCH_STATUS.warming }
-            ));
 
             const matchResp = await fetch(`${audioApiUrl}/api/audio/match-library`, {
               method: 'POST',
@@ -651,24 +658,26 @@ const Search = () => {
                   }
                 });
 
-                setSongs(prev => prev.map(s => {
-                  if (s.source !== 'itunes') return s;
-
-                  const key = String(s.trackId || s.id);
-                  const matched = matchMap.get(key);
-
-                  if (!matched) return { ...s, matchStatus: MATCH_STATUS.notFound };
-
-                  return {
-                    ...s,
-                    matchedLibraryTrack: matched.matched_product_name || null,
-                    matchStatus: matched.matched_product_name ? MATCH_STATUS.resolved : MATCH_STATUS.notFound,
-                    tempo_match: matched.tempo_match ?? null,
-                    energy_match: matched.energy_match ?? null,
-                    mood_match: matched.mood_match ?? null,
-                    dance_match: matched.dance_match ?? null,
-                  };
-                }));
+                setSongMatchData(prev => {
+                  const next = new Map(prev);
+                  itunesSongs.forEach(s => {
+                    const key = String(s.trackId || s.id);
+                    const matched = matchMap.get(key);
+                    if (!matched) {
+                      next.set(key, { matchStatus: MATCH_STATUS.notFound });
+                    } else {
+                      next.set(key, {
+                        matchedLibraryTrack: matched.matched_product_name || null,
+                        matchStatus: matched.matched_product_name ? MATCH_STATUS.resolved : MATCH_STATUS.notFound,
+                        tempo_match: matched.tempo_match ?? null,
+                        energy_match: matched.energy_match ?? null,
+                        mood_match: matched.mood_match ?? null,
+                        dance_match: matched.dance_match ?? null,
+                      });
+                    }
+                  });
+                  return next;
+                });
               }
             }
           } catch (matchErr) {
@@ -849,9 +858,14 @@ const Search = () => {
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6">
-          {filteredSongs.map((song, i) => (
-            <SongCard key={song.id} song={song} isPlaying={isPlaying} activeSong={activeSong} onPlay={handlePlay} onPause={handlePause} index={i} onSongNameClick={handleSongNameClick} onArtistClick={handleArtistClick} onAlbumClick={handleAlbumClick} playbackRate={playbackRate} />
-          ))}
+        {filteredSongs.map((song, i) => {
+          const key = String(song.trackId || song.id);
+          const matchData = songMatchData.get(key);
+          const songWithMatch = matchData ? { ...song, ...matchData } : song;
+          return (
+            <SongCard key={song.id} song={songWithMatch} isPlaying={isPlaying} activeSong={activeSong} onPlay={handlePlay} onPause={handlePause} index={i} onSongNameClick={handleSongNameClick} onArtistClick={handleArtistClick} onAlbumClick={handleAlbumClick} playbackRate={playbackRate} />
+          );
+        })}
         </div>
       </div>
     </div>
