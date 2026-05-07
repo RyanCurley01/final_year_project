@@ -24,7 +24,30 @@ const ARTISTS = ['Aphex Twin', 'Boards of Canada', 'Squarepusher'];
 
 const fallbackImage = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="250" height="250" viewBox="0 0 250 250"><rect width="250" height="250" fill="#374151"/><circle cx="125" cy="125" r="80" fill="#4B5563"/><circle cx="125" cy="125" r="30" fill="#374151"/><circle cx="125" cy="125" r="10" fill="#6B7280"/></svg>');
 
+// These sentinel objects keep the UI state explicit. Instead of relying on null checks
+// alone, the page can render three distinct states for every external song card:
+// still matching, matched to a library track, or definitively not found.
+const MATCH_PENDING_STATE = {
+  id: null,
+  albumTitle: 'Matching library...',
+};
 
+const MATCH_NOT_FOUND_STATE = {
+  id: null,
+  albumTitle: 'No similar library track found',
+};
+
+const MATCH_WARMING_STATE = {
+  id: null,
+  albumTitle: 'Loading song matches...',
+};
+
+const MATCH_STATUS = {
+  pending: 'pending',
+  resolved: 'resolved',
+  warming: 'warming',
+  notFound: 'not_found',
+};
 
 const SongCard = ({ song, isPlaying, activeSong, onPlay, onPause, index, onSongNameClick, onArtistClick, onAlbumClick, playbackRate }) => {
   const dispatch = useDispatch();
@@ -379,11 +402,60 @@ const SongCard = ({ song, isPlaying, activeSong, onPlay, onPause, index, onSongN
             </p>
           </div>
 
-          {/* Matched library track label for iTunes songs */}
-          {song.matchedLibraryTrack && (
+          {/* Database Matching Footer - If an iTunes song was matched with a 
+          library track via similarity, display the linked local track info and match score badges */}
+          {(song.matchedLibraryTrack || 
+          song.matchStatus === MATCH_STATUS.pending || 
+          song.matchStatus === MATCH_STATUS.warming || 
+          song.matchStatus === MATCH_STATUS.resolved) && (
             <div className="mt-2 pt-2 border-t border-gray-700/50">
               <p className="text-[10px] text-cyan-400">Matched via library track:</p>
-              <p className="text-[11px] text-white truncate font-medium">{song.matchedLibraryTrack}</p>
+              {song.matchStatus === MATCH_STATUS.warming ? (
+                <div className="flex items-center gap-1.5 mt-0.5">
+                  <div className="w-2.5 h-2.5 border-2 border-yellow-400 border-t-transparent rounded-full animate-spin"></div>
+                  <p className="text-[11px] text-yellow-400 truncate font-medium">
+                    {MATCH_WARMING_STATE.albumTitle}
+                  </p>
+                </div>
+              ) : (
+              <p className="text-[11px] text-white truncate font-medium">
+                {song.matchStatus === MATCH_STATUS.pending
+                  ? MATCH_PENDING_STATE.albumTitle
+                  : song.matchedLibraryTrack}
+              </p>
+              )}
+              {song.matchStatus === MATCH_STATUS.resolved && song.matchedDbSong?.tempo_match != null && (
+                <div className="flex gap-1 mt-1 flex-wrap">
+                  <span className={`px-1 py-0.5 rounded text-[10px] ${
+                    song.matchedDbSong.tempo_match >= 0.7 ? 'bg-green-500/30 text-green-300' : 
+                    song.matchedDbSong.tempo_match >= 0.5 ? 'bg-yellow-500/30 text-yellow-300' : 
+                    'bg-red-500/30 text-red-300'
+                  }`}>
+                    Tempo:{Math.round(song.matchedDbSong.tempo_match * 100)}%
+                  </span>
+                  <span className={`px-1 py-0.5 rounded text-[10px] ${
+                    song.matchedDbSong.energy_match >= 0.7 ? 'bg-green-500/30 text-green-300' : 
+                    song.matchedDbSong.energy_match >= 0.5 ? 'bg-yellow-500/30 text-yellow-300' : 
+                    'bg-red-500/30 text-red-300'
+                  }`}>
+                    Energy:{Math.round(song.matchedDbSong.energy_match * 100)}%
+                  </span>
+                  <span className={`px-1 py-0.5 rounded text-[10px] ${
+                    song.matchedDbSong.mood_match >= 0.7 ? 'bg-green-500/30 text-green-300' : 
+                    song.matchedDbSong.mood_match >= 0.5 ? 'bg-yellow-500/30 text-yellow-300' : 
+                    'bg-red-500/30 text-red-300'
+                  }`}>
+                    Mood:{Math.round(song.matchedDbSong.mood_match * 100)}%
+                  </span>
+                  <span className={`px-1 py-0.5 rounded text-[10px] ${
+                    song.matchedDbSong.dance_match >= 0.7 ? 'bg-green-500/30 text-green-300' : 
+                    song.matchedDbSong.dance_match >= 0.5 ? 'bg-yellow-500/30 text-yellow-300' : 
+                    'bg-red-500/30 text-red-300'
+                  }`}>
+                    Dance:{Math.round(song.matchedDbSong.dance_match * 100)}%
+                  </span>
+                </div>
+              )}
             </div>
           )}
 
@@ -647,15 +719,21 @@ const Search = () => {
                     matchMap.set(String(m.input_track_id), m);
                   }
                 });
-                if (matchMap.size > 0) {
+                
+                if (itunesSongs.length > 0) {
                   setSongs(prev => prev.map(s => {
                     if (s.source !== 'itunes') return s;
+                    
                     const key = String(s.trackId || s.id);
+                    
                     const matched = matchMap.get(key);
-                    if (!matched) return s;
+                    
+                    if (!matched) return { ...s, matchStatus: MATCH_STATUS.notFound };
+                    
                     return {
                       ...s,
                       matchedLibraryTrack: matched.matched_product_name || null,
+                      matchStatus: matched.matched_product_name ? MATCH_STATUS.resolved : MATCH_STATUS.notFound,
                       tempo_match: matched.tempo_match ?? null,
                       energy_match: matched.energy_match ?? null,
                       mood_match: matched.mood_match ?? null,

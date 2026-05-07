@@ -837,7 +837,7 @@ const SimilarSongs = () => {
         intervalRef.current = null;
       }
     };
-  }, [activeSong?.trackId || activeSong?.id, songs.length > 0, dbSongs.length > 0]);
+  }, [activeSong?.trackId || activeSong?.id, songs.length, dbSongs.length]);
 
 
   // --- Bulk Match Hook: Correlate external iTunes songs with internal Database tracks ---
@@ -1029,17 +1029,8 @@ const SimilarSongs = () => {
         // Retry only genuine network failures (not cache misses — those will never resolve without warm-up).
         if (networkFailures.length > 0) {
           console.warn(`[SimilarSongs] Retrying library match for ${networkFailures.length} network failures`);
-          setSongMatchData(prev => {
-            const next = new Map(prev);
-            newlyMatched.forEach((s) => {
-              const key = normalizeTrackId(s.trackId || s.id);
-              const resolved = matchedByTrack.get(key);
-              if (resolved) {
-                next.set(key, { matchedDbSong: resolved, matchStatus: MATCH_STATUS.resolved });
-              }
-            });
-            return next;
-          });
+          await runMatchPass(networkFailures);
+          applyResolvedMatches(); 
         }
 
         // Call warm-cache to:
