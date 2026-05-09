@@ -363,11 +363,12 @@ const SongCard = ({ song, isPlaying, activeSong, onPlay, onPause, index, onSongN
             </p>
           </div>
 
-          {/* Library match footer */}
+          {/* Library match footer — shown for all iTunes songs that have any matchStatus */}
           {(song.matchedLibraryTrack ||
             song.matchStatus === MATCH_STATUS.pending ||
             song.matchStatus === MATCH_STATUS.warming ||
-            song.matchStatus === MATCH_STATUS.resolved) && (
+            song.matchStatus === MATCH_STATUS.resolved ||
+            song.matchStatus === MATCH_STATUS.notFound) && (
             <div className="mt-2 pt-2 border-t border-gray-700/50">
               <p className="text-[10px] text-cyan-400">Matched via library track:</p>
               {song.matchStatus === MATCH_STATUS.warming ? (
@@ -480,7 +481,6 @@ const Search = () => {
           .slice(0, 47);
         setDbSongs(libraryTargetSongs);
 
-        // Build target_ids once so the match payload can constrain the backend search
         const targetIds = libraryTargetSongs
           .map(s => Number(s.id))
           .filter(id => Number.isFinite(id) && id > 0);
@@ -522,7 +522,6 @@ const Search = () => {
                 artistRank: artistIndex + 1,
                 popularityScore: 51 - artistIndex,
                 source: 'itunes',
-                // Do NOT set matchStatus here — it gets set in bulk below
               }));
             
             allArtistSongs.push(...artistSongs);
@@ -592,21 +591,28 @@ const Search = () => {
         
         uniqueResults.sort((a, b) => b.relevance - a.relevance);
 
-        // Separate iTunes songs from DB songs for targeted matching
+        // Separate iTunes songs for targeted matching
         const itunesSongs = uniqueResults.filter(s => s.source === 'itunes');
 
-        // Build the initial warming map as a plain object so we can pass it
-        // directly into setSongMatchData without a second state call.
-        // This avoids a React batching race where a plain set followed by a
-        // functional updater sees stale prev (the pre-set empty Map).
+        // FIX: stamp matchStatus: 'warming' directly onto each iTunes song object
+        // so the card always has a status on its very first render — before songMatchData
+        // is populated. This closes the race window between setSongs and setSongMatchData
+        // that was leaving cards blank (no footer, no spinner) on the initial render.
+        const uniqueResultsWithStatus = uniqueResults.map(song => {
+          if (song.source !== 'itunes') return song;
+          return { ...song, matchStatus: MATCH_STATUS.warming };
+        });
+
+        // Build the initial warming map in sync with the stamped song objects.
+        // Both setSongs and setSongMatchData fire together so React can batch them
+        // into a single render — cards see consistent state from frame 1.
         const initialMatchMap = new Map();
         itunesSongs.forEach(s => {
           initialMatchMap.set(String(s.trackId || s.id), { matchStatus: MATCH_STATUS.warming });
         });
 
-        // Single synchronous commit: songs + their initial warming states land
-        // in the same render, so no card ever renders without a matchStatus.
-        setSongs(uniqueResults);
+        // Single synchronous commit: songs carry matchStatus, map mirrors it.
+        setSongs(uniqueResultsWithStatus);
         setSongMatchData(initialMatchMap);
 
         // Yield to the renderer so the cards paint with spinners before the
@@ -622,7 +628,6 @@ const Search = () => {
               previewUrl: s.previewUrl || s.fileUrl || '',
             }));
 
-            // Include target_ids to constrain backend search and prevent Railway timeouts
             const matchPayload = {
               candidates,
               limit: itunesSongs.length,
@@ -639,8 +644,6 @@ const Search = () => {
             if (matchResp.ok) {
               const matchData = fixTextDeep(await matchResp.json());
 
-              // Don't gate on status === 'success' — consume whatever matches array came back.
-              // This handles partial responses and non-standard status strings from Railway.
               const matches = matchData.matches || [];
 
               const matchMap = new Map();
@@ -648,9 +651,9 @@ const Search = () => {
                 matchMap.set(String(m.input_track_id), m);
               });
 
-              // Rebuild from the known itunesSongs list (not from matches) so every card
-              // is guaranteed to resolve. Cards absent from matchMap flip to notFound,
-              // stopping their spinner cleanly.
+              // Rebuild from the known itunesSongs list so every card is guaranteed
+              // to resolve. Cards absent from matchMap flip to notFound, stopping
+              // their spinner cleanly.
               const resolvedMap = new Map();
               itunesSongs.forEach(s => {
                 const key = String(s.trackId || s.id);
@@ -659,8 +662,6 @@ const Search = () => {
                 if (!matched || !matched.matched_product_name) {
                   resolvedMap.set(key, { matchStatus: MATCH_STATUS.notFound });
                 } else {
-                  // Store scores both flat (bottom badge row on the card) and nested
-                  // under matchedDbSong (library match footer badge row on the card)
                   resolvedMap.set(key, {
                     matchedLibraryTrack: matched.matched_product_name,
                     matchStatus: MATCH_STATUS.resolved,
@@ -678,12 +679,9 @@ const Search = () => {
                 }
               });
 
-              // Plain set (not functional) is safe here: we own the full resolved
-              // map and nothing else is writing to songMatchData at this point.
               setSongMatchData(resolvedMap);
 
             } else {
-              // Non-200 response — resolve all as notFound so spinners stop
               console.warn('[Search] match-library returned', matchResp.status);
               const notFoundMap = new Map();
               itunesSongs.forEach(s => {
@@ -694,8 +692,6 @@ const Search = () => {
           } catch (matchErr) {
             if (matchErr.name !== 'AbortError') {
               console.warn('[Search] Library match lookup failed:', matchErr.message);
-              // Resolve all warming cards to notFound on network error so no card
-              // spins forever. Skip on AbortError (component unmounted — state is discarded).
               const notFoundMap = new Map();
               itunesSongs.forEach(s => {
                 notFoundMap.set(String(s.trackId || s.id), { matchStatus: MATCH_STATUS.notFound });
@@ -882,6 +878,8 @@ const Search = () => {
           {filteredSongs.map((song, i) => {
             const key = String(song.trackId || song.id);
             const matchData = songMatchData.get(key);
+            // matchData overrides when present; song itself carries warming status as fallback
+            // so the footer and spinner are always visible from the very first render.
             const songWithMatch = matchData ? { ...song, ...matchData } : song;
             return (
               <SongCard
