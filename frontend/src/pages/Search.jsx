@@ -370,13 +370,17 @@ const SongCard = ({ song, isPlaying, activeSong, onPlay, onPause, index, onSongN
             song.matchStatus === MATCH_STATUS.notFound) && (
             <div className="mt-2 pt-2 border-t border-gray-700/50">
               <p className="text-[10px] text-cyan-400">Matched via library track:</p>
-              {(song.matchStatus === MATCH_STATUS.warming || song.matchStatus === MATCH_STATUS.notFound) ? (
+              {song.matchStatus === MATCH_STATUS.warming ? (
                 <div className="flex items-center gap-1.5 mt-0.5">
                   <div className="w-2.5 h-2.5 border-2 border-yellow-400 border-t-transparent rounded-full animate-spin"></div>
                   <p className="text-[11px] text-yellow-400 truncate font-medium">
                     {MATCH_WARMING_STATE.albumTitle}
                   </p>
                 </div>
+              ) : song.matchStatus === MATCH_STATUS.notFound ? (
+                <p className="text-[11px] text-gray-500 truncate font-medium">
+                  {MATCH_NOT_FOUND_STATE.albumTitle}
+                </p>
               ) : (
                 <p className="text-[11px] text-white truncate font-medium">
                   {song.matchStatus === MATCH_STATUS.pending
