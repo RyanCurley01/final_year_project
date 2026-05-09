@@ -447,6 +447,11 @@ const Search = () => {
   // setTimeout when the new search begins.
   const runIdRef = useRef(0);
 
+  // Holds the wake-up function for the polling loop's current sleep.
+  // The cleanup calls this to interrupt the sleep immediately rather than
+  // waiting the full 20 seconds for the old loop to wake and find isStale().
+  const wakeUpRef = useRef(null);
+
   const dispatch = useDispatch();
   const navigate = useNavigate();
   const { activeSong, isPlaying, playbackRate } = useSelector((state) => state.player);
@@ -741,19 +746,25 @@ const Search = () => {
           });
 
           // -----------------------------------------------------------
-          // Polling loop — mirrors SimilarSongs' pollForNewMatches exactly.
-          // Retries only cache-miss songs every 20 s, up to 15 attempts.
-          // Checks abortController so navigating away cancels cleanly.
+          // Polling loop — retries cache-miss songs every 20s, up to 15
+          // attempts. The sleep is cancellable via wakeUpRef so a new search
+          // or unmount interrupts it immediately instead of waiting 20s.
           // -----------------------------------------------------------
           const MAX_POLL_ATTEMPTS = 15;
           const POLL_INTERVAL_MS = 20_000;
           let remaining = [...cacheMisses];
           let attempt = 0;
 
+          const cancellableSleep = (ms) => new Promise(resolve => {
+            // Store the resolve function so the cleanup can call it early.
+            wakeUpRef.current = resolve;
+            setTimeout(resolve, ms);
+          });
+
           const pollForNewMatches = async () => {
             while (remaining.length > 0 && attempt < MAX_POLL_ATTEMPTS) {
               attempt++;
-              await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
+              await cancellableSleep(POLL_INTERVAL_MS);
 
               // Stop immediately if a newer search has started.
               if (isStale()) return;
@@ -824,9 +835,14 @@ const Search = () => {
     return () => {
       // Abort in-flight fetch requests (initial loads, match-library, warm-cache).
       abortController.abort();
+      // Wake the polling loop if it's mid-sleep so it hits isStale() immediately
+      // rather than waiting up to 20 seconds for the timer to fire naturally.
+      if (wakeUpRef.current) {
+        wakeUpRef.current();
+        wakeUpRef.current = null;
+      }
       // Incrementing the ref invalidates myRunId for this effect's closures.
-      // Any polling loop mid-sleep will find isStale() === true when it wakes
-      // and exit without touching the new search's state.
+      // The loop will find isStale() === true as soon as it wakes and exit.
       runIdRef.current++;
     };
   // mountId changes every time the component mounts, so this effect always
