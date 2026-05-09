@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { useNavigate, useParams } from 'react-router-dom';
 import { createPortal } from 'react-dom';
@@ -440,18 +440,24 @@ const Search = () => {
   // cleanup aborted the previous poll but the effect never restarted.
   const [mountId] = useState(() => Math.random());
 
+  // Tracks which effect "run" is current. Each effect invocation captures its
+  // own runId at startup; every async check compares against the ref's current
+  // value. When a new search fires, the ref increments and all older loops see
+  // their runId is stale, so they exit — even if they are mid-sleep in a
+  // setTimeout when the new search begins.
+  const runIdRef = useRef(0);
+
   const dispatch = useDispatch();
   const navigate = useNavigate();
   const { activeSong, isPlaying, playbackRate } = useSelector((state) => state.player);
 
   useEffect(() => {
     const abortController = new AbortController();
-    
-    // cancelled is declared in the effect scope so the cleanup closure can set
-    // it to true. The polling loop checks it on every iteration so it exits
-    // immediately when the component unmounts or searchTerm changes, even if
-    // an await is in progress when the cleanup runs.
-    let cancelled = false;
+
+    // Capture this effect's unique run ID. Any async callback that finds
+    // runIdRef.current !== myRunId knows a newer search has started and exits.
+    const myRunId = ++runIdRef.current;
+    const isStale = () => runIdRef.current !== myRunId;
 
     const fetchSearchResults = async () => {
       setLoading(true);
@@ -744,13 +750,13 @@ const Search = () => {
               attempt++;
               await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
 
-              // Stop immediately if the component unmounted or searchTerm changed.
-              if (cancelled) return;
+              // Stop immediately if a newer search has started.
+              if (isStale()) return;
 
               console.log(`[Search] Poll ${attempt}/${MAX_POLL_ATTEMPTS}: retrying ${remaining.length} warming songs...`);
               const { resolvedMap: pollMap, skippedIds: pollSkipped } = await runMatchPass(remaining);
 
-              if (cancelled) return;
+              if (isStale()) return;
 
               // Apply any newly resolved songs to songMatchData immediately
               // so their cards flip from yellow spinner to match result.
@@ -813,10 +819,10 @@ const Search = () => {
     return () => {
       // Abort in-flight fetch requests (initial loads, match-library, warm-cache).
       abortController.abort();
-      // cancelled is closed over by pollForNewMatches — setting it here is what
-      // actually stops the polling loop, since AbortSignal checks don't propagate
-      // reliably into nested async while-loops after the signal has already fired.
-      cancelled = true;
+      // Incrementing the ref invalidates myRunId for this effect's closures.
+      // Any polling loop mid-sleep will find isStale() === true when it wakes
+      // and exit without touching the new search's state.
+      runIdRef.current++;
     };
   // mountId changes every time the component mounts, so this effect always
   // re-runs on remount regardless of whether searchTerm changed.
