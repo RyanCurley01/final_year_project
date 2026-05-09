@@ -371,7 +371,7 @@ const SongCard = ({ song, isPlaying, activeSong, onPlay, onPause, index, onSongN
             song.matchStatus === MATCH_STATUS.notFound) && (
             <div className="mt-2 pt-2 border-t border-gray-700/50">
               <p className="text-[10px] text-cyan-400">Matched via library track:</p>
-              {song.matchStatus === MATCH_STATUS.warming ? (
+              {(song.matchStatus === MATCH_STATUS.warming || song.matchStatus === MATCH_STATUS.notFound) ? (
                 <div className="flex items-center gap-1.5 mt-0.5">
                   <div className="w-2.5 h-2.5 border-2 border-yellow-400 border-t-transparent rounded-full animate-spin"></div>
                   <p className="text-[11px] text-yellow-400 truncate font-medium">
@@ -382,8 +382,6 @@ const SongCard = ({ song, isPlaying, activeSong, onPlay, onPause, index, onSongN
                 <p className="text-[11px] text-white truncate font-medium">
                   {song.matchStatus === MATCH_STATUS.pending
                     ? MATCH_PENDING_STATE.albumTitle
-                    : song.matchStatus === MATCH_STATUS.notFound
-                    ? MATCH_NOT_FOUND_STATE.albumTitle
                     : song.matchedLibraryTrack}
                 </p>
               )}
@@ -641,27 +639,26 @@ const Search = () => {
               signal: abortController.signal,
             });
 
-            if (matchResp.ok) {
-              const matchData = fixTextDeep(await matchResp.json());
-
-              const matches = matchData.matches || [];
-
+            // Helper: build a map covering every iTunes song, resolving each to
+            // notFound by default. Entries from the API response overwrite the default.
+            // This guarantees no song is ever left in the 'warming' state permanently —
+            // even if the backend silently drops a song from its response.
+            const buildFullResolvedMap = (matches) => {
               const matchMap = new Map();
               matches.forEach(m => {
                 matchMap.set(String(m.input_track_id), m);
               });
 
-              // Rebuild from the known itunesSongs list so every card is guaranteed
-              // to resolve. Cards absent from matchMap flip to notFound, stopping
-              // their spinner cleanly.
               const resolvedMap = new Map();
+              // Seed every iTunes song as notFound first
+              itunesSongs.forEach(s => {
+                resolvedMap.set(String(s.trackId || s.id), { matchStatus: MATCH_STATUS.notFound });
+              });
+              // Overwrite with real results where the backend returned a match
               itunesSongs.forEach(s => {
                 const key = String(s.trackId || s.id);
                 const matched = matchMap.get(key);
-
-                if (!matched || !matched.matched_product_name) {
-                  resolvedMap.set(key, { matchStatus: MATCH_STATUS.notFound });
-                } else {
+                if (matched && matched.matched_product_name) {
                   resolvedMap.set(key, {
                     matchedLibraryTrack: matched.matched_product_name,
                     matchStatus: MATCH_STATUS.resolved,
@@ -678,20 +675,20 @@ const Search = () => {
                   });
                 }
               });
+              return resolvedMap;
+            };
 
-              setSongMatchData(resolvedMap);
-
+            if (matchResp.ok) {
+              const matchData = fixTextDeep(await matchResp.json());
+              setSongMatchData(buildFullResolvedMap(matchData.matches || []));
             } else {
               console.warn('[Search] match-library returned', matchResp.status);
-              const notFoundMap = new Map();
-              itunesSongs.forEach(s => {
-                notFoundMap.set(String(s.trackId || s.id), { matchStatus: MATCH_STATUS.notFound });
-              });
-              setSongMatchData(notFoundMap);
+              setSongMatchData(buildFullResolvedMap([]));
             }
           } catch (matchErr) {
             if (matchErr.name !== 'AbortError') {
               console.warn('[Search] Library match lookup failed:', matchErr.message);
+              // Resolve all to notFound so no card spins forever.
               const notFoundMap = new Map();
               itunesSongs.forEach(s => {
                 notFoundMap.set(String(s.trackId || s.id), { matchStatus: MATCH_STATUS.notFound });
