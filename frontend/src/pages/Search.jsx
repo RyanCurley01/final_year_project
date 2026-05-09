@@ -610,6 +610,9 @@ const Search = () => {
         // match-library fetch (which can take several seconds) blocks the thread.
         await new Promise(resolve => setTimeout(resolve, 0));
 
+        // A new search may have started during the yield or the iTunes fetches above.
+        if (isStale()) return;
+
         if (itunesSongs.length === 0) {
           setLoading(false);
           return;
@@ -685,15 +688,17 @@ const Search = () => {
               return { resolvedMap: buildFullResolvedMap([]), skippedIds: new Set() };
             }
           } catch (matchErr) {
-            if (matchErr.name !== 'AbortError') {
-              console.warn('[Search] Library match lookup failed:', matchErr.message);
+            if (matchErr.name === 'AbortError') {
+              throw matchErr; // re-throw so the polling loop exits immediately
             }
+            console.warn('[Search] Library match lookup failed:', matchErr.message);
             return { resolvedMap: buildFullResolvedMap([]), skippedIds: new Set() };
           }
         };
 
         // --- First pass ---
         const { resolvedMap, skippedIds } = await runMatchPass(itunesSongs);
+        if (isStale()) return;
         setSongMatchData(resolvedMap);
 
         // Identify cache misses — songs the backend explicitly skipped
