@@ -573,9 +573,7 @@ const SimilarSongs = () => {
     // Identify the currently selected or playing track.
     const targetSong = getCurrentTarget();
 
-    // Abort execution and clear the UI if no valid target song exists,
-    //  or if the global song list is empty.
-    if (!targetSong || songs.length === 0) {
+    if (!targetSong || songs.length === 0 || cachedAudioFeatures === null) {
       setRecommendations([]);
       return;
     }
@@ -688,7 +686,7 @@ const SimilarSongs = () => {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify(payload),
-          signal: AbortSignal.timeout(5000)
+          signal: AbortSignal.timeout(15000)
         });
 
         if (response.ok) {
@@ -837,7 +835,7 @@ const SimilarSongs = () => {
         intervalRef.current = null;
       }
     };
-  }, [activeSong?.trackId || activeSong?.id, songs.length, dbSongs.length]);
+  }, [activeSong?.trackId || activeSong?.id, dbSongs.length, cachedAudioFeatures !== null]);
 
 
   // --- Bulk Match Hook: Correlate external iTunes songs with internal Database tracks ---
