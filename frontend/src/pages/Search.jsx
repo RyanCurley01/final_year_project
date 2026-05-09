@@ -16,7 +16,6 @@ import { productService } from '../redux/services';
 import { FaPauseCircle, FaPlayCircle, FaStar, FaRegStar } from 'react-icons/fa';
 import { FiShoppingCart, FiMaximize2, FiMinimize2 } from 'react-icons/fi';
 import envConfig from '../config/environment';
-import blissImage from '../assets/bliss.png';
 import { fixTextDeep } from '../utils/fixText';
 import { useActionToast } from '../components/CartToast';
 
@@ -170,7 +169,7 @@ const SongCard = ({ song, isPlaying, activeSong, onPlay, onPause, index, onSongN
           />
         )}
         
-        {/* Play/Pause overlay - shows on hover */}
+        {/* Play/Pause overlay */}
         {song.previewUrl && (
           <div 
             className={`absolute inset-0 rounded-lg flex justify-center items-center z-20 ${isHovered ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
@@ -199,7 +198,7 @@ const SongCard = ({ song, isPlaying, activeSong, onPlay, onPause, index, onSongN
           </div>
         )}
 
-        {/* Maximise button for video/onset cards - top right */}
+        {/* Maximise button for video/onset cards */}
         {(isVideo || useOnsetImages) && (
           <button
             onClick={(e) => { e.stopPropagation(); setIsFullscreen(true); }}
@@ -364,10 +363,11 @@ const SongCard = ({ song, isPlaying, activeSong, onPlay, onPause, index, onSongN
             </p>
           </div>
 
-          {(song.matchedLibraryTrack || 
-          song.matchStatus === MATCH_STATUS.pending || 
-          song.matchStatus === MATCH_STATUS.warming || 
-          song.matchStatus === MATCH_STATUS.resolved) && (
+          {/* Library match footer */}
+          {(song.matchedLibraryTrack ||
+            song.matchStatus === MATCH_STATUS.pending ||
+            song.matchStatus === MATCH_STATUS.warming ||
+            song.matchStatus === MATCH_STATUS.resolved) && (
             <div className="mt-2 pt-2 border-t border-gray-700/50">
               <p className="text-[10px] text-cyan-400">Matched via library track:</p>
               {song.matchStatus === MATCH_STATUS.warming ? (
@@ -378,78 +378,46 @@ const SongCard = ({ song, isPlaying, activeSong, onPlay, onPause, index, onSongN
                   </p>
                 </div>
               ) : (
-              <p className="text-[11px] text-white truncate font-medium">
-                {song.matchStatus === MATCH_STATUS.pending
-                  ? MATCH_PENDING_STATE.albumTitle
-                  : song.matchedLibraryTrack}
-              </p>
+                <p className="text-[11px] text-white truncate font-medium">
+                  {song.matchStatus === MATCH_STATUS.pending
+                    ? MATCH_PENDING_STATE.albumTitle
+                    : song.matchStatus === MATCH_STATUS.notFound
+                    ? MATCH_NOT_FOUND_STATE.albumTitle
+                    : song.matchedLibraryTrack}
+                </p>
               )}
               {song.matchStatus === MATCH_STATUS.resolved && song.matchedDbSong?.tempo_match != null && (
                 <div className="flex gap-1 mt-1 flex-wrap">
                   <span className={`px-1 py-0.5 rounded text-[10px] ${
-                    song.matchedDbSong.tempo_match >= 0.7 ? 'bg-green-500/30 text-green-300' : 
-                    song.matchedDbSong.tempo_match >= 0.5 ? 'bg-yellow-500/30 text-yellow-300' : 
+                    song.matchedDbSong.tempo_match >= 0.7 ? 'bg-green-500/30 text-green-300' :
+                    song.matchedDbSong.tempo_match >= 0.5 ? 'bg-yellow-500/30 text-yellow-300' :
                     'bg-red-500/30 text-red-300'
                   }`}>
                     Tempo:{Math.round(song.matchedDbSong.tempo_match * 100)}%
                   </span>
                   <span className={`px-1 py-0.5 rounded text-[10px] ${
-                    song.matchedDbSong.energy_match >= 0.7 ? 'bg-green-500/30 text-green-300' : 
-                    song.matchedDbSong.energy_match >= 0.5 ? 'bg-yellow-500/30 text-yellow-300' : 
+                    song.matchedDbSong.energy_match >= 0.7 ? 'bg-green-500/30 text-green-300' :
+                    song.matchedDbSong.energy_match >= 0.5 ? 'bg-yellow-500/30 text-yellow-300' :
                     'bg-red-500/30 text-red-300'
                   }`}>
                     Energy:{Math.round(song.matchedDbSong.energy_match * 100)}%
                   </span>
                   <span className={`px-1 py-0.5 rounded text-[10px] ${
-                    song.matchedDbSong.mood_match >= 0.7 ? 'bg-green-500/30 text-green-300' : 
-                    song.matchedDbSong.mood_match >= 0.5 ? 'bg-yellow-500/30 text-yellow-300' : 
+                    song.matchedDbSong.mood_match >= 0.7 ? 'bg-green-500/30 text-green-300' :
+                    song.matchedDbSong.mood_match >= 0.5 ? 'bg-yellow-500/30 text-yellow-300' :
                     'bg-red-500/30 text-red-300'
                   }`}>
                     Mood:{Math.round(song.matchedDbSong.mood_match * 100)}%
                   </span>
                   <span className={`px-1 py-0.5 rounded text-[10px] ${
-                    song.matchedDbSong.dance_match >= 0.7 ? 'bg-green-500/30 text-green-300' : 
-                    song.matchedDbSong.dance_match >= 0.5 ? 'bg-yellow-500/30 text-yellow-300' : 
+                    song.matchedDbSong.dance_match >= 0.7 ? 'bg-green-500/30 text-green-300' :
+                    song.matchedDbSong.dance_match >= 0.5 ? 'bg-yellow-500/30 text-yellow-300' :
                     'bg-red-500/30 text-red-300'
                   }`}>
                     Dance:{Math.round(song.matchedDbSong.dance_match * 100)}%
                   </span>
                 </div>
               )}
-            </div>
-          )}
-
-          {/* Audio Feature Match Badges */}
-          {song.tempo_match != null && (
-            <div className="flex gap-1 mt-auto pt-2 flex-wrap">
-              <span className={`px-1 py-0.5 rounded text-[10px] ${
-                song.tempo_match >= 0.7 ? 'bg-green-500/30 text-green-300' : 
-                song.tempo_match >= 0.5 ? 'bg-yellow-500/30 text-yellow-300' : 
-                'bg-red-500/30 text-red-300'
-              }`}>
-                Tempo:{Math.round(song.tempo_match * 100)}%
-              </span>
-              <span className={`px-1 py-0.5 rounded text-[10px] ${
-                song.energy_match >= 0.7 ? 'bg-green-500/30 text-green-300' : 
-                song.energy_match >= 0.5 ? 'bg-yellow-500/30 text-yellow-300' : 
-                'bg-red-500/30 text-red-300'
-              }`}>
-                Energy:{Math.round((song.energy_match || 0) * 100)}%
-              </span>
-              <span className={`px-1 py-0.5 rounded text-[10px] ${
-                song.mood_match >= 0.7 ? 'bg-green-500/30 text-green-300' : 
-                song.mood_match >= 0.5 ? 'bg-yellow-500/30 text-yellow-300' : 
-                'bg-red-500/30 text-red-300'
-              }`}>
-                Mood:{Math.round((song.mood_match || 0) * 100)}%
-              </span>
-              <span className={`px-1 py-0.5 rounded text-[10px] ${
-                (song.dance_match) >= 0.7 ? 'bg-green-500/30 text-green-300' : 
-                (song.dance_match) >= 0.5 ? 'bg-yellow-500/30 text-yellow-300' : 
-                'bg-red-500/30 text-red-300'
-              }`}>
-                Dance:{Math.round((song.dance_match || 0) * 100)}%
-              </span>
             </div>
           )}
         </>
@@ -511,6 +479,11 @@ const Search = () => {
           )
           .slice(0, 47);
         setDbSongs(libraryTargetSongs);
+
+        // Build target_ids once so the match payload can constrain the backend search
+        const targetIds = libraryTargetSongs
+          .map(s => Number(s.id))
+          .filter(id => Number.isFinite(id) && id > 0);
         
         const allArtistSongs = [];
         const audioApiUrl = envConfig.getApiBaseUrl();
@@ -549,7 +522,7 @@ const Search = () => {
                 artistRank: artistIndex + 1,
                 popularityScore: 51 - artistIndex,
                 source: 'itunes',
-                matchStatus: MATCH_STATUS.warming,
+                // Do NOT set matchStatus here — it gets set in bulk below
               }));
             
             allArtistSongs.push(...artistSongs);
@@ -618,7 +591,9 @@ const Search = () => {
         });
         
         uniqueResults.sort((a, b) => b.relevance - a.relevance);
-        
+
+        // --- FIX 1: Set ALL iTunes songs to warming immediately, before any async match call ---
+        // This ensures every card shows the spinner while waiting, with no blanks.
         const initialMatchMap = new Map();
         uniqueResults.forEach(s => {
           if (s.source === 'itunes') {
@@ -626,12 +601,14 @@ const Search = () => {
           }
         });
         setSongs(uniqueResults);
-        setSongMatchData(initialMatchMap); 
+        setSongMatchData(initialMatchMap);
 
+        // Yield to the renderer so cards appear before the match fetch blocks the thread
         await new Promise(resolve => setTimeout(resolve, 0));
 
         // Match iTunes songs against library
         const itunesSongs = uniqueResults.filter(s => s.source === 'itunes');
+
         if (itunesSongs.length > 0) {
           try {
             const candidates = itunesSongs.map(s => ({
@@ -641,48 +618,93 @@ const Search = () => {
               previewUrl: s.previewUrl || s.fileUrl || '',
             }));
 
+            // --- FIX 2: Include target_ids to constrain backend search and prevent Railway timeouts ---
+            const matchPayload = {
+              candidates,
+              limit: itunesSongs.length,
+              ...(targetIds.length > 0 && { target_ids: targetIds }),
+            };
+
             const matchResp = await fetch(`${audioApiUrl}/api/audio/match-library`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ candidates, limit: itunesSongs.length }),
+              body: JSON.stringify(matchPayload),
               signal: abortController.signal,
             });
 
             if (matchResp.ok) {
               const matchData = fixTextDeep(await matchResp.json());
-              if (matchData.status === 'success' && matchData.matches) {
-                const matchMap = new Map();
-                matchData.matches.forEach(m => {
-                  if (m.matched_product_name || m.similarity_score > 0) {
-                    matchMap.set(String(m.input_track_id), m);
-                  }
-                });
 
-                setSongMatchData(prev => {
-                  const next = new Map(prev);
-                  itunesSongs.forEach(s => {
-                    const key = String(s.trackId || s.id);
-                    const matched = matchMap.get(key);
-                    if (!matched) {
-                      next.set(key, { matchStatus: MATCH_STATUS.notFound });
-                    } else {
-                      next.set(key, {
-                        matchedLibraryTrack: matched.matched_product_name || null,
-                        matchStatus: matched.matched_product_name ? MATCH_STATUS.resolved : MATCH_STATUS.notFound,
+              // --- FIX 3: Don't gate on status === 'success' — use whatever matches array came back ---
+              // This handles partial responses and non-standard status values from Railway.
+              const matches = matchData.matches || [];
+
+              const matchMap = new Map();
+              matches.forEach(m => {
+                matchMap.set(String(m.input_track_id), m);
+              });
+
+              // --- FIX 4: Iterate ALL itunesSongs so every card is resolved, not just matched ones ---
+              // Previously, songs missing from matchData.matches were never updated from 'warming'.
+              setSongMatchData(prev => {
+                const next = new Map(prev);
+                itunesSongs.forEach(s => {
+                  const key = String(s.trackId || s.id);
+                  const matched = matchMap.get(key);
+
+                  if (!matched || !matched.matched_product_name) {
+                    // Explicitly flip to notFound so the yellow spinner stops
+                    next.set(key, { matchStatus: MATCH_STATUS.notFound });
+                  } else {
+                    // Store scores both flat (for the bottom badge row) and nested
+                    // under matchedDbSong (for the library match footer badge row)
+                    next.set(key, {
+                      matchedLibraryTrack: matched.matched_product_name,
+                      matchStatus: MATCH_STATUS.resolved,
+                      matchedDbSong: {
                         tempo_match: matched.tempo_match ?? null,
                         energy_match: matched.energy_match ?? null,
                         mood_match: matched.mood_match ?? null,
                         dance_match: matched.dance_match ?? null,
-                      });
-                    }
-                  });
-                  return next;
+                      },
+                      tempo_match: matched.tempo_match ?? null,
+                      energy_match: matched.energy_match ?? null,
+                      mood_match: matched.mood_match ?? null,
+                      dance_match: matched.dance_match ?? null,
+                    });
+                  }
                 });
-              }
+                return next;
+              });
+            } else {
+              // Non-200 response — resolve all as notFound so spinners stop
+              console.warn('[Search] match-library returned', matchResp.status);
+              setSongMatchData(prev => {
+                const next = new Map(prev);
+                itunesSongs.forEach(s => {
+                  next.set(String(s.trackId || s.id), { matchStatus: MATCH_STATUS.notFound });
+                });
+                return next;
+              });
             }
           } catch (matchErr) {
             if (matchErr.name !== 'AbortError') {
               console.warn('[Search] Library match lookup failed:', matchErr.message);
+            }
+            // --- FIX 5: Always resolve warming cards on error so they never spin forever ---
+            // Skipped for AbortError (component unmounted) since state updates on unmounted
+            // components are harmless but noisy; the map is discarded anyway.
+            if (matchErr.name !== 'AbortError') {
+              setSongMatchData(prev => {
+                const next = new Map(prev);
+                itunesSongs.forEach(s => {
+                  const key = String(s.trackId || s.id);
+                  if (!next.has(key) || next.get(key)?.matchStatus === MATCH_STATUS.warming) {
+                    next.set(key, { matchStatus: MATCH_STATUS.notFound });
+                  }
+                });
+                return next;
+              });
             }
           }
         }
@@ -852,20 +874,35 @@ const Search = () => {
         </div>
 
         <div className="mb-6 flex flex-wrap gap-3">
-          <button onClick={() => setFilter('all')} className={`px-4 py-2 rounded-full text-sm font-medium transition-all ${filter === 'all' ? 'bg-white text-black' : 'bg-white/10 text-white hover:bg-white/20'}`}>
+          <button
+            onClick={() => setFilter('all')}
+            className={`px-4 py-2 rounded-full text-sm font-medium transition-all ${filter === 'all' ? 'bg-white text-black' : 'bg-white/10 text-white hover:bg-white/20'}`}
+          >
             All Results ({songs.length})
           </button>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6">
-        {filteredSongs.map((song, i) => {
-          const key = String(song.trackId || song.id);
-          const matchData = songMatchData.get(key);
-          const songWithMatch = matchData ? { ...song, ...matchData } : song;
-          return (
-            <SongCard key={song.id} song={songWithMatch} isPlaying={isPlaying} activeSong={activeSong} onPlay={handlePlay} onPause={handlePause} index={i} onSongNameClick={handleSongNameClick} onArtistClick={handleArtistClick} onAlbumClick={handleAlbumClick} playbackRate={playbackRate} />
-          );
-        })}
+          {filteredSongs.map((song, i) => {
+            const key = String(song.trackId || song.id);
+            const matchData = songMatchData.get(key);
+            const songWithMatch = matchData ? { ...song, ...matchData } : song;
+            return (
+              <SongCard
+                key={song.id}
+                song={songWithMatch}
+                isPlaying={isPlaying}
+                activeSong={activeSong}
+                onPlay={handlePlay}
+                onPause={handlePause}
+                index={i}
+                onSongNameClick={handleSongNameClick}
+                onArtistClick={handleArtistClick}
+                onAlbumClick={handleAlbumClick}
+                playbackRate={playbackRate}
+              />
+            );
+          })}
         </div>
       </div>
     </div>
