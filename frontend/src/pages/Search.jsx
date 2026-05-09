@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { useNavigate, useParams } from 'react-router-dom';
 import { createPortal } from 'react-dom';
@@ -6,7 +6,6 @@ import { createPortal } from 'react-dom';
 import Loader from '../components/Loader';
 import AudioReactiveVideo from '../components/AudioReactiveVideo';
 import OnsetImageCard from '../components/OnsetImageCard';
-import { useAudioFeatures } from '../context/AudioFeaturesContext';
 import { setActiveSong, playPause, setPlaybackRate } from '../redux/features/playerSlice';
 import { addToCart } from '../redux/features/cartSlice';
 import { addToWishlistLocal, removeFromWishlistLocal, addWishlistItem, removeWishlistByProduct } from '../redux/features/wishlistSlice';
@@ -433,22 +432,11 @@ const Search = () => {
   const [dbSongs, setDbSongs] = useState([]);
   const [filter, setFilter] = useState('all');
   const [error, setError] = useState(null);
-  const [recommendations, setRecommendations] = useState([]);
-  const [recLoading, setRecLoading] = useState(false);
-  const [recommendationPool, setRecommendationPool] = useState([]);
   const [songMatchData, setSongMatchData] = useState(new Map());
 
-  const intervalRef = useRef(null);
   const dispatch = useDispatch();
   const navigate = useNavigate();
   const { activeSong, isPlaying, playbackRate } = useSelector((state) => state.player);
-  
-  const { audioFeatures } = useAudioFeatures();
-
-  const audioFeaturesRef = useRef(audioFeatures);
-  audioFeaturesRef.current = audioFeatures;
-  const playbackRateRef = useRef(playbackRate);
-  playbackRateRef.current = playbackRate;
 
   useEffect(() => {
     const abortController = new AbortController();
@@ -530,7 +518,6 @@ const Search = () => {
           }
         }
         
-        setRecommendationPool(allArtistSongs);
         
         const searchNorm = normalize(searchLower);
         const filteredDbSongs = musicProducts.filter(song => {
@@ -788,14 +775,6 @@ const Search = () => {
         albumArtwork: song.artworkUrl100?.replace('100x100', '600x600')
       }
     });
-  };
-
-  const handleRecommendationClick = (song) => {
-    if (song?.fileUrl) {
-      const index = songs.findIndex(s => s.id === song.id);
-      dispatch(setActiveSong({ song, data: songs, i: index }));
-      dispatch(playPause(true));
-    }
   };
 
   if (loading) return <Loader title={searchTerm ? `Searching for "${searchTerm}"...` : 'Loading...'} />;
