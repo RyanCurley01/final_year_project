@@ -433,6 +433,13 @@ const Search = () => {
   const [error, setError] = useState(null);
   const [songMatchData, setSongMatchData] = useState(new Map());
 
+  // A stable random value created once per mount. Including it in the
+  // useEffect dependency array forces the effect to re-run on every remount
+  // even when searchTerm is unchanged — this fixes cards getting permanently
+  // stuck in the warming state after navigating away and back, because the
+  // cleanup aborted the previous poll but the effect never restarted.
+  const [mountId] = useState(() => Math.random());
+
   const dispatch = useDispatch();
   const navigate = useNavigate();
   const { activeSong, isPlaying, playbackRate } = useSelector((state) => state.player);
@@ -440,6 +447,12 @@ const Search = () => {
   useEffect(() => {
     const abortController = new AbortController();
     
+    // cancelled is declared in the effect scope so the cleanup closure can set
+    // it to true. The polling loop checks it on every iteration so it exits
+    // immediately when the component unmounts or searchTerm changes, even if
+    // an await is in progress when the cleanup runs.
+    let cancelled = false;
+
     const fetchSearchResults = async () => {
       setLoading(true);
       setError(null);
@@ -731,12 +744,13 @@ const Search = () => {
               attempt++;
               await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
 
-              if (abortController.signal.aborted) return;
+              // Stop immediately if the component unmounted or searchTerm changed.
+              if (cancelled) return;
 
               console.log(`[Search] Poll ${attempt}/${MAX_POLL_ATTEMPTS}: retrying ${remaining.length} warming songs...`);
               const { resolvedMap: pollMap, skippedIds: pollSkipped } = await runMatchPass(remaining);
 
-              if (abortController.signal.aborted) return;
+              if (cancelled) return;
 
               // Apply any newly resolved songs to songMatchData immediately
               // so their cards flip from yellow spinner to match result.
@@ -797,9 +811,16 @@ const Search = () => {
     fetchSearchResults();
     
     return () => {
+      // Abort in-flight fetch requests (initial loads, match-library, warm-cache).
       abortController.abort();
+      // cancelled is closed over by pollForNewMatches — setting it here is what
+      // actually stops the polling loop, since AbortSignal checks don't propagate
+      // reliably into nested async while-loops after the signal has already fired.
+      cancelled = true;
     };
-  }, [searchTerm]);
+  // mountId changes every time the component mounts, so this effect always
+  // re-runs on remount regardless of whether searchTerm changed.
+  }, [searchTerm, mountId]);
 
   // songMatchData in the dependency array ensures the grid re-renders
   // whenever a poll resolves new matches — identical to SimilarSongs.
