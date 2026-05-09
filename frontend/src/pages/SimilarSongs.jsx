@@ -1186,7 +1186,7 @@ const SimilarSongs = () => {
       [seeded[i], seeded[j]] = [seeded[j], seeded[i]];
     }
     return seeded;
-  }, [songs, filter, shuffleSeed]);
+  }, [songs, filter, shuffleSeed, songMatchData]);
 
   // Global Audio Player Hooks 
   
