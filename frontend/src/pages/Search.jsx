@@ -592,26 +592,19 @@ const Search = () => {
         // Separate iTunes songs for targeted matching
         const itunesSongs = uniqueResults.filter(s => s.source === 'itunes');
 
-        // FIX: stamp matchStatus: 'warming' directly onto each iTunes song object
-        // so the card always has a status on its very first render — before songMatchData
-        // is populated. This closes the race window between setSongs and setSongMatchData
-        // that was leaving cards blank (no footer, no spinner) on the initial render.
-        const uniqueResultsWithStatus = uniqueResults.map(song => {
-          if (song.source !== 'itunes') return song;
-          return { ...song, matchStatus: MATCH_STATUS.warming };
-        });
-
-        // Build the initial warming map in sync with the stamped song objects.
-        // Both setSongs and setSongMatchData fire together so React can batch them
-        // into a single render — cards see consistent state from frame 1.
+        // Build the warming map BEFORE setSongs so both state updates land in the
+        // same React batch. Songs are kept clean (no matchStatus stamped on them) —
+        // the map is the single source of truth for all card status. filteredSongs
+        // depends on songMatchData so it recomputes whenever the map changes, which
+        // is what propagates warming → resolved/notFound updates to the cards.
         const initialMatchMap = new Map();
         itunesSongs.forEach(s => {
           initialMatchMap.set(String(s.trackId || s.id), { matchStatus: MATCH_STATUS.warming });
         });
 
-        // Single synchronous commit: songs carry matchStatus, map mirrors it.
-        setSongs(uniqueResultsWithStatus);
+        // Both calls in the same synchronous block — React batches into one render.
         setSongMatchData(initialMatchMap);
+        setSongs(uniqueResults);
 
         // Yield to the renderer so the cards paint with spinners before the
         // match-library fetch (which can take several seconds on Railway) blocks.
@@ -716,7 +709,7 @@ const Search = () => {
   const filteredSongs = useMemo(() => {
     if (filter === 'all') return songs;
     return songs.filter(song => song.artistName?.toLowerCase().includes(filter.toLowerCase()));
-  }, [songs, filter]);
+  }, [songs, filter, songMatchData]);
 
   const handlePlay = (song, index) => {
     if (song.fileUrl) {
