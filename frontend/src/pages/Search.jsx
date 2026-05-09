@@ -778,14 +778,16 @@ const Search = () => {
 
               if (isStale()) return;
 
-              // Apply any newly resolved songs to songMatchData immediately
-              // so their cards flip from yellow spinner to match result.
+              // Apply newly resolved or definitively unmatched songs immediately
+              // so their cards flip from yellow spinner to the correct final state.
               setSongMatchData(prev => {
                 const next = new Map(prev);
                 remaining.forEach(s => {
                   const key = String(s.trackId || s.id);
                   const entry = pollMap.get(key);
-                  if (entry?.matchStatus === MATCH_STATUS.resolved) {
+                  // Apply both resolved AND notFound — previously only resolved
+                  // was applied, leaving notFound cards spinning forever.
+                  if (entry && (entry.matchStatus === MATCH_STATUS.resolved || entry.matchStatus === MATCH_STATUS.notFound)) {
                     next.set(key, entry);
                   }
                 });
