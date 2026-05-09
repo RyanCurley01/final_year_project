@@ -362,7 +362,7 @@ const SongCard = ({ song, isPlaying, activeSong, onPlay, onPause, index, onSongN
             </p>
           </div>
 
-          {/* Library match footer — shown for all iTunes songs that have any matchStatus */}
+          {/* Library match footer */}
           {(song.matchedLibraryTrack ||
             song.matchStatus === MATCH_STATUS.pending ||
             song.matchStatus === MATCH_STATUS.warming ||
@@ -429,7 +429,6 @@ const Search = () => {
   
   const [loading, setLoading] = useState(true);
   const [songs, setSongs] = useState([]);
-  const [dbSongs, setDbSongs] = useState([]);
   const [filter, setFilter] = useState('all');
   const [error, setError] = useState(null);
   const [songMatchData, setSongMatchData] = useState(new Map());
@@ -444,6 +443,7 @@ const Search = () => {
     const fetchSearchResults = async () => {
       setLoading(true);
       setError(null);
+      setSongMatchData(new Map());
       
       if (!searchTerm || searchTerm.trim() === '') {
         setSongs([]);
@@ -453,6 +453,7 @@ const Search = () => {
       
       const searchLower = searchTerm.toLowerCase().trim();
       const normalize = (s) => s?.toLowerCase().replace(/[''`]/g, '') || '';
+      const audioApiUrl = envConfig.getApiBaseUrl();
       
       try {
         const products = await productService.getAllProducts();
@@ -465,14 +466,12 @@ const Search = () => {
             ))
           )
           .slice(0, 47);
-        setDbSongs(libraryTargetSongs);
 
         const targetIds = libraryTargetSongs
           .map(s => Number(s.id))
           .filter(id => Number.isFinite(id) && id > 0);
         
         const allArtistSongs = [];
-        const audioApiUrl = envConfig.getApiBaseUrl();
         
         for (let i = 0; i < ARTISTS.length; i++) {
           const artist = ARTISTS[i];
@@ -517,7 +516,6 @@ const Search = () => {
             }
           }
         }
-        
         
         const searchNorm = normalize(searchLower);
         const filteredDbSongs = musicProducts.filter(song => {
@@ -576,107 +574,217 @@ const Search = () => {
         
         uniqueResults.sort((a, b) => b.relevance - a.relevance);
 
-        // Separate iTunes songs for targeted matching
         const itunesSongs = uniqueResults.filter(s => s.source === 'itunes');
 
-        // Build the warming map BEFORE setSongs so both state updates land in the
-        // same React batch. Songs are kept clean (no matchStatus stamped on them) —
-        // the map is the single source of truth for all card status. filteredSongs
-        // depends on songMatchData so it recomputes whenever the map changes, which
-        // is what propagates warming → resolved/notFound updates to the cards.
+        // Seed all iTunes songs as warming immediately so cards show the
+        // yellow spinner from the very first render, before any API call.
         const initialMatchMap = new Map();
         itunesSongs.forEach(s => {
           initialMatchMap.set(String(s.trackId || s.id), { matchStatus: MATCH_STATUS.warming });
         });
 
-        // Both calls in the same synchronous block — React batches into one render.
+        // Both state updates in the same synchronous block — React batches into one render.
         setSongMatchData(initialMatchMap);
         setSongs(uniqueResults);
 
-        // Yield to the renderer so the cards paint with spinners before the
-        // match-library fetch (which can take several seconds on Railway) blocks.
+        // Yield to the renderer so cards paint with spinners before the
+        // match-library fetch (which can take several seconds) blocks the thread.
         await new Promise(resolve => setTimeout(resolve, 0));
 
-        if (itunesSongs.length > 0) {
-          try {
-            const candidates = itunesSongs.map(s => ({
+        if (itunesSongs.length === 0) {
+          setLoading(false);
+          return;
+        }
+
+        // ---------------------------------------------------------------
+        // Helper: build a fully-resolved map covering every iTunes song.
+        // Seeds every song as notFound, then overwrites with real results.
+        // Guarantees no card is ever left spinning permanently.
+        // ---------------------------------------------------------------
+        const buildFullResolvedMap = (matches) => {
+          const matchMap = new Map(matches.map(m => [String(m.input_track_id), m]));
+          const resolvedMap = new Map();
+
+          // Default every iTunes song to notFound
+          itunesSongs.forEach(s => {
+            resolvedMap.set(String(s.trackId || s.id), { matchStatus: MATCH_STATUS.notFound });
+          });
+
+          // Overwrite with real results where the backend returned a match
+          itunesSongs.forEach(s => {
+            const key = String(s.trackId || s.id);
+            const matched = matchMap.get(key);
+            if (matched?.matched_product_name) {
+              resolvedMap.set(key, {
+                matchedLibraryTrack: matched.matched_product_name,
+                matchStatus: MATCH_STATUS.resolved,
+                matchedDbSong: {
+                  tempo_match: matched.tempo_match ?? null,
+                  energy_match: matched.energy_match ?? null,
+                  mood_match: matched.mood_match ?? null,
+                  dance_match: matched.dance_match ?? null,
+                },
+              });
+            }
+          });
+
+          return resolvedMap;
+        };
+
+        // ---------------------------------------------------------------
+        // Single match pass — mirrors SimilarSongs' runMatchPass.
+        // Returns { resolvedMap, skippedIds } so the caller knows which
+        // songs the backend skipped due to missing cached features.
+        // ---------------------------------------------------------------
+        const runMatchPass = async (candidates) => {
+          const payload = {
+            candidates: candidates.map(s => ({
               trackId: String(s.trackId || s.id),
               trackName: s.trackName || '',
               artistName: s.artistName || '',
               previewUrl: s.previewUrl || s.fileUrl || '',
-            }));
+            })),
+            limit: candidates.length,
+            ...(targetIds.length > 0 && { target_ids: targetIds }),
+          };
 
-            const matchPayload = {
-              candidates,
-              limit: itunesSongs.length,
-              ...(targetIds.length > 0 && { target_ids: targetIds }),
-            };
-
-            const matchResp = await fetch(`${audioApiUrl}/api/audio/match-library`, {
+          try {
+            const resp = await fetch(`${audioApiUrl}/api/audio/match-library`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(matchPayload),
+              body: JSON.stringify(payload),
               signal: abortController.signal,
             });
 
-            // Helper: build a map covering every iTunes song, resolving each to
-            // notFound by default. Entries from the API response overwrite the default.
-            // This guarantees no song is ever left in the 'warming' state permanently —
-            // even if the backend silently drops a song from its response.
-            const buildFullResolvedMap = (matches) => {
-              const matchMap = new Map();
-              matches.forEach(m => {
-                matchMap.set(String(m.input_track_id), m);
-              });
-
-              const resolvedMap = new Map();
-              // Seed every iTunes song as notFound first
-              itunesSongs.forEach(s => {
-                resolvedMap.set(String(s.trackId || s.id), { matchStatus: MATCH_STATUS.notFound });
-              });
-              // Overwrite with real results where the backend returned a match
-              itunesSongs.forEach(s => {
-                const key = String(s.trackId || s.id);
-                const matched = matchMap.get(key);
-                if (matched && matched.matched_product_name) {
-                  resolvedMap.set(key, {
-                    matchedLibraryTrack: matched.matched_product_name,
-                    matchStatus: MATCH_STATUS.resolved,
-                    matchedDbSong: {
-                      tempo_match: matched.tempo_match ?? null,
-                      energy_match: matched.energy_match ?? null,
-                      mood_match: matched.mood_match ?? null,
-                      dance_match: matched.dance_match ?? null,
-                    },
-                    tempo_match: matched.tempo_match ?? null,
-                    energy_match: matched.energy_match ?? null,
-                    mood_match: matched.mood_match ?? null,
-                    dance_match: matched.dance_match ?? null,
-                  });
-                }
-              });
-              return resolvedMap;
-            };
-
-            if (matchResp.ok) {
-              const matchData = fixTextDeep(await matchResp.json());
-              setSongMatchData(buildFullResolvedMap(matchData.matches || []));
+            if (resp.ok) {
+              const data = fixTextDeep(await resp.json());
+              const matches = data.matches || [];
+              const skippedIds = new Set((data.skipped || []).map(id => String(id)));
+              return { resolvedMap: buildFullResolvedMap(matches), skippedIds };
             } else {
-              console.warn('[Search] match-library returned', matchResp.status);
-              setSongMatchData(buildFullResolvedMap([]));
+              console.warn('[Search] match-library returned', resp.status);
+              return { resolvedMap: buildFullResolvedMap([]), skippedIds: new Set() };
             }
           } catch (matchErr) {
             if (matchErr.name !== 'AbortError') {
               console.warn('[Search] Library match lookup failed:', matchErr.message);
-              // Resolve all to notFound so no card spins forever.
-              const notFoundMap = new Map();
-              itunesSongs.forEach(s => {
-                notFoundMap.set(String(s.trackId || s.id), { matchStatus: MATCH_STATUS.notFound });
-              });
-              setSongMatchData(notFoundMap);
             }
+            return { resolvedMap: buildFullResolvedMap([]), skippedIds: new Set() };
           }
+        };
+
+        // --- First pass ---
+        const { resolvedMap, skippedIds } = await runMatchPass(itunesSongs);
+        setSongMatchData(resolvedMap);
+
+        // Identify cache misses — songs the backend explicitly skipped
+        // because it had no cached audio features for them yet.
+        const cacheMisses = itunesSongs.filter(s =>
+          skippedIds.has(String(s.trackId || s.id))
+        );
+
+        if (cacheMisses.length > 0) {
+          // Kick off warm-cache so the backend extracts features in-memory
+          // for the skipped songs, making them available for subsequent polls.
+          const warmSongs = cacheMisses.map(s => ({
+            trackId: Number(s.trackId || s.id),
+            previewUrl: s.previewUrl || s.fileUrl || '',
+            trackName: s.trackName || '',
+            artistName: s.artistName || '',
+            artworkUrl100: s.artworkUrl100 || '',
+          })).filter(s => s.trackId && s.previewUrl);
+
+          const allTrackIds = itunesSongs
+            .map(s => Number(s.trackId || s.id))
+            .filter(Boolean);
+
+          fetch(`${audioApiUrl}/api/audio/warm-cache`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ songs: warmSongs, current_track_ids: allTrackIds }),
+            signal: abortController.signal,
+          }).catch(err => console.warn('[Search] warm-cache failed:', err.message));
+
+          // Flip cache-miss cards to warming (yellow spinner) so the user
+          // knows they are still being processed, not permanently unmatched.
+          setSongMatchData(prev => {
+            const next = new Map(prev);
+            cacheMisses.forEach(s => {
+              const key = String(s.trackId || s.id);
+              next.set(key, { matchStatus: MATCH_STATUS.warming });
+            });
+            return next;
+          });
+
+          // -----------------------------------------------------------
+          // Polling loop — mirrors SimilarSongs' pollForNewMatches exactly.
+          // Retries only cache-miss songs every 20 s, up to 15 attempts.
+          // Checks abortController so navigating away cancels cleanly.
+          // -----------------------------------------------------------
+          const MAX_POLL_ATTEMPTS = 15;
+          const POLL_INTERVAL_MS = 20_000;
+          let remaining = [...cacheMisses];
+          let attempt = 0;
+
+          const pollForNewMatches = async () => {
+            while (remaining.length > 0 && attempt < MAX_POLL_ATTEMPTS) {
+              attempt++;
+              await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
+
+              if (abortController.signal.aborted) return;
+
+              console.log(`[Search] Poll ${attempt}/${MAX_POLL_ATTEMPTS}: retrying ${remaining.length} warming songs...`);
+              const { resolvedMap: pollMap, skippedIds: pollSkipped } = await runMatchPass(remaining);
+
+              if (abortController.signal.aborted) return;
+
+              // Apply any newly resolved songs to songMatchData immediately
+              // so their cards flip from yellow spinner to match result.
+              setSongMatchData(prev => {
+                const next = new Map(prev);
+                remaining.forEach(s => {
+                  const key = String(s.trackId || s.id);
+                  const entry = pollMap.get(key);
+                  if (entry?.matchStatus === MATCH_STATUS.resolved) {
+                    next.set(key, entry);
+                  }
+                });
+                return next;
+              });
+
+              // Keep only songs still skipped by the backend for the next round.
+              remaining = remaining.filter(s =>
+                pollSkipped.has(String(s.trackId || s.id))
+              );
+
+              if (remaining.length === 0) {
+                console.log('[Search] All warming songs matched — polling complete.');
+              }
+            }
+
+            // Polling exhausted — flip any still-warming cards to notFound
+            // so they don't spin forever.
+            if (remaining.length > 0) {
+              console.log(`[Search] Polling ended with ${remaining.length} unresolved after ${attempt} attempts.`);
+              setSongMatchData(prev => {
+                const next = new Map(prev);
+                remaining.forEach(s => {
+                  const key = String(s.trackId || s.id);
+                  const existing = next.get(key);
+                  if (!existing || existing.matchStatus === MATCH_STATUS.warming) {
+                    next.set(key, { matchStatus: MATCH_STATUS.notFound });
+                  }
+                });
+                return next;
+              });
+            }
+          };
+
+          pollForNewMatches().catch(err =>
+            console.warn('[Search] Poll loop error:', err)
+          );
         }
+
       } catch (err) {
         if (err.name !== 'AbortError') {
           setError(err.message);
@@ -693,6 +801,8 @@ const Search = () => {
     };
   }, [searchTerm]);
 
+  // songMatchData in the dependency array ensures the grid re-renders
+  // whenever a poll resolves new matches — identical to SimilarSongs.
   const filteredSongs = useMemo(() => {
     if (filter === 'all') return songs;
     return songs.filter(song => song.artistName?.toLowerCase().includes(filter.toLowerCase()));
@@ -847,8 +957,8 @@ const Search = () => {
           {filteredSongs.map((song, i) => {
             const key = String(song.trackId || song.id);
             const matchData = songMatchData.get(key);
-            // matchData overrides when present; song itself carries warming status as fallback
-            // so the footer and spinner are always visible from the very first render.
+            // Merge match data at render time — songs state is never mutated
+            // for match info, keeping the two concerns cleanly separated.
             const songWithMatch = matchData ? { ...song, ...matchData } : song;
             return (
               <SongCard
