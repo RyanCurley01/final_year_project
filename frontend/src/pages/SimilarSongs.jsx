@@ -483,12 +483,19 @@ const SimilarSongs = () => {
 
     const targetSong = getCurrentTarget();
 
-    if (!targetSong || songs.length === 0 || cachedAudioFeatures === null) {
+    // FIX 1: Only bail out of the entire effect when there is genuinely no
+    // song context or song list. A null cache is handled per-tick inside
+    // updateRecs so the interval stays alive and fires once the cache loads.
+    if (!targetSong || songs.length === 0) {
       setRecommendations([]);
       return;
     }
 
     const updateRecs = async () => {
+      // FIX 1 (continued): Per-tick skip — cache hasn't loaded yet.
+      // The interval keeps running; the next tick will try again.
+      if (cachedAudioFeatures === null) return;
+
       try {
         const apiBaseUrl = envConfig.getApiBaseUrl();
         console.log('[SimilarSongs] updateRecs tick — cachedAudioFeatures:', cachedAudioFeatures ? Object.keys(cachedAudioFeatures).length + ' keys' : 'null');
@@ -686,7 +693,13 @@ const SimilarSongs = () => {
         intervalRef.current = null;
       }
     };
-  }, [activeSong?.trackId || activeSong?.id, dbSongs.length, cachedAudioFeatures !== null]);
+
+  // FIX 2: Use cachedAudioFeatures directly (not cachedAudioFeatures !== null).
+  // The boolean coercion only ever flips false→true once per mount, so the
+  // effect would never re-run when the cache object reference updates after
+  // navigating back from SongDetails. Using the object itself means React
+  // detects the new reference and restarts the effect with fresh data.
+  }, [activeSong?.trackId ?? activeSong?.id, dbSongs.length, cachedAudioFeatures]);
 
 
   // --- Bulk Match Hook ---
