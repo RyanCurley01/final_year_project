@@ -657,14 +657,10 @@ const Search = () => {
         }
 
         // ---------------------------------------------------------------
-        // Helper: build a resolved Map from match-library results.
-        //
-        // IMPORTANT: we only produce notFound for songs the backend actually
-        // processed and found nothing for. Songs the backend skipped (no
-        // cached audio features yet) are left OUT of this map so they keep
-        // their warming status until the poll loop resolves them.
-        // This prevents false-notFound entries that would overwrite a
-        // resolved entry written earlier by SimilarSongs.
+        // Helper: build a Map containing ONLY confirmed resolved matches.
+        // Songs the backend skipped OR processed-but-found-nothing are both
+        // left OUT — they stay warming and go through the poll loop.
+        // notFound is only written when polling is exhausted.
         // ---------------------------------------------------------------
         const buildResolvedMap = (matches, skippedIds) => {
           const matchMap = new Map(matches.map(m => [normalizeTrackId(m.input_track_id), m]));
@@ -672,10 +668,7 @@ const Search = () => {
 
           uncachedSongs.forEach(s => {
             const key = normalizeTrackId(s.trackId || s.id);
-
-            // Skip songs the backend didn't process — keep them warming.
-            if (skippedIds.has(key)) return;
-
+            if (skippedIds.has(key)) return; // still warming — skip
             const matched = matchMap.get(key);
             if (matched?.matched_product_name) {
               resolvedMap.set(key, {
@@ -688,10 +681,8 @@ const Search = () => {
                   dance_match: matched.dance_match ?? null,
                 },
               });
-            } else {
-              // Backend processed it and found nothing — definitively notFound.
-              resolvedMap.set(key, { matchStatus: MATCH_STATUS.notFound });
             }
+            // No else — processed-but-unmatched stays warming until poll exhaustion
           });
 
           return resolvedMap;
@@ -724,30 +715,36 @@ const Search = () => {
               const data = fixTextDeep(await resp.json());
               const matches = data.matches || [];
               const skippedIds = new Set((data.skipped || []).map(id => normalizeTrackId(id)));
-              return { resolvedMap: buildResolvedMap(matches, skippedIds), skippedIds };
+              return { resolvedMap: buildResolvedMap(matches, skippedIds), skippedIds, matchedIds: new Set(matches.map(m => normalizeTrackId(m.input_track_id))) };
             } else {
               console.warn('[Search] match-library returned', resp.status);
-              return { resolvedMap: buildResolvedMap([], new Set()), skippedIds: new Set() };
+              return { resolvedMap: new Map(), skippedIds: new Set(), matchedIds: new Set() };
             }
           } catch (matchErr) {
-            if (matchErr.name === 'AbortError') {
-              throw matchErr;
-            }
+            if (matchErr.name === 'AbortError') throw matchErr;
             console.warn('[Search] Library match lookup failed:', matchErr.message);
-            return { resolvedMap: buildResolvedMap([], new Set()), skippedIds: new Set() };
+            return { resolvedMap: new Map(), skippedIds: new Set(), matchedIds: new Set() };
           }
         };
 
         // --- First pass ---
-        const { resolvedMap, skippedIds } = await runMatchPass(uncachedSongs);
+        const { resolvedMap, skippedIds, matchedIds } = await runMatchPass(uncachedSongs);
         if (isStale()) return;
 
-        // Dispatch resolved results into the global cache.
-        const resolvedBatch = {};
-        resolvedMap.forEach((value, key) => { resolvedBatch[key] = value; });
-        dispatch(mergeMatchData(resolvedBatch));
+        // Dispatch only confirmed resolved matches — no notFound yet.
+        if (resolvedMap.size > 0) {
+          const resolvedBatch = {};
+          resolvedMap.forEach((value, key) => { resolvedBatch[key] = value; });
+          dispatch(mergeMatchData(resolvedBatch));
+        }
 
-        const cacheMisses = uncachedSongs.filter(s =>
+        // All songs not yet resolved go into polling — both explicit cache misses
+        // (skipped by backend) and songs the backend processed but didn't match.
+        const allStillUnresolved = uncachedSongs.filter(s =>
+          !resolvedMap.has(normalizeTrackId(s.trackId || s.id))
+        );
+
+        const cacheMisses = allStillUnresolved.filter(s =>
           skippedIds.has(normalizeTrackId(s.trackId || s.id))
         );
 
@@ -760,9 +757,7 @@ const Search = () => {
             artworkUrl100: s.artworkUrl100 || '',
           })).filter(s => s.trackId && s.previewUrl);
 
-          const allTrackIds = itunesSongs
-            .map(s => Number(s.trackId || s.id))
-            .filter(Boolean);
+          const allTrackIds = itunesSongs.map(s => Number(s.trackId || s.id)).filter(Boolean);
 
           fetch(`${audioApiUrl}/api/audio/warm-cache`, {
             method: 'POST',
@@ -770,21 +765,18 @@ const Search = () => {
             body: JSON.stringify({ songs: warmSongs, current_track_ids: allTrackIds }),
             signal: abortController.signal,
           }).catch(err => console.warn('[Search] warm-cache failed:', err.message));
+        }
 
-          // Ensure cache-miss cards show warming — mergeMatchData rank guard
-          // means this never overwrites a resolved entry from SimilarSongs.
-          const warmingBatch2 = {};
-          cacheMisses.forEach(s => {
-            warmingBatch2[normalizeTrackId(s.trackId || s.id)] = { matchStatus: MATCH_STATUS.warming };
-          });
-          dispatch(mergeMatchData(warmingBatch2));
+        // Poll ALL still-unresolved songs. notFound only written on exhaustion.
+        if (allStillUnresolved.length > 0) {
+          console.log(`[Search] ${allStillUnresolved.length} songs still unresolved — polling (${cacheMisses.length} cache misses, ${allStillUnresolved.length - cacheMisses.length} unmatched)`);
 
-          // -----------------------------------------------------------
-          // Polling loop for cache-miss songs.
-          // -----------------------------------------------------------
+          // Track which songs have been resolved across all poll rounds.
+          const resolvedByPolling = new Set(resolvedMap.keys());
+
           const MAX_POLL_ATTEMPTS = 15;
           const POLL_INTERVAL_MS = 20_000;
-          let remaining = [...cacheMisses];
+          let remaining = [...allStillUnresolved];
           let attempt = 0;
 
           const cancellableSleep = (ms) => new Promise(resolve => {
@@ -796,27 +788,24 @@ const Search = () => {
             while (remaining.length > 0 && attempt < MAX_POLL_ATTEMPTS) {
               attempt++;
               await cancellableSleep(POLL_INTERVAL_MS);
-
               if (isStale()) return;
 
-              console.log(`[Search] Poll ${attempt}/${MAX_POLL_ATTEMPTS}: retrying ${remaining.length} warming songs...`);
+              console.log(`[Search] Poll ${attempt}/${MAX_POLL_ATTEMPTS}: retrying ${remaining.length} songs...`);
               const { resolvedMap: pollMap, skippedIds: pollSkipped } = await runMatchPass(remaining);
-
               if (isStale()) return;
 
-              // Dispatch newly resolved or definitively notFound entries.
-              const pollBatch = {};
-              remaining.forEach(s => {
-                const key = normalizeTrackId(s.trackId || s.id);
-                const entry = pollMap.get(key);
-                if (entry && (entry.matchStatus === MATCH_STATUS.resolved || entry.matchStatus === MATCH_STATUS.notFound)) {
-                  pollBatch[key] = entry;
-                }
-              });
-              if (Object.keys(pollBatch).length > 0) {
+              // Dispatch any newly resolved entries immediately.
+              if (pollMap.size > 0) {
+                const pollBatch = {};
+                pollMap.forEach((value, key) => {
+                  pollBatch[key] = value;
+                  resolvedByPolling.add(key);
+                });
                 dispatch(mergeMatchData(pollBatch));
               }
 
+              // Keep only songs still skipped for next round; resolved and
+              // processed-but-unmatched both drop out of remaining.
               remaining = remaining.filter(s =>
                 pollSkipped.has(normalizeTrackId(s.trackId || s.id))
               );
@@ -826,13 +815,15 @@ const Search = () => {
               }
             }
 
-            // Polling exhausted — flip any still-warming cards to notFound.
-            // Use mergeMatchData (not setMatchEntry) so the rank guard protects
-            // any entries already resolved by SimilarSongs in the shared cache.
-            if (remaining.length > 0) {
-              console.log(`[Search] Polling ended with ${remaining.length} unresolved after ${attempt} attempts.`);
+            // Polling exhausted — flip everything still unresolved to notFound.
+            // mergeMatchData rank guard prevents downgrading a resolved entry.
+            const finallyUnresolved = allStillUnresolved.filter(
+              s => !resolvedByPolling.has(normalizeTrackId(s.trackId || s.id))
+            );
+            if (finallyUnresolved.length > 0) {
+              console.log(`[Search] Polling ended with ${finallyUnresolved.length} unresolved after ${attempt} attempts.`);
               const exhaustedBatch = {};
-              remaining.forEach(s => {
+              finallyUnresolved.forEach(s => {
                 exhaustedBatch[normalizeTrackId(s.trackId || s.id)] = { matchStatus: MATCH_STATUS.notFound };
               });
               dispatch(mergeMatchData(exhaustedBatch));

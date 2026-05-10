@@ -835,6 +835,20 @@ const SimilarSongs = () => {
           applyResolvedMatches(); 
         }
 
+        // All songs still unresolved after the first pass (and network-failure
+        // retry) fall into two buckets:
+        //   cacheMisses  — backend explicitly skipped (no features cached yet)
+        //   stillUnmatched — backend processed but returned no match
+        //
+        // Both are kept as "warming" and polled. We never write notFound after
+        // just one pass because the backend may still be extracting features
+        // asynchronously. notFound is only written when polling is exhausted.
+        const allStillUnresolved = uncachedCandidates.filter(
+          (s) => !matchedByTrack.has(normalizeTrackId(s.trackId || s.id))
+        );
+
+        // Warm-cache call covers cache-miss songs so the backend extracts
+        // their features in-memory for subsequent poll passes.
         const allTrackIds = candidateSongs.map((s) => Number(s.trackId || s.id)).filter(Boolean);
         const warmSongs = cacheMisses.map((s) => ({
           trackId: Number(s.trackId || s.id),
@@ -862,30 +876,14 @@ const SimilarSongs = () => {
           console.warn('[SimilarSongs] Cache sync failed:', err.message);
         });
 
-        // Cache-miss cards are already showing the warming spinner from the
-        // seed dispatched in fetchAllSongs — no need to re-seed here.
+        // Poll ALL still-unresolved songs (cache misses + unmatched), not just
+        // cache misses. notFound is only written when polling is exhausted.
+        if (allStillUnresolved.length > 0) {
+          console.log(`[SimilarSongs] ${allStillUnresolved.length} songs still unresolved — polling (${cacheMisses.length} cache misses, ${allStillUnresolved.length - cacheMisses.length} unmatched)`);
 
-        // Mark definitively unmatched songs (not skipped, not resolved) as notFound.
-        const warmingTrackIds = new Set(cacheMisses.map((s) => normalizeTrackId(s.trackId || s.id)));
-        const notFoundBatch = {};
-        uncachedCandidates.forEach((s) => {
-          const key = normalizeTrackId(s.trackId || s.id);
-          if (!matchedByTrack.has(key) && !warmingTrackIds.has(key)) {
-            notFoundBatch[key] = {
-              matchedDbSong: { ...MATCH_NOT_FOUND_STATE },
-              matchStatus: MATCH_STATUS.notFound,
-            };
-          }
-        });
-        if (Object.keys(notFoundBatch).length > 0) {
-          dispatch(mergeMatchData(notFoundBatch));
-        }
-
-        // Polling loop for cache-miss songs.
-        if (cacheMisses.length > 0) {
           const MAX_POLL_ATTEMPTS = 15;
           const POLL_INTERVAL_MS = 20_000;
-          let remaining = [...cacheMisses];
+          let remaining = [...allStillUnresolved];
           let attempt = 0;
 
           const pollForNewMatches = async () => {
@@ -893,37 +891,41 @@ const SimilarSongs = () => {
               attempt++;
               await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
 
-              console.log(`[SimilarSongs] Poll ${attempt}/${MAX_POLL_ATTEMPTS}: retrying ${remaining.length} previously-skipped songs...`);
+              console.log(`[SimilarSongs] Poll ${attempt}/${MAX_POLL_ATTEMPTS}: retrying ${remaining.length} songs...`);
               const pollSkipped = await runMatchPass(remaining);
 
               const newlyMatched = remaining.filter((s) => matchedByTrack.has(normalizeTrackId(s.trackId || s.id)));
               if (newlyMatched.length > 0) {
                 console.log(`[SimilarSongs] Poll ${attempt}: ${newlyMatched.length} new matches found!`);
-                // applyResolvedMatches() already dispatched these via runMatchPass → applyResolvedMatches.
+                // applyResolvedMatches() already dispatched these inside runMatchPass.
               }
 
+              // Keep only songs still skipped by the backend for the next round.
+              // Songs returned in neither matches nor skipped are genuinely unmatched
+              // at this point and drop out of remaining — they'll get notFound below
+              // once the loop ends.
               remaining = remaining.filter((s) => pollSkipped.has(normalizeTrackId(s.trackId || s.id)));
 
               if (remaining.length === 0) {
-                console.log(`[SimilarSongs] All songs matched — polling complete.`);
+                console.log(`[SimilarSongs] All songs resolved — polling complete.`);
               }
             }
 
-            if (remaining.length > 0) {
-              console.log(`[SimilarSongs] Polling ended with ${remaining.length} songs still unresolved after ${attempt} attempts.`);
-
-              // Flip exhausted warming cards to notFound in the global store.
-              remaining.forEach((s) => {
-                const key = normalizeTrackId(s.trackId || s.id);
-                // Only downgrade if still warming — resolved entries are protected by mergeMatchData rank guard.
-                dispatch(setMatchEntry({
-                  trackId: key,
-                  data: {
-                    matchedDbSong: { ...MATCH_NOT_FOUND_STATE },
-                    matchStatus: MATCH_STATUS.notFound,
-                  },
-                }));
+            // Polling exhausted — flip any cards still warming to notFound.
+            // Use mergeMatchData so the rank guard protects already-resolved entries.
+            const allNowUnresolved = allStillUnresolved.filter(
+              (s) => !matchedByTrack.has(normalizeTrackId(s.trackId || s.id))
+            );
+            if (allNowUnresolved.length > 0) {
+              console.log(`[SimilarSongs] Polling ended with ${allNowUnresolved.length} songs unresolved after ${attempt} attempts.`);
+              const exhaustedBatch = {};
+              allNowUnresolved.forEach((s) => {
+                exhaustedBatch[normalizeTrackId(s.trackId || s.id)] = {
+                  matchedDbSong: { ...MATCH_NOT_FOUND_STATE },
+                  matchStatus: MATCH_STATUS.notFound,
+                };
               });
+              dispatch(mergeMatchData(exhaustedBatch));
             }
           };
 
