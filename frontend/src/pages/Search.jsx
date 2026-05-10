@@ -388,7 +388,7 @@ const SongCard = ({ song, isPlaying, activeSong, onPlay, onPause, index, onSongN
                 <p className="text-[11px] text-white truncate font-medium">
                   {song.matchStatus === MATCH_STATUS.pending
                     ? MATCH_PENDING_STATE.albumTitle
-                    : song.matchedLibraryTrack}
+                    : (song.matchedLibraryTrack || song.matchedDbSong?.albumTitle)}
                 </p>
               )}
               {song.matchStatus === MATCH_STATUS.resolved && song.matchedDbSong?.tempo_match != null && (
@@ -675,6 +675,7 @@ const Search = () => {
                 matchedLibraryTrack: matched.matched_product_name,
                 matchStatus: MATCH_STATUS.resolved,
                 matchedDbSong: {
+                  albumTitle: matched.matched_product_name,  // SimilarSongs reads name from here
                   tempo_match: matched.tempo_match ?? null,
                   energy_match: matched.energy_match ?? null,
                   mood_match: matched.mood_match ?? null,

@@ -735,6 +735,7 @@ const SimilarSongs = () => {
           const batch = {};
           matchedByTrack.forEach((resolved, key) => {
             batch[key] = {
+              matchedLibraryTrack: resolved.matchedLibraryTrack || resolved.albumTitle,
               matchedDbSong: resolved,
               matchStatus: MATCH_STATUS.resolved,
             };
@@ -792,10 +793,12 @@ const SimilarSongs = () => {
                 matches.forEach((match) => {
                   const key = normalizeTrackId(match.input_track_id);
                   const fallbackTitle = match.matched_product_id ? `Track ${match.matched_product_id}` : 'No similar library track found';
-                  
+                  const name = match.matched_product_name || fallbackTitle;
+
                   matchedByTrack.set(key, {
                     id: match.matched_product_id ?? null,
-                    albumTitle: match.matched_product_name || fallbackTitle,
+                    albumTitle: name,          // SimilarSongs SongCard reads this
+                    matchedLibraryTrack: name, // Search SongCard reads this
                     similarity_score: match.similarity_score ?? null,
                     tempo_match: match.tempo_match ?? null,
                     energy_match: match.energy_match ?? null,
