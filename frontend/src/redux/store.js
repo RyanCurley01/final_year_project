@@ -19,6 +19,8 @@ import playerReducer from './features/playerSlice';
 import cartReducer from './features/cartSlice';
 import purchaseReducer from './features/purchaseSlice';
 import wishlistReducer from './features/wishlistSlice';
+import matchReducer from './features/matchCacheSlice';
+
 import { musicServiceApi } from './services/apiService';
 import { productsApi } from './services/productsApi';
 
@@ -50,6 +52,7 @@ export const store = configureStore({
     cart: persistedCartReducer,
     purchase: purchaseReducer,
     wishlist: wishlistReducer,
+    matchCache: matchReducer
   },
 
   // Middleware Configurations
