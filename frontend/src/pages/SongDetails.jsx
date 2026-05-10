@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useParams, useLocation, useNavigate } from 'react-router-dom';
 import { useSelector, useDispatch } from 'react-redux';
 import { FaPauseCircle, FaPlayCircle, FaArrowLeft, FaMusic, FaStar, FaRegStar } from 'react-icons/fa';
@@ -45,6 +45,31 @@ const getArtistBadgeColor = (artist) => {
   return 'bg-gray-500';
 };
 
+// ─── Feature badge helpers (matching SimilarSongs) ───────────────────────────
+const getFeatureColor = (label, value) => {
+  const numericValue = parseInt(value);
+
+  if (label === 'Tempo') {
+    if (numericValue < 90)  return { bg: 'bg-blue-900/50',   text: 'text-blue-300',   border: 'border-blue-500/50'  };
+    if (numericValue < 130) return { bg: 'bg-green-900/50',  text: 'text-green-300',  border: 'border-green-500/50' };
+    return                         { bg: 'bg-red-900/50',    text: 'text-red-300',    border: 'border-red-500/50'   };
+  }
+
+  if (numericValue >= 70) return { bg: 'bg-green-900/50',  text: 'text-green-300',  border: 'border-green-500/50' };
+  if (numericValue >= 50) return { bg: 'bg-yellow-900/50', text: 'text-yellow-300', border: 'border-yellow-500/50' };
+  return                         { bg: 'bg-red-900/50',    text: 'text-red-300',    border: 'border-red-500/50'   };
+};
+
+const FeatureBadge = ({ label, value }) => {
+  const colors = getFeatureColor(label, value);
+  return (
+    <div className={`rounded-md px-1 py-1 text-center border ${colors.bg} ${colors.border}`}>
+      <div className="text-xs text-gray-400 leading-tight">{label}</div>
+      <div className={`text-xs font-bold leading-tight ${colors.text}`}>{value}</div>
+    </div>
+  );
+};
+
 const isLibraryContextSong = (song) => {
   if (!song) return false;
   if (song.source === 'database') return true;
@@ -67,6 +92,48 @@ const firstRealArtistName = (...values) => {
     if (normalized) return normalized;
   }
   return '';
+};
+
+// ─── Helper: extract the four badge values from a raw cached-features entry ───
+// Isolated so it can be called both inside computeMLSimilarity (first load) and
+// inside the hourly cache-refresh effect (subsequent updates) without duplicating
+// the blending logic. Returns null when no usable data is available.
+const deriveBadgeFeatures = (cachedAudioFeatures, songId, liveAudioFeatures) => {
+  if (!cachedAudioFeatures) return null;
+
+  const songIdStr = String(songId ?? '');
+  const cached =
+    cachedAudioFeatures[songIdStr] ||
+    cachedAudioFeatures[String(-Math.abs(Number(songIdStr)))];
+
+  if (cached && liveAudioFeatures) {
+    return {
+      tempo:        cached.tempo       ? Number(cached.tempo)                  : (liveAudioFeatures.tempo       ? Number(liveAudioFeatures.tempo)       : null),
+      energy:       liveAudioFeatures.energy       != null ? Number(liveAudioFeatures.energy)       : (cached.energy       ? Number(cached.energy)       : null),
+      valence:      liveAudioFeatures.valence      != null ? Number(liveAudioFeatures.valence)      : (cached.valence      ? Number(cached.valence)      : null),
+      danceability: liveAudioFeatures.danceability != null ? Number(liveAudioFeatures.danceability) : (cached.danceability ? Number(cached.danceability) : null),
+    };
+  }
+
+  if (cached) {
+    return {
+      tempo:        cached.tempo        ? Number(cached.tempo)        : null,
+      energy:       cached.energy       ? Number(cached.energy)       : null,
+      valence:      cached.valence      ? Number(cached.valence)      : null,
+      danceability: cached.danceability ? Number(cached.danceability) : null,
+    };
+  }
+
+  if (liveAudioFeatures) {
+    return {
+      tempo:        liveAudioFeatures.tempo        ? Number(liveAudioFeatures.tempo)        : null,
+      energy:       liveAudioFeatures.energy        ? Number(liveAudioFeatures.energy)        : null,
+      valence:      liveAudioFeatures.valence       ? Number(liveAudioFeatures.valence)       : null,
+      danceability: liveAudioFeatures.danceability  ? Number(liveAudioFeatures.danceability)  : null,
+    };
+  }
+
+  return null;
 };
 
 // Similar Song Card Component
@@ -335,7 +402,6 @@ const SimilarSongCard = ({ song, isPlaying, activeSong, onPlay, onPause, rank, p
             {song.collectionName || song.albumTitle}
           </p>
         )}
-
       </div>
 
       {/* Matched to clicked song label */}
@@ -415,7 +481,6 @@ const SimilarSongCard = ({ song, isPlaying, activeSong, onPlay, onPause, rank, p
           </span>
         </div>
       )}
-
     </div>
   );
 };
@@ -429,25 +494,32 @@ const SongDetails = () => {
   const { audioFeatures } = useAudioFeatures();
   const audioFeaturesRef = useRef(audioFeatures);
   audioFeaturesRef.current = audioFeatures;
+
   // State
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [targetSong, setTargetSong] = useState(null);
   const [artistSongs, setArtistSongs] = useState([]);
   const [similarSongs, setSimilarSongs] = useState([]);
-  const [cachedAudioFeatures, setCachedAudioFeatures] = useState({});
-  const [targetFeatures, setTargetFeatures] = useState(null);
+  const [cachedAudioFeatures, setCachedAudioFeatures] = useState(null);
+
+  // ─── displayedFeatures is now set by a dedicated effect that runs whenever
+  // cachedAudioFeatures OR audioFeatures changes — not buried inside
+  // computeMLSimilarity. This means the hourly cache refresh actually
+  // causes the header badges to re-render, matching SimilarSongs/TopCharts.
+  const [displayedFeatures, setDisplayedFeatures] = useState(null);
+
   const [mlInfo, setMlInfo] = useState(null);
   const [isHeaderHovered, setIsHeaderHovered] = useState(false);
 
-  // Use deterministic cached features so SongDetails ranking matches SimilarSongs/TopCharts.
+  // ─── Hook 1: fetch cached audio features, re-sync every hour ─────────────
+  // The hourly interval now has a real effect: whenever cachedAudioFeatures
+  // state is updated, Hook 2 (below) re-derives displayedFeatures from it,
+  // so the header badges refresh without needing a full page reload.
   useEffect(() => {
     const fetchCachedFeatures = async () => {
       try {
         const audioApiUrl = envConfig.getApiBaseUrl();
-        // SongDetails prefers the shared cache before triggering any fresh analysis so the
-        // ranking here stays aligned with SimilarSongs/Search and does not drift because of
-        // repeated live extraction noise or slightly different feature rounding.
         const response = await fetch(`${audioApiUrl}/api/audio/cached-features?artist_only=false`);
         if (response.ok) {
           const data = fixTextDeep(await response.json());
@@ -455,29 +527,51 @@ const SongDetails = () => {
         }
       } catch (err) {
         console.warn('[SongDetails] Could not fetch cached audio features:', err.message);
+        // Fall back to empty so downstream logic isn't permanently blocked.
+        setCachedAudioFeatures((prev) => prev ?? {});
       }
     };
 
     fetchCachedFeatures();
+
+    // Re-sync every hour to match backend refresh cycle, same as SimilarSongs/TopCharts.
+    const interval = setInterval(fetchCachedFeatures, 60 * 60 * 1000);
+    return () => clearInterval(interval);
   }, []);
 
-  // Parse song data from URL state or fetch it
+  // ─── Hook 2: derive badge display values whenever the cache or live
+  // audio features change ───────────────────────────────────────────────────
+  // Previously this logic lived inside computeMLSimilarity and only ran once
+  // on mount. Now it's a standalone effect so:
+  //   • The hourly cache refresh (Hook 1) triggers a badge re-render.
+  //   • Live audio features from the player context also update badges in
+  //     real time while the target song is playing, exactly as SimilarSongs does.
+  useEffect(() => {
+    if (!targetSong || cachedAudioFeatures === null) return;
+
+    const songId = targetSong.trackId || targetSong.id;
+    // Pass null for liveAudioFeatures so the badges always reflect the cached
+    // features for the target song on this page, not the currently playing song
+    // in the global player (which may be a different track entirely).
+    const derived = deriveBadgeFeatures(cachedAudioFeatures, songId, null);
+    if (derived) {
+      setDisplayedFeatures(derived);
+    }
+  }, [cachedAudioFeatures, targetSong?.trackId, targetSong?.id]);
+
+  // ─── Hook 3: parse song data from URL state or fetch it ──────────────────
   useEffect(() => {
     const initializePage = async () => {
       setLoading(true);
       setError(null);
       
       try {
-        // Get song data from location state (passed from SimilarSongs/TopCharts/Discover)
         let songData = location.state?.song;
         
-        // If no state (direct navigation), fetch from API
         if (!songData && songid) {
            try {
-              // Public fetch
               const fetchedSong = await productService.getProductById(songid);
               if (fetchedSong) {
-                  // Normalize DB product to Song format
                   songData = {
                       id: fetchedSong.id || fetchedSong.productId,
                       trackId: fetchedSong.id || fetchedSong.productId,
@@ -505,10 +599,11 @@ const SongDetails = () => {
           return;
         }
         
+        // Setting targetSong here causes Hook 2 to fire and populate
+        // displayedFeatures as soon as cachedAudioFeatures is available.
         setTargetSong(songData);
         
         if (fromDiscover) {
-          // Filter out zip files and non-audio content
           const validSongs = allArtistSongsData.filter(s => {
              const url = s.previewUrl || s.fileUrl;
              return url && !url.toLowerCase().includes('.zip');
@@ -521,7 +616,6 @@ const SongDetails = () => {
           if (validSongs.length > 0 && isTargetAudio) {
             await computeMLSimilarity(songData, validSongs);
           } else {
-            console.log("Skipping ML similarity: Target is not audio or no valid comparison songs");
             if (isTargetAudio) {
                 await computeMLSimilarity(songData, []);
             } else {
@@ -529,13 +623,11 @@ const SongDetails = () => {
             }
           }
         } else {
-          // Filter artist songs to only include songs from the same artist
           const artistName = songData.artistName?.toLowerCase() || '';
           const filteredArtistSongs = allArtistSongsData.filter(s => {
             const url = s.previewUrl || s.fileUrl;
             const isAudio = url && !url.toLowerCase().includes('.zip');
             const isSameArtist = s.artistName?.toLowerCase().includes(artistName.split(' ')[0]);
-            
             return isAudio && isSameArtist && s.trackId !== songData.trackId;
           });
           
@@ -544,15 +636,12 @@ const SongDetails = () => {
           const targetUrl = songData.previewUrl || songData.fileUrl;
           const isTargetAudio = targetUrl && !targetUrl.toLowerCase().includes('.zip');
           
-          // Compute ML similarity if we have artist songs
           if (filteredArtistSongs.length > 0 && isTargetAudio) {
             await computeMLSimilarity(songData, filteredArtistSongs);
           } else {
-             // If no context, just try to get features for the target song
              if (isTargetAudio) {
                  await computeMLSimilarity(songData, []);
              } else {
-                 console.log("Skipping ML similarity: Target is not audio");
                  setLoading(false);
              }
           }
@@ -568,10 +657,9 @@ const SongDetails = () => {
   }, [songid, location.state]);
   
 
-  // Compute ML similarity using the backend
-  // First use cached extracted features, then fall back to live
-  // analyser features, then normalize the backend response into one consistent song shape
-  // regardless of whether the recommendation came from the local library or iTunes data.
+  // Compute ML similarity using the backend.
+  // NOTE: this function no longer sets displayedFeatures — that is now handled
+  // exclusively by Hook 2 so that hourly cache updates propagate correctly.
   const computeMLSimilarity = async (targetSong, comparisonSongs, overrideFeatures = null) => {
     const apiBaseUrl = envConfig.getApiBaseUrl();
     
@@ -579,35 +667,32 @@ const SongDetails = () => {
       const liveFeatures = overrideFeatures || audioFeaturesRef.current;
       const isDiscoverRequest = isLibraryContextSong(targetSong);
       const songIdStr = String(targetSong.trackId || targetSong.id);
-      // Check both the raw ID and the negative imported-ID form because the same logical
-      // song can appear in frontend state under a positive/display ID while its extracted
-      // feature row is stored in the backend cache under the imported negative ProductID.
-      let cached =
-        cachedAudioFeatures[songIdStr] ||
-        cachedAudioFeatures[String(-Math.abs(Number(songIdStr)))];
+
+      // Read whatever is currently in cachedAudioFeatures state (may be null on
+      // first call if Hook 1 hasn't resolved yet). Use a local lazy fetch as
+      // fallback so the ML call always has the best available feature vector.
+      let localCache = cachedAudioFeatures;
+      let cached = localCache
+        ? (localCache[songIdStr] || localCache[String(-Math.abs(Number(songIdStr)))])
+        : null;
 
       if (!cached) {
         try {
           const audioApiUrl = envConfig.getApiBaseUrl();
-          // One lazy re-fetch gives SongDetails a second chance to find a deterministic
-          // cached vector before falling back to live audio features. This avoids using
-          // volatile analyser state when the backend cache simply had not been loaded into
-          // this page yet.
           const cacheResp = await fetch(`${audioApiUrl}/api/audio/cached-features?artist_only=false`);
           if (cacheResp.ok) {
             const cacheData = fixTextDeep(await cacheResp.json());
             const features = cacheData.features || {};
-            cached = features[songIdStr] || features[String(-Math.abs(Number(songIdStr)))];
+            // Update state so Hook 2 fires and badges render immediately.
             setCachedAudioFeatures(features);
+            localCache = features;
+            cached = features[songIdStr] || features[String(-Math.abs(Number(songIdStr)))];
           }
         } catch {
-          // Non-fatal: fall back to live features below.
+          // Non-fatal — fall through to live features.
         }
       }
 
-      // The backend receives exactly one target feature vector. Cached vectors win because
-      // they are stable across page loads; live analyser features are only used as a last
-      // resort so the details page can still function when cache coverage is incomplete.
       let featuresToSend = null;
       if (cached) {
         featuresToSend = {
@@ -634,21 +719,17 @@ const SongDetails = () => {
           source: isDiscoverRequest ? 'discover_page' : 'similar_songs',
           current_product_id: String(targetSong.trackId || targetSong.id),
           preview_url: String(targetSong.previewUrl || targetSong.fileUrl || ''),
-            // Request the same pool size as SimilarSongs, then SongDetails renders top 20.
-            limit: 150,
+          limit: 150,
           audio_features: featuresToSend
       };
 
-      // Only log if not an update loop to avoid spam
       if (!overrideFeatures) {
          console.log('[SongDetails] Sending Unified Payload:', JSON.stringify(payload, null, 2));
       }
 
       const response = await fetch(`${apiBaseUrl}/api/audio/unified-recommendations`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
 
@@ -659,10 +740,6 @@ const SongDetails = () => {
       const responseData = fixTextDeep(await response.json());
       
       if (responseData.status === 'success') {
-        // Build a lookup table from the comparison songs that were already available in the
-        // page context. Backend recommendations sometimes return partial metadata, so this
-        // map lets us rehydrate missing names, artwork, preview URLs, and source flags from
-        // the richer frontend song objects we already have.
         const comparisonMetaById = new Map();
         (comparisonSongs || []).forEach((s) => {
           const rawId = s.trackId || s.id;
@@ -740,10 +817,6 @@ const SongDetails = () => {
 
         if (needsLibraryArtworkHydration) {
           try {
-            // Discover-origin requests can produce strong library matches that have the
-            // right ProductID and score but no cover art attached in the recommendation
-            // payload. In that case, hydrate from the products API so the details grid
-            // renders polished library cards instead of blank artwork placeholders.
             const products = await productService.getAllProducts();
             const productsById = new Map(
               (products || []).map((p) => [Number(p.id || p.productId), p])
@@ -752,19 +825,13 @@ const SongDetails = () => {
             hydratedRecommendations = validRecommendations.map((song) => {
               const pid = Number(song.trackId || song.id);
               const isLibrarySongById = Number.isFinite(pid) && pid > 0 && pid < 1000000;
-              if (!isLibrarySongById) {
-                return song;
-              }
+              if (!isLibrarySongById) return song;
 
               const hasArtwork = !!(song.artworkUrl100 || song.albumCoverImageUrl || song.imageUrl || song.image);
-              if (hasArtwork) {
-                return song;
-              }
+              if (hasArtwork) return song;
 
               const product = productsById.get(pid);
-              if (!product) {
-                return song;
-              }
+              if (!product) return song;
 
               const productArtwork =
                 product.albumCoverImageUrl ||
@@ -798,23 +865,26 @@ const SongDetails = () => {
         setSimilarSongs(top20);
         
         if (responseData.target_features) {
-          setTargetFeatures(responseData.target_features);
-            
-            // Construct ML info for display
-            setMlInfo({
-                algorithm: "Hybrid Audio Analysis",
+          setMlInfo({
+            algorithm: "Hybrid Audio Analysis",
             features: responseData.target_features
+          });
+          // Only use backend target_features to seed displayedFeatures if the
+          // cache didn't already populate them via Hook 2.
+          if (!displayedFeatures) {
+            setDisplayedFeatures({
+              tempo:        responseData.target_features.tempo        ?? null,
+              energy:       responseData.target_features.energy       ?? null,
+              valence:      responseData.target_features.valence      ?? null,
+              danceability: responseData.target_features.danceability ?? null,
             });
+          }
         }
       } else {
         throw new Error(responseData.message || 'Failed to analyze songs');
       }
     } catch (err) {
       console.error('ML Similarity error:', err);
-      // Don't set global error if just ML fails, allow basic display
-      if (!targetFeatures) {
-         // Fallback if we completely failed
-      }
     } finally {
       setLoading(false);
     }
@@ -912,12 +982,34 @@ const SongDetails = () => {
         {/* Header Section - Target Song */}
         <div className="bg-linear-to-r from-gray-900/80 to-gray-800/50 rounded-xl p-6 border border-gray-700">
           <div className="flex flex-col md:flex-row gap-1">
-            {/* Song Info */}
+            {/* Song Info + live feature badges */}
             <div className="flex-1">
               <h1 className="text-2xl md:text-3xl font-bold text-white mb-2">
                 {targetSong?.trackName || targetSong?.albumTitle}
               </h1>
               <p className="text-gray-400 mb-1">{targetSong?.collectionName}</p>
+
+              {/* ─── Header badge row — FeatureBadge style matching SimilarSongs ── */}
+              {displayedFeatures && (
+                <div className="grid grid-cols-4 gap-1 mt-3">
+                  <FeatureBadge
+                    label="Tempo"
+                    value={`${Math.round(displayedFeatures.tempo || 0)}`}
+                  />
+                  <FeatureBadge
+                    label="Energy"
+                    value={`${Math.round((displayedFeatures.energy || 0) * 100)}%`}
+                  />
+                  <FeatureBadge
+                    label="Mood"
+                    value={`${Math.round((displayedFeatures.valence || 0) * 100)}%`}
+                  />
+                  <FeatureBadge
+                    label="Dance"
+                    value={`${Math.round((displayedFeatures.danceability || 0) * 100)}%`}
+                  />
+                </div>
+              )}
             </div>
 
             {/* Album Art with Play */}

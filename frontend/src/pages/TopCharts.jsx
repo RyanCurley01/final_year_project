@@ -13,6 +13,15 @@ import OnsetImageCard from '../components/OnsetImageCard';
 
 const ARTISTS = ['Aphex Twin', 'Boards of Canada', 'Squarepusher'];
 
+// Normalised lowercase fragments used to filter songs returned by the
+// topcharts endpoint down to the three IDM artists only.
+const IDM_ARTIST_FRAGMENTS = ['aphex twin', 'boards of canada', 'squarepusher'];
+
+const isIdmArtist = (artistName) => {
+  const lower = String(artistName || '').toLowerCase();
+  return IDM_ARTIST_FRAGMENTS.some((fragment) => lower.includes(fragment));
+};
+
 const getArtistBadgeColor = (artist) => {
   if (artist?.toLowerCase().includes('aphex')) return 'bg-purple-500';
   if (artist?.toLowerCase().includes('boards')) return 'bg-orange-500';
@@ -252,7 +261,12 @@ const TopCharts = () => {
         setCachedAudioFeatures({});
       }
     };
+
     fetchCachedFeatures();
+
+    // Re-sync every hour to match backend refresh cycle
+    const interval = setInterval(fetchCachedFeatures, 60 * 60 * 1000);
+    return () => clearInterval(interval);
   }, []);
 
   // Reset UI state when the user switches to a different track
@@ -288,29 +302,35 @@ const TopCharts = () => {
           }));
         setDbSongs(musicProducts);
         
-        
-        // Request TopCharts artist songs and any cached features from backend proxy
+        // Fetch IDM songs pre-sorted by iTunes popularity rank from the
+        // dedicated ranked endpoint. Falls back to the standard topcharts
+        // endpoint (with client-side IDM filter) if ranked is unavailable.
         let allArtistSongs = [];
         try {
-          const resp = await fetch(`${apiBaseUrl}/itunes/topcharts?limit_per_artist=50`);
+          const resp = await fetch(`${apiBaseUrl}/itunes/topcharts-ranked`);
           if (resp.ok) {
             const data = fixTextDeep(await resp.json());
             if (data.songs) {
               allArtistSongs = data.songs;
+              console.log(`[TopCharts] topcharts-ranked returned ${allArtistSongs.length} songs.`);
             }
-            // Merge any returned features into cachedAudioFeatures so visualiser can use them
             if (data.features) {
               setCachedAudioFeatures(prev => ({ ...(prev || {}), ...data.features }));
             }
           } else {
-            console.warn('[TopCharts] topcharts proxy failed, falling back to client-side search');
+            console.warn('[TopCharts] topcharts-ranked failed, falling back to topcharts');
+            const fallbackResp = await fetch(`${apiBaseUrl}/itunes/topcharts?limit_per_artist=50`);
+            if (fallbackResp.ok) {
+              const fallbackData = fixTextDeep(await fallbackResp.json());
+              allArtistSongs = (fallbackData.songs || []).filter((s) => isIdmArtist(s.artistName));
+              if (fallbackData.features) {
+                setCachedAudioFeatures(prev => ({ ...(prev || {}), ...fallbackData.features }));
+              }
+            }
           }
         } catch (e) {
-          console.warn('[TopCharts] topcharts fetch error:', e.message || e);
+          console.warn('[TopCharts] fetch error:', e.message || e);
         }
-
-        // Interleave by artistRank if available (fallback to current ordering)
-        allArtistSongs.sort((a, b) => (a.artistRank || 0) - (b.artistRank || 0));
 
         setSongs(allArtistSongs);
         setDbSongs(musicProducts);
@@ -531,7 +551,16 @@ const TopCharts = () => {
   }, [activeSong?.trackId || activeSong?.id, songs.length > 0, cachedAudioFeatures]);
 
   const filteredSongs = useMemo(() => {
-    if (filter === 'all') return songs;
+    if (filter === 'all') {
+      // Sort all three artists together by iTunes popularity rank so the
+      // most popular track across any artist appears first.
+      // Songs with no rank fall to the end.
+      return [...songs].sort((a, b) => {
+        const ra = a.popularityRank ?? 99999;
+        const rb = b.popularityRank ?? 99999;
+        return ra - rb;
+      });
+    }
     return songs.filter(song => song.artistName?.toLowerCase().includes(filter.toLowerCase()));
   }, [songs, filter]);
 
@@ -591,8 +620,6 @@ const TopCharts = () => {
     if (songToPlay.fileUrl) {
       // Look up the clicked track in the filtered grid so next/prev
       // advances through the visible song card list.
-      // Try multiple ID fields since recommendations use product_id (DB) while
-      // grid songs use iTunes trackId — the two namespaces rarely overlap.
       const recNormId = normalizeTrackId(song.product_id || song.id || song.trackId);
       let index = filteredSongs.findIndex(s =>
         normalizeTrackId(s.trackId || s.id) === recNormId
@@ -601,7 +628,6 @@ const TopCharts = () => {
       );
       
       // If found, use filtered list as queue; otherwise append to end
-      // so the player can still advance to the next visible card.
       const queueData = index !== -1 ? filteredSongs : [...filteredSongs, songToPlay];
       const queueIndex = index !== -1 ? index : filteredSongs.length;
       
@@ -850,7 +876,6 @@ const TopCharts = () => {
           {/* Recommendations List */}
           {activeSong && recommendations.length > 0 && (
             <>
-              {/* <p className="text-[12px] text-gray-500 mb-2">{recommendations.length} matches • Updates 3s</p> */}
               <div className="space-y-2">
                 {recommendations
                   .map(rec => {

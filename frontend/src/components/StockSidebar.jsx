@@ -22,18 +22,22 @@ const inRange = (value, start, end) => {
   return ts >= start && ts < end;
 };
 
+// Resolve availableSince from both camelCase and PascalCase keys
+const getAvailableSince = (item) =>
+  item.availableSince || item.AvailableSince || null;
+
+// Resolve unavailableSince from both camelCase and PascalCase keys
+const getUnavailableSince = (item) =>
+  item.unavailableSince || item.UnavailableSince || null;
+
 const latestDateValue = (...values) => {
   let latest = null;
-
   values.forEach((value) => {
     if (!value) return;
     const parsed = new Date(value);
     if (Number.isNaN(parsed.getTime())) return;
-    if (!latest || parsed > latest) {
-      latest = parsed;
-    }
+    if (!latest || parsed > latest) latest = parsed;
   });
-
   return latest ? latest.toISOString() : null;
 };
 
@@ -43,9 +47,13 @@ const getValidDate = (value) => {
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 };
 
-const normalizeProductId = (value) => {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : null;
+const isItemAvailable = (item) =>
+  item.isAvailable !== undefined ? item.isAvailable : item.available;
+
+// True if the product is a library song (positive ID), false if iTunes import (negative ID)
+const isLibrarySong = (item) => {
+  const pid = Number(item.productId);
+  return Number.isFinite(pid) && pid > 0;
 };
 
 const StockSidebar = () => {
@@ -62,7 +70,6 @@ const StockSidebar = () => {
     !!(currentUser?.email || currentUser?.accountEmailAddress) &&
     !!currentUser?.password;
 
-  // Employees and Managers can view
   const canView = (isManager || isEmployee) && hasBasicAuth;
 
   useEffect(() => {
@@ -71,7 +78,6 @@ const StockSidebar = () => {
       setError(null);
       const email = currentUser?.email || currentUser?.accountEmailAddress;
 
-      // Timeout to prevent infinite loading if service is down
       const timeout = setTimeout(() => {
         setError(new Error('Request timed out — stock service may be unavailable.'));
         setIsLoading(false);
@@ -82,9 +88,7 @@ const StockSidebar = () => {
         .then(async (res) => {
           clearTimeout(timeout);
 
-          // Merge duplicate rows by productId.
-          // Some datasets contain historical duplicate records; if any row is available,
-          // show the product as available to avoid false "Unavailable" states.
+          // Merge duplicate rows by productId — if any row is available, treat as available.
           const mergedByProduct = new Map();
           (res || []).forEach((item) => {
             const key = item?.productId;
@@ -96,30 +100,26 @@ const StockSidebar = () => {
               return;
             }
 
-            const currentAvail = current.isAvailable !== undefined ? current.isAvailable : current.available;
-            const itemAvail = item.isAvailable !== undefined ? item.isAvailable : item.available;
+            const currentAvail = isItemAvailable(current);
+            const itemAvail   = isItemAvailable(item);
+
             const mergedAvailableSince = latestDateValue(
-              current.availableSince,
-              current.AvailableSince,
-              item.availableSince,
-              item.AvailableSince
+              current.availableSince, current.AvailableSince,
+              item.availableSince,    item.AvailableSince
             );
             const mergedUnavailableSince = latestDateValue(
-              current.unavailableSince,
-              current.UnavailableSince,
-              item.unavailableSince,
-              item.UnavailableSince
+              current.unavailableSince, current.UnavailableSince,
+              item.unavailableSince,    item.UnavailableSince
             );
 
-            // Keep newest-ish row by larger id (when present), and OR availability.
             const currentId = Number(current.id ?? current.stockId ?? current.StockID ?? 0);
-            const itemId = Number(item.id ?? item.stockId ?? item.StockID ?? 0);
+            const itemId    = Number(item.id    ?? item.stockId    ?? item.StockID    ?? 0);
             const preferred = itemId >= currentId ? item : current;
 
             mergedByProduct.set(key, {
               ...preferred,
-              isAvailable: Boolean(currentAvail) || Boolean(itemAvail),
-              availableSince: mergedAvailableSince,
+              isAvailable:      Boolean(currentAvail) || Boolean(itemAvail),
+              availableSince:   mergedAvailableSince,
               unavailableSince: mergedUnavailableSince,
             });
           });
@@ -156,7 +156,6 @@ const StockSidebar = () => {
 
   if (!canView) return null;
 
-  // Determine stock status badge (binary: available or unavailable)
   const getStockBadge = (available) => {
     if (available === null || available === undefined) return null;
     if (!available) {
@@ -173,9 +172,26 @@ const StockSidebar = () => {
     );
   };
 
-  const renderSection = (title, rows, productMap, options = {}) => (
+  const getSourceBadge = (item) => {
+    if (isLibrarySong(item)) {
+      return (
+        <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-blue-500/20 text-blue-300 ml-1">
+          Library
+        </span>
+      );
+    }
+    return (
+      <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-purple-500/20 text-purple-300 ml-1">
+        iTunes
+      </span>
+    );
+  };
+
+  const renderSection = (title, rows, options = {}) => (
     <div className="mb-6">
-      <h3 className="text-md font-semibold text-white mb-2">{title} ({rows.length})</h3>
+      <h3 className="text-md font-semibold text-white mb-2">
+        {title} ({rows.length})
+      </h3>
       {rows.length === 0 ? (
         <p className="text-gray-500 text-sm">No songs in this section.</p>
       ) : (
@@ -185,16 +201,20 @@ const StockSidebar = () => {
               <th className="px-4 py-2">#</th>
               <th className="px-4 py-2">Product Name</th>
               <th className="px-4 py-2">Cover</th>
+              <th className="px-4 py-2">Source</th>
               <th className="px-4 py-2">Status</th>
+              {options.showDate && <th className="px-4 py-2">Date</th>}
             </tr>
           </thead>
           <tbody>
             {rows.map((item, i) => {
-              const product = productMap[item.productId];
-              const defaultAvailable = item.isAvailable !== undefined ? item.isAvailable : item.available;
-              const sectionAvailable = options.statusResolver
-                ? options.statusResolver(item, defaultAvailable)
-                : defaultAvailable;
+              const product        = productMap[item.productId];
+              const defaultAvail   = isItemAvailable(item);
+              const sectionAvail   = options.statusResolver
+                ? options.statusResolver(item, defaultAvail)
+                : defaultAvail;
+              const dateValue      = options.dateField ? options.dateField(item) : null;
+
               return (
                 <tr
                   key={`${title}-${item.productId}-${i}`}
@@ -206,11 +226,9 @@ const StockSidebar = () => {
                     {product?.albumCoverImageUrl ? (
                       (() => {
                         const coverUrl = product.albumCoverImageUrl;
-                        const isVideo = coverUrl && coverUrl.toLowerCase().includes('.mp4');
-                        const isTeddyEmotion = product.albumTitle?.toLowerCase().includes('teddy emotion');
-                        const useOnsetImages = isVideo && !isTeddyEmotion;
-
-                        if (useOnsetImages) {
+                        const isVideo  = coverUrl?.toLowerCase().includes('.mp4');
+                        const isTeddy  = product.albumTitle?.toLowerCase().includes('teddy emotion');
+                        if (isVideo && !isTeddy) {
                           return (
                             <div className="w-10 h-10">
                               <OnsetImageCard
@@ -232,13 +250,19 @@ const StockSidebar = () => {
                           />
                         );
                       })()
-                    ) : (
-                      "—"
-                    )}
+                    ) : "—"}
                   </td>
-                  <td className="px-4 py-2">
-                    {getStockBadge(sectionAvailable)}
-                  </td>
+                  <td className="px-4 py-2">{getSourceBadge(item)}</td>
+                  <td className="px-4 py-2">{getStockBadge(sectionAvail)}</td>
+                  {options.showDate && (
+                    <td className="px-4 py-2 text-xs text-gray-400">
+                      {dateValue
+                        ? new Date(dateValue).toLocaleDateString(undefined, {
+                            day: '2-digit', month: 'short', year: 'numeric',
+                          })
+                        : '—'}
+                    </td>
+                  )}
                 </tr>
               );
             })}
@@ -255,9 +279,7 @@ const StockSidebar = () => {
         className="flex flex-row justify-start items-center text-sm font-medium text-[#1E90FF] hover:text-[#00BFFF]"
       >
         <FaWarehouse className="w-6 h-6 mr-2" />
-        <span className="underline hover:no-underline">
-          Stock
-        </span>
+        <span className="underline hover:no-underline">Stock</span>
       </button>
 
       {isOpen && createPortal(
@@ -273,8 +295,8 @@ const StockSidebar = () => {
               Stock Availability
             </h2>
             <p className="text-gray-400 text-sm mb-4">
-              Weekly stock summary with the current catalogue plus imported
-              replacement songs added and removed from the rotating stock pool.
+              Weekly stock summary — library songs and rotating iTunes imports
+              added and removed from the catalogue.
             </p>
 
             <div className="overflow-auto bg-[#1a1a1a] p-2 rounded w-full">
@@ -293,60 +315,93 @@ const StockSidebar = () => {
                   getSearchableText={(item) => productMap[item.productId]?.albumTitle || ''}
                   placeholder="Filter by song name…"
                 >
-                  {(filteredData) => (
-                    (() => {
-                      const now = new Date();
-                      const thisWeekStart = startOfIsoWeek(now);
-                      const nextWeekStart = new Date(thisWeekStart);
-                      nextWeekStart.setDate(nextWeekStart.getDate() + 7);
-                      const lastWeekStart = new Date(thisWeekStart);
-                      lastWeekStart.setDate(lastWeekStart.getDate() - 7);
-                      const isAvailable = (item) => item.isAvailable !== undefined ? item.isAvailable : item.available;
+                  {(filteredData) => {
+                    const now           = new Date();
+                    const thisWeekStart = startOfIsoWeek(now);
+                    const nextWeekStart = new Date(thisWeekStart);
+                    nextWeekStart.setDate(nextWeekStart.getDate() + 7);
+                    const lastWeekStart = new Date(thisWeekStart);
+                    lastWeekStart.setDate(lastWeekStart.getDate() - 7);
 
-                      const songsList = filteredData.filter((item) => !!isAvailable(item));
+                    // ── Currently available ─────────────────────────────────
+                    const available = filteredData.filter((item) => isItemAvailable(item));
 
-                      const unavailableLastWeek = filteredData.filter((item) => {
-                        const available = isAvailable(item);
-                        return !available && inRange(item.unavailableSince, lastWeekStart, thisWeekStart);
+                    // ── Added this week (availableSince falls in current week) ─
+                    const addedThisWeek = filteredData
+                      .filter((item) =>
+                        isItemAvailable(item) &&
+                        inRange(getAvailableSince(item), thisWeekStart, nextWeekStart)
+                      )
+                      .sort((a, b) => {
+                        const da = getValidDate(getAvailableSince(a))?.getTime() ?? 0;
+                        const db = getValidDate(getAvailableSince(b))?.getTime() ?? 0;
+                        return db - da; // newest first
                       });
 
-                      const unavailableThisWeek = filteredData.filter((item) => {
-                        const available = isAvailable(item);
-                        return !available && inRange(item.unavailableSince, thisWeekStart, nextWeekStart);
+                    // ── Added last week ─────────────────────────────────────
+                    const addedLastWeek = filteredData
+                      .filter((item) =>
+                        isItemAvailable(item) &&
+                        inRange(getAvailableSince(item), lastWeekStart, thisWeekStart)
+                      )
+                      .sort((a, b) => {
+                        const da = getValidDate(getAvailableSince(a))?.getTime() ?? 0;
+                        const db = getValidDate(getAvailableSince(b))?.getTime() ?? 0;
+                        return db - da;
                       });
 
-                      const newThisWeekCandidates = filteredData.filter((item) => {
-                        const available = isAvailable(item);
-                        if (!available) return false;
-                        return inRange(item.availableSince, thisWeekStart, nextWeekStart);
+                    // ── Removed this week (unavailableSince in current week) ─
+                    const removedThisWeek = filteredData
+                      .filter((item) =>
+                        !isItemAvailable(item) &&
+                        inRange(getUnavailableSince(item), thisWeekStart, nextWeekStart)
+                      )
+                      .sort((a, b) => {
+                        const da = getValidDate(getUnavailableSince(a))?.getTime() ?? 0;
+                        const db = getValidDate(getUnavailableSince(b))?.getTime() ?? 0;
+                        return db - da;
                       });
 
-                      const replacementCountThisWeek = unavailableThisWeek.length;
-                      const newThisWeek = [...newThisWeekCandidates]
-                        .sort((left, right) => {
-                          const rightDate = getValidDate(right.availableSince)?.getTime() ?? 0;
-                          const leftDate = getValidDate(left.availableSince)?.getTime() ?? 0;
-                          return rightDate - leftDate;
-                        })
-                        .slice(0, replacementCountThisWeek || newThisWeekCandidates.length);
+                    // ── Removed last week ───────────────────────────────────
+                    const removedLastWeek = filteredData
+                      .filter((item) =>
+                        !isItemAvailable(item) &&
+                        inRange(getUnavailableSince(item), lastWeekStart, thisWeekStart)
+                      )
+                      .sort((a, b) => {
+                        const da = getValidDate(getUnavailableSince(a))?.getTime() ?? 0;
+                        const db = getValidDate(getUnavailableSince(b))?.getTime() ?? 0;
+                        return db - da;
+                      });
 
-                      // Exclude new-this-week songs from the main list so the two sections together = 272
-                      const songsListExcludingNew = songsList;
-
-                      return (
-                        <>
-                          {renderSection("Stock Availability", songsListExcludingNew, productMap, {
-                            statusResolver: () => true,
-                          })}
-                          {renderSection("New Songs This Week", newThisWeek, productMap, {
-                            statusResolver: () => true,
-                          })}
-                          {renderSection("Unavailable Songs This Week", unavailableThisWeek, productMap)}
-                          {renderSection("Unavailable Songs Last Week", unavailableLastWeek, productMap)}
-                        </>
-                      );
-                    })()
-                  )}
+                    return (
+                      <>
+                        {renderSection("Current Stock", available, {
+                          statusResolver: () => true,
+                        })}
+                        {renderSection("Added This Week", addedThisWeek, {
+                          statusResolver: () => true,
+                          showDate: true,
+                          dateField: getAvailableSince,
+                        })}
+                        {renderSection("Added Last Week", addedLastWeek, {
+                          statusResolver: () => true,
+                          showDate: true,
+                          dateField: getAvailableSince,
+                        })}
+                        {renderSection("Removed This Week", removedThisWeek, {
+                          statusResolver: () => false,
+                          showDate: true,
+                          dateField: getUnavailableSince,
+                        })}
+                        {renderSection("Removed Last Week", removedLastWeek, {
+                          statusResolver: () => false,
+                          showDate: true,
+                          dateField: getUnavailableSince,
+                        })}
+                      </>
+                    );
+                  }}
                 </SidebarSearchFilter>
               )}
 

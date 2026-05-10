@@ -14,6 +14,15 @@ import { fixTextDeep } from '../utils/fixText';
 
 const ARTISTS = ['Aphex Twin', 'Boards of Canada', 'Squarepusher'];
 
+// Normalised lowercase fragments used to filter songs returned by the
+// topcharts endpoint down to the three IDM artists only.
+const IDM_ARTIST_FRAGMENTS = ['aphex twin', 'boards of canada', 'squarepusher'];
+
+const isIdmArtist = (artistName) => {
+  const lower = String(artistName || '').toLowerCase();
+  return IDM_ARTIST_FRAGMENTS.some((fragment) => lower.includes(fragment));
+};
+
 const getArtistBadgeColor = (artist) => {
   if (artist?.toLowerCase().includes('aphex')) return 'bg-purple-500';
   if (artist?.toLowerCase().includes('boards')) return 'bg-orange-500';
@@ -345,7 +354,12 @@ const SimilarSongs = () => {
         setCachedAudioFeatures({});
       }
     };
+
     fetchCachedFeatures();
+
+    // Re-sync every hour to match backend refresh cycle
+    const interval = setInterval(fetchCachedFeatures, 60 * 60 * 1000);
+    return () => clearInterval(interval);
   }, []);
 
   // --- Initialization Hook 2: Fetch and Assemble Song Data ---
@@ -383,9 +397,20 @@ const SimilarSongs = () => {
           if (resp.ok) {
             const data = fixTextDeep(await resp.json());
             if (data.songs) {
-              allArtistSongs = data.songs;
+              // ── KEY FILTER ────────────────────────────────────────────────
+              // The topcharts endpoint returns up to 225 songs (150 IDM artist
+              // tracks + 75 broad popular tracks). This page is exclusively
+              // about the three IDM artists, so we discard anything whose
+              // artistName doesn't match one of them.
+              allArtistSongs = data.songs.filter((song) => isIdmArtist(song.artistName));
+              console.log(
+                `[SimilarSongs] topcharts returned ${data.songs.length} songs; ` +
+                `kept ${allArtistSongs.length} IDM artist tracks after filtering.`
+              );
             }
             if (data.features) {
+              // Merge the full feature map so similarity scoring works for all
+              // songs, including the broad ones (even though we don't show them).
               setCachedAudioFeatures(prev => ({ ...(prev || {}), ...data.features }));
             }
           } else {
@@ -397,7 +422,7 @@ const SimilarSongs = () => {
         
         const calculatedSongs = allArtistSongs.map(song => song);
 
-        // Seed ALL iTunes songs as warming in the global store and register
+        // Seed ALL IDM songs as warming in the global store and register
         // their IDs immediately — before the bulk match hook fires — so cards
         // never flash blank or "not found" while waiting for API results.
         const itunesCandidates = calculatedSongs.filter(s => s.source !== 'database');
@@ -684,7 +709,7 @@ const SimilarSongs = () => {
 
     const matchSongsUsingBulkEndpoint = async () => {
         const apiBaseUrl = envConfig.getApiBaseUrl();
-        console.log(`[SimilarSongs] Matching ${songs.length} iTunes songs to 47 library songs using Bulk Match...`);
+        console.log(`[SimilarSongs] Matching ${songs.length} IDM songs to 47 library songs using Bulk Match...`);
         const candidateSongs = songs.filter((song) => song.source !== 'database');
         if (candidateSongs.length === 0) {
           await finishAnalyzing();
@@ -692,8 +717,6 @@ const SimilarSongs = () => {
         }
 
         // --- Cache-hit fast path ---
-        // Songs already resolved in the global Redux cache don't need API calls.
-        // (localTrackIds and warming seeds were set at song load time in fetchAllSongs.)
         const alreadyCached = candidateSongs.filter(s => {
           const cached = globalMatchCache[normalizeTrackId(s.trackId || s.id)];
           return cached && (
@@ -726,11 +749,8 @@ const SimilarSongs = () => {
           )
         );
         
-        // Accumulates positive matches from all batches.
         const matchedByTrack = new Map();
 
-        // Immediately dispatch any new matches into the global store so cards
-        // flip progressively rather than waiting for all batches to finish.
         const applyResolvedMatches = () => {
           const batch = {};
           matchedByTrack.forEach((resolved, key) => {
@@ -797,8 +817,8 @@ const SimilarSongs = () => {
 
                   matchedByTrack.set(key, {
                     id: match.matched_product_id ?? null,
-                    albumTitle: name,          // SimilarSongs SongCard reads this
-                    matchedLibraryTrack: name, // Search SongCard reads this
+                    albumTitle: name,
+                    matchedLibraryTrack: name,
                     similarity_score: match.similarity_score ?? null,
                     tempo_match: match.tempo_match ?? null,
                     energy_match: match.energy_match ?? null,
@@ -825,7 +845,6 @@ const SimilarSongs = () => {
           return skippedIds;
         };
 
-        // First pass — only uncached candidates.
         const skippedIds = await runMatchPass(uncachedCandidates);
 
         const unresolved = uncachedCandidates.filter((s) => !matchedByTrack.has(normalizeTrackId(s.trackId || s.id)));
@@ -838,20 +857,10 @@ const SimilarSongs = () => {
           applyResolvedMatches(); 
         }
 
-        // All songs still unresolved after the first pass (and network-failure
-        // retry) fall into two buckets:
-        //   cacheMisses  — backend explicitly skipped (no features cached yet)
-        //   stillUnmatched — backend processed but returned no match
-        //
-        // Both are kept as "warming" and polled. We never write notFound after
-        // just one pass because the backend may still be extracting features
-        // asynchronously. notFound is only written when polling is exhausted.
         const allStillUnresolved = uncachedCandidates.filter(
           (s) => !matchedByTrack.has(normalizeTrackId(s.trackId || s.id))
         );
 
-        // Warm-cache call covers cache-miss songs so the backend extracts
-        // their features in-memory for subsequent poll passes.
         const allTrackIds = candidateSongs.map((s) => Number(s.trackId || s.id)).filter(Boolean);
         const warmSongs = cacheMisses.map((s) => ({
           trackId: Number(s.trackId || s.id),
@@ -879,8 +888,6 @@ const SimilarSongs = () => {
           console.warn('[SimilarSongs] Cache sync failed:', err.message);
         });
 
-        // Poll ALL still-unresolved songs (cache misses + unmatched), not just
-        // cache misses. notFound is only written when polling is exhausted.
         if (allStillUnresolved.length > 0) {
           console.log(`[SimilarSongs] ${allStillUnresolved.length} songs still unresolved — polling (${cacheMisses.length} cache misses, ${allStillUnresolved.length - cacheMisses.length} unmatched)`);
 
@@ -900,13 +907,8 @@ const SimilarSongs = () => {
               const newlyMatched = remaining.filter((s) => matchedByTrack.has(normalizeTrackId(s.trackId || s.id)));
               if (newlyMatched.length > 0) {
                 console.log(`[SimilarSongs] Poll ${attempt}: ${newlyMatched.length} new matches found!`);
-                // applyResolvedMatches() already dispatched these inside runMatchPass.
               }
 
-              // Keep only songs still skipped by the backend for the next round.
-              // Songs returned in neither matches nor skipped are genuinely unmatched
-              // at this point and drop out of remaining — they'll get notFound below
-              // once the loop ends.
               remaining = remaining.filter((s) => pollSkipped.has(normalizeTrackId(s.trackId || s.id)));
 
               if (remaining.length === 0) {
@@ -914,8 +916,6 @@ const SimilarSongs = () => {
               }
             }
 
-            // Polling exhausted — flip any cards still warming to notFound.
-            // Use mergeMatchData so the rank guard protects already-resolved entries.
             const allNowUnresolved = allStillUnresolved.filter(
               (s) => !matchedByTrack.has(normalizeTrackId(s.trackId || s.id))
             );
@@ -944,9 +944,6 @@ const SimilarSongs = () => {
       console.warn('SimilarSongs bulk matching aborted:', err);
       await finishAnalyzing();
     });
-  // globalMatchCache intentionally omitted from deps — we snapshot it at match
-  // start via the closure. Adding it would re-trigger the whole bulk pass on
-  // every cache update, defeating the purpose of the fast-path check.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading, dbSongs.length, songs.length, cachedAudioFeatures]);
 
@@ -969,7 +966,6 @@ const SimilarSongs = () => {
       [seeded[i], seeded[j]] = [seeded[j], seeded[i]];
     }
     return seeded;
-  // songMatchData intentionally included so the grid re-renders on cache updates.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [songs, filter, shuffleSeed, songMatchData]);
 

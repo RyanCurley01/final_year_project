@@ -439,6 +439,12 @@ const Search = () => {
   const [filter, setFilter] = useState('all');
   const [error, setError] = useState(null);
 
+  // ─── NEW: cached audio features, refreshed every hour to match SimilarSongs ───
+  // Initialised to null so downstream logic can distinguish "not yet loaded"
+  // from "loaded but empty". The search effect waits for this before sending
+  // audio_features payloads to match-library, exactly as SimilarSongs does.
+  const [cachedAudioFeatures, setCachedAudioFeatures] = useState(null);
+
   // Tracks which trackIds belong to the current search mount so we only
   // surface the relevant slice of the global cache in the grid.
   const [localTrackIds, setLocalTrackIds] = useState(new Set());
@@ -463,6 +469,57 @@ const Search = () => {
   const dispatch = useDispatch();
   const navigate = useNavigate();
   const { activeSong, isPlaying, playbackRate } = useSelector((state) => state.player);
+
+  // ─── NEW: Fetch pre-computed audio features, re-sync every hour ─────────────
+  // Mirrors the identical hook in SimilarSongs so that match-library payloads
+  // sent from Search include the same audio_features data, enabling the
+  // backend to return accurate tempo/energy/mood/dance badge scores.
+  useEffect(() => {
+    const fetchCachedFeatures = async () => {
+      try {
+        const audioApiUrl = envConfig.getApiBaseUrl();
+        const response = await fetch(`${audioApiUrl}/api/audio/cached-features?artist_only=false`);
+
+        if (response.ok) {
+          const data = fixTextDeep(await response.json());
+          setCachedAudioFeatures(data.features || {});
+          console.log(`[Search] Loaded ${data.count} cached audio features`);
+        }
+      } catch (err) {
+        console.warn('[Search] Could not fetch cached audio features:', err.message);
+        // Fall back to an empty object so the rest of the component isn't
+        // blocked waiting for a value that will never arrive.
+        setCachedAudioFeatures({});
+      }
+    };
+
+    fetchCachedFeatures();
+
+    // Re-sync every hour to match the backend refresh cycle, same as SimilarSongs.
+    const interval = setInterval(fetchCachedFeatures, 60 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // ─── Helper: build audio_features payload from cachedAudioFeatures ──────────
+  // Mirrors buildAudioFeaturePayload in SimilarSongs so the same fields are
+  // forwarded to match-library, giving the backend enough data to compute the
+  // badge scores (tempo_match, energy_match, mood_match, dance_match).
+  const buildAudioFeaturePayload = (features) => {
+    if (!features) return null;
+    return {
+      tempo: Number(features.tempo ?? 120),
+      energy: Number(features.energy ?? 0.5),
+      valence: Number(features.valence ?? 0.5),
+      danceability: Number(features.danceability ?? 0.5),
+      acousticness: Number(features.acousticness ?? 0.5),
+      spectral_centroid: Number(features.spectral_centroid ?? features.spectralCentroid ?? 1500),
+      spectral_rolloff: Number(features.spectral_rolloff ?? features.spectralRolloff ?? 3000),
+      zero_crossing_rate: Number(features.zero_crossing_rate ?? features.zeroCrossingRate ?? 0.05),
+      instrumentalness: Number(features.instrumentalness ?? 0.5),
+      loudness: Number(features.loudness ?? -14),
+      speechiness: Number(features.speechiness ?? 0.1),
+    };
+  };
 
   useEffect(() => {
     const abortController = new AbortController();
@@ -656,12 +713,11 @@ const Search = () => {
           return;
         }
 
-        // ---------------------------------------------------------------
-        // Helper: build a Map containing ONLY confirmed resolved matches.
-        // Songs the backend skipped OR processed-but-found-nothing are both
-        // left OUT — they stay warming and go through the poll loop.
+        // ─── Helper: build a Map of confirmed resolved matches ─────────────────
+        // Songs the backend skipped OR processed-but-found-nothing are left out;
+        // they stay warming and go through the poll loop.
         // notFound is only written when polling is exhausted.
-        // ---------------------------------------------------------------
+        // ──────────────────────────────────────────────────────────────────────
         const buildResolvedMap = (matches, skippedIds) => {
           const matchMap = new Map(matches.map(m => [normalizeTrackId(m.input_track_id), m]));
           const resolvedMap = new Map();
@@ -675,7 +731,7 @@ const Search = () => {
                 matchedLibraryTrack: matched.matched_product_name,
                 matchStatus: MATCH_STATUS.resolved,
                 matchedDbSong: {
-                  albumTitle: matched.matched_product_name,  // SimilarSongs reads name from here
+                  albumTitle: matched.matched_product_name,
                   tempo_match: matched.tempo_match ?? null,
                   energy_match: matched.energy_match ?? null,
                   mood_match: matched.mood_match ?? null,
@@ -683,23 +739,44 @@ const Search = () => {
                 },
               });
             }
-            // No else — processed-but-unmatched stays warming until poll exhaustion
           });
 
           return resolvedMap;
         };
 
-        // ---------------------------------------------------------------
-        // Single match pass — only for uncachedSongs.
-        // ---------------------------------------------------------------
+        // ─── Single match pass — only for uncachedSongs ───────────────────────
+        // NEW: candidates now include audio_features from cachedAudioFeatures
+        // (when available) so the backend can return accurate badge scores,
+        // mirroring the payload structure used in SimilarSongs' runMatchPass.
+        // ──────────────────────────────────────────────────────────────────────
         const runMatchPass = async (candidates) => {
           const payload = {
-            candidates: candidates.map(s => ({
-              trackId: normalizeTrackId(s.trackId || s.id),
-              trackName: s.trackName || '',
-              artistName: s.artistName || '',
-              previewUrl: s.previewUrl || s.fileUrl || '',
-            })),
+            candidates: candidates.map(s => {
+              const rawId = String(s.trackId || s.id || '');
+              const numericId = Number(rawId);
+              const negId = Number.isFinite(numericId) && numericId !== 0
+                ? String(-Math.abs(numericId))
+                : null;
+              // Look up cached features by positive or negative id, same as
+              // SimilarSongs, so the badge scores populate from the first pass.
+              const cached = cachedAudioFeatures
+                ? (cachedAudioFeatures[rawId] || (negId ? cachedAudioFeatures[negId] : null))
+                : null;
+              const audioFeatures = buildAudioFeaturePayload(cached);
+
+              const candidate = {
+                trackId: normalizeTrackId(s.trackId || s.id),
+                trackName: s.trackName || '',
+                artistName: s.artistName || '',
+                previewUrl: s.previewUrl || s.fileUrl || '',
+              };
+
+              if (audioFeatures) {
+                candidate.audio_features = audioFeatures;
+              }
+
+              return candidate;
+            }),
             limit: candidates.length,
             ...(targetIds.length > 0 && { target_ids: targetIds }),
           };

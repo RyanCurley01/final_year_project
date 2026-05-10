@@ -19,19 +19,34 @@ from feature_extraction import extract_audio_features_from_preview, derive_mood
 from ml_service import _parse_json_list
 import ml_service
 import json
-import ml_service
 
 router = APIRouter()
 
-# Interval (in seconds) between automatic top-chart refreshes.
-# Default: 1 hour.  Override with env var TOPCHARTS_REFRESH_INTERVAL.
-REFRESH_INTERVAL = int(os.getenv("TOPCHARTS_REFRESH_INTERVAL", 60 * 60))
+# ---------------------------------------------------------------------------
+# Timing
+# ---------------------------------------------------------------------------
+REFRESH_INTERVAL      = int(os.getenv("TOPCHARTS_REFRESH_INTERVAL", 60 * 60))
 STARTUP_REFRESH_DELAY = int(os.getenv("TOPCHARTS_STARTUP_REFRESH_DELAY", 5))
 
-# Weekly catalog composition targets
-TOPCHARTS_TARGET_COUNT = 150
+# ---------------------------------------------------------------------------
+# Catalog composition
+#   ARTISTS                    → up to TOPCHARTS_TARGET_COUNT songs fetched
+#                                from these three artists specifically.
+#   ITUNES_SEARCH_TERMS        → up to ITUNES_SEARCH_TARGET_COUNT additional
+#                                popular songs from broad iTunes search.
+#   _IMPORT_CAP                → hard ceiling for total imported (negative-ID)
+#                                rows in DB at any time (default 272).
+# ---------------------------------------------------------------------------
+TOPCHARTS_TARGET_COUNT     = 150
 ITUNES_SEARCH_TARGET_COUNT = 75
-LIBRARY_TARGET_COUNT = 47
+LIBRARY_TARGET_COUNT       = 47
+
+ARTISTS = [
+    "Aphex Twin",
+    "Boards of Canada",
+    "Squarepusher",
+]
+
 ITUNES_SEARCH_TERMS = [
     "top pop hits", "hip hop hits", "rock classics",
     "R&B soul", "country hits", "jazz standards",
@@ -40,744 +55,116 @@ ITUNES_SEARCH_TERMS = [
     "blues guitar", "reggae dub", "K-pop hits",
 ]
 
-# Default artist list used for TopCharts proxy and frontend parity
-ARTISTS = [
-    "Aphex Twin",
-    "Boards of Canada",
-    "Squarepusher",
-]
+_IMPORT_CAP = max(1, AUDIO_FEATURES_MAX_IMPORTED_ROWS)
 
-# Track the background task so we can cancel it on shutdown
+# Background task handle
 _refresh_task: asyncio.Task | None = None
 
 
-async def _lookup_real_genre(track_id: int, fallback: str = "Unknown") -> str:
-    """
-    Look up the authoritative primaryGenreName for a single track via the
-    iTunes Lookup API.  The RSS category label is unreliable (it reflects
-    the *chart* category, not the track's actual genre), so we always prefer
-    the Lookup API result.
-
-    Falls back to *fallback* on any error.
-    """
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(
-                f"https://itunes.apple.com/lookup?id={track_id}"
-            )
-            if resp.status_code == 200:
-                results = resp.json().get("results", [])
-                if results:
-                    genre = results[0].get("primaryGenreName")
-                    if genre:
-                        return genre
-    except Exception:
-        pass
-    return fallback
-
-
-@router.get("/api/itunes/topcharts")
-async def get_topcharts(artists: str | None = None, limit_per_artist: int = 50):
-    """
-    Proxy endpoint: fetch TopCharts-style artist songs from iTunes and return
-    them together with any cached audio features (from ml_service.audio_features_cache)
-    so the frontend can display songs with their ML features when available.
-
-    Query params:
-      - artists: optional comma-separated artist list (defaults to configured ARTISTS)
-      - limit_per_artist: how many tracks per artist to return (default 50)
-    """
-    try:
-        artist_list = ARTISTS if not artists else [a.strip() for a in artists.split(',') if a.strip()]
-
-        songs = []
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            for artist in artist_list:
-                try:
-                    resp = await client.get(f"{ITUNES_API_BASE_URL}/search", params={"term": artist, "limit": 200, "media": "music", "entity": "song"})
-                    if resp.status_code != 200:
-                        continue
-                    data = resp.json()
-                    results = data.get('results', []) or []
-                    artist_lower = artist.lower()
-                    artist_songs = [
-                        {
-                            'id': track.get('trackId'),
-                            'trackId': track.get('trackId'),
-                            'trackName': track.get('trackName'),
-                            'albumTitle': track.get('trackName'),
-                            'artistName': track.get('artistName'),
-                            'collectionName': track.get('collectionName'),
-                            'artworkUrl100': track.get('artworkUrl100'),
-                            'previewUrl': track.get('previewUrl'),
-                            'fileUrl': track.get('previewUrl'),
-                            'primaryGenreName': track.get('primaryGenreName'),
-                            'trackTimeMillis': track.get('trackTimeMillis')
-                        }
-                        for track in results
-                        if track.get('previewUrl') and track.get('artistName') and artist_lower in track.get('artistName','').lower()
-                    ][: max(0, int(limit_per_artist))]
-
-                    songs.extend(artist_songs)
-                    # small polite pause to avoid accidental rate-limit bursts
-                    await asyncio.sleep(0.05)
-                except Exception:
-                    continue
-
-        # Build a features mapping for any cached entries we have for these tracks
-        features_map = {}
-        for s in songs:
-            try:
-                tid = s.get('trackId')
-                if not tid:
-                    continue
-                # Check both import-key (-trackId) and absolute trackId keys in cache
-                cache_key_neg = int(-abs(int(tid)))
-                cache_key_pos = int(abs(int(tid)))
-                cached = None
-                if cache_key_neg in ml_service.audio_features_cache:
-                    cached = ml_service.audio_features_cache[cache_key_neg]
-                elif cache_key_pos in ml_service.audio_features_cache:
-                    cached = ml_service.audio_features_cache[cache_key_pos]
-                if cached:
-                    # Ensure JSON-serializable types (floats/ints/strings)
-                    features_map[str(cache_key_pos)] = {
-                        'tempo': float(cached.get('tempo', 0)),
-                        'energy': float(cached.get('energy', 0)),
-                        'valence': float(cached.get('valence', 0)),
-                        'danceability': float(cached.get('danceability', 0)),
-                        'acousticness': float(cached.get('acousticness', 0)) if cached.get('acousticness') is not None else None,
-                    }
-                    # Also expose negative-key for compatibility with frontend lookups
-                    features_map[str(cache_key_neg)] = features_map[str(cache_key_pos)]
-            except Exception:
-                continue
-
-        return {"status": "success", "count": len(songs), "songs": songs, "features": features_map}
-    except Exception as e:
-        console.log(f"❌ TopCharts proxy error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# ============================================
-# ITUNES INTEGRATION ENDPOINTS
-# ============================================
-
-# EXECUTION ORDER: Router endpoint.
-@router.get("/api/itunes/search")
-async def search_itunes(term: str, limit: int = 200, media: str = "music", entity: str = "song"):
-    """Proxy endpoint for iTunes Search API."""
-    try:
-        itunes_url = f"{ITUNES_API_BASE_URL}/search"
-        params = {"term": term, "limit": limit, "media": media, "entity": entity}
-        
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            response = await client.get(itunes_url, params=params)
-            
-            if response.status_code != 200:
-                raise HTTPException(status_code=response.status_code, detail="iTunes API error")
-            
-            return response.json()
-            
-    except httpx.TimeoutException:
-        raise HTTPException(status_code=504, detail="iTunes API timeout")
-    except Exception as e:
-        console.log(f"❌ iTunes search error: {e}")
-        raise HTTPException(status_code=500, detail=f"Error searching iTunes: {str(e)}")
-
-# EXECUTION ORDER: Router endpoint.
-@router.delete("/api/itunes/clear-imported-songs")
-async def clear_imported_songs():
-    """
-    Delete all imported iTunes songs (negative ProductIDs) from the database.
-    This removes both Products and AudioFeatures entries.
-    """
-    try:
-        console.log("🗑️  Starting cleanup of imported songs...")
-        deleted_count = 0
-        
-        with get_db_connection() as conn:
-            if conn:
-                with conn.cursor() as cursor:
-                    # Delete from all dependent tables first (some may not exist).
-                    _safe_execute(cursor, "DELETE FROM UserInteractions WHERE ProductID < 0")
-                    _safe_execute(cursor, "DELETE FROM UserRecommendations WHERE ProductID < 0")
-                    _safe_execute(cursor, "DELETE FROM Wishlist WHERE ProductID < 0")
-                    _safe_execute(cursor, "DELETE FROM Sold_Products WHERE ProductID < 0")
-                    _safe_execute(cursor, "DELETE FROM Purchased_Products WHERE ProductID < 0")
-                    _safe_execute(cursor, "DELETE FROM CustomerSummary WHERE ProductID < 0")
-                    _safe_execute(cursor, "DELETE FROM Payments WHERE ProductID < 0")
-                    _safe_execute(cursor, "DELETE FROM Order_Items WHERE ProductID < 0")
-                    _safe_execute(cursor, "DELETE FROM Stock WHERE ProductID < 0")
-                    
-                    cursor.execute("DELETE FROM AudioFeatures WHERE ProductID < 0")
-                    audio_deleted = cursor.rowcount
-                    
-                    cursor.execute("DELETE FROM Products WHERE ProductID < 0")
-                    products_deleted = cursor.rowcount
-                    
-                    conn.commit()
-                    deleted_count = products_deleted
-                    
-                    console.log(f"   ✅ Deleted {products_deleted} products, {audio_deleted} features")
-        
-        # Reload cache after cleanup
-        ml_service.cache_loaded = False
-        # We should ideally clear the cache immediately to reflect changes
-        # Re-running startup_cache or clearing just the deleted keys would be better
-        # For now, just marking it not loaded might force a reload if logic elsewhere checks it?
-        # But looking at get_cached_audio_features, it just checks cache_loaded then reads generic dict.
-        # If we set cache_loaded=False, it returns error.
-        # So we SHOULD reload.
-        
-        console.log(f"🎉 Cleanup complete: {deleted_count} imported songs removed")
-        
-        return {
-            "status": "success",
-            "deleted_count": deleted_count,
-            "message": f"Successfully removed {deleted_count} imported songs from database"
-        }
-        
-    except Exception as e:
-        console.log(f"❌ Cleanup error: {e}")
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Cleanup failed: {str(e)}")
-
-# EXECUTION ORDER: Router endpoint.
-@router.post("/api/itunes/import-top-songs")
-async def import_top_songs(limit: int = 150):
-    """
-    Import the current Top 150 US Pop Songs from iTunes RSS Feed.
-    This ensures we have a high-quality, diverse dataset for the ML model.
-    """
-    try:
-        console.log(f"🎵 Starting Top {limit} Songs Import from iTunes RSS...")
-        
-        # 1. Fetch RSS Feed
-        # Updated URL to generic 'topsongs' which matches curl results
-        rss_url = f"https://itunes.apple.com/us/rss/topsongs/limit={limit}/json"
-        
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.get(rss_url)
-            if response.status_code != 200:
-                raise HTTPException(status_code=response.status_code, detail="iTunes RSS error")
-            
-            data = response.json()
-            # The RSS feed structure is different from the Search API
-            entries = data.get('feed', {}).get('entry', [])
-        
-        console.log(f"   Found {len(entries)} songs in RSS feed")
-        
-        # 2. Extract features and insert
-        imported_count = 0
-        skipped_count = 0
-        error_count = 0
-        
-        loop = asyncio.get_running_loop()
-
-        for entry in entries:
-            try:
-                # RSS feed parsing
-                track_id_str = entry.get('id', {}).get('attributes', {}).get('im:id')
-                track_id = int(track_id_str) if track_id_str else 0
-                
-                track_name = entry.get('im:name', {}).get('label', 'Unknown')
-                artist_name = entry.get('im:artist', {}).get('label', 'Unknown')
-                
-                # Preview URL is often in 'link' list with type 'audio/x-m4a' or similar
-                links = entry.get('link', [])
-                preview_url = None
-                if isinstance(links, list):
-                    for link in links:
-                        link_type = link.get('attributes', {}).get('type', '')
-                        if 'audio' in link_type or 'video' in link_type: # type is typically 'audio/x-m4a'
-                            preview_url = link.get('attributes', {}).get('href')
-                            break
-                    if not preview_url and len(links) >= 2:
-                         # Fallback: often the second link is the preview
-                         preview_url = links[1].get('attributes', {}).get('href')
-                elif isinstance(links, dict):
-                     preview_url = links.get('attributes', {}).get('href')
-                
-                image_url = entry.get('im:image', [{}])[-1].get('label', '') # Get largest image
-                price_str = entry.get('im:price', {}).get('attributes', {}).get('amount', '0.99')
-                try:
-                    price = float(price_str)
-                except:
-                    price = 0.99
-                
-                if not preview_url or not track_id:
-                    skipped_count += 1
-                    continue
-
-                # Use negative IDs for imported songs
-                product_id = -track_id
-                
-                # Check DB existence
-                with get_db_connection() as conn:
-                    if conn:
-                        with conn.cursor() as cursor:
-                            cursor.execute("SELECT ProductID FROM Products WHERE ProductID = %s", (product_id,))
-                            if cursor.fetchone():
-                                skipped_count += 1
-                                continue
-                
-                # Extract Audio Features
-                features = await loop.run_in_executor(
-                    executor,
-                    extract_audio_features_from_preview,
-                    preview_url,
-                    track_id
-                )
-                
-                if not features:
-                    error_count += 1
-                    continue
-
-                # Classify genre cluster using ML pipeline (same as import-to-database)
-                genre_label = ml_service.classify_genre_from_features(
-                    features['tempo'],
-                    features['energy'],
-                    features['valence'],
-                    features['danceability'],
-                    features['acousticness'],
-                    spectral_centroid=features.get('spectral_centroid', 1500.0),
-                    spectral_rolloff=features.get('spectral_rolloff', 3000.0),
-                    zero_crossing_rate=features.get('zero_crossing_rate', 0.05),
-                    instrumentalness=features.get('instrumentalness', 0.5),
-                    loudness=features.get('loudness', -60.0),
-                    speechiness=features.get('speechiness', 0.1),
-                    spectral_bandwidth=features.get('spectral_bandwidth', 1500.0),
-                    rms_energy=features.get('rms_energy', 0.02),
-                    onset_rate=features.get('onset_rate', 2.0),
-                    harmonic_ratio=features.get('harmonic_ratio', 0.5),
-                    percussive_ratio=features.get('percussive_ratio', 0.5),
-                    duration=features.get('duration', 0),
-                    key_signature=features.get('key_signature', 'C'),
-                    time_signature=features.get('time_signature', '4/4'),
-                    mfcc_mean=features.get('mfcc_mean'),
-                    chroma_mean=features.get('chroma_mean'),
-                    spectral_contrast_mean=features.get('spectral_contrast_mean')
-                )
-                # Look up the real genre from the iTunes Lookup API
-                # (RSS category label reflects the chart, not the track's actual genre)
-                rss_genre = entry.get('category', {}).get('attributes', {}).get('label', 'Unknown')
-                actual_genre = await _lookup_real_genre(track_id, fallback=rss_genre)
-
-                # Insert into DB
-                with get_db_connection() as conn:
-                    if conn:
-                        with conn.cursor() as cursor:
-                            # Products
-                            # Note: Products table schema uses AlbumTitle for track name, and albumCoverImageUrl
-                            cursor.execute("""
-                                INSERT INTO Products (
-                                    ProductID, AlbumTitle, AlbumPrice, 
-                                    albumCoverImageUrl, file_url, preview_url
-                                ) VALUES (%s, %s, %s, %s, %s, %s)
-                            """, (
-                                product_id,
-                                track_name, # Storing track name in AlbumTitle as per schema
-                                price,
-                                image_url,
-                                preview_url,
-                                preview_url
-                            ))
-                            
-                            # AudioFeatures
-                            # Convert arrays to JSON string if needed
-                            import json
-                            mfcc_json = json.dumps(features.get('mfcc_mean', [])) if features.get('mfcc_mean') else None
-                            chroma_json = json.dumps(features.get('chroma_mean', [])) if features.get('chroma_mean') else None
-                            spectral_contrast_json = json.dumps(features.get('spectral_contrast_mean', [])) if features.get('spectral_contrast_mean') else None
-
-                            cursor.execute("""
-                                INSERT INTO AudioFeatures (
-                                    ProductID, Tempo, Energy, Danceability, Valence,
-                                    Acousticness, Instrumentalness, Loudness, Speechiness,
-                                    SpectralCentroid, SpectralRolloff, ZeroCrossingRate, Genre,
-                                    GenreCluster, SpectralBandwidth, SpectralContrast,
-                                    RmsEnergy, OnsetRate, HarmonicRatio, PercussiveRatio,
-                                    MfccMean, ChromaMean, Key_Signature, TimeSignature, Duration
-                                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                            """, (
-                                product_id,
-                                features['tempo'],
-                                features['energy'],
-                                features['danceability'],
-                                features['valence'],
-                                features['acousticness'],
-                                features.get('instrumentalness', 0.5),
-                                features.get('loudness', -60.0),
-                                features.get('speechiness', 0.1),
-                                features.get('spectral_centroid', 1500.0),
-                                features.get('spectral_rolloff', 3000.0),
-                                features.get('zero_crossing_rate', 0.05),
-                                actual_genre,
-                                genre_label,
-                                features.get('spectral_bandwidth', 1500.0),
-                                spectral_contrast_json,
-                                features.get('rms_energy', 0.02),
-                                features.get('onset_rate', 2.0),
-                                features.get('harmonic_ratio', 0.5),
-                                features.get('percussive_ratio', 0.5),
-                                mfcc_json,
-                                chroma_json,
-                                features.get('key_signature', None),
-                                features.get('time_signature', None),
-                                features.get('duration', None)
-                            ))
-                            conn.commit()
-                
-                imported_count += 1
-                console.log(f"   ✅ Imported: {track_name} by {artist_name} (Genre: {actual_genre}, Cluster: {genre_label})")
-
-            except Exception as e:
-                error_count += 1
-                console.log(f"   ❌ Error processing entry {entry.get('im:name', {}).get('label')}: {e}")
-        
-        prune_result = {"pruned": 0, "before": 0, "after": 0}
-        if AUDIO_FEATURES_PRUNE_ENABLED:
-            prune_result = _prune_imported_audiofeatures(AUDIO_FEATURES_MAX_IMPORTED_ROWS)
-            if prune_result["pruned"] > 0:
-                console.log(
-                    f"   🧹 Pruned imported AudioFeatures: {prune_result['before']} -> {prune_result['after']} "
-                    f"(removed {prune_result['pruned']})"
-                )
-
-        # 3. Reload Cache
-        await ml_service.startup_cache()
-        
-        return {
-            "status": "success",
-            "imported": imported_count,
-            "skipped": skipped_count,
-            "errors": error_count,
-            "pruned_imported": prune_result["pruned"],
-            "imported_before_prune": prune_result["before"],
-            "imported_after_prune": prune_result["after"],
-        }
-
-    except Exception as e:
-        console.log(f"❌ RSS Import Error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/api/itunes/import-to-database")
-async def import_itunes_songs_to_database(limit: int = 50, genre: str = "pop"):
-    """
-    Import iTunes songs into the database to increase dataset size for better similarity scores.
-    
-    Steps:
-    1. Search iTunes for songs by the given genre or artist name
-    2. Extract audio features from preview URLs
-    3. Insert into Products table (with negative ProductIDs to avoid conflicts)
-    4. Insert features into AudioFeatures table
-    5. Reload cache
-    
-    Args:
-        limit: Number of songs to import (max 75)
-        genre: Search term — artist name (e.g. "Aphex Twin") or genre (e.g. "pop")
-    
-    Returns:
-        Summary of imported songs
-    """
-    try:
-        enforced_limit = max(1, min(int(limit or ITUNES_SEARCH_TARGET_COUNT), ITUNES_SEARCH_TARGET_COUNT))
-        search_term = genre or "pop"
-        console.log(f"🎵 Starting iTunes import: {enforced_limit} '{search_term}' songs...")
-        
-        # 1. Search iTunes API
-        itunes_url = f"{ITUNES_API_BASE_URL}/search"
-        params = {"term": search_term, "limit": enforced_limit, "media": "music", "entity": "song"}
-        
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            response = await client.get(itunes_url, params=params)
-            if response.status_code != 200:
-                raise HTTPException(status_code=response.status_code, detail="iTunes API error")
-            
-            data = response.json()
-            results = data.get('results', [])
-        
-        console.log(f"   Found {len(results)} iTunes songs")
-        
-        # 2. Extract features and insert into database
-        imported_count = 0
-        skipped_count = 0
-        error_count = 0
-        imported_songs = []
-        
-        loop = asyncio.get_running_loop()
-
-        for track in results:
-            track_id = track.get('trackId')
-            preview_url = track.get('previewUrl')
-            
-            if not preview_url:
-                skipped_count += 1
-                continue
-            
-            try:
-                # Use negative IDs to avoid conflicts with existing products
-                product_id = -track_id
-                
-                # Check if already exists
-                with get_db_connection() as conn:
-                    if conn:
-                        with conn.cursor() as cursor:
-                            cursor.execute("SELECT ProductID FROM Products WHERE ProductID = %s", (product_id,))
-                            if cursor.fetchone():
-                                skipped_count += 1
-                                continue
-                
-                # Extract features from preview URL
-                features = await loop.run_in_executor(
-                    executor,
-                    extract_audio_features_from_preview,
-                    preview_url,
-                    track_id
-                )
-                
-                if not features:
-                    error_count += 1
-                    continue
-                
-                # Classify genre cluster using ML pipeline
-                genre_label = ml_service.classify_genre_from_features(
-                    features['tempo'],
-                    features['energy'],
-                    features['valence'],
-                    features['danceability'],
-                    features['acousticness'],
-                    spectral_centroid=features.get('spectral_centroid', 1500.0),
-                    spectral_rolloff=features.get('spectral_rolloff', 3000.0),
-                    zero_crossing_rate=features.get('zero_crossing_rate', 0.05),
-                    instrumentalness=features.get('instrumentalness', 0.5),
-                    loudness=features.get('loudness', -60.0),
-                    speechiness=features.get('speechiness', 0.1),
-                    spectral_bandwidth=features.get('spectral_bandwidth', 1500.0),
-                    rms_energy=features.get('rms_energy', 0.02),
-                    onset_rate=features.get('onset_rate', 2.0),
-                    harmonic_ratio=features.get('harmonic_ratio', 0.5),
-                    percussive_ratio=features.get('percussive_ratio', 0.5),
-                    duration=features.get('duration', 0),
-                    key_signature=features.get('key_signature', 'C'),
-                    time_signature=features.get('time_signature', '4/4'),
-                    mfcc_mean=features.get('mfcc_mean'),
-                    chroma_mean=features.get('chroma_mean'),
-                    spectral_contrast_mean=features.get('spectral_contrast_mean')
-                )
-                actual_genre = track.get('primaryGenreName', 'Unknown')
-                
-                # Insert into Products table
-                with get_db_connection() as conn:
-                    if conn:
-                        with conn.cursor() as cursor:
-                            # Insert into Products
-                            cursor.execute("""
-                                INSERT INTO Products (
-                                    ProductID, AlbumTitle, AlbumPrice,
-                                    albumCoverImageUrl, file_url, preview_url
-                                ) VALUES (%s, %s, %s, %s, %s, %s)
-                            """, (
-                                product_id,
-                                track.get('trackName', 'Unknown'),
-                                track.get('trackPrice', 0.99),
-                                track.get('artworkUrl100', ''),
-                                preview_url,  # Use preview as full file for iTunes
-                                preview_url
-                            ))
-                            
-                            # Insert into AudioFeatures with FULL feature set
-                            # Convert MFCC and Chroma arrays to JSON strings for storage
-                            import json
-                            mfcc_json = json.dumps(features.get('mfcc_mean', [])) if features.get('mfcc_mean') else None
-                            chroma_json = json.dumps(features.get('chroma_mean', [])) if features.get('chroma_mean') else None
-                            spectral_contrast_json = json.dumps(features.get('spectral_contrast_mean', [])) if features.get('spectral_contrast_mean') else None
-                            
-                            cursor.execute("""
-                                INSERT INTO AudioFeatures (
-                                    ProductID, Tempo, Energy, Danceability, Valence,
-                                    Acousticness, Instrumentalness, Loudness, Speechiness,
-                                    SpectralCentroid, SpectralRolloff, ZeroCrossingRate, Genre,
-                                    GenreCluster, SpectralBandwidth, SpectralContrast,
-                                    RmsEnergy, OnsetRate, HarmonicRatio, PercussiveRatio,
-                                    Mood, MfccMean, ChromaMean, Key_Signature, TimeSignature, Duration
-                                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                            """, (
-                                product_id,
-                                features['tempo'],
-                                features['energy'],
-                                features['danceability'],
-                                features['valence'],
-                                features['acousticness'],
-                                features.get('instrumentalness', 0.5),
-                                features.get('loudness', -60.0),
-                                features.get('speechiness', 0.1),
-                                features.get('spectral_centroid', 1500.0),
-                                features.get('spectral_rolloff', 3000.0),
-                                features.get('zero_crossing_rate', 0.05),
-                                actual_genre,
-                                genre_label,
-                                features.get('spectral_bandwidth', 1500.0),
-                                spectral_contrast_json,
-                                features.get('rms_energy', 0.02),
-                                features.get('onset_rate', 2.0),
-                                features.get('harmonic_ratio', 0.5),
-                                features.get('percussive_ratio', 0.5),
-                                features.get('mood', derive_mood(features['valence'], features['energy'])),
-                                mfcc_json,
-                                chroma_json,
-                                features.get('key_signature', None),
-                                features.get('time_signature', None),
-                                features.get('duration', None)
-                            ))
-                            
-                            conn.commit()
-                
-                imported_count += 1
-                imported_songs.append({
-                    "product_id": product_id,
-                    "track_name": track.get('trackName'),
-                    "artist": track.get('artistName'),
-                    "genre": actual_genre,
-                    "genre_cluster": genre_label,
-                    "tempo": features['tempo'],
-                    "energy": features['energy']
-                })
-                
-                console.log(f"   ✅ Imported: {track.get('trackName')} by {track.get('artistName')} (Genre: {actual_genre}, Cluster: {genre_label})")
-                
-            except Exception as e:
-                error_count += 1
-                console.log(f"   ❌ Error importing track {track_id}: {e}")
-        
-        prune_result = {"pruned": 0, "before": 0, "after": 0}
-        if AUDIO_FEATURES_PRUNE_ENABLED:
-            prune_result = _prune_imported_audiofeatures(AUDIO_FEATURES_MAX_IMPORTED_ROWS)
-            if prune_result["pruned"] > 0:
-                console.log(
-                    f"   🧹 Pruned imported AudioFeatures: {prune_result['before']} -> {prune_result['after']} "
-                    f"(removed {prune_result['pruned']})"
-                )
-
-        # 3. Reload cache to include new songs
-        console.log("   🔄 Reloading cache with new songs...")
-        
-        with get_db_connection() as conn:
-            if conn:
-                with conn.cursor() as cursor:
-                    sql = """
-                        SELECT 
-                            ProductID, Tempo, Energy, Valence, Danceability,
-                            Acousticness, Genre, Mood, SpectralCentroid, SpectralRolloff,
-                            ZeroCrossingRate, Instrumentalness, Loudness, Speechiness,
-                            Key_Signature, TimeSignature, Duration, MfccMean, ChromaMean
-                        FROM AudioFeatures
-                        WHERE Tempo IS NOT NULL AND Energy IS NOT NULL
-                    """
-                    cursor.execute(sql)
-                    feature_results = cursor.fetchall()
-                    
-                    ml_service.audio_features_cache.clear()
-                    for row in feature_results:
-                        mfcc_list = _parse_json_list(row.get('MfccMean'), 13)
-                        chroma_list = _parse_json_list(row.get('ChromaMean'), 12)
-                        mood_val = row.get('Mood') or derive_mood(
-                            float(row.get('Valence', 0.5)),
-                            float(row.get('Energy', 0.5))
-                        )
-                        ml_service.audio_features_cache[row['ProductID']] = {
-                            'id': row['ProductID'],
-                            'tempo': row['Tempo'],
-                            'energy': row['Energy'],
-                            'valence': row['Valence'],
-                            'danceability': row['Danceability'],
-                            'acousticness': row['Acousticness'],
-                            'genre': row['Genre'],
-                            'mood': mood_val,
-                            'spectral_centroid': row['SpectralCentroid'],
-                            'spectral_rolloff': row['SpectralRolloff'],
-                            'zero_crossing_rate': row['ZeroCrossingRate'],
-                            'instrumentalness': row['Instrumentalness'],
-                            'loudness': row['Loudness'],
-                            'speechiness': row['Speechiness'],
-                            'key_signature': row.get('Key_Signature'),
-                            'time_signature': row.get('TimeSignature'),
-                            'duration': row.get('Duration', 0),
-                            'mfcc_mean': mfcc_list,
-                            'chroma_mean': chroma_list
-                        }
-        
-        ml_service.cache_loaded = True
-        console.log(f"   ✅ Cache reloaded with {len(ml_service.audio_features_cache)} songs")
-        
-        return {
-            "status": "success",
-            "imported": imported_count,
-            "skipped": skipped_count,
-            "errors": error_count,
-            "total_in_db": len(ml_service.audio_features_cache),
-            "pruned_imported": prune_result["pruned"],
-            "imported_before_prune": prune_result["before"],
-            "imported_after_prune": prune_result["after"],
-            "sample_imported": imported_songs[:5]
-        }
-    except Exception as e:
-          console.log(f"❌ Import error: {e}")
-          raise HTTPException(status_code=500, detail=str(e))
-
-
-# ============================================
-# LIVE TOP-CHARTS REFRESH (DIFFERENTIAL SYNC)
-# ============================================
-
-def _mark_products_unavailable(cursor, product_ids: list[int]):
-    """
-    Mark a list of product IDs as unavailable in Stock (IsAvailable = 0)
-    instead of deleting them.  This preserves history so the store shows
-    which songs were previously available but have since been removed.
-    The caller is responsible for committing the transaction.
-    """
-    if not product_ids:
-        return
-
-    for pid in product_ids:
-        _upsert_stock(cursor, int(pid), 0)
-
+# ===========================================================================
+# HELPERS
+# ===========================================================================
 
 def _safe_execute(cursor, sql: str, params=None):
-    """Execute a statement, silently skipping expected idempotency errors."""
     try:
         cursor.execute(sql, params)
     except Exception as e:
         msg = str(e)
-        # 1146: table doesn't exist
-        # 1060: duplicate column name
-        # 1061: duplicate key name
         if "1146" in msg or "1060" in msg or "1061" in msg:
             return
         raise
 
 
 def _ensure_stock_schema(cursor):
-    """Best-effort schema hardening for stock retention behavior."""
     _safe_execute(cursor, "ALTER TABLE Stock ADD COLUMN IsAvailable TINYINT(1) NOT NULL DEFAULT 1")
     _safe_execute(cursor, "ALTER TABLE Stock ADD COLUMN UnavailableSince DATETIME NULL")
     _safe_execute(cursor, "ALTER TABLE Stock ADD COLUMN AvailableSince DATETIME NULL")
 
 
+def _ensure_artist_name_column(cursor):
+    _safe_execute(cursor, "ALTER TABLE Products ADD COLUMN ArtistName VARCHAR(255) NULL")
+
+
+def _upsert_stock(cursor, product_id: int, is_available: int):
+    available_flag = 1 if int(is_available) == 1 else 0
+    try:
+        if available_flag == 1:
+            cursor.execute(
+                "INSERT INTO Stock (IsAvailable, ProductID, UnavailableSince, AvailableSince) "
+                "VALUES (1, %s, NULL, NOW()) "
+                "ON DUPLICATE KEY UPDATE IsAvailable = 1, UnavailableSince = NULL, "
+                "AvailableSince = CASE WHEN IsAvailable = 0 THEN NOW() ELSE AvailableSince END",
+                (product_id,)
+            )
+        else:
+            cursor.execute(
+                "INSERT INTO Stock (IsAvailable, ProductID, UnavailableSince, AvailableSince) "
+                "VALUES (0, %s, NOW(), NULL) "
+                "ON DUPLICATE KEY UPDATE IsAvailable = 0, "
+                "UnavailableSince = COALESCE(UnavailableSince, NOW()), AvailableSince = NULL",
+                (product_id,)
+            )
+        return
+    except Exception as e:
+        if "1452" in str(e):
+            return
+
+    cursor.execute(
+        "SELECT StockID FROM Stock WHERE ProductID = %s ORDER BY StockID DESC LIMIT 1",
+        (product_id,)
+    )
+    row = cursor.fetchone()
+    if row:
+        sid = int(row["StockID"])
+        if available_flag == 1:
+            try:
+                cursor.execute(
+                    "UPDATE Stock SET IsAvailable = 1, UnavailableSince = NULL, "
+                    "AvailableSince = CASE WHEN IsAvailable = 0 THEN NOW() ELSE AvailableSince END "
+                    "WHERE StockID = %s", (sid,)
+                )
+            except Exception:
+                cursor.execute("UPDATE Stock SET IsAvailable = 1 WHERE StockID = %s", (sid,))
+        else:
+            try:
+                cursor.execute(
+                    "UPDATE Stock SET IsAvailable = 0, "
+                    "UnavailableSince = COALESCE(UnavailableSince, NOW()), "
+                    "AvailableSince = NULL WHERE StockID = %s", (sid,)
+                )
+            except Exception:
+                cursor.execute("UPDATE Stock SET IsAvailable = 0 WHERE StockID = %s", (sid,))
+    else:
+        try:
+            if available_flag == 1:
+                cursor.execute(
+                    "INSERT INTO Stock (IsAvailable, ProductID, UnavailableSince, AvailableSince) "
+                    "VALUES (1, %s, NULL, NOW())", (product_id,)
+                )
+            else:
+                cursor.execute(
+                    "INSERT INTO Stock (IsAvailable, ProductID, UnavailableSince) "
+                    "VALUES (0, %s, NOW())", (product_id,)
+                )
+        except Exception as e:
+            if "1452" in str(e):
+                return
+            if available_flag == 1:
+                cursor.execute("INSERT INTO Stock (IsAvailable, ProductID) VALUES (1, %s)", (product_id,))
+            else:
+                cursor.execute("INSERT INTO Stock (IsAvailable, ProductID) VALUES (0, %s)", (product_id,))
+
+
+def _mark_products_unavailable(cursor, product_ids: list[int]):
+    for pid in product_ids:
+        _upsert_stock(cursor, int(pid), 0)
+
+
 def _purge_stale_unavailable_imports(cursor, retention_days: int) -> int:
-    """
-    Delete imported songs (negative ProductIDs) that have stayed unavailable
-    for at least retention_days.
-    """
     keep_days = max(1, int(retention_days))
     cursor.execute(
         """
-        SELECT DISTINCT ProductID
-        FROM Stock
+        SELECT DISTINCT ProductID FROM Stock
         WHERE ProductID < 0
           AND COALESCE(IsAvailable, 1) = 0
           AND UnavailableSince IS NOT NULL
@@ -788,55 +175,37 @@ def _purge_stale_unavailable_imports(cursor, retention_days: int) -> int:
     stale_ids = [int(r["ProductID"]) for r in cursor.fetchall()]
     if not stale_ids:
         return 0
-
     fmt = ",".join(["%s"] * len(stale_ids))
-    _safe_execute(cursor, f"DELETE FROM UserInteractions WHERE ProductID IN ({fmt})", stale_ids)
-    _safe_execute(cursor, f"DELETE FROM UserRecommendations WHERE ProductID IN ({fmt})", stale_ids)
-    _safe_execute(cursor, f"DELETE FROM Wishlist WHERE ProductID IN ({fmt})", stale_ids)
-    _safe_execute(cursor, f"DELETE FROM Sold_Products WHERE ProductID IN ({fmt})", stale_ids)
-    _safe_execute(cursor, f"DELETE FROM Purchased_Products WHERE ProductID IN ({fmt})", stale_ids)
-    _safe_execute(cursor, f"DELETE FROM CustomerSummary WHERE ProductID IN ({fmt})", stale_ids)
-    _safe_execute(cursor, f"DELETE FROM Payments WHERE ProductID IN ({fmt})", stale_ids)
-    _safe_execute(cursor, f"DELETE FROM Order_Items WHERE ProductID IN ({fmt})", stale_ids)
-    _safe_execute(cursor, f"DELETE FROM Stock WHERE ProductID IN ({fmt})", stale_ids)
-    _safe_execute(cursor, f"DELETE FROM AudioFeatures WHERE ProductID IN ({fmt})", stale_ids)
-    _safe_execute(cursor, f"DELETE FROM Products WHERE ProductID IN ({fmt})", stale_ids)
+    for tbl in ("UserInteractions", "UserRecommendations", "Wishlist", "Sold_Products",
+                "Purchased_Products", "CustomerSummary", "Payments", "Order_Items",
+                "Stock", "AudioFeatures", "Products"):
+        _safe_execute(cursor, f"DELETE FROM {tbl} WHERE ProductID IN ({fmt})", stale_ids)
     return len(stale_ids)
 
 
 def _prune_imported_audiofeatures(max_imported_rows: int) -> dict:
-    """
-    Keep imported iTunes songs (negative ProductIDs) bounded by deleting
-    low-priority rows first: unavailable songs first, then oldest updated rows.
-    """
-    # Cap comes from config so composition changes take effect without code edits.
     target_cap = int(max_imported_rows)
-
     if target_cap <= 0:
         return {"pruned": 0, "before": 0, "after": 0}
 
     with get_db_connection() as conn:
         if not conn:
             return {"pruned": 0, "before": 0, "after": 0}
-
         with conn.cursor() as cursor:
             cursor.execute("SELECT COUNT(*) AS c FROM AudioFeatures WHERE ProductID < 0")
             before = int((cursor.fetchone() or {}).get("c") or 0)
             if before <= target_cap:
                 return {"pruned": 0, "before": before, "after": before}
 
-            # Prune in rounds and re-check count each round to guarantee we hit cap.
             while True:
                 cursor.execute("SELECT COUNT(*) AS c FROM AudioFeatures WHERE ProductID < 0")
                 current = int((cursor.fetchone() or {}).get("c") or 0)
                 overflow = max(0, current - target_cap)
                 if overflow <= 0:
                     break
-
                 cursor.execute(
                     """
-                    SELECT af.ProductID
-                    FROM AudioFeatures af
+                    SELECT af.ProductID FROM AudioFeatures af
                     LEFT JOIN Stock s ON s.ProductID = af.ProductID
                     WHERE af.ProductID < 0
                     ORDER BY COALESCE(s.IsAvailable, 0) ASC, af.UpdatedAt ASC, af.FeatureID ASC
@@ -847,21 +216,11 @@ def _prune_imported_audiofeatures(max_imported_rows: int) -> dict:
                 to_prune = [int(r["ProductID"]) for r in cursor.fetchall()]
                 if not to_prune:
                     break
-
                 fmt = ",".join(["%s"] * len(to_prune))
-
-                # Remove dependent rows first to satisfy FK constraints.
-                _safe_execute(cursor, f"DELETE FROM UserInteractions WHERE ProductID IN ({fmt})", to_prune)
-                _safe_execute(cursor, f"DELETE FROM UserRecommendations WHERE ProductID IN ({fmt})", to_prune)
-                _safe_execute(cursor, f"DELETE FROM Wishlist WHERE ProductID IN ({fmt})", to_prune)
-                _safe_execute(cursor, f"DELETE FROM Sold_Products WHERE ProductID IN ({fmt})", to_prune)
-                _safe_execute(cursor, f"DELETE FROM Purchased_Products WHERE ProductID IN ({fmt})", to_prune)
-                _safe_execute(cursor, f"DELETE FROM CustomerSummary WHERE ProductID IN ({fmt})", to_prune)
-                _safe_execute(cursor, f"DELETE FROM Payments WHERE ProductID IN ({fmt})", to_prune)
-                _safe_execute(cursor, f"DELETE FROM Order_Items WHERE ProductID IN ({fmt})", to_prune)
-                _safe_execute(cursor, f"DELETE FROM Stock WHERE ProductID IN ({fmt})", to_prune)
-                _safe_execute(cursor, f"DELETE FROM AudioFeatures WHERE ProductID IN ({fmt})", to_prune)
-                _safe_execute(cursor, f"DELETE FROM Products WHERE ProductID IN ({fmt})", to_prune)
+                for tbl in ("UserInteractions", "UserRecommendations", "Wishlist", "Sold_Products",
+                            "Purchased_Products", "CustomerSummary", "Payments", "Order_Items",
+                            "Stock", "AudioFeatures", "Products"):
+                    _safe_execute(cursor, f"DELETE FROM {tbl} WHERE ProductID IN ({fmt})", to_prune)
                 conn.commit()
 
             cursor.execute("SELECT COUNT(*) AS c FROM AudioFeatures WHERE ProductID < 0")
@@ -869,713 +228,930 @@ def _prune_imported_audiofeatures(max_imported_rows: int) -> dict:
             return {"pruned": max(0, before - after), "before": before, "after": after}
 
 
-def _upsert_stock(cursor, product_id: int, is_available: int):
-    """
-    Insert or update a Stock row for a product.
-    Works whether or not the UNIQUE index on ProductID exists:
-      - With the index: ON DUPLICATE KEY UPDATE fires on the unique ProductID.
-      - Without the index: falls back to check-then-insert/update.
-    Silently skips FK constraint errors (product may not exist yet).
-    """
-    available_flag = 1 if int(is_available) == 1 else 0
-    try:
-        if available_flag == 1:
-            cursor.execute(
-                "INSERT INTO Stock (IsAvailable, ProductID, UnavailableSince, AvailableSince) VALUES (1, %s, NULL, NOW()) "
-                "ON DUPLICATE KEY UPDATE IsAvailable = 1, UnavailableSince = NULL, "
-                "AvailableSince = CASE WHEN IsAvailable = 0 THEN NOW() ELSE AvailableSince END",
-                (product_id,)
-            )
-        else:
-            cursor.execute(
-                "INSERT INTO Stock (IsAvailable, ProductID, UnavailableSince, AvailableSince) VALUES (0, %s, NOW(), NULL) "
-                "ON DUPLICATE KEY UPDATE IsAvailable = 0, UnavailableSince = COALESCE(UnavailableSince, NOW()), AvailableSince = NULL",
-                (product_id,)
-            )
-        return
-    except Exception as e:
-        if "1452" in str(e):
-            return  # FK constraint — product doesn't exist yet, skip
-        pass
-
-    # Fallback for schemas without unique key or UnavailableSince support.
-    cursor.execute("SELECT StockID FROM Stock WHERE ProductID = %s ORDER BY StockID DESC LIMIT 1", (product_id,))
-    row = cursor.fetchone()
-    if row:
-        sid = int(row["StockID"])
-        if available_flag == 1:
-            try:
-                cursor.execute(
-                    "UPDATE Stock SET IsAvailable = 1, UnavailableSince = NULL, "
-                    "AvailableSince = CASE WHEN IsAvailable = 0 THEN NOW() ELSE AvailableSince END "
-                    "WHERE StockID = %s",
-                    (sid,)
-                )
-            except Exception:
-                cursor.execute("UPDATE Stock SET IsAvailable = 1 WHERE StockID = %s", (sid,))
-        else:
-            try:
-                cursor.execute(
-                    "UPDATE Stock SET IsAvailable = 0, UnavailableSince = COALESCE(UnavailableSince, NOW()), AvailableSince = NULL WHERE StockID = %s",
-                    (sid,)
-                )
-            except Exception:
-                cursor.execute("UPDATE Stock SET IsAvailable = 0 WHERE StockID = %s", (sid,))
-    else:
-        if available_flag == 1:
-            try:
-                cursor.execute(
-                    "INSERT INTO Stock (IsAvailable, ProductID, UnavailableSince, AvailableSince) VALUES (1, %s, NULL, NOW())",
-                    (product_id,)
-                )
-            except Exception as e:
-                if "1452" in str(e):
-                    return
-                cursor.execute("INSERT INTO Stock (IsAvailable, ProductID) VALUES (1, %s)", (product_id,))
-        else:
-            try:
-                cursor.execute("INSERT INTO Stock (IsAvailable, ProductID, UnavailableSince) VALUES (0, %s, NOW())", (product_id,))
-            except Exception as e:
-                if "1452" in str(e):
-                    return
-                cursor.execute("INSERT INTO Stock (IsAvailable, ProductID) VALUES (0, %s)", (product_id,))
-
-
-async def _import_single_song_rss(entry, loop) -> dict | None:
-    """
-    Parse an RSS feed entry, extract audio features and return a dict ready for
-    DB insertion, or None on failure.
-    """
-    track_id_str = entry.get('id', {}).get('attributes', {}).get('im:id')
-    track_id = int(track_id_str) if track_id_str else 0
-
-    track_name = entry.get('im:name', {}).get('label', 'Unknown')
-    artist_name = entry.get('im:artist', {}).get('label', 'Unknown')
-
-    links = entry.get('link', [])
-    preview_url = None
-    if isinstance(links, list):
-        for link in links:
-            link_type = link.get('attributes', {}).get('type', '')
-            if 'audio' in link_type or 'video' in link_type:
-                preview_url = link.get('attributes', {}).get('href')
-                break
-        if not preview_url and len(links) >= 2:
-            preview_url = links[1].get('attributes', {}).get('href')
-    elif isinstance(links, dict):
-        preview_url = links.get('attributes', {}).get('href')
-
-    image_url = entry.get('im:image', [{}])[-1].get('label', '')
-    price_str = entry.get('im:price', {}).get('attributes', {}).get('amount', '0.99')
-    try:
-        price = float(price_str)
-    except Exception:
-        price = 0.99
-
-    if not preview_url or not track_id:
-        return None
-
-    product_id = -track_id
-
-    features = await loop.run_in_executor(
-        executor, extract_audio_features_from_preview, preview_url, track_id
-    )
-    if not features:
-        return None
-
-    genre_label = ml_service.classify_genre_from_features(
-        features['tempo'], features['energy'], features['valence'],
-        features['danceability'], features['acousticness'],
-        spectral_centroid=features.get('spectral_centroid', 1500.0),
-        spectral_rolloff=features.get('spectral_rolloff', 3000.0),
-        zero_crossing_rate=features.get('zero_crossing_rate', 0.05),
-        instrumentalness=features.get('instrumentalness', 0.5),
-        loudness=features.get('loudness', -60.0),
-        speechiness=features.get('speechiness', 0.1),
-        spectral_bandwidth=features.get('spectral_bandwidth', 1500.0),
-        rms_energy=features.get('rms_energy', 0.02),
-        onset_rate=features.get('onset_rate', 2.0),
-        harmonic_ratio=features.get('harmonic_ratio', 0.5),
-        percussive_ratio=features.get('percussive_ratio', 0.5),
-        duration=features.get('duration', 0),
-        key_signature=features.get('key_signature', 'C'),
-        time_signature=features.get('time_signature', '4/4'),
-        mfcc_mean=features.get('mfcc_mean'),
-        chroma_mean=features.get('chroma_mean'),
-        spectral_contrast_mean=features.get('spectral_contrast_mean')
-    )
-    # Look up the real genre via iTunes Lookup API (RSS category is unreliable)
-    rss_genre = entry.get('category', {}).get('attributes', {}).get('label', 'Unknown')
-    actual_genre = await _lookup_real_genre(track_id, fallback=rss_genre)
-
-    mfcc_json = json.dumps(features.get('mfcc_mean', [])) if features.get('mfcc_mean') else None
-    chroma_json = json.dumps(features.get('chroma_mean', [])) if features.get('chroma_mean') else None
-    spectral_contrast_json = json.dumps(features.get('spectral_contrast_mean', [])) if features.get('spectral_contrast_mean') else None
-
+def _feature_entry_from_cache(cached: dict) -> dict:
     return {
-        "product_id": product_id,
-        "track_name": track_name,
-        "artist_name": artist_name,
-        "price": price,
-        "image_url": image_url,
-        "preview_url": preview_url,
-        "features": features,
-        "genre_label": genre_label,
-        "actual_genre": actual_genre,
-        "mfcc_json": mfcc_json,
-        "chroma_json": chroma_json,
-        "spectral_contrast_json": spectral_contrast_json,
+        "tempo":            float(cached.get("tempo") or 0),
+        "energy":           float(cached.get("energy") or 0),
+        "valence":          float(cached.get("valence") or 0),
+        "danceability":     float(cached.get("danceability") or 0),
+        "acousticness":     float(cached.get("acousticness") or 0)
+                            if cached.get("acousticness") is not None else None,
+        "genre":            cached.get("genre"),
+        "genreCluster":     cached.get("genre_cluster"),
+        "mood":             cached.get("mood"),
+        "spectralCentroid": cached.get("spectral_centroid"),
+        "spectralRolloff":  cached.get("spectral_rolloff"),
+        "zeroCrossingRate": cached.get("zero_crossing_rate"),
+        "instrumentalness": cached.get("instrumentalness"),
+        "speechiness":      cached.get("speechiness"),
+        "loudness":         cached.get("loudness"),
+        "onsetRate":        cached.get("onset_rate"),
+        "harmonicRatio":    cached.get("harmonic_ratio"),
+        "percussiveRatio":  cached.get("percussive_ratio"),
+        "keySignature":     cached.get("key_signature"),
+        "timeSignature":    cached.get("time_signature"),
+        "duration":         cached.get("duration"),
     }
 
 
-async def _import_single_song_search(track, loop) -> dict | None:
-    """
-    Parse an iTunes Search API result, extract audio features and return a dict
-    ready for DB insertion, or None on failure.
-    """
-    track_id = track.get('trackId')
-    preview_url = track.get('previewUrl')
-    if not preview_url or not track_id:
-        return None
-
-    product_id = -track_id
-
-    features = await loop.run_in_executor(
-        executor, extract_audio_features_from_preview, preview_url, track_id
+def _classify_features(features: dict) -> str:
+    return ml_service.classify_genre_from_features(
+        features["tempo"], features["energy"], features["valence"],
+        features["danceability"], features["acousticness"],
+        spectral_centroid=features.get("spectral_centroid", 1500.0),
+        spectral_rolloff=features.get("spectral_rolloff", 3000.0),
+        zero_crossing_rate=features.get("zero_crossing_rate", 0.05),
+        instrumentalness=features.get("instrumentalness", 0.5),
+        loudness=features.get("loudness", -60.0),
+        speechiness=features.get("speechiness", 0.1),
+        spectral_bandwidth=features.get("spectral_bandwidth", 1500.0),
+        rms_energy=features.get("rms_energy", 0.02),
+        onset_rate=features.get("onset_rate", 2.0),
+        harmonic_ratio=features.get("harmonic_ratio", 0.5),
+        percussive_ratio=features.get("percussive_ratio", 0.5),
+        duration=features.get("duration", 0),
+        key_signature=features.get("key_signature", "C"),
+        time_signature=features.get("time_signature", "4/4"),
+        mfcc_mean=features.get("mfcc_mean"),
+        chroma_mean=features.get("chroma_mean"),
+        spectral_contrast_mean=features.get("spectral_contrast_mean"),
     )
-    if not features:
-        return None
-
-    genre_label = ml_service.classify_genre_from_features(
-        features['tempo'], features['energy'], features['valence'],
-        features['danceability'], features['acousticness'],
-        spectral_centroid=features.get('spectral_centroid', 1500.0),
-        spectral_rolloff=features.get('spectral_rolloff', 3000.0),
-        zero_crossing_rate=features.get('zero_crossing_rate', 0.05),
-        instrumentalness=features.get('instrumentalness', 0.5),
-        loudness=features.get('loudness', -60.0),
-        speechiness=features.get('speechiness', 0.1),
-        spectral_bandwidth=features.get('spectral_bandwidth', 1500.0),
-        rms_energy=features.get('rms_energy', 0.02),
-        onset_rate=features.get('onset_rate', 2.0),
-        harmonic_ratio=features.get('harmonic_ratio', 0.5),
-        percussive_ratio=features.get('percussive_ratio', 0.5),
-        duration=features.get('duration', 0),
-        key_signature=features.get('key_signature', 'C'),
-        time_signature=features.get('time_signature', '4/4'),
-        mfcc_mean=features.get('mfcc_mean'),
-        chroma_mean=features.get('chroma_mean'),
-        spectral_contrast_mean=features.get('spectral_contrast_mean')
-    )
-    actual_genre = track.get('primaryGenreName', 'Unknown')
-
-    mfcc_json = json.dumps(features.get('mfcc_mean', [])) if features.get('mfcc_mean') else None
-    chroma_json = json.dumps(features.get('chroma_mean', [])) if features.get('chroma_mean') else None
-    spectral_contrast_json = json.dumps(features.get('spectral_contrast_mean', [])) if features.get('spectral_contrast_mean') else None
-
-    return {
-        "product_id": product_id,
-        "track_name": track.get('trackName', 'Unknown'),
-        "artist_name": track.get('artistName', 'Unknown'),
-        "price": track.get('trackPrice', 0.99),
-        "image_url": track.get('artworkUrl100', ''),
-        "preview_url": preview_url,
-        "features": features,
-        "genre_label": genre_label,
-        "actual_genre": actual_genre,
-        "mfcc_json": mfcc_json,
-        "chroma_json": chroma_json,
-        "spectral_contrast_json": spectral_contrast_json,
-    }
 
 
-def _insert_song_row(cursor, song: dict):
-    """Insert a parsed song dict into Products + AudioFeatures."""
-    f = song["features"]
-    cursor.execute("""
-        INSERT INTO Products (ProductID, AlbumTitle, AlbumPrice,
-                              albumCoverImageUrl, file_url, preview_url)
-        VALUES (%s, %s, %s, %s, %s, %s)
-    """, (
-        song["product_id"], song["track_name"], song["price"],
-        song["image_url"], song["preview_url"], song["preview_url"]
-    ))
-    cursor.execute("""
-        INSERT INTO AudioFeatures (
-            ProductID, Tempo, Energy, Danceability, Valence,
-            Acousticness, Instrumentalness, Loudness, Speechiness,
-            SpectralCentroid, SpectralRolloff, ZeroCrossingRate, Genre,
-            GenreCluster, SpectralBandwidth, SpectralContrast,
-            RmsEnergy, OnsetRate, HarmonicRatio, PercussiveRatio,
-            Mood, MfccMean, ChromaMean, Key_Signature, TimeSignature, Duration
-        ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-    """, (
-        song["product_id"],
-        f['tempo'], f['energy'], f['danceability'], f['valence'],
-        f['acousticness'],
-        f.get('instrumentalness', 0.5), f.get('loudness', -60.0),
-        f.get('speechiness', 0.1), f.get('spectral_centroid', 1500.0),
-        f.get('spectral_rolloff', 3000.0), f.get('zero_crossing_rate', 0.05),
-        song.get("actual_genre", "Unknown"),
-        song["genre_label"],
-        f.get('spectral_bandwidth', 1500.0),
-        song.get("spectral_contrast_json"),
-        f.get('rms_energy', 0.02), f.get('onset_rate', 2.0),
-        f.get('harmonic_ratio', 0.5), f.get('percussive_ratio', 0.5),
-        f.get('mood', derive_mood(f['valence'], f['energy'])),
-        song["mfcc_json"], song["chroma_json"],
-        f.get('key_signature'), f.get('time_signature'), f.get('duration')
-    ))
-    # Also ensure a Stock row exists (available since we just imported it)
-    _upsert_stock(cursor, int(song["product_id"]), 1)
+# ===========================================================================
+# FETCH PHASE — collect track metadata from iTunes (no audio extraction yet)
+# ===========================================================================
 
-
-async def _fetch_current_chart_ids() -> tuple[dict[int, dict], dict[int, dict]]:
+async def _fetch_artist_tracks(limit_per_artist: int) -> dict[int, dict]:
     """
-    Fetch the current iTunes Top songs (RSS) and a capped set of iTunes search songs,
-    returning two dicts mapping negative product_id → entry/track
-    for RSS and Search results respectively.
+    Search iTunes for each artist in ARTISTS and collect up to
+    `limit_per_artist` tracks **per artist independently**, for a total
+    of up to len(ARTISTS) * limit_per_artist tracks.
 
-    Sources:
-      - RSS: Top 150 charting songs (topsongs feed).
-      - Search: Top 75 most popular current songs via the iTunes "topSongs" lookup
-        plus artist-specific searches (Aphex Twin, Squarepusher, Boards of Canada),
-        followed by genre fallback terms if still under target.
+    FIX: the outer TOPCHARTS_TARGET_COUNT cap was previously checked inside
+    the per-artist loop, which caused later artists to be skipped entirely
+    once the first artist's results (however few had preview URLs) reached
+    the global ceiling.  Each artist now gets its own budget and the global
+    cap is only applied as a final trim after all artists have been fetched.
     """
-    # Two separate buckets: one for RSS chart songs, one for artist/genre search results.
-    # Both use negative product IDs (e.g. -12345) to distinguish imported songs from library songs.
-    rss_entries: dict[int, dict] = {}
-    search_tracks: dict[int, dict] = {}
+    collected: dict[int, dict] = {}
+    per_artist = max(1, limit_per_artist)
 
-    # Single shared HTTP client with a 30-second timeout for all iTunes API calls in this function
     async with httpx.AsyncClient(timeout=30.0) as client:
-
-        # ── PHASE 1: IDM SEARCH ────────────────────────────────────
-        # Fetch up to 150 IDM (Intelligent Dance Music) songs via the iTunes Search API.
-        # Apple's RSS genre taxonomy has no dedicated IDM category, so we search directly.
-        # Broad list of IDM artists + related subgenre terms to ensure we hit 150.
-        idm_search_terms = [
-            # Core IDM artists
-            "Aphex Twin", "Squarepusher", "Boards of Canada", "Autechre",
-            "Clark Warp Records", "Plaid electronic", "Venetian Snares",
-            "Four Tet", "Amon Tobin", "Telefon Tel Aviv",
-            "Bibio electronic", "Luke Vibert", "Mu-Ziq",
-            "Machinedrum", "Floating Points", "Jon Hopkins",
-            # Subgenre / style searches
-            "IDM", "intelligent dance music", "electronica",
-            "ambient electronic", "glitch electronic", "braindance",
-            "downtempo electronic", "experimental electronic",
-            "Warp Records",
-        ]
-        for term in idm_search_terms:
-            if len(rss_entries) >= TOPCHARTS_TARGET_COUNT:
-                break
+        for artist in ARTISTS:
+            artist_collected: dict[int, dict] = {}
             try:
-                params = {"term": term, "limit": 200, "media": "music", "entity": "song"}
+                # Request a generous result set so we can find enough tracks
+                # that actually have a previewUrl (iTunes doesn't guarantee it).
+                params = {"term": artist, "limit": 200, "media": "music", "entity": "song"}
                 resp = await client.get(f"{ITUNES_API_BASE_URL}/search", params=params)
-                if resp.status_code == 200:
-                    for track in resp.json().get('results', []):
-                        tid = track.get('trackId')
-                        pid = -int(tid) if tid else None
-                        if (
-                            pid
-                            and track.get('previewUrl')
-                            and pid not in rss_entries
-                        ):
-                            rss_entries[pid] = track
-                            if len(rss_entries) >= TOPCHARTS_TARGET_COUNT:
-                                break
-                await asyncio.sleep(3)  # Apple rate-limit: ~20 calls/min
+                if resp.status_code != 200:
+                    console.log(f"   ⚠️ iTunes search failed for '{artist}': HTTP {resp.status_code}")
+                    continue
+
+                for track in resp.json().get("results", []):
+                    # Stop once this artist's personal budget is met.
+                    if len(artist_collected) >= per_artist:
+                        break
+                    tid = track.get("trackId")
+                    pid = -int(tid) if tid else None
+                    # Only accept tracks that have a preview URL and whose pid
+                    # hasn't already been claimed by a previous artist.
+                    if pid and track.get("previewUrl") and pid not in collected and pid not in artist_collected:
+                        track["_source_artist"] = artist
+                        artist_collected[pid] = track
+
+                collected.update(artist_collected)
+                console.log(f"   🎵 Artist '{artist}': collected {len(artist_collected)} tracks (budget={per_artist})")
+                await asyncio.sleep(0.15)
+
             except Exception as e:
-                console.log(f"   ⚠️ IDM search failed for '{term}': {e}")
+                console.log(f"   ⚠️ Artist fetch error for '{artist}': {e}")
 
-        # ── PHASE 2: ARTIST / GENRE SEARCH ────────────────────────────
-        # If RSS didn't fill the full catalogue, increase the search target to compensate.
-        # Minimum 75 search songs, but can grow if RSS underdelivered.
-        search_target = max(
-            ITUNES_SEARCH_TARGET_COUNT,
-            AUDIO_FEATURES_MAX_IMPORTED_ROWS - len(rss_entries),
-        )
+    # Final trim to global cap — should rarely be needed but kept as a safety net.
+    if len(collected) > TOPCHARTS_TARGET_COUNT:
+        collected = dict(list(collected.items())[:TOPCHARTS_TARGET_COUNT])
 
-        # Genre RSS sub-feeds are intentionally disabled — Apple's sub-genre IDs are unreliable
-        # and returned wrong genres in testing. Artist search terms produce more accurate results.
-        rss_genre_feeds = []
-        genre_rss_budget = 0
-        for feed_url in rss_genre_feeds:
-            if len(search_tracks) >= genre_rss_budget:
-                break
-            try:
-                resp = await client.get(feed_url)
-                if resp.status_code == 200:
-                    feed_entries = resp.json().get('feed', {}).get('entry', [])
-                    
-                    for entry in feed_entries:
-                        tid_str = entry.get('id', {}).get('attributes', {}).get('im:id')
-                        
-                        if not tid_str:
-                            continue
-                        pid = -int(tid_str)
-                        
-                        # Only add if not already captured from RSS or a previous genre feed
-                        if pid not in rss_entries and pid not in search_tracks:
-                            # RSS entries have a different structure to Search API results,
-                            # so we reshape them into a Search-compatible dict for downstream processing
-                            links = entry.get('link', [])
-                            preview_url = None
-                            
-                            if isinstance(links, list):
-                                # Look for an audio/video link type first (the actual preview clip)
-                                for link in links:
-                                    link_type = link.get('attributes', {}).get('type', '')
-                                    
-                                    if 'audio' in link_type or 'video' in link_type:
-                                        preview_url = link.get('attributes', {}).get('href')
-                                        break
-                                
-                                # Fallback: the second link in the array is often the preview
-                                if not preview_url and len(links) >= 2:
-                                    preview_url = links[1].get('attributes', {}).get('href')
-                            
-                            if preview_url:
-                                # RSS category labels reflect the chart, not the track — call the
-                                # Lookup API to get the actual genre for this specific track
-                                real_genre = await _lookup_real_genre(
-                                    int(tid_str),
-                                    fallback=entry.get('category', {}).get('attributes', {}).get('label', 'Unknown')
-                                )
-                                # Reshape into the same dict format that the Search API returns,
-                                # so _import_single_song_search can process it without special-casing
-                                search_tracks[pid] = {
-                                    'trackId': int(tid_str),
-                                    'trackName': entry.get('im:name', {}).get('label', 'Unknown'),
-                                    'artistName': entry.get('im:artist', {}).get('label', 'Unknown'),
-                                    'previewUrl': preview_url,
-                                    'artworkUrl100': entry.get('im:image', [{}])[-1].get('label', ''),
-                                    'trackPrice': float(entry.get('im:price', {}).get('attributes', {}).get('amount', '0.99') or '0.99'),
-                                    'primaryGenreName': real_genre,
-                                }
-                                
-                                if len(search_tracks) >= genre_rss_budget:
-                                    break
-            except Exception as e:
-                console.log(f"   ⚠️ Genre RSS feed failed: {e}")
+    console.log(f"   ✅ _fetch_artist_tracks: {len(collected)} total across {len(ARTISTS)} artists")
+    return collected
 
-        # ── PHASE 3: ITUNES SEARCH API ────────────────────────────────
-        # Iterate through curated search terms (artist names like "hip hop hits", "rock classics",
-        # and genre keywords like "Pop", "Jazz") to fill the remaining 75 slots.
-        # Each term queries up to 200 results from the iTunes Search API.
+
+async def _fetch_broad_tracks(exclude_pids: set[int], target: int) -> dict[int, dict]:
+    """
+    Fetch up to `target` popular iTunes tracks via ITUNES_SEARCH_TERMS,
+    skipping any pid already in `exclude_pids`.
+    Returns a pid → track dict.
+    """
+    collected: dict[int, dict] = {}
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
         for term in ITUNES_SEARCH_TERMS:
-            # Stop searching once we've collected enough songs for the search pool
-            if len(search_tracks) >= search_target:
+            if len(collected) >= target:
                 break
             try:
                 params = {"term": term, "limit": 200, "media": "music", "entity": "song"}
                 resp = await client.get(f"{ITUNES_API_BASE_URL}/search", params=params)
-                
-                if resp.status_code == 200:
-                    for track in resp.json().get('results', []):
-                        tid = track.get('trackId')
-                        # Negate the iTunes track ID to create a negative ProductID
-                        pid = -int(tid) if tid else None
-                        
-                        # Only keep tracks that have a preview URL and aren't already in either bucket
-                        if (
-                            pid
-                            and track.get('previewUrl')
-                            and pid not in rss_entries
-                            and pid not in search_tracks
-                        ):
-                            search_tracks[pid] = track
-                            if len(search_tracks) >= search_target:
-                                break
-                await asyncio.sleep(3)  # Apple rate-limit: ~20 calls/min
+                if resp.status_code != 200:
+                    continue
+                for track in resp.json().get("results", []):
+                    if len(collected) >= target:
+                        break
+                    tid = track.get("trackId")
+                    pid = -int(tid) if tid else None
+                    if (pid and track.get("previewUrl")
+                            and pid not in exclude_pids
+                            and pid not in collected):
+                        track["_source_term"] = term
+                        collected[pid] = track
+                await asyncio.sleep(0.1)
             except Exception as e:
-                console.log(f"   ⚠️ Search fetch failed for term '{term}': {e}")
+                console.log(f"   ⚠️ Broad fetch error for '{term}': {e}")
 
-    # Return both pools separately so the caller can prioritise RSS chart songs over search songs
-    return rss_entries, search_tracks
+    console.log(f"   ✅ _fetch_broad_tracks: {len(collected)} total")
+    return collected
 
+
+# ===========================================================================
+# IMPORT PHASE — extract audio features and upsert into DB
+# ===========================================================================
+
+async def _upsert_track_to_db(track: dict, loop) -> bool:
+    """
+    Extract audio features for `track` and INSERT or UPDATE the row in
+    Products + AudioFeatures + Stock.  Returns True on success.
+    Existing rows have their audio features re-extracted so every hourly
+    refresh reflects the latest feature data.
+    """
+    tid         = track.get("trackId")
+    preview_url = track.get("previewUrl")
+    if not tid or not preview_url:
+        return False
+
+    product_id = -int(tid)
+
+    features = await loop.run_in_executor(
+        executor, extract_audio_features_from_preview, preview_url, int(tid)
+    )
+    if not features:
+        return False
+
+    genre_label  = _classify_features(features)
+    actual_genre = track.get("primaryGenreName", "Unknown")
+
+    mfcc_json              = json.dumps(features["mfcc_mean"]) if features.get("mfcc_mean") else None
+    chroma_json            = json.dumps(features["chroma_mean"]) if features.get("chroma_mean") else None
+    spectral_contrast_json = (
+        json.dumps(features["spectral_contrast_mean"])
+        if features.get("spectral_contrast_mean") else None
+    )
+
+    with get_db_connection() as conn:
+        if not conn:
+            return False
+        with conn.cursor() as cursor:
+
+            # ── Products: INSERT or UPDATE ───────────────────────────────────
+            cursor.execute("SELECT ProductID FROM Products WHERE ProductID = %s", (product_id,))
+            if cursor.fetchone():
+                cursor.execute(
+                    """
+                    UPDATE Products
+                       SET AlbumTitle         = %s,
+                           AlbumPrice         = %s,
+                           albumCoverImageUrl = %s,
+                           file_url           = %s,
+                           preview_url        = %s,
+                           ArtistName         = %s
+                     WHERE ProductID = %s
+                    """,
+                    (
+                        track.get("trackName", "Unknown"),
+                        track.get("trackPrice", 0.99),
+                        track.get("artworkUrl100", ""),
+                        preview_url, preview_url,
+                        track.get("artistName", "Unknown Artist"),
+                        product_id,
+                    )
+                )
+            else:
+                cursor.execute(
+                    """
+                    INSERT INTO Products
+                        (ProductID, AlbumTitle, AlbumPrice,
+                         albumCoverImageUrl, file_url, preview_url, ArtistName)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    (
+                        product_id,
+                        track.get("trackName", "Unknown"),
+                        track.get("trackPrice", 0.99),
+                        track.get("artworkUrl100", ""),
+                        preview_url, preview_url,
+                        track.get("artistName", "Unknown Artist"),
+                    )
+                )
+
+            # ── AudioFeatures: INSERT or UPDATE ──────────────────────────────
+            af_values = (
+                features["tempo"], features["energy"],
+                features["danceability"], features["valence"],
+                features["acousticness"],
+                features.get("instrumentalness", 0.5),
+                features.get("loudness", -60.0),
+                features.get("speechiness", 0.1),
+                features.get("spectral_centroid", 1500.0),
+                features.get("spectral_rolloff", 3000.0),
+                features.get("zero_crossing_rate", 0.05),
+                actual_genre, genre_label,
+                features.get("spectral_bandwidth", 1500.0),
+                spectral_contrast_json,
+                features.get("rms_energy", 0.02),
+                features.get("onset_rate", 2.0),
+                features.get("harmonic_ratio", 0.5),
+                features.get("percussive_ratio", 0.5),
+                features.get("mood", derive_mood(features["valence"], features["energy"])),
+                mfcc_json, chroma_json,
+                features.get("key_signature"),
+                features.get("time_signature"),
+                features.get("duration"),
+            )
+
+            cursor.execute("SELECT FeatureID FROM AudioFeatures WHERE ProductID = %s", (product_id,))
+            if cursor.fetchone():
+                cursor.execute(
+                    """
+                    UPDATE AudioFeatures SET
+                        Tempo=%s, Energy=%s, Danceability=%s, Valence=%s,
+                        Acousticness=%s, Instrumentalness=%s, Loudness=%s, Speechiness=%s,
+                        SpectralCentroid=%s, SpectralRolloff=%s, ZeroCrossingRate=%s,
+                        Genre=%s, GenreCluster=%s, SpectralBandwidth=%s, SpectralContrast=%s,
+                        RmsEnergy=%s, OnsetRate=%s, HarmonicRatio=%s, PercussiveRatio=%s,
+                        Mood=%s, MfccMean=%s, ChromaMean=%s,
+                        Key_Signature=%s, TimeSignature=%s, Duration=%s
+                    WHERE ProductID = %s
+                    """,
+                    af_values + (product_id,)
+                )
+            else:
+                cursor.execute(
+                    """
+                    INSERT INTO AudioFeatures
+                        (ProductID, Tempo, Energy, Danceability, Valence,
+                         Acousticness, Instrumentalness, Loudness, Speechiness,
+                         SpectralCentroid, SpectralRolloff, ZeroCrossingRate,
+                         Genre, GenreCluster, SpectralBandwidth, SpectralContrast,
+                         RmsEnergy, OnsetRate, HarmonicRatio, PercussiveRatio,
+                         Mood, MfccMean, ChromaMean, Key_Signature, TimeSignature, Duration)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    """,
+                    (product_id,) + af_values
+                )
+
+            _upsert_stock(cursor, product_id, 1)
+            conn.commit()
+
+    return True
+
+
+# ===========================================================================
+# TOPCHARTS ENDPOINT — always served from DB
+# ===========================================================================
+
+@router.get("/api/itunes/topcharts")
+async def get_topcharts(artists: str | None = None, limit_per_artist: int = 50):
+    """
+    Returns all available imported songs from the DB (ProductID < 0,
+    IsAvailable = 1).  The DB is the single source of truth — it is updated
+    every hour by refresh_topcharts with the three artist catalogues + broad
+    popular tracks, so TopCharts and SimilarSongs always score against the
+    same freshly-extracted pool.
+
+    `artists` and `limit_per_artist` are accepted for backwards-compatibility
+    but are no longer used to filter results.
+    """
+    try:
+        songs        = []
+        features_map = {}
+
+        def _query_stock_songs(conn):
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT
+                        p.ProductID, p.AlbumTitle, p.ArtistName,
+                        p.albumCoverImageUrl, p.preview_url,
+                        af.Tempo, af.Energy, af.Valence, af.Danceability,
+                        af.Acousticness, af.Genre, af.GenreCluster, af.Mood,
+                        af.SpectralCentroid, af.SpectralRolloff, af.ZeroCrossingRate,
+                        af.Instrumentalness, af.Speechiness, af.Loudness,
+                        af.OnsetRate, af.HarmonicRatio, af.PercussiveRatio,
+                        af.Key_Signature, af.TimeSignature, af.Duration
+                    FROM Products p
+                    JOIN AudioFeatures af ON af.ProductID = p.ProductID
+                    LEFT JOIN Stock s     ON s.ProductID  = p.ProductID
+                    WHERE p.ProductID < 0
+                      AND COALESCE(s.IsAvailable, 1) = 1
+                    ORDER BY p.ProductID DESC
+                    """
+                )
+                return cursor.fetchall()
+
+        rows = []
+        with get_db_connection() as conn:
+            if conn:
+                rows = _query_stock_songs(conn)
+
+        # Cold-start: no imported songs yet — trigger a refresh and retry once
+        if not rows:
+            console.log("⚠️ get_topcharts: no songs in DB — triggering cold-start refresh")
+            try:
+                await refresh_topcharts()
+            except Exception as err:
+                console.log(f"   ⚠️ Cold-start refresh failed: {err}")
+            with get_db_connection() as conn:
+                if conn:
+                    rows = _query_stock_songs(conn)
+
+        if not rows:
+            console.log("❌ get_topcharts: still no songs after cold-start refresh")
+            return {"status": "success", "count": 0, "songs": [], "features": {}, "source": "empty"}
+
+        for row in rows:
+            pid     = int(row["ProductID"])
+            abs_tid = abs(pid)
+            preview = row.get("preview_url") or ""
+            artwork = row.get("albumCoverImageUrl") or ""
+
+            song = {
+                "id":               abs_tid,
+                "trackId":          abs_tid,
+                "trackName":        row.get("AlbumTitle") or f"Track {abs_tid}",
+                "albumTitle":       row.get("AlbumTitle") or f"Track {abs_tid}",
+                "artistName":       row.get("ArtistName") or None,
+                "collectionName":   None,
+                "artworkUrl100":    artwork,
+                "previewUrl":       preview,
+                "fileUrl":          preview,
+                "primaryGenreName": row.get("Genre"),
+                "source":           "db_stock",
+            }
+            songs.append(song)
+
+            # Prefer in-memory ML cache (full feature vector) over raw DB columns
+            cached = (
+                ml_service.audio_features_cache.get(-abs_tid)
+                or ml_service.audio_features_cache.get(abs_tid)
+            )
+            entry = _feature_entry_from_cache(cached) if cached else {
+                "tempo":            float(row.get("Tempo") or 0),
+                "energy":           float(row.get("Energy") or 0),
+                "valence":          float(row.get("Valence") or 0),
+                "danceability":     float(row.get("Danceability") or 0),
+                "acousticness":     float(row.get("Acousticness") or 0)
+                                    if row.get("Acousticness") is not None else None,
+                "genre":            row.get("Genre"),
+                "genreCluster":     row.get("GenreCluster"),
+                "mood":             row.get("Mood"),
+                "spectralCentroid": row.get("SpectralCentroid"),
+                "spectralRolloff":  row.get("SpectralRolloff"),
+                "zeroCrossingRate": row.get("ZeroCrossingRate"),
+                "instrumentalness": row.get("Instrumentalness"),
+                "speechiness":      row.get("Speechiness"),
+                "loudness":         row.get("Loudness"),
+                "onsetRate":        row.get("OnsetRate"),
+                "harmonicRatio":    row.get("HarmonicRatio"),
+                "percussiveRatio":  row.get("PercussiveRatio"),
+                "keySignature":     row.get("Key_Signature"),
+                "timeSignature":    row.get("TimeSignature"),
+                "duration":         row.get("Duration"),
+            }
+
+            features_map[str(abs_tid)]  = entry
+            features_map[str(-abs_tid)] = entry
+
+        console.log(f"✅ get_topcharts: serving {len(songs)} songs from DB")
+        return {
+            "status":   "success",
+            "count":    len(songs),
+            "songs":    songs,
+            "features": features_map,
+            "source":   "db_stock",
+        }
+
+    except Exception as e:
+        console.log(f"❌ TopCharts error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ===========================================================================
+# SEARCH PROXY
+# ===========================================================================
+
+@router.get("/api/itunes/search")
+async def search_itunes(term: str, limit: int = 200, media: str = "music", entity: str = "song"):
+    """Proxy endpoint for iTunes Search API."""
+    try:
+        params = {"term": term, "limit": limit, "media": media, "entity": entity}
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.get(f"{ITUNES_API_BASE_URL}/search", params=params)
+            if response.status_code != 200:
+                raise HTTPException(status_code=response.status_code, detail="iTunes API error")
+            return response.json()
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="iTunes API timeout")
+    except Exception as e:
+        console.log(f"❌ iTunes search error: {e}")
+        raise HTTPException(status_code=500, detail=f"Error searching iTunes: {str(e)}")
+
+
+# ===========================================================================
+# CLEAR IMPORTED SONGS
+# ===========================================================================
+
+@router.delete("/api/itunes/clear-imported-songs")
+async def clear_imported_songs():
+    """Delete all imported iTunes songs (negative ProductIDs) from the database."""
+    try:
+        console.log("🗑️  Starting cleanup of imported songs...")
+        deleted_count = 0
+
+        with get_db_connection() as conn:
+            if conn:
+                with conn.cursor() as cursor:
+                    for tbl in ("UserInteractions", "UserRecommendations", "Wishlist",
+                                "Sold_Products", "Purchased_Products", "CustomerSummary",
+                                "Payments", "Order_Items", "Stock"):
+                        _safe_execute(cursor, f"DELETE FROM {tbl} WHERE ProductID < 0")
+
+                    cursor.execute("DELETE FROM AudioFeatures WHERE ProductID < 0")
+                    audio_deleted = cursor.rowcount
+                    cursor.execute("DELETE FROM Products WHERE ProductID < 0")
+                    products_deleted = cursor.rowcount
+                    conn.commit()
+                    deleted_count = products_deleted
+                    console.log(f"   ✅ Deleted {products_deleted} products, {audio_deleted} features")
+
+        console.log(f"🎉 Cleanup complete: {deleted_count} imported songs removed")
+        return {
+            "status":        "success",
+            "deleted_count": deleted_count,
+            "message":       f"Successfully removed {deleted_count} imported songs from database",
+        }
+
+    except Exception as e:
+        console.log(f"❌ Cleanup error: {e}")
+        import traceback; traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Cleanup failed: {str(e)}")
+
+
+# ===========================================================================
+# LEGACY IMPORT ENDPOINTS (kept for backwards-compatibility)
+# ===========================================================================
+
+@router.post("/api/itunes/import-top-songs")
+async def import_top_songs(limit: int = 150):
+    """Legacy endpoint — delegates to refresh_topcharts."""
+    console.log("ℹ️  import-top-songs called — delegating to refresh_topcharts")
+    return await refresh_topcharts()
+
+
+@router.post("/api/itunes/import-to-database")
+async def import_itunes_songs_to_database(limit: int = 50, genre: str = "pop"):
+    """Legacy endpoint — delegates to refresh_topcharts."""
+    console.log("ℹ️  import-to-database called — delegating to refresh_topcharts")
+    return await refresh_topcharts()
+
+
+# ===========================================================================
+# CORE HOURLY REFRESH
+# ===========================================================================
 
 @router.post("/api/itunes/refresh-topcharts")
 async def refresh_topcharts():
     """
-    Live differential sync of the entire store catalogue (every 1 hour).
+    Hourly differential sync — runs on startup and every REFRESH_INTERVAL seconds.
 
-        iTunes songs (ProductID < 0):
-            1. Fetch the current Top 150 chart songs (RSS) + top 75 charting/artist songs
-               (genre RSS feeds for Pop/Hip-Hop/Rock/R&B, Aphex Twin, Squarepusher,
-               Boards of Canada, and genre fallback terms).
-            2. Determine a strict replacement budget for this cycle.
-            3. Import up to that many new chart entries.
-            4. Mark the same number of dropped songs unavailable in Stock (kept for history).
-            5. Existing chart songs → ensure Stock is available.
-
-        Library songs (ProductID > 0):
-            6. Validate the fixed 47-song library set has a reachable file_url (S3) and AudioFeatures.
-            7. Mark unavailable if the file is gone; mark available if it came back.
-
-    Finally reload the ML cache so recommendations reflect the latest state.
+    Step 1  Fetch up to TOPCHARTS_TARGET_COUNT (150) tracks from ARTISTS
+            (Aphex Twin, Boards of Canada, Squarepusher) via iTunes Search.
+            Each artist gets its own independent budget of
+            TOPCHARTS_TARGET_COUNT // len(ARTISTS) = 50 tracks so that a
+            slow or thin artist catalogue never starves the others.
+    Step 2  Fetch up to ITUNES_SEARCH_TARGET_COUNT (75) additional popular
+            tracks via broad ITUNES_SEARCH_TERMS, excluding artist tracks.
+    Step 3  For every track in both pools — whether new or already in DB —
+            re-extract audio features and UPDATE (or INSERT) Products +
+            AudioFeatures + Stock, so every hourly cycle refreshes feature data.
+    Step 4  Mark any previously-available imported track that is no longer in
+            the live pool as unavailable in Stock.
+    Step 5  Validate library songs (ProductID > 0).
+    Step 6  Purge stale unavailable imports older than STOCK_UNAVAILABLE_RETENTION_DAYS.
+    Step 7  Prune imported AudioFeatures rows to _IMPORT_CAP (default 272).
+    Step 8  Reload ML cache and sync GenreCluster labels back to DB.
     """
     try:
-        console.log("🔄 Starting live store refresh (iTunes + library)...")
+        console.log("🔄 Starting hourly store refresh (artists + broad)...")
         start_ts = datetime.utcnow()
 
-        # Ensure stock schema has columns needed for retention handling.
         with get_db_connection() as conn:
             if conn:
                 with conn.cursor() as cursor:
                     _ensure_stock_schema(cursor)
+                    _ensure_artist_name_column(cursor)
                     conn.commit()
 
-        # ── ITUNES SONGS ──────────────────────────────────────────────
-        # 1. Fetch live chart IDs from iTunes
-        rss_entries, search_tracks = await _fetch_current_chart_ids()
-        live_ids: set[int] = set(rss_entries.keys()) | set(search_tracks.keys())
-        console.log(f"   📡 Live charts: {len(rss_entries)} top-chart + {len(search_tracks)} pop = {len(live_ids)} unique songs")
+        # ── STEP 1: fetch artist tracks (~50 per artist, 150 total) ──────────
+        # Each artist gets an independent budget so thin catalogues (few tracks
+        # with previewUrls) don't silently eat into the quota of other artists.
+        per_artist    = max(1, TOPCHARTS_TARGET_COUNT // len(ARTISTS))
+        artist_tracks = await _fetch_artist_tracks(per_artist)
 
-        # 2. Get existing iTunes product IDs from DB and track which imported rows
-        # are currently available in stock. Only currently available songs can be
-        # removed as replacements in this cycle.
-        existing_itunes_ids: set[int] = set()
-        available_itunes_ids: set[int] = set()
+        # ── STEP 2: fetch broad popular tracks (up to 75, no artist overlap) ─
+        broad_tracks  = await _fetch_broad_tracks(
+            exclude_pids=set(artist_tracks.keys()),
+            target=ITUNES_SEARCH_TARGET_COUNT,
+        )
+
+        # Artist tracks take precedence on pid collision (shouldn't happen)
+        all_tracks: dict[int, dict] = {**broad_tracks, **artist_tracks}
+        live_pids:  set[int]        = set(all_tracks.keys())
+
+        console.log(
+            f"   📡 Fetched: {len(artist_tracks)} artist + "
+            f"{len(broad_tracks)} broad = {len(live_pids)} total"
+        )
+
+        # ── STEP 3: upsert every live track (extract + INSERT/UPDATE) ─────────
+        loop           = asyncio.get_running_loop()
+        upserted_count = 0
+        error_count    = 0
+
+        for pid, track in all_tracks.items():
+            try:
+                ok = await _upsert_track_to_db(track, loop)
+                if ok:
+                    upserted_count += 1
+                    console.log(
+                        f"   ✅ Upserted: "
+                        f"{track.get('trackName', pid)} "
+                        f"by {track.get('artistName', '?')}"
+                    )
+                else:
+                    error_count += 1
+            except Exception as e:
+                error_count += 1
+                console.log(f"   ❌ Upsert error for pid {pid}: {e}")
+
+        console.log(f"   💾 Upserted {upserted_count} tracks ({error_count} errors)")
+
+        # ── STEP 4: mark dropped tracks unavailable ───────────────────────────
+        existing_available: set[int] = set()
         with get_db_connection() as conn:
             if conn:
                 with conn.cursor() as cursor:
                     cursor.execute(
                         """
-                        SELECT p.ProductID, MAX(COALESCE(s.IsAvailable, 1)) AS IsAvailable
+                        SELECT p.ProductID
                         FROM Products p
                         LEFT JOIN Stock s ON s.ProductID = p.ProductID
                         WHERE p.ProductID < 0
-                        GROUP BY p.ProductID
+                          AND COALESCE(s.IsAvailable, 1) = 1
                         """
                     )
-                    imported_rows = cursor.fetchall()
-                    existing_itunes_ids = {int(row['ProductID']) for row in imported_rows}
-                    available_itunes_ids = {
-                        int(row['ProductID'])
-                        for row in imported_rows
-                        if int(row.get('IsAvailable') or 0) == 1
-                    }
-        console.log(f"   💾 Existing in DB: {len(existing_itunes_ids)} iTunes songs")
+                    existing_available = {int(r["ProductID"]) for r in cursor.fetchall()}
 
-        # 3. Compute diff and pair removals/additions so each cycle performs
-        # strict one-for-one replacement for the rotating imported pool.
-        ids_to_add_all = sorted(live_ids - existing_itunes_ids)
-        ids_dropped_all = sorted(available_itunes_ids - live_ids)
-        ids_kept = existing_itunes_ids & live_ids   # still on charts or returning from retention
-
-        console.log(f"   📊 Diff: {len(ids_dropped_all)} replaceable drops, {len(ids_to_add_all)} new, {len(ids_kept)} kept")
-
-        # 4. Determine the exact number of replacement pairs allowed this cycle.
-        # Cold-start: when no iTunes songs exist yet, allow a full initial import
-        # up to max_imports_per_cycle instead of requiring one-for-one replacement.
-        max_imports_per_cycle = int(os.getenv("MAX_IMPORTS_PER_CYCLE", str(AUDIO_FEATURES_MAX_IMPORTED_ROWS)))
-        if not existing_itunes_ids:
-            replacement_budget = min(len(ids_to_add_all), max_imports_per_cycle)
-            console.log(f"   🆕 Cold start detected — seeding up to {replacement_budget} songs")
-        else:
-            replacement_budget = min(len(ids_dropped_all), len(ids_to_add_all), max_imports_per_cycle)
-        ids_to_add_this_cycle = ids_to_add_all[:replacement_budget]
-        ids_to_remove_candidates = ids_dropped_all[:replacement_budget]
-        deferred_additions_count = max(0, len(ids_to_add_all) - replacement_budget)
-        deferred_removals_count = max(0, len(ids_dropped_all) - replacement_budget)
-
-        if replacement_budget == 0:
-            console.log("   ℹ️ No replacement pairs scheduled this cycle")
-        else:
-            console.log(
-                f"   🔁 Replacement budget: {replacement_budget} "
-                f"(deferred adds: {deferred_additions_count}, deferred removals: {deferred_removals_count})"
-            )
-
-        # 5. Re-mark kept songs as available (they're still on the charts)
-        # and revive retained songs that re-enter the live set.
-        if ids_kept:
+        dropped_pids = sorted(existing_available - live_pids)
+        if dropped_pids:
             with get_db_connection() as conn:
                 if conn:
                     with conn.cursor() as cursor:
-                        for pid in ids_kept:
-                            _upsert_stock(cursor, int(pid), 1)
+                        _mark_products_unavailable(cursor, dropped_pids)
                         conn.commit()
+            console.log(f"   🚫 Marked {len(dropped_pids)} dropped tracks unavailable")
 
-        # 6. Import only the matched replacement additions for this cycle.
-        marked_unavailable_count = 0
-        imported_count = 0
-        error_count = 0
-        loop = asyncio.get_running_loop()
-
-        for pid in ids_to_add_this_cycle:
-            try:
-                song: dict | None = None
-                if pid in rss_entries:
-                    song = await _import_single_song_search(rss_entries[pid], loop)
-                elif pid in search_tracks:
-                    song = await _import_single_song_search(search_tracks[pid], loop)
-
-                if not song:
-                    error_count += 1
-                    continue
-
-                with get_db_connection() as conn:
-                    if conn:
-                        with conn.cursor() as cursor:
-                            _insert_song_row(cursor, song)
-                            conn.commit()
-
-                imported_count += 1
-                console.log(f"   ✅ Imported: {song['track_name']} by {song['artist_name']}")
-
-            except Exception as e:
-                error_count += 1
-                console.log(f"   ❌ Error importing {pid}: {e}")
-
-        # 7. Only retire as many currently available songs as were successfully
-        # imported, so every removal has a concrete replacement in the same cycle.
-        ids_to_mark_unavailable = ids_to_remove_candidates[:imported_count]
-        deferred_removals_count += max(0, replacement_budget - imported_count)
-        deferred_additions_count += max(0, replacement_budget - imported_count)
-
-        if ids_to_mark_unavailable:
-            with get_db_connection() as conn:
-                if conn:
-                    with conn.cursor() as cursor:
-                        _mark_products_unavailable(cursor, ids_to_mark_unavailable)
-                        conn.commit()
-                        marked_unavailable_count = len(ids_to_mark_unavailable)
-            console.log(f"   🚫 Marked {marked_unavailable_count} replaced iTunes songs as unavailable")
-
-        if imported_count != marked_unavailable_count:
-            console.log(
-                f"   ⚠️ Replacement imbalance after import: imported={imported_count}, removed={marked_unavailable_count}"
-            )
-
-        # ── LIBRARY SONGS ─────────────────────────────────────────────
-        # 8. Validate library songs (positive ProductIDs): check file_url + AudioFeatures
-        library_available = 0
+        # ── STEP 5: validate library songs ────────────────────────────────────
+        library_available   = 0
         library_unavailable = 0
         with get_db_connection() as conn:
             if conn:
                 with conn.cursor() as cursor:
-                    # Validate only the fixed library target set to keep runtime/data expectations stable.
-                    cursor.execute("""
+                    cursor.execute(
+                        """
                         SELECT p.ProductID, p.file_url, af.FeatureID
                         FROM Products p
                         LEFT JOIN AudioFeatures af ON af.ProductID = p.ProductID
                         WHERE p.ProductID > 0
                         ORDER BY p.ProductID ASC
                         LIMIT %s
-                    """, (LIBRARY_TARGET_COUNT,))
-                    library_rows = cursor.fetchall()
-
-                    for row in library_rows:
-                        pid = row['ProductID']
-                        file_url = (row.get('file_url') or '').strip()
-                        has_features = row.get('FeatureID') is not None
-                        is_available = 1 if (file_url and has_features) else 0
-
-                        if is_available:
+                        """,
+                        (LIBRARY_TARGET_COUNT,)
+                    )
+                    for row in cursor.fetchall():
+                        pid      = row["ProductID"]
+                        file_url = (row.get("file_url") or "").strip()
+                        has_feat = row.get("FeatureID") is not None
+                        avail    = 1 if (file_url and has_feat) else 0
+                        if avail:
                             library_available += 1
                         else:
                             library_unavailable += 1
-
-                        # Upsert Stock row
-                        _upsert_stock(cursor, pid, is_available)
-
+                        _upsert_stock(cursor, pid, avail)
                     conn.commit()
-        console.log(f"   📚 Library songs: {library_available} available, {library_unavailable} unavailable")
 
-        purged_unavailable_count = 0
+        console.log(f"   📚 Library: {library_available} available, {library_unavailable} unavailable")
+
+        # ── STEP 6: purge stale unavailable imports ───────────────────────────
+        purged_count = 0
         with get_db_connection() as conn:
             if conn:
                 with conn.cursor() as cursor:
-                    purged_unavailable_count = _purge_stale_unavailable_imports(
-                        cursor,
-                        STOCK_UNAVAILABLE_RETENTION_DAYS,
+                    purged_count = _purge_stale_unavailable_imports(
+                        cursor, STOCK_UNAVAILABLE_RETENTION_DAYS
                     )
                     conn.commit()
-        if purged_unavailable_count > 0:
-            console.log(
-                f"   🗑️ Removed {purged_unavailable_count} imported songs unavailable for >= {STOCK_UNAVAILABLE_RETENTION_DAYS} days"
-            )
+        if purged_count:
+            console.log(f"   🗑️ Purged {purged_count} stale unavailable imports")
 
+        # ── STEP 7: prune to hard cap ─────────────────────────────────────────
         prune_result = {"pruned": 0, "before": 0, "after": 0}
         if AUDIO_FEATURES_PRUNE_ENABLED:
-            prune_result = _prune_imported_audiofeatures(AUDIO_FEATURES_MAX_IMPORTED_ROWS)
-            if prune_result["pruned"] > 0:
+            prune_result = _prune_imported_audiofeatures(_IMPORT_CAP)
+            if prune_result["pruned"]:
                 console.log(
-                    f"   🧹 Pruned imported AudioFeatures: {prune_result['before']} -> {prune_result['after']} "
-                    f"(removed {prune_result['pruned']})"
+                    f"   🧹 Pruned: {prune_result['before']} → {prune_result['after']} "
+                    f"({prune_result['pruned']} removed)"
                 )
 
-        # ── RELOAD ────────────────────────────────────────────────────
-        # 9. Reload ML cache
+        # ── STEP 8: reload ML cache + sync GenreCluster ───────────────────────
         await ml_service.startup_cache()
 
-        cached_imported_count = sum(1 for pid in ml_service.audio_features_cache if int(pid) < 0)
-        cached_library_count = sum(1 for pid in ml_service.audio_features_cache if int(pid) > 0)
+        cluster_updates = []
+        try:
+            cluster_updates = [
+                (data.get("genre_cluster"), pid)
+                for pid, data in ml_service.audio_features_cache.items()
+                if data.get("genre_cluster")
+            ]
+            if cluster_updates:
+                with get_db_connection() as conn:
+                    if conn:
+                        with conn.cursor() as cursor:
+                            cursor.executemany(
+                                "UPDATE AudioFeatures SET GenreCluster = %s WHERE ProductID = %s",
+                                cluster_updates,
+                            )
+                            conn.commit()
+                console.log(f"   🔄 Synced GenreCluster for {len(cluster_updates)} songs")
+        except Exception as e:
+            console.log(f"   ⚠️ GenreCluster sync failed: {e}")
 
         elapsed = (datetime.utcnow() - start_ts).total_seconds()
         summary = {
-            "status": "success",
-            "topcharts_target": TOPCHARTS_TARGET_COUNT,
-            "artist_search_target": ITUNES_SEARCH_TARGET_COUNT,
-            "live_topcharts": len(rss_entries),
-            "live_artist_search": len(search_tracks),
-            "live_imported_total": len(live_ids),
-            "itunes_new_detected": len(ids_to_add_all),
-            "itunes_replacement_budget": replacement_budget,
-            "itunes_marked_unavailable": marked_unavailable_count,
-            "itunes_imported": imported_count,
-            "itunes_deferred_additions": deferred_additions_count,
-            "itunes_deferred_removals": deferred_removals_count,
-            "itunes_kept": len(ids_kept),
-            "library_available": library_available,
-            "library_unavailable": library_unavailable,
-            "errors": error_count,
-            "purged_unavailable_week": purged_unavailable_count,
-            "pruned_imported": prune_result["pruned"],
+            "status":                "success",
+            "import_cap":            _IMPORT_CAP,
+            "artist_tracks_fetched": len(artist_tracks),
+            "broad_tracks_fetched":  len(broad_tracks),
+            "total_live_tracks":     len(live_pids),
+            "upserted":              upserted_count,
+            "errors":                error_count,
+            "dropped_unavailable":   len(dropped_pids),
+            "library_available":     library_available,
+            "library_unavailable":   library_unavailable,
+            "purged_stale":          purged_count,
+            "pruned_imported":       prune_result["pruned"],
             "imported_before_prune": prune_result["before"],
-            "imported_after_prune": prune_result["after"],
-            "cached_imported_available": cached_imported_count,
-            "cached_library_total": cached_library_count,
-            "total_in_cache": len(ml_service.audio_features_cache),
-            "elapsed_seconds": round(elapsed, 1),
+            "imported_after_prune":  prune_result["after"],
+            "genre_cluster_synced":  len(cluster_updates),
+            "total_in_cache":        len(ml_service.audio_features_cache),
+            "elapsed_seconds":       round(elapsed, 1),
         }
-        console.log(f"🎉 Store refresh complete in {elapsed:.1f}s: {summary}")
+        console.log(f"🎉 Refresh complete in {elapsed:.1f}s: {summary}")
         return summary
 
     except Exception as e:
         console.log(f"❌ Store refresh error: {e}")
-        import traceback
-        traceback.print_exc()
+        import traceback; traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Refresh failed: {str(e)}")
+    
+
+@router.get("/api/itunes/topcharts-ranked")
+async def get_topcharts_ranked():
+    """
+    Returns the IDM artist songs from the DB (ProductID < 0, IsAvailable = 1)
+    sorted by their popularity position in the iTunes search results.
+
+    Strategy:
+      1. Load all available IDM songs from DB (same pool as get_topcharts).
+      2. For each artist in ARTISTS, hit the iTunes Search API to get their
+         tracks in popularity order (iTunes returns results ranked by
+         popularity by default).
+      3. Build a rank map: abs(trackId) → position (lower = more popular).
+      4. Sort the DB songs by that rank, artist by artist in ARTISTS order.
+         Songs with no iTunes rank (e.g. newly imported, lookup miss) are
+         appended at the end of their artist group.
+      5. Return the sorted list plus the features map (same shape as
+         get_topcharts so the frontend can drop in as a replacement).
+    """
+    try:
+        # ── Step 1: load DB songs ────────────────────────────────────────────
+        def _query_stock_songs(conn):
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT
+                        p.ProductID, p.AlbumTitle, p.ArtistName,
+                        p.albumCoverImageUrl, p.preview_url,
+                        af.Tempo, af.Energy, af.Valence, af.Danceability,
+                        af.Acousticness, af.Genre, af.GenreCluster, af.Mood,
+                        af.SpectralCentroid, af.SpectralRolloff, af.ZeroCrossingRate,
+                        af.Instrumentalness, af.Speechiness, af.Loudness,
+                        af.OnsetRate, af.HarmonicRatio, af.PercussiveRatio,
+                        af.Key_Signature, af.TimeSignature, af.Duration
+                    FROM Products p
+                    JOIN AudioFeatures af ON af.ProductID = p.ProductID
+                    LEFT JOIN Stock s     ON s.ProductID  = p.ProductID
+                    WHERE p.ProductID < 0
+                      AND COALESCE(s.IsAvailable, 1) = 1
+                    """
+                )
+                return cursor.fetchall()
+
+        rows = []
+        with get_db_connection() as conn:
+            if conn:
+                rows = _query_stock_songs(conn)
+
+        if not rows:
+            return {"status": "success", "count": 0, "songs": [], "features": {}, "source": "empty"}
+
+        # Build a quick lookup: abs_tid → row
+        db_by_tid: dict[int, dict] = {}
+        for row in rows:
+            abs_tid = abs(int(row["ProductID"]))
+            artist  = (row.get("ArtistName") or "").lower()
+            # Only include IDM artists
+            if any(frag in artist for frag in ["aphex twin", "boards of canada", "squarepusher"]):
+                db_by_tid[abs_tid] = row
+
+        if not db_by_tid:
+            return {"status": "success", "count": 0, "songs": [], "features": {}, "source": "empty"}
+
+        # ── Step 2: fetch iTunes popularity rank for each artist ─────────────
+        # iTunes returns search results ordered by popularity (most popular first).
+        # We request 200 results to cover the full catalogue and record each
+        # trackId's position in the response as its popularity rank.
+        rank_map: dict[int, int] = {}   # abs_tid → rank (0 = most popular)
+
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            for artist in ARTISTS:
+                try:
+                    params = {
+                        "term":   artist,
+                        "limit":  200,
+                        "media":  "music",
+                        "entity": "song",
+                    }
+                    resp = await client.get(f"{ITUNES_API_BASE_URL}/search", params=params)
+                    if resp.status_code != 200:
+                        console.log(f"   ⚠️ iTunes rank fetch failed for '{artist}': HTTP {resp.status_code}")
+                        continue
+
+                    results = resp.json().get("results", [])
+                    for position, track in enumerate(results):
+                        tid = track.get("trackId")
+                        if tid:
+                            rank_map[int(tid)] = position
+
+                    console.log(f"   🎵 iTunes rank fetch for '{artist}': {len(results)} results")
+                    await asyncio.sleep(0.15)
+
+                except Exception as e:
+                    console.log(f"   ⚠️ iTunes rank fetch error for '{artist}': {e}")
+
+        console.log(f"   📊 rank_map has {len(rank_map)} entries")
+
+        # ── Step 3: sort DB songs by artist then by iTunes rank ──────────────
+        # Group by artist in canonical order, sort each group by rank.
+        ARTIST_FRAGMENTS = [
+            ("aphex twin",       "Aphex Twin"),
+            ("boards of canada", "Boards of Canada"),
+            ("squarepusher",     "Squarepusher"),
+        ]
+
+        sorted_rows: list[dict] = []
+        for fragment, _ in ARTIST_FRAGMENTS:
+            group = [
+                row for row in db_by_tid.values()
+                if fragment in (row.get("ArtistName") or "").lower()
+            ]
+            # Sort by iTunes popularity rank; unranked songs go to the end
+            group.sort(key=lambda r: rank_map.get(abs(int(r["ProductID"])), 99999))
+            sorted_rows.extend(group)
+
+        # ── Step 4: build response (same shape as get_topcharts) ────────────
+        songs        = []
+        features_map = {}
+
+        for row in sorted_rows:
+            pid     = int(row["ProductID"])
+            abs_tid = abs(pid)
+            preview = row.get("preview_url") or ""
+            artwork = row.get("albumCoverImageUrl") or ""
+
+            song = {
+                "id":               abs_tid,
+                "trackId":          abs_tid,
+                "trackName":        row.get("AlbumTitle") or f"Track {abs_tid}",
+                "albumTitle":       row.get("AlbumTitle") or f"Track {abs_tid}",
+                "artistName":       row.get("ArtistName") or None,
+                "collectionName":   None,
+                "artworkUrl100":    artwork,
+                "previewUrl":       preview,
+                "fileUrl":          preview,
+                "primaryGenreName": row.get("Genre"),
+                "source":           "db_stock",
+                "popularityRank":   rank_map.get(abs_tid),   # expose rank for debugging
+            }
+            songs.append(song)
+
+            cached = (
+                ml_service.audio_features_cache.get(-abs_tid)
+                or ml_service.audio_features_cache.get(abs_tid)
+            )
+            entry = _feature_entry_from_cache(cached) if cached else {
+                "tempo":            float(row.get("Tempo") or 0),
+                "energy":           float(row.get("Energy") or 0),
+                "valence":          float(row.get("Valence") or 0),
+                "danceability":     float(row.get("Danceability") or 0),
+                "acousticness":     float(row.get("Acousticness") or 0)
+                                    if row.get("Acousticness") is not None else None,
+                "genre":            row.get("Genre"),
+                "genreCluster":     row.get("GenreCluster"),
+                "mood":             row.get("Mood"),
+                "spectralCentroid": row.get("SpectralCentroid"),
+                "spectralRolloff":  row.get("SpectralRolloff"),
+                "zeroCrossingRate": row.get("ZeroCrossingRate"),
+                "instrumentalness": row.get("Instrumentalness"),
+                "speechiness":      row.get("Speechiness"),
+                "loudness":         row.get("Loudness"),
+                "onsetRate":        row.get("OnsetRate"),
+                "harmonicRatio":    row.get("HarmonicRatio"),
+                "percussiveRatio":  row.get("PercussiveRatio"),
+                "keySignature":     row.get("Key_Signature"),
+                "timeSignature":    row.get("TimeSignature"),
+                "duration":         row.get("Duration"),
+            }
+
+            features_map[str(abs_tid)]  = entry
+            features_map[str(-abs_tid)] = entry
+
+        console.log(f"✅ get_topcharts_ranked: returning {len(songs)} songs sorted by iTunes popularity")
+        return {
+            "status":   "success",
+            "count":    len(songs),
+            "songs":    songs,
+            "features": features_map,
+            "source":   "db_stock_ranked",
+        }
+
+    except Exception as e:
+        console.log(f"❌ TopCharts ranked error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
-# ============================================
-# BACKGROUND AUTO-REFRESH SCHEDULER
-# ============================================
+# ===========================================================================
+# BACKGROUND SCHEDULER
+# ===========================================================================
 
-async def _run_scheduled_refresh(trigger: str):
+async def _run_scheduled_refresh(trigger: str) -> bool:
     try:
         console.log(f"⏰ {trigger} store refresh starting (interval={REFRESH_INTERVAL}s)...")
         await refresh_topcharts()
+        return True
     except Exception as e:
         console.log(f"⚠️ {trigger} store refresh failed: {e}")
         return False
-    return True
+
 
 async def _topcharts_refresh_loop():
     """
-    Background coroutine that refreshes the store on a fixed interval (default 1 hour).
-    Runs forever until the task is cancelled (e.g. on app shutdown).
+    Background coroutine: fires on startup then every REFRESH_INTERVAL seconds.
     """
-    # Wait a short period after startup so dependent services are ready, then
-    # hydrate the imported catalogue immediately instead of waiting an hour.
     if STARTUP_REFRESH_DELAY > 0:
         await asyncio.sleep(STARTUP_REFRESH_DELAY)
 
-    # Retry startup refresh with backoff — DB may still be initialising
+    # Always enforce hard cap against whatever is already in the DB before
+    # the first refresh, so a restart never serves stale rows beyond _IMPORT_CAP.
+    prune = _prune_imported_audiofeatures(_IMPORT_CAP)
+    if prune["pruned"] > 0:
+        console.log(
+            f"🧹 Startup hard-cap prune: {prune['before']} → {prune['after']} "
+            f"({prune['pruned']} removed)"
+        )
+    else:
+        console.log(
+            f"✅ Startup cap check: {prune['after']} imported songs in DB (cap={_IMPORT_CAP})"
+        )
+
     max_retries = 5
     for attempt in range(1, max_retries + 1):
         success = await _run_scheduled_refresh(f"Startup (attempt {attempt}/{max_retries})")
@@ -1586,7 +1162,7 @@ async def _topcharts_refresh_loop():
             console.log(f"⏳ Retrying startup refresh in {wait}s...")
             await asyncio.sleep(wait)
         else:
-            console.log("❌ Startup refresh exhausted all retries. Will retry at next scheduled interval.")
+            console.log("❌ Startup refresh exhausted all retries — will retry at next interval.")
 
     while True:
         await asyncio.sleep(REFRESH_INTERVAL)
@@ -1599,7 +1175,8 @@ def start_refresh_scheduler():
     if _refresh_task is None or _refresh_task.done():
         _refresh_task = asyncio.get_event_loop().create_task(_topcharts_refresh_loop())
         console.log(
-            f"🕐 Top-charts auto-refresh scheduled: startup delay={STARTUP_REFRESH_DELAY}s, interval={REFRESH_INTERVAL}s"
+            f"🕐 Top-charts auto-refresh scheduled: "
+            f"startup delay={STARTUP_REFRESH_DELAY}s, interval={REFRESH_INTERVAL}s"
         )
 
 
