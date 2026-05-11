@@ -103,38 +103,34 @@ def db_s3_storage_stats(cursor) -> tuple[int, int]:
 
 
 def db_fetch_images(cursor, product_id: int, count: int) -> list:
-    """Fetch a random contiguous slice of hosted images (S3 provider only)."""
-    # Early exit prevents extra SQL work when no rows exist.
-    total = db_count_images(cursor, product_id)
+    total = db_count_images_by_provider(cursor, product_id, "s3")
+
     if total <= 0:
         return []
 
-    cursor.execute("SELECT COUNT(*) as s3_count FROM ImageGeneration WHERE ProductID = %s AND Provider = 's3'", (product_id,))
-    s3_count = cursor.fetchone().get("s3_count", 0)
+    limit_n = min(count, total)
 
-    pool_size = s3_count
-    if pool_size <= 0:
-        return []
-
-    limit_n = min(count, pool_size)
-    if pool_size <= limit_n:
-        offset = 0
-    else:
-        # Random offset gives visual variety without ORDER BY RAND() cost.
-        offset = random.randint(0, pool_size - limit_n)
+    offset = 0
+    if total > limit_n:
+        offset = random.randint(0, total - limit_n)
 
     cursor.execute(
         """
-        SELECT ImageUrl AS url, Width AS width, Height AS height, KeywordTag AS tags
+        SELECT ImageUrl AS url,
+               Width AS width,
+               Height AS height,
+               KeywordTag AS tags
         FROM ImageGeneration
-        WHERE ProductID = %s AND Provider = 's3'
-        ORDER BY ImageGenID ASC
+        WHERE ProductID = %s
+          AND Provider = 's3'
+        ORDER BY CreatedAt DESC
         LIMIT %s OFFSET %s
         """,
         (product_id, limit_n, offset),
     )
+
     rows = cursor.fetchall() or []
-    # Normalize DB columns into API-facing image objects.
+
     return [
         {
             "url": r.get("url"),
