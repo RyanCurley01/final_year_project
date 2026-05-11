@@ -74,6 +74,12 @@ ITUNES_API_BASE_URL = os.getenv('ITUNES_API_BASE_URL', 'https://itunes.apple.com
 # Allowed Origins for CORS
 # EXECUTION ORDER: Run on module import.
 def get_allowed_origins():
+    env_origins = os.getenv("ALLOWED_ORIGINS", "")
+    if env_origins.strip():
+        extra = [o.strip() for o in env_origins.split(",") if o.strip()]
+    else:
+        extra = []
+        
     origins = [
         "http://localhost:5173",
         "http://localhost:5174",
@@ -86,6 +92,7 @@ def get_allowed_origins():
         
         # Production - Vercel
         "https://music-recommendation-store.vercel.app",
+        *extra,
     ]
 
     # Add Codespaces origins if running in Codespaces
