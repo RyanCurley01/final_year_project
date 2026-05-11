@@ -182,26 +182,26 @@ def db_insert_hosted_images(
         storage_key = img.get("storageKey") or ""
         content_type = img.get("contentType") or "image/jpeg"
         byte_size = int(img.get("byteSize") or 0)
+        # img dict uses "tags" key; DB column is KeywordTag
         tags = img.get("tags") or ""
         source_url = img.get("sourceUrl") or ""
 
         cursor.execute(
             """
             INSERT INTO ImageGeneration
-                (ProductID, Url, UrlHash, StorageKey, ContentType, ByteSize, Tags, SourceUrl, Provider, CreatedAt)
+                (ProductID, ImageUrl, UrlHash, StorageKey, ContentType, ByteSize, KeywordTag, SourceUrl, Provider, CreatedAt)
             VALUES
-                (%s, %s, %s, %s, %s, %s, %s, %s, 'S3', NOW())
+                (%s, %s, %s, %s, %s, %s, %s, %s, 's3', NOW())
             ON DUPLICATE KEY UPDATE
-                Url         = VALUES(Url),
+                ImageUrl    = VALUES(ImageUrl),
                 StorageKey  = VALUES(StorageKey),
                 ContentType = VALUES(ContentType),
                 ByteSize    = VALUES(ByteSize),
-                Tags        = VALUES(Tags),
-                SourceUrl   = VALUES(SourceUrl),
-                UpdatedAt   = NOW()
+                KeywordTag  = VALUES(KeywordTag),
+                SourceUrl   = VALUES(SourceUrl)
             """,
             (product_id, url, url_hash, storage_key, content_type, byte_size, tags, source_url),
         )
-        inserted += cursor.rowcount  
+        inserted += cursor.rowcount
 
     return inserted

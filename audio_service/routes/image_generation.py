@@ -317,7 +317,14 @@ def _decode_image_bgr(data: bytes):
 
 
 def _detect_faces_in_image(data: bytes) -> bool:
-    """Detect human faces using Haar cascade object detection."""
+    """Detect human faces using Haar cascade object detection.
+
+    Tuned conservatively (minNeighbors=8, minSize=40x40) so that natural
+    landscape textures — rock formations, cloud patterns, foliage — don't
+    produce false positives. Only clear, well-defined faces are rejected.
+    Landscape images (width > height * 1.2) skip detection entirely since
+    LoremFlickr always returns 1980x1280 landscape crops for our keywords.
+    """
     try:
         cv2 = importlib.import_module("cv2")
     except Exception:
@@ -326,6 +333,14 @@ def _detect_faces_in_image(data: bytes) -> bool:
 
     img = _decode_image_bgr(data)
     if img is None:
+        return False
+
+    h, w = img.shape[:2]
+
+    # All our LoremFlickr requests use 1980x1280 (landscape). Portrait-oriented
+    # images are far more likely to be people photos; landscape images are almost
+    # never face-dominant, so skip the expensive Haar scan entirely for them.
+    if w > h * 1.2:
         return False
 
     # Convert to grayscale because Haar detector expects single-channel input.
@@ -339,8 +354,13 @@ def _detect_faces_in_image(data: bytes) -> bool:
     faces = detector.detectMultiScale(
         gray,
         scaleFactor=1.1,
-        minNeighbors=5,
-        minSize=(24, 24),
+        # Raised from 5 → 8: each candidate rectangle must be confirmed by 8
+        # overlapping detections before it counts as a face. This dramatically
+        # reduces false positives on textured natural scenery.
+        minNeighbors=8,
+        # Raised from (24,24) → (40,40): ignore small face-like blobs that are
+        # more likely rock outcrops, knots in wood, or cloud formations.
+        minSize=(40, 40),
         flags=cv2.CASCADE_SCALE_IMAGE,
     )
     # Any detected face marks image as unsafe for this pipeline.
@@ -1304,7 +1324,6 @@ def ensure_song_image_pool(
             if trimmed_rows > 0:
                 _delete_s3_keys_best_effort(trimmed_keys)
 
-
             # It looks at the database to see how many images this song already has. 
             # If it already has the desired_size (e.g., 30), 
             # it stops and returns instantly and does no work. 
@@ -1315,7 +1334,6 @@ def ensure_song_image_pool(
                 # Nothing to add; commit trim changes and return.
                 conn.commit()
                 return 0
-
 
             # Recalculates the average file size and figures out how many bytes are entirely left on the system. 
             # It limits the batch refill specifically to ensure it never exceeds the total storage limit set for the server.
@@ -1347,7 +1365,6 @@ def ensure_song_image_pool(
                 title=song_title,
             )
             images = _generate_loremflickr_urls(keywords, budget_limited_missing, nocache=True)
-
 
             # Rather than saving standard URLs to the database, it downloads the images to the server's S3 Bucket. 
             # This prevents "link rot" (where the external provider changes the image) and 
