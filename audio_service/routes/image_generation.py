@@ -1437,8 +1437,8 @@ def precompute_all_song_image_pools(pool_size: int = _DEFAULT_POOL_SIZE) -> dict
                 LEFT JOIN AudioFeatures af ON af.ProductID = p.ProductID
                 WHERE p.AlbumTitle IS NOT NULL
                 AND p.AlbumTitle != ''
-                AND p.preview_url IS NOT NULL
-                AND p.preview_url != ''
+                AND p.file_url IS NOT NULL
+                AND p.file_url != ''
                 AND p.ProductID > 0
                 """
             )
