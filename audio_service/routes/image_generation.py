@@ -1135,32 +1135,26 @@ def _pool_video_http_response(video_bytes: bytes, filename: str, range_header: O
 
 
 def backfill_all_s3_images_to_db() -> int:
-    """
-    Single-pass bulk backfill: scan entire S3 prefix once, group by product_id,
-    insert all missing rows in one DB session. Returns total rows inserted.
-    """
     from s3_service import list_all_objects_under_prefix
 
     if not IMAGE_POOL_S3_BUCKET:
-        console.log("⚠️ No S3 bucket configured, skipping backfill.")
         return 0
 
-    console.log(f"🔍 Scanning S3 bucket {IMAGE_POOL_S3_BUCKET} under prefix {IMAGE_POOL_S3_PREFIX}/ ...")
+    # Do the S3 scan FIRST, before touching the DB
+    console.log(f"🔍 Scanning S3 ...")
     all_objects = list_all_objects_under_prefix(IMAGE_POOL_S3_BUCKET, f"{IMAGE_POOL_S3_PREFIX}/")
 
     if not all_objects:
-        console.log("⚠️ No S3 objects found under prefix.")
         return 0
 
-    console.log(f"✅ Found {len(all_objects)} S3 objects. Grouping by product_id ...")
+    console.log(f"✅ Found {len(all_objects)} S3 objects. Grouping ...")
 
-    # Group objects by product_id parsed from key: {prefix}/{product_id}/{hash}.{ext}
+    # Group by product_id BEFORE opening DB connection
     from collections import defaultdict
     grouped: dict[int, list[dict]] = defaultdict(list)
     skipped = 0
     for obj in all_objects:
         key = obj["key"]
-        # Expected format: image-pool/1234/abc123def456.jpg
         parts = key.split("/")
         if len(parts) < 3:
             skipped += 1
@@ -1172,8 +1166,9 @@ def backfill_all_s3_images_to_db() -> int:
             continue
         grouped[product_id].append(obj)
 
-    console.log(f"📦 Grouped into {len(grouped)} products. Skipped {skipped} malformed keys.")
+    console.log(f"📦 Grouped into {len(grouped)} products. Now opening DB ...")
 
+    # Only NOW open the DB connection
     content_type_map = {
         "jpg": "image/jpeg", "jpeg": "image/jpeg",
         "png": "image/png", "webp": "image/webp", "gif": "image/gif",
@@ -1183,9 +1178,7 @@ def backfill_all_s3_images_to_db() -> int:
 
     with get_db_connection() as conn:
         if not conn:
-            console.log("⚠️ No DB connection available.")
             return 0
-
         with conn.cursor() as cursor:
             for product_id, objects in grouped.items():
                 hosted_images = []
@@ -1221,8 +1214,8 @@ def backfill_all_s3_images_to_db() -> int:
                     )
                     total_inserted += inserted
 
-            conn.commit()
-            console.log(f"✅ Bulk backfill complete: {total_inserted} rows inserted across {len(grouped)} products.")
+        conn.commit()
+        console.log(f"✅ Bulk backfill complete: {total_inserted} rows inserted.")
 
     return total_inserted
     
