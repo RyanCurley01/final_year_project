@@ -1140,17 +1140,84 @@ def backfill_all_s3_images_to_db() -> int:
     if not IMAGE_POOL_S3_BUCKET:
         return 0
 
-    # Scan with empty prefix to see EVERYTHING in the bucket
-    console.log(f"🔍 Scanning entire bucket {IMAGE_POOL_S3_BUCKET} with no prefix filter ...")
-    all_objects = list_all_objects_under_prefix(IMAGE_POOL_S3_BUCKET, "")
+    # Do the S3 scan FIRST, before touching the DB
+    console.log(f"🔍 Scanning S3 ...")
+    all_objects = list_all_objects_under_prefix(IMAGE_POOL_S3_BUCKET, f"{IMAGE_POOL_S3_PREFIX}/")
 
-    console.log(f"✅ Found {len(all_objects)} total objects in bucket.")
-    console.log(f"📋 Current IMAGE_POOL_S3_PREFIX = '{IMAGE_POOL_S3_PREFIX}'")
-    console.log(f"📋 First 20 keys found:")
-    for obj in all_objects[:20]:
-        console.log(f"   {obj['key']}")
+    if not all_objects:
+        return 0
 
-    return 0  # dry run only, no DB writes yet
+    console.log(f"✅ Found {len(all_objects)} S3 objects. Grouping ...")
+
+    # Group by product_id BEFORE opening DB connection
+    from collections import defaultdict
+    grouped: dict[int, list[dict]] = defaultdict(list)
+    skipped = 0
+    for obj in all_objects:
+        key = obj["key"]
+        parts = key.split("/")
+        if len(parts) < 3:
+            skipped += 1
+            continue
+        try:
+            product_id = int(parts[-2])
+        except (ValueError, IndexError):
+            skipped += 1
+            continue
+        grouped[product_id].append(obj)
+
+    console.log(f"📦 Grouped into {len(grouped)} products. Now opening DB ...")
+
+    # Only NOW open the DB connection
+    content_type_map = {
+        "jpg": "image/jpeg", "jpeg": "image/jpeg",
+        "png": "image/png", "webp": "image/webp", "gif": "image/gif",
+    }
+
+    total_inserted = 0
+
+    with get_db_connection() as conn:
+        if not conn:
+            return 0
+        with conn.cursor() as cursor:
+            for product_id, objects in grouped.items():
+                hosted_images = []
+                for obj in objects:
+                    key = obj["key"]
+                    filename = key.rsplit("/", 1)[-1]
+                    url_hash = filename.rsplit(".", 1)[0] if "." in filename else filename
+                    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else "img"
+                    content_type = content_type_map.get(ext, "image/jpeg")
+                    hosted_url = f"/api/images/file/{product_id}/{url_hash}"
+
+                    hosted_images.append({
+                        "url": hosted_url,
+                        "urlLarge": hosted_url,
+                        "tags": None,
+                        "width": 1980,
+                        "height": 1280,
+                        "lock_id": None,
+                        "sourceUrl": None,
+                        "storageKey": key,
+                        "contentType": content_type,
+                        "byteSize": obj["size"],
+                        "urlHash": url_hash,
+                    })
+
+                if hosted_images:
+                    inserted = _db_insert_hosted_images(
+                        cursor,
+                        product_id,
+                        hosted_images,
+                        _contains_banned_figure_terms,
+                        _hash_url,
+                    )
+                    total_inserted += inserted
+
+        conn.commit()
+        console.log(f"✅ Bulk backfill complete: {total_inserted} rows inserted.")
+
+    return total_inserted
     
     
 def _host_loremflickr_images_to_s3(
