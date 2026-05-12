@@ -30,17 +30,6 @@ const getAvailableSince = (item) =>
 const getUnavailableSince = (item) =>
   item.unavailableSince || item.UnavailableSince || null;
 
-const latestDateValue = (...values) => {
-  let latest = null;
-  values.forEach((value) => {
-    if (!value) return;
-    const parsed = new Date(value);
-    if (Number.isNaN(parsed.getTime())) return;
-    if (!latest || parsed > latest) latest = parsed;
-  });
-  return latest ? latest.toISOString() : null;
-};
-
 const getValidDate = (value) => {
   if (!value) return null;
   const parsed = new Date(value);
@@ -54,6 +43,75 @@ const isItemAvailable = (item) =>
 const isLibrarySong = (item) => {
   const pid = Number(item.productId);
   return Number.isFinite(pid) && pid > 0;
+};
+
+/**
+ * Returns the most recently modified date for a stock row, used to determine
+ * which duplicate is "freshest" and therefore authoritative for availability.
+ *
+ * We look at:
+ *  - unavailableSince  (most direct signal a row was recently deactivated)
+ *  - availableSince    (most direct signal a row was recently activated)
+ *  - id / stockId      (higher numeric ID = created later in most ORMs)
+ */
+const getRowRecency = (item) => {
+  const unavail = getValidDate(getUnavailableSince(item));
+  const avail   = getValidDate(getAvailableSince(item));
+  const id      = Number(item.id ?? item.stockId ?? item.StockID ?? 0);
+
+  // Prefer the latest date stamp; fall back to numeric ID as a tiebreaker
+  const latestDate = [unavail, avail]
+    .filter(Boolean)
+    .reduce((max, d) => (d > max ? d : max), new Date(0));
+
+  return { latestDate, id };
+};
+
+/**
+ * Compare two stock rows and return the one that is more "recent / authoritative".
+ * Rules (in priority order):
+ *  1. The row with a later date stamp (unavailableSince or availableSince) wins.
+ *  2. If dates are equal (or both absent), the row with the higher numeric ID wins.
+ */
+const moreRecentRow = (a, b) => {
+  const ra = getRowRecency(a);
+  const rb = getRowRecency(b);
+
+  if (ra.latestDate > rb.latestDate) return a;
+  if (rb.latestDate > ra.latestDate) return b;
+  return ra.id >= rb.id ? a : b; // higher ID = newer record
+};
+
+/**
+ * Merge duplicate stock rows for the same productId.
+ *
+ * Strategy:
+ *  - The "winning" row (most recently modified) is authoritative for
+ *    `isAvailable`, `unavailableSince`, and `availableSince`.
+ *  - We do NOT OR availability across rows — that was the root bug causing
+ *    removed items to appear available and never show in Removed sections.
+ *  - We spread the winner's fields so that both camelCase and PascalCase
+ *    date keys are preserved faithfully.
+ */
+const mergeStockRows = (rows) => {
+  const mergedByProduct = new Map();
+
+  rows.forEach((item) => {
+    const key = item?.productId;
+    if (key === null || key === undefined) return;
+
+    const current = mergedByProduct.get(key);
+    if (!current) {
+      mergedByProduct.set(key, item);
+      return;
+    }
+
+    // Pick whichever row carries the most up-to-date availability signal
+    const winner = moreRecentRow(current, item);
+    mergedByProduct.set(key, winner);
+  });
+
+  return Array.from(mergedByProduct.values());
 };
 
 const StockSidebar = () => {
@@ -88,43 +146,16 @@ const StockSidebar = () => {
         .then(async (res) => {
           clearTimeout(timeout);
 
-          // Merge duplicate rows by productId — if any row is available, treat as available.
-          const mergedByProduct = new Map();
-          (res || []).forEach((item) => {
-            const key = item?.productId;
-            if (key === null || key === undefined) return;
+          console.log("RAW STOCK COUNT:", res?.length);
+          const unavailableItems = (res || []).filter(item =>
+            item.isAvailable === false ||
+            item.available === false ||
+            item.isAvailable === 0 ||
+            item.available === 0
+          );
+          console.log("UNAVAILABLE ROWS (raw):", JSON.stringify(unavailableItems, null, 2));
 
-            const current = mergedByProduct.get(key);
-            if (!current) {
-              mergedByProduct.set(key, item);
-              return;
-            }
-
-            const currentAvail = isItemAvailable(current);
-            const itemAvail   = isItemAvailable(item);
-
-            const mergedAvailableSince = latestDateValue(
-              current.availableSince, current.AvailableSince,
-              item.availableSince,    item.AvailableSince
-            );
-            const mergedUnavailableSince = latestDateValue(
-              current.unavailableSince, current.UnavailableSince,
-              item.unavailableSince,    item.UnavailableSince
-            );
-
-            const currentId = Number(current.id ?? current.stockId ?? current.StockID ?? 0);
-            const itemId    = Number(item.id    ?? item.stockId    ?? item.StockID    ?? 0);
-            const preferred = itemId >= currentId ? item : current;
-
-            mergedByProduct.set(key, {
-              ...preferred,
-              isAvailable:      Boolean(currentAvail) || Boolean(itemAvail),
-              availableSince:   mergedAvailableSince,
-              unavailableSince: mergedUnavailableSince,
-            });
-          });
-
-          const merged = Array.from(mergedByProduct.values());
+          const merged = mergeStockRows(res || []);
           setData(merged);
 
           // Enrich with product names
@@ -208,12 +239,12 @@ const StockSidebar = () => {
           </thead>
           <tbody>
             {rows.map((item, i) => {
-              const product        = productMap[item.productId];
-              const defaultAvail   = isItemAvailable(item);
-              const sectionAvail   = options.statusResolver
+              const product      = productMap[item.productId];
+              const defaultAvail = isItemAvailable(item);
+              const sectionAvail = options.statusResolver
                 ? options.statusResolver(item, defaultAvail)
                 : defaultAvail;
-              const dateValue      = options.dateField ? options.dateField(item) : null;
+              const dateValue  = options.dateField ? options.dateField(item) : null;
 
               return (
                 <tr
@@ -316,7 +347,7 @@ const StockSidebar = () => {
                   placeholder="Filter by song name…"
                 >
                   {(filteredData) => {
-                    const now           = new Date();
+                    const now = new Date();
                     const thisWeekStart = startOfIsoWeek(now);
                     const nextWeekStart = new Date(thisWeekStart);
                     nextWeekStart.setDate(nextWeekStart.getDate() + 7);
@@ -351,6 +382,8 @@ const StockSidebar = () => {
                       });
 
                     // ── Removed this week (unavailableSince in current week) ─
+                    // NOTE: we check !isItemAvailable to confirm the winning row
+                    // is genuinely unavailable, and unavailableSince falls in range.
                     const removedThisWeek = filteredData
                       .filter((item) =>
                         !isItemAvailable(item) &&
