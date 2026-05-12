@@ -82,8 +82,12 @@ def run_seed(pool_size: int) -> dict:
     Importing here (not at module level) lets the seed script start without
     crashing when optional heavy deps (cv2, librosa) aren't installed yet.
     """
-    from routes.image_generation import precompute_all_song_image_pools  # noqa
+    from routes.image_generation import precompute_all_song_image_pools, backfill_all_s3_images_to_db
 
+    log.info("Starting bulk S3 → DB backfill ...")
+    backfilled = backfill_all_s3_images_to_db()
+    log.info("Bulk backfill inserted %d rows.", backfilled)
+    
     log.info("Starting image pool seed (pool_size=%d) …", pool_size)
     result = precompute_all_song_image_pools(pool_size=pool_size)
     return result

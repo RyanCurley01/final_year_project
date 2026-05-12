@@ -1134,72 +1134,97 @@ def _pool_video_http_response(video_bytes: bytes, filename: str, range_header: O
     return Response(content=chunk, media_type="video/mp4", status_code=206, headers=headers)
 
 
-def _backfill_from_existing_s3(
-    cursor,
-    product_id: int,
-    pool_size: int,
-) -> int:
+def backfill_all_s3_images_to_db() -> int:
     """
-    Scan S3 for already-hosted images for this product and insert any
-    that are missing from the ImageGeneration table.
-    Returns count of rows inserted.
+    Single-pass bulk backfill: scan entire S3 prefix once, group by product_id,
+    insert all missing rows in one DB session. Returns total rows inserted.
     """
-    from s3_service import list_objects  # your new helper
+    from s3_service import list_all_objects_under_prefix
 
     if not IMAGE_POOL_S3_BUCKET:
+        console.log("⚠️ No S3 bucket configured, skipping backfill.")
         return 0
 
-    prefix = f"{IMAGE_POOL_S3_PREFIX}/{product_id}/"
-    try:
-        objects = list_objects(IMAGE_POOL_S3_BUCKET, prefix)
-    except Exception as e:
-        console.log(f"⚠️ S3 list failed for ProductID={product_id}: {e}")
+    console.log(f"🔍 Scanning S3 bucket {IMAGE_POOL_S3_BUCKET} under prefix {IMAGE_POOL_S3_PREFIX}/ ...")
+    all_objects = list_all_objects_under_prefix(IMAGE_POOL_S3_BUCKET, f"{IMAGE_POOL_S3_PREFIX}/")
+
+    if not all_objects:
+        console.log("⚠️ No S3 objects found under prefix.")
         return 0
 
-    if not objects:
-        return 0
+    console.log(f"✅ Found {len(all_objects)} S3 objects. Grouping by product_id ...")
 
-    # Build hosted-image dicts that match what _db_insert_hosted_images expects
-    hosted_images = []
-    for obj in objects[:pool_size]:  # don't exceed pool_size
+    # Group objects by product_id parsed from key: {prefix}/{product_id}/{hash}.{ext}
+    from collections import defaultdict
+    grouped: dict[int, list[dict]] = defaultdict(list)
+    skipped = 0
+    for obj in all_objects:
         key = obj["key"]
-        # Derive the url_hash from the filename (e.g. "abc123.jpg" → "abc123")
-        filename = key.rsplit("/", 1)[-1]
-        url_hash = filename.rsplit(".", 1)[0]
+        # Expected format: image-pool/1234/abc123def456.jpg
+        parts = key.split("/")
+        if len(parts) < 3:
+            skipped += 1
+            continue
+        try:
+            product_id = int(parts[-2])
+        except (ValueError, IndexError):
+            skipped += 1
+            continue
+        grouped[product_id].append(obj)
 
-        # Infer content type from extension
-        ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else "img"
-        content_type_map = {
-            "jpg": "image/jpeg", "jpeg": "image/jpeg",
-            "png": "image/png", "webp": "image/webp", "gif": "image/gif",
-        }
-        content_type = content_type_map.get(ext, "image/jpeg")
+    console.log(f"📦 Grouped into {len(grouped)} products. Skipped {skipped} malformed keys.")
 
-        hosted_url = f"/api/images/file/{product_id}/{url_hash}"
-        hosted_images.append({
-            "url": hosted_url,
-            "urlLarge": hosted_url,
-            "tags": None,
-            "width": 1980,
-            "height": 1280,
-            "lock_id": None,
-            "sourceUrl": None,         
-            "storageKey": key,
-            "contentType": content_type,
-            "byteSize": obj["size"],
-            "urlHash": url_hash,
-        })
+    content_type_map = {
+        "jpg": "image/jpeg", "jpeg": "image/jpeg",
+        "png": "image/png", "webp": "image/webp", "gif": "image/gif",
+    }
 
-    if not hosted_images:
-        return 0
+    total_inserted = 0
 
-    return _db_insert_hosted_images(
-        cursor,
-        product_id,
-        hosted_images,
-        _contains_banned_figure_terms,
-        _hash_url,
-    )
+    with get_db_connection() as conn:
+        if not conn:
+            console.log("⚠️ No DB connection available.")
+            return 0
+
+        with conn.cursor() as cursor:
+            for product_id, objects in grouped.items():
+                hosted_images = []
+                for obj in objects:
+                    key = obj["key"]
+                    filename = key.rsplit("/", 1)[-1]
+                    url_hash = filename.rsplit(".", 1)[0] if "." in filename else filename
+                    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else "img"
+                    content_type = content_type_map.get(ext, "image/jpeg")
+                    hosted_url = f"/api/images/file/{product_id}/{url_hash}"
+
+                    hosted_images.append({
+                        "url": hosted_url,
+                        "urlLarge": hosted_url,
+                        "tags": None,
+                        "width": 1980,
+                        "height": 1280,
+                        "lock_id": None,
+                        "sourceUrl": None,
+                        "storageKey": key,
+                        "contentType": content_type,
+                        "byteSize": obj["size"],
+                        "urlHash": url_hash,
+                    })
+
+                if hosted_images:
+                    inserted = _db_insert_hosted_images(
+                        cursor,
+                        product_id,
+                        hosted_images,
+                        _contains_banned_figure_terms,
+                        _hash_url,
+                    )
+                    total_inserted += inserted
+
+            conn.commit()
+            console.log(f"✅ Bulk backfill complete: {total_inserted} rows inserted across {len(grouped)} products.")
+
+    return total_inserted
     
     
 def _host_loremflickr_images_to_s3(
@@ -1400,11 +1425,6 @@ def ensure_song_image_pool(
             trimmed_rows, trimmed_keys = _db_trim_song_pool_by_provider_with_keys(cursor, product_id, "s3", int(desired_size))
             if trimmed_rows > 0:
                 _delete_s3_keys_best_effort(trimmed_keys)
-                
-            # import existing S3 images into DB first
-            backfilled = _backfill_from_existing_s3(cursor, product_id, int(desired_size))
-            if backfilled:
-                conn.commit()
 
             # It looks at the database to see how many images this song already has. 
             # If it already has the desired_size (e.g., 30), 
@@ -1541,11 +1561,6 @@ def precompute_all_song_image_pools(pool_size: int = _DEFAULT_POOL_SIZE) -> dict
                 trimmed_rows, trimmed_keys = _db_trim_song_pool_by_provider_with_keys(cursor, pid, "s3", int(pool_size))
                 if trimmed_rows > 0:
                     _delete_s3_keys_best_effort(trimmed_keys)
- 
-                # try to satisfy pool from existing S3 objects first
-                backfilled = _backfill_from_existing_s3(cursor, pid, int(pool_size))
-                if backfilled:
-                    conn.commit() 
                                       
                 # Count how many S3-hosted images this song currently has in the database.
                 existing = _db_count_images_by_provider(cursor, pid, "s3")

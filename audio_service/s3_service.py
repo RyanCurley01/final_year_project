@@ -214,3 +214,29 @@ def list_object_keys(bucket_name: str, prefix: str) -> list[str]:
     except ClientError as e:
         console.log(f"Error listing S3 objects ({bucket_name}/{prefix}): {e}")
         return []
+
+    
+def list_all_objects_under_prefix(bucket_name: str, prefix: str) -> list[dict]:
+    """Scan entire prefix in one paginated sweep, returning all key+size dicts."""
+    if s3_client is None:
+        return []
+    objects = []
+    continuation_token = None
+    try:
+        while True:
+            kwargs = {"Bucket": bucket_name, "Prefix": prefix}
+            if continuation_token:
+                kwargs["ContinuationToken"] = continuation_token
+            resp = s3_client.list_objects_v2(**kwargs)
+            for obj in resp.get("Contents", []) or []:
+                key = (obj or {}).get("Key")
+                size = (obj or {}).get("Size") or 0
+                if key:
+                    objects.append({"key": key, "size": int(size)})
+            if not resp.get("IsTruncated"):
+                break
+            continuation_token = resp.get("NextContinuationToken")
+        return objects
+    except ClientError as e:
+        console.log(f"Error listing all S3 objects under {prefix}: {e}")
+        return []
