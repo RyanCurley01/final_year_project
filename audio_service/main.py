@@ -29,7 +29,6 @@ app = FastAPI(title="Audio Analysis Service", version="2.0.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=get_allowed_origins(),
-    allow_origin_regex=r"https://.*\.vercel\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
