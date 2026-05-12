@@ -316,19 +316,24 @@ def _decode_image_bgr(data: bytes):
         return None
 
 
-def _detect_faces_in_image(data: bytes) -> bool:
-    """Detect human faces using Haar cascade object detection.
+def _detect_people_in_image(data: bytes) -> bool:
+    """Detect human presence using four Haar cascade layers.
 
-    Tuned conservatively (minNeighbors=8, minSize=40x40) so that natural
-    landscape textures — rock formations, cloud patterns, foliage — don't
-    produce false positives. Only clear, well-defined faces are rejected.
-    Landscape images (width > height * 1.2) skip detection entirely since
-    LoremFlickr always returns 1980x1280 landscape crops for our keywords.
+    Skin-tone heuristic intentionally omitted: all images are sourced via
+    _VERIFIED_KEYWORDS (nature/landscape/abstract only), so warm-toned false
+    positives from sunset, sandstone, coral, and canyon keywords would far
+    outweigh the marginal benefit of catching the rare incidental silhouette
+    that slips past all four cascades.
+
+    Detection layers:
+      1. Frontal face  — direct portraits
+      2. Profile face  — side-on faces
+      3. Full body     — standing figures, even at distance
+      4. Upper body    — torsos when legs are out of frame
     """
     try:
         cv2 = importlib.import_module("cv2")
     except Exception:
-        # If detector dependency is unavailable, fail open so ingestion doesn't crash.
         return False
 
     img = _decode_image_bgr(data)
@@ -336,35 +341,39 @@ def _detect_faces_in_image(data: bytes) -> bool:
         return False
 
     h, w = img.shape[:2]
-
-    # All our LoremFlickr requests use 1980x1280 (landscape). Portrait-oriented
-    # images are far more likely to be people photos; landscape images are almost
-    # never face-dominant, so skip the expensive Haar scan entirely for them.
-    if w > h * 1.2:
+    if h < 20 or w < 20:
         return False
 
-    # Convert to grayscale because Haar detector expects single-channel input.
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    cascade_path = os.path.join(cv2.data.haarcascades, "haarcascade_frontalface_default.xml")
-    detector = cv2.CascadeClassifier(cascade_path)
-    # If cascade cannot be loaded, skip rejection instead of crashing.
-    if detector.empty():
-        return False
 
-    faces = detector.detectMultiScale(
-        gray,
-        scaleFactor=1.1,
-        # Raised from 5 → 8: each candidate rectangle must be confirmed by 8
-        # overlapping detections before it counts as a face. This dramatically
-        # reduces false positives on textured natural scenery.
-        minNeighbors=8,
-        # Raised from (24,24) → (40,40): ignore small face-like blobs that are
-        # more likely rock outcrops, knots in wood, or cloud formations.
-        minSize=(40, 40),
-        flags=cv2.CASCADE_SCALE_IMAGE,
-    )
-    # Any detected face marks image as unsafe for this pipeline.
-    return len(faces) > 0
+    cascade_configs = [
+        # (filename, scaleFactor, minNeighbors, minSize)
+        # Frontal: strict neighbors to avoid rock/cloud false positives.
+        ("haarcascade_frontalface_default.xml", 1.1, 8, (40, 40)),
+        # Profile: slightly relaxed since side-on hits are geometrically rarer.
+        ("haarcascade_profileface.xml",         1.1, 7, (40, 40)),
+        # Full body: finer scale steps to catch distant/small figures.
+        ("haarcascade_fullbody.xml",             1.05, 6, (60, 120)),
+        # Upper body: catches torsos when legs are cropped or occluded.
+        ("haarcascade_upperbody.xml",            1.1, 7, (50, 50)),
+    ]
+
+    for filename, scale, neighbors, min_size in cascade_configs:
+        cascade_path = os.path.join(cv2.data.haarcascades, filename)
+        detector = cv2.CascadeClassifier(cascade_path)
+        if detector.empty():
+            continue
+        hits = detector.detectMultiScale(
+            gray,
+            scaleFactor=scale,
+            minNeighbors=neighbors,
+            minSize=min_size,
+            flags=cv2.CASCADE_SCALE_IMAGE,
+        )
+        if len(hits) > 0:
+            return True
+
+    return False
 
 
 def _detect_red_border_in_image(data: bytes) -> bool:
@@ -398,16 +407,16 @@ def _detect_red_border_in_image(data: bytes) -> bool:
     r = border[:, 2].astype(np.int16)
 
     # Strong red dominance in edge pixels => likely red frame/border overlay.
-    red_mask = (r > 150) & (r > (g + 45)) & (r > (b + 45))
+    red_mask = (r > 180) & (r > (g + 60)) & (r > (b + 60))
     red_ratio = float(np.count_nonzero(red_mask)) / float(max(1, red_mask.size))
     # Reject when most edge pixels are red-dominant (likely frame overlay).
-    return red_ratio >= 0.55
+    return red_ratio >= 0.75
 
 
 def _moderation_rejection_reason(data: bytes) -> Optional[str]:
-    # Face check runs first as the strongest disqualifier.
-    if _detect_faces_in_image(data):
-        return "face_detected"
+    # Person check runs first as the strongest disqualifier.
+    if _detect_people_in_image(data):
+        return "person_detected"
     # Secondary check rejects heavy red-border overlays.
     if _detect_red_border_in_image(data):
         return "red_border_detected"
@@ -1125,6 +1134,74 @@ def _pool_video_http_response(video_bytes: bytes, filename: str, range_header: O
     return Response(content=chunk, media_type="video/mp4", status_code=206, headers=headers)
 
 
+def _backfill_from_existing_s3(
+    cursor,
+    product_id: int,
+    pool_size: int,
+) -> int:
+    """
+    Scan S3 for already-hosted images for this product and insert any
+    that are missing from the ImageGeneration table.
+    Returns count of rows inserted.
+    """
+    from s3_service import list_objects  # your new helper
+
+    if not IMAGE_POOL_S3_BUCKET:
+        return 0
+
+    prefix = f"{IMAGE_POOL_S3_PREFIX}/{product_id}/"
+    try:
+        objects = list_objects(IMAGE_POOL_S3_BUCKET, prefix)
+    except Exception as e:
+        console.log(f"⚠️ S3 list failed for ProductID={product_id}: {e}")
+        return 0
+
+    if not objects:
+        return 0
+
+    # Build hosted-image dicts that match what _db_insert_hosted_images expects
+    hosted_images = []
+    for obj in objects[:pool_size]:  # don't exceed pool_size
+        key = obj["key"]
+        # Derive the url_hash from the filename (e.g. "abc123.jpg" → "abc123")
+        filename = key.rsplit("/", 1)[-1]
+        url_hash = filename.rsplit(".", 1)[0]
+
+        # Infer content type from extension
+        ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else "img"
+        content_type_map = {
+            "jpg": "image/jpeg", "jpeg": "image/jpeg",
+            "png": "image/png", "webp": "image/webp", "gif": "image/gif",
+        }
+        content_type = content_type_map.get(ext, "image/jpeg")
+
+        hosted_url = f"/api/images/file/{product_id}/{url_hash}"
+        hosted_images.append({
+            "url": hosted_url,
+            "urlLarge": hosted_url,
+            "tags": None,
+            "width": 1980,
+            "height": 1280,
+            "lock_id": None,
+            "sourceUrl": None,         
+            "storageKey": key,
+            "contentType": content_type,
+            "byteSize": obj["size"],
+            "urlHash": url_hash,
+        })
+
+    if not hosted_images:
+        return 0
+
+    return _db_insert_hosted_images(
+        cursor,
+        product_id,
+        hosted_images,
+        _contains_banned_figure_terms,
+        _hash_url,
+    )
+    
+    
 def _host_loremflickr_images_to_s3(
     product_id: int,
     images: list,
@@ -1323,6 +1400,11 @@ def ensure_song_image_pool(
             trimmed_rows, trimmed_keys = _db_trim_song_pool_by_provider_with_keys(cursor, product_id, "s3", int(desired_size))
             if trimmed_rows > 0:
                 _delete_s3_keys_best_effort(trimmed_keys)
+                
+            # import existing S3 images into DB first
+            backfilled = _backfill_from_existing_s3(cursor, product_id, int(desired_size))
+            if backfilled:
+                conn.commit()
 
             # It looks at the database to see how many images this song already has. 
             # If it already has the desired_size (e.g., 30), 
@@ -1459,7 +1541,12 @@ def precompute_all_song_image_pools(pool_size: int = _DEFAULT_POOL_SIZE) -> dict
                 trimmed_rows, trimmed_keys = _db_trim_song_pool_by_provider_with_keys(cursor, pid, "s3", int(pool_size))
                 if trimmed_rows > 0:
                     _delete_s3_keys_best_effort(trimmed_keys)
-                    
+ 
+                # try to satisfy pool from existing S3 objects first
+                backfilled = _backfill_from_existing_s3(cursor, pid, int(pool_size))
+                if backfilled:
+                    conn.commit() 
+                                      
                 # Count how many S3-hosted images this song currently has in the database.
                 existing = _db_count_images_by_provider(cursor, pid, "s3")
                 inserted_for_song = 0
@@ -1531,7 +1618,7 @@ def precompute_all_song_image_pools(pool_size: int = _DEFAULT_POOL_SIZE) -> dict
                             images,
                             max_retries=1,
                             retry_backoff_secs=0.0,
-                            per_image_delay_secs=0.0,
+                            per_image_delay_secs=0.3,
                         )
 
                         inserted_round = 0
