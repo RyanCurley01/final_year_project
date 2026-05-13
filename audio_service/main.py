@@ -135,7 +135,7 @@ app.include_router(image_generation.router)
 if __name__ == "__main__":
     # Railway injects PORT (often 8080) but routes public traffic to the
     # Dockerfile EXPOSE port (5000).  Always bind to 5000 so the two match.
-    port = 5000
+    port = int(os.getenv("PORT", 5000))
     reload_enabled = str(os.getenv("UVICORN_RELOAD", "false")).strip().lower() in {"1", "true", "yes", "on"}
     console.log(f"🔌 Running on port {port}")
     uvicorn.run("main:app", host="0.0.0.0", port=port, reload=reload_enabled)
