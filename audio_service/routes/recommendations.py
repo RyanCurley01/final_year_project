@@ -32,7 +32,7 @@ from feature_extraction import (
 )
 from s3_service import generate_presigned_url
 import ml_service
-from ml_service import KEY_NAME_TO_INDEX, TIME_SIG_TO_BEATS, _parse_json_list
+from ml_service import KEY_NAME_TO_INDEX, TIME_SIG_TO_BEATS, _parse_json_list, _build_feature_vector
 
 router = APIRouter()
 
@@ -129,63 +129,20 @@ def _genre_agreement_score(target: dict, candidate: dict) -> float:
 
 def _build_similarity_vector(f: dict) -> list:
     """
-    Build a normalized similarity vector from audio features dict.
+    Build a similarity vector from audio features dict using raw (unscaled) values,
+    matching the feature vector structure used during ML model training in ml_service.
     Uses ALL AudioFeatures columns for comprehensive similarity matching:
     11 core + 5 new + 1 duration + 1 key_index + 1 time_sig_beats + 13 MFCC + 12 Chroma + 7 SpectralContrast = 51D
     """
-    vec = [
-        float(f.get('tempo') if f.get('tempo') is not None else 120) / 200.0,
-        float(f.get('energy') if f.get('energy') is not None else 0.5),
-        float(f.get('valence') if f.get('valence') is not None else 0.5),
-        float(f.get('danceability') if f.get('danceability') is not None else 0.5),
-        float(f.get('acousticness') if f.get('acousticness') is not None else 0.5),
-        float(f.get('spectral_centroid') if f.get('spectral_centroid') is not None else 1500.0) / 5000.0,
-        float(f.get('spectral_rolloff') if f.get('spectral_rolloff') is not None else 3000.0) / 10000.0,
-        float(f.get('zero_crossing_rate') if f.get('zero_crossing_rate') is not None else 0.05) * 10.0,
-        float(f.get('instrumentalness') if f.get('instrumentalness') is not None else 0.5),
-        float((f.get('loudness') if f.get('loudness') is not None else -60.0) + 60.0) / 60.0,
-        float(f.get('speechiness') if f.get('speechiness') is not None else 0.1),
-        # New features for genre separation
-        float(f.get('spectral_bandwidth') if f.get('spectral_bandwidth') is not None else 1500.0) / 5000.0,
-        float(f.get('rms_energy') if f.get('rms_energy') is not None else 0.02) * 10.0,
-        float(f.get('onset_rate') if f.get('onset_rate') is not None else 2.0) / 10.0,
-        float(f.get('harmonic_ratio') if f.get('harmonic_ratio') is not None else 0.5),
-        float(f.get('percussive_ratio') if f.get('percussive_ratio') is not None else 0.5),
-        # Duration normalized (0-300s typical range)
-        float(f.get('duration') if f.get('duration') is not None else 0) / 300.0,
-        # Key signature as index (0-11) normalized
-        float(KEY_NAME_TO_INDEX.get(f.get('key_signature', ''), 0)) / 11.0,
-        # Time signature beats normalized
-        float(TIME_SIG_TO_BEATS.get(f.get('time_signature', '4/4'), 4.0)) / 7.0,
-    ]
-    # MFCC means (13 coefficients) - normalize roughly by dividing by 300
-    mfcc = f.get('mfcc_mean')
-    if mfcc and isinstance(mfcc, list) and len(mfcc) == 13:
-        vec.extend([float(x) / 300.0 for x in mfcc])
-    elif isinstance(mfcc, str):
-        parsed = _parse_json_list(mfcc, 13)
-        vec.extend([float(x) / 300.0 for x in parsed])
-    else:
-        vec.extend([0.0] * 13)
-    # Chroma means (12 pitch classes) - already 0-1 range
-    chroma = f.get('chroma_mean')
-    if chroma and isinstance(chroma, list) and len(chroma) == 12:
-        vec.extend([float(x) for x in chroma])
-    elif isinstance(chroma, str):
-        parsed = _parse_json_list(chroma, 12)
-        vec.extend([float(x) for x in parsed])
-    else:
-        vec.extend([0.0] * 12)
-    # Spectral contrast means (7 bands) - normalize by dividing by 50
-    sc = f.get('spectral_contrast_mean')
-    if sc and isinstance(sc, list) and len(sc) == 7:
-        vec.extend([float(x) / 50.0 for x in sc])
-    elif isinstance(sc, str):
-        parsed = _parse_json_list(sc, 7)
-        vec.extend([float(x) / 50.0 for x in parsed])
-    else:
-        vec.extend([0.0] * 7)
-    return vec
+    # FIX #1 & #2: Use _build_feature_vector from ml_service so that the similarity
+    # vector is structurally identical (same field order, same raw values, same
+    # _parse_json_list normalisation for MFCC/Chroma/SpectralContrast) to the
+    # vectors the scaler and classifiers were trained on. The previous manual
+    # per-feature division (/ 200.0, / 300.0, / 50.0, etc.) produced a differently
+    # scaled space that made cosine distances between cached and live vectors
+    # meaningless, because cached vectors go through the scaler while live vectors
+    # were hand-normalised differently.
+    return _build_feature_vector(f)
 
 # ============================================
 # CACHED AUDIO FEATURES ENDPOINT (for artist songs)
@@ -321,7 +278,10 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
                 current_id_int = resolved_pid
                 current_id_str = str(resolved_pid)
                 console.log(f"✅ Resolved discover ProductID from preview_url: {resolved_pid}")
-             
+
+        # clean_current_id derivation moved AFTER the discover fallback block so that
+        # it reflects the resolved current_id_str rather than the original (potentially
+        # empty / non-numeric) value that arrived in the request.
         clean_current_id = clean_id_str(current_id_str)
 
         # 1. Determine or Extract Features for Target Song
@@ -501,6 +461,11 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
                            'percussive_ratio': features.get('percussive_ratio', 0.5),
                            'genre': features.get('genre', ''),
                            'genre_cluster': features.get('genre_cluster', ''),
+                           'key_signature': features.get('key_signature'),
+                           'time_signature': features.get('time_signature'),
+                           'duration': features.get('duration', 0),
+                           'mfcc_mean': features.get('mfcc_mean', []),
+                           'chroma_mean': features.get('chroma_mean', []),
                            '_meta': song 
                       })
             
@@ -916,7 +881,7 @@ async def get_midi_recommendations(request: MidiTargetRequest):
             'danceability':      float(target_features_raw.get('danceability', 0.5)),
             'acousticness':      float(target_features_raw.get('acousticness', 0.5)),
             'spectral_centroid': float(target_features_raw.get('spectral_centroid', 0.3)) * 5000,
-            'spectral_rolloff':  float(target_features_raw.get('spectral_centroid', 0.3)) * 10000,
+            'spectral_rolloff':  float(target_features_raw.get('spectral_rolloff', 0.3)) * 10000,
             'zero_crossing_rate':float(target_features_raw.get('zero_crossing_rate', 0.05)),
             'instrumentalness':  float(target_features_raw.get('instrumentalness', 0.5)),
             'loudness':          float(target_features_raw.get('loudness', 0.5)) * 60 - 60,
@@ -1552,17 +1517,20 @@ async def match_library_songs(request: LibraryMatchRequest):
                 except Exception:
                     candidate_features = None
 
-            try:
-                # Try lookup by ID (negative ID for artist songs)
-                # Cache keys are integers, so convert to int for lookup
-                candidate_id_int = int(candidate.trackId)
-                neg_id_lookup = -abs(candidate_id_int)
-                if neg_id_lookup in ml_service.audio_features_cache:
-                    candidate_features = ml_service.audio_features_cache[neg_id_lookup]
-                elif abs(candidate_id_int) in ml_service.audio_features_cache:
-                    candidate_features = ml_service.audio_features_cache[abs(candidate_id_int)]
-            except (ValueError, TypeError):
-                pass
+            # Only attempts the cache ID lookup when candidate_features has not already
+            # been populated from audio_features.
+            if not candidate_features:
+                try:
+                    # Try lookup by ID (negative ID for artist songs)
+                    # Cache keys are integers, so convert to int for lookup
+                    candidate_id_int = int(candidate.trackId)
+                    neg_id_lookup = -abs(candidate_id_int)
+                    if neg_id_lookup in ml_service.audio_features_cache:
+                        candidate_features = ml_service.audio_features_cache[neg_id_lookup]
+                    elif abs(candidate_id_int) in ml_service.audio_features_cache:
+                        candidate_features = ml_service.audio_features_cache[abs(candidate_id_int)]
+                except (ValueError, TypeError):
+                    pass
             
             if not candidate_features:
                 # No cached features — record this trackId so the frontend knows
@@ -1830,6 +1798,13 @@ async def _warm_cache_background(songs: List[Dict]):
 
                 predicted_genre = ml_service.predict_real_genre(features) or genre_cluster
 
+                # Stores mfcc_mean and chroma_mean as parsed lists (not raw feature dict values)
+                # so that _build_similarity_vector / _build_feature_vector receive the same list type
+                # that startup_cache stores.
+                mfcc_list = _parse_json_list(features.get('mfcc_mean'), 13)
+                chroma_list = _parse_json_list(features.get('chroma_mean'), 12)
+                spectral_contrast_list = _parse_json_list(features.get('spectral_contrast_mean'), 7)
+
                 # Update in-memory cache only (no DB writes — iTunes songs are transient)
                 ml_service.audio_features_cache[product_id] = {
                     'id': product_id,
@@ -1851,13 +1826,13 @@ async def _warm_cache_background(songs: List[Dict]):
                     'time_signature': features.get('time_signature'),
                     'duration': features.get('duration', 0),
                     'spectral_bandwidth': features.get('spectral_bandwidth', 1500.0),
-                    'spectral_contrast_mean': features.get('spectral_contrast_mean', []),
+                    'spectral_contrast_mean': spectral_contrast_list,
                     'rms_energy': features.get('rms_energy', 0.02),
                     'onset_rate': features.get('onset_rate', 2.0),
                     'harmonic_ratio': features.get('harmonic_ratio', 0.5),
                     'percussive_ratio': features.get('percussive_ratio', 0.5),
-                    'mfcc_mean': features.get('mfcc_mean', []),
-                    'chroma_mean': features.get('chroma_mean', [])
+                    'mfcc_mean': mfcc_list,
+                    'chroma_mean': chroma_list
                 }
 
                 extracted_count += 1

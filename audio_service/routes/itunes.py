@@ -16,7 +16,7 @@ from config import (
 )
 from database import get_db_connection
 from feature_extraction import extract_audio_features_from_preview, derive_mood
-from ml_service import _parse_json_list
+from ml_service import _parse_json_list, _build_feature_vector
 import ml_service
 import json
 
@@ -275,6 +275,8 @@ def _classify_features(features: dict) -> str:
         mfcc_mean=features.get("mfcc_mean"),
         chroma_mean=features.get("chroma_mean"),
         spectral_contrast_mean=features.get("spectral_contrast_mean"),
+        current_cache_size=len(ml_service.audio_features_cache),
+        current_cache_items=ml_service.audio_features_cache,
     )
 
 
@@ -397,13 +399,18 @@ async def _upsert_track_to_db(track: dict, loop) -> bool:
 
     genre_label  = _classify_features(features)
     actual_genre = track.get("primaryGenreName", "Unknown")
+    predicted_genre = ml_service.predict_real_genre(features) or genre_label
 
-    mfcc_json              = json.dumps(features["mfcc_mean"]) if features.get("mfcc_mean") else None
-    chroma_json            = json.dumps(features["chroma_mean"]) if features.get("chroma_mean") else None
-    spectral_contrast_json = (
-        json.dumps(features["spectral_contrast_mean"])
-        if features.get("spectral_contrast_mean") else None
-    )
+    # Stores mfcc_mean, chroma_mean, and spectral_contrast_mean as parsed lists
+    # (not raw feature dict values) so that _build_similarity_vector /
+    # _build_feature_vector receive the same list type that startup_cache stores.
+    mfcc_list              = _parse_json_list(features.get("mfcc_mean"), 13)
+    chroma_list            = _parse_json_list(features.get("chroma_mean"), 12)
+    spectral_contrast_list = _parse_json_list(features.get("spectral_contrast_mean"), 7)
+
+    mfcc_json              = json.dumps(mfcc_list)
+    chroma_json            = json.dumps(chroma_list)
+    spectral_contrast_json = json.dumps(spectral_contrast_list)
 
     with get_db_connection() as conn:
         if not conn:
@@ -509,6 +516,41 @@ async def _upsert_track_to_db(track: dict, loop) -> bool:
 
             _upsert_stock(cursor, product_id, 1)
             conn.commit()
+
+    # Update in-memory cache immediately so the recommendation engine can use
+    # the freshly extracted features without waiting for the full startup_cache()
+    # reload at the end of refresh_topcharts (Step 8).
+    # Mirrors the cache-entry structure that startup_cache() produces so that
+    # _build_feature_vector / _build_similarity_vector receive identically
+    # structured dicts whether the entry came from DB load or live upsert.
+    ml_service.audio_features_cache[product_id] = {
+        'id':                    product_id,
+        'tempo':                 features['tempo'],
+        'energy':                features['energy'],
+        'valence':               features['valence'],
+        'danceability':          features['danceability'],
+        'acousticness':          features['acousticness'],
+        'genre':                 predicted_genre,
+        'genre_cluster':         genre_label,
+        'mood':                  features.get('mood', derive_mood(features['valence'], features['energy'])),
+        'spectral_centroid':     features.get('spectral_centroid', 1500.0),
+        'spectral_rolloff':      features.get('spectral_rolloff', 3000.0),
+        'zero_crossing_rate':    features.get('zero_crossing_rate', 0.05),
+        'instrumentalness':      features.get('instrumentalness', 0.5),
+        'loudness':              features.get('loudness', -60.0),
+        'speechiness':           features.get('speechiness', 0.1),
+        'key_signature':         features.get('key_signature'),
+        'time_signature':        features.get('time_signature'),
+        'duration':              features.get('duration', 0),
+        'spectral_bandwidth':    features.get('spectral_bandwidth', 1500.0),
+        'spectral_contrast_mean': spectral_contrast_list,
+        'rms_energy':            features.get('rms_energy', 0.02),
+        'onset_rate':            features.get('onset_rate', 2.0),
+        'harmonic_ratio':        features.get('harmonic_ratio', 0.5),
+        'percussive_ratio':      features.get('percussive_ratio', 0.5),
+        'mfcc_mean':             mfcc_list,
+        'chroma_mean':           chroma_list,
+    }
 
     return True
 
