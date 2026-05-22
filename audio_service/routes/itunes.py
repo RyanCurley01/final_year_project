@@ -107,15 +107,26 @@ def _upsert_stock(cursor, product_id: int, is_available: int):
         return
     except Exception as e:
         if "1452" in str(e):
-            return
+            console.log(
+                f"   ⚠️ _upsert_stock FK error for ProductID={product_id} "
+                f"(is_available={available_flag}): {e} — will retry via UPDATE path"
+            )
+        else:
+            raise
 
     cursor.execute(
-        "SELECT StockID FROM Stock WHERE ProductID = %s ORDER BY StockID DESC LIMIT 1",
+        "SELECT StockID FROM Stock WHERE ProductID = %s ORDER BY StockID DESC",
         (product_id,)
     )
-    row = cursor.fetchone()
-    if row:
-        sid = int(row["StockID"])
+    all_rows = cursor.fetchall()
+    if len(all_rows) > 1:
+        # Keep only the newest; delete the rest so there's a single source of truth.
+        stale_ids = [int(r["StockID"]) for r in all_rows[1:]]
+        fmt = ",".join(["%s"] * len(stale_ids))
+        _safe_execute(cursor, f"DELETE FROM Stock WHERE StockID IN ({fmt})", stale_ids)
+
+    if all_rows:
+        sid = int(all_rows[0]["StockID"])
         if available_flag == 1:
             try:
                 cursor.execute(
@@ -135,6 +146,7 @@ def _upsert_stock(cursor, product_id: int, is_available: int):
             except Exception:
                 cursor.execute("UPDATE Stock SET IsAvailable = 0 WHERE StockID = %s", (sid,))
     else:
+        # No existing Stock row at all — insert fresh.
         try:
             if available_flag == 1:
                 cursor.execute(
@@ -148,6 +160,11 @@ def _upsert_stock(cursor, product_id: int, is_available: int):
                 )
         except Exception as e:
             if "1452" in str(e):
+                console.log(
+                    f"   ❌ _upsert_stock: cannot insert Stock for ProductID={product_id} "
+                    f"— Products row not yet committed. Ensure conn.commit() before calling "
+                    f"_upsert_stock on a newly inserted product."
+                )
                 return
             if available_flag == 1:
                 cursor.execute("INSERT INTO Stock (IsAvailable, ProductID) VALUES (1, %s)", (product_id,))
@@ -176,9 +193,10 @@ def _purge_stale_unavailable_imports(cursor, retention_days: int) -> int:
     if not stale_ids:
         return 0
     fmt = ",".join(["%s"] * len(stale_ids))
+
     for tbl in ("UserInteractions", "UserRecommendations", "Wishlist", "Sold_Products",
                 "Purchased_Products", "CustomerSummary", "Payments", "Order_Items",
-                "Stock", "AudioFeatures", "Products"):
+                "AudioFeatures", "Products", "Stock"):   
         _safe_execute(cursor, f"DELETE FROM {tbl} WHERE ProductID IN ({fmt})", stale_ids)
     return len(stale_ids)
 
@@ -217,9 +235,10 @@ def _prune_imported_audiofeatures(max_imported_rows: int) -> dict:
                 if not to_prune:
                     break
                 fmt = ",".join(["%s"] * len(to_prune))
+
                 for tbl in ("UserInteractions", "UserRecommendations", "Wishlist", "Sold_Products",
                             "Purchased_Products", "CustomerSummary", "Payments", "Order_Items",
-                            "Stock", "AudioFeatures", "Products"):
+                            "AudioFeatures", "Products", "Stock"):   # Stock moved to end
                     _safe_execute(cursor, f"DELETE FROM {tbl} WHERE ProductID IN ({fmt})", to_prune)
                 conn.commit()
 
@@ -383,6 +402,7 @@ async def _upsert_track_to_db(track: dict, loop) -> bool:
     Products + AudioFeatures + Stock.  Returns True on success.
     Existing rows have their audio features re-extracted so every hourly
     refresh reflects the latest feature data.
+
     """
     tid         = track.get("trackId")
     preview_url = track.get("previewUrl")
@@ -401,9 +421,6 @@ async def _upsert_track_to_db(track: dict, loop) -> bool:
     actual_genre = track.get("primaryGenreName", "Unknown")
     predicted_genre = ml_service.predict_real_genre(features) or genre_label
 
-    # Stores mfcc_mean, chroma_mean, and spectral_contrast_mean as parsed lists
-    # (not raw feature dict values) so that _build_similarity_vector /
-    # _build_feature_vector receive the same list type that startup_cache stores.
     mfcc_list              = _parse_json_list(features.get("mfcc_mean"), 13)
     chroma_list            = _parse_json_list(features.get("chroma_mean"), 12)
     spectral_contrast_list = _parse_json_list(features.get("spectral_contrast_mean"), 7)
@@ -457,6 +474,9 @@ async def _upsert_track_to_db(track: dict, loop) -> bool:
                         track.get("artistName", "Unknown Artist"),
                     )
                 )
+
+
+            conn.commit()
 
             # ── AudioFeatures: INSERT or UPDATE ──────────────────────────────
             af_values = (
@@ -520,9 +540,6 @@ async def _upsert_track_to_db(track: dict, loop) -> bool:
     # Update in-memory cache immediately so the recommendation engine can use
     # the freshly extracted features without waiting for the full startup_cache()
     # reload at the end of refresh_topcharts (Step 8).
-    # Mirrors the cache-entry structure that startup_cache() produces so that
-    # _build_feature_vector / _build_similarity_vector receive identically
-    # structured dicts whether the entry came from DB load or live upsert.
     ml_service.audio_features_cache[product_id] = {
         'id':                    product_id,
         'tempo':                 features['tempo'],
@@ -639,7 +656,6 @@ async def get_topcharts(artists: str | None = None, limit_per_artist: int = 50):
             }
             songs.append(song)
 
-            # Prefer in-memory ML cache (full feature vector) over raw DB columns
             cached = (
                 ml_service.audio_features_cache.get(-abs_tid)
                 or ml_service.audio_features_cache.get(abs_tid)
@@ -722,22 +738,21 @@ async def clear_imported_songs():
                 with conn.cursor() as cursor:
                     for tbl in ("UserInteractions", "UserRecommendations", "Wishlist",
                                 "Sold_Products", "Purchased_Products", "CustomerSummary",
-                                "Payments", "Order_Items", "Stock"):
+                                "Payments", "Order_Items", "AudioFeatures", "Products", "Stock"):
                         _safe_execute(cursor, f"DELETE FROM {tbl} WHERE ProductID < 0")
 
-                    cursor.execute("DELETE FROM AudioFeatures WHERE ProductID < 0")
-                    audio_deleted = cursor.rowcount
-                    cursor.execute("DELETE FROM Products WHERE ProductID < 0")
-                    products_deleted = cursor.rowcount
+                    cursor.execute("SELECT ROW_COUNT() AS c")
+                    products_deleted = deleted_count  # already 0; row count tracked below
                     conn.commit()
-                    deleted_count = products_deleted
-                    console.log(f"   ✅ Deleted {products_deleted} products, {audio_deleted} features")
+                    # Re-query for accurate count
+                    cursor.execute("SELECT COUNT(*) AS c FROM Products WHERE ProductID < 0")
+                    still_remaining = int((cursor.fetchone() or {}).get("c") or 0)
+                    console.log(f"   ✅ Cleanup complete — {still_remaining} imported products remaining")
 
-        console.log(f"🎉 Cleanup complete: {deleted_count} imported songs removed")
+        console.log(f"🎉 Cleanup complete")
         return {
             "status":        "success",
-            "deleted_count": deleted_count,
-            "message":       f"Successfully removed {deleted_count} imported songs from database",
+            "message":       "Successfully removed all imported songs from database",
         }
 
     except Exception as e:
@@ -802,8 +817,6 @@ async def refresh_topcharts():
                     conn.commit()
 
         # ── STEP 1: fetch artist tracks (~50 per artist, 150 total) ──────────
-        # Each artist gets an independent budget so thin catalogues (few tracks
-        # with previewUrls) don't silently eat into the quota of other artists.
         per_artist    = max(1, TOPCHARTS_TARGET_COUNT // len(ARTISTS))
         artist_tracks = await _fetch_artist_tracks(per_artist)
 
@@ -1038,9 +1051,6 @@ async def get_topcharts_ranked():
             return {"status": "success", "count": 0, "songs": [], "features": {}, "source": "empty"}
 
         # ── Step 2: fetch iTunes popularity rank for each artist ─────────────
-        # iTunes returns search results ordered by popularity (most popular first).
-        # We request 200 results to cover the full catalogue and record each
-        # trackId's position in the response as its popularity rank.
         rank_map: dict[int, int] = {}   # abs_tid → rank (0 = most popular)
 
         async with httpx.AsyncClient(timeout=20.0) as client:
@@ -1072,7 +1082,6 @@ async def get_topcharts_ranked():
         console.log(f"   📊 rank_map has {len(rank_map)} entries")
 
         # ── Step 3: sort DB songs by artist then by iTunes rank ──────────────
-        # Group by artist in canonical order, sort each group by rank.
         ARTIST_FRAGMENTS = [
             ("aphex twin",       "Aphex Twin"),
             ("boards of canada", "Boards of Canada"),
@@ -1085,7 +1094,6 @@ async def get_topcharts_ranked():
                 row for row in db_by_tid.values()
                 if fragment in (row.get("ArtistName") or "").lower()
             ]
-            # Sort by iTunes popularity rank; unranked songs go to the end
             group.sort(key=lambda r: rank_map.get(abs(int(r["ProductID"])), 99999))
             sorted_rows.extend(group)
 
@@ -1111,7 +1119,7 @@ async def get_topcharts_ranked():
                 "fileUrl":          preview,
                 "primaryGenreName": row.get("Genre"),
                 "source":           "db_stock",
-                "popularityRank":   rank_map.get(abs_tid),   # expose rank for debugging
+                "popularityRank":   rank_map.get(abs_tid),
             }
             songs.append(song)
 
@@ -1181,8 +1189,6 @@ async def _topcharts_refresh_loop():
     if STARTUP_REFRESH_DELAY > 0:
         await asyncio.sleep(STARTUP_REFRESH_DELAY)
 
-    # Always enforce hard cap against whatever is already in the DB before
-    # the first refresh, so a restart never serves stale rows beyond _IMPORT_CAP.
     prune = _prune_imported_audiofeatures(_IMPORT_CAP)
     if prune["pruned"] > 0:
         console.log(

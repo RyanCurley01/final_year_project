@@ -224,3 +224,7 @@ SELECT
 FROM AudioFeatures
 GROUP BY Source, Genre
 ORDER BY Source, Count DESC;"
+
+To undo last comit locally and remotely
+git reset --hard HEAD~1
+git push --force
