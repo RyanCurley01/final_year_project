@@ -410,9 +410,11 @@ async def startup_cache():
                                 else:
                                     # Support Vector Machine (RBF kernel for non-linear boundaries)
                                     # refit=False: we select the best params manually by validation set score below
+                                    # Regularization: Lower C values = stronger regularization (more underfitting)
+                                    # Larger gamma = narrower kernel influence (can overfit with high C)
                                     grid_svm = GridSearchCV(
                                         SVC(kernel='rbf', probability=True),
-                                        {'C': [0.01, 0.1, 1, 10, 100], 'gamma': ['scale', 'auto', 0.1, 1]},
+                                        {'C': [0.0001, 0.001, 0.01, 0.1], 'gamma': ['scale', 0.001, 0.01]},
                                         cv=cv_folds, scoring='accuracy', refit=False
                                     )
                                     grid_svm.fit(X_train_scaled, y_train)
@@ -425,9 +427,11 @@ async def startup_cache():
                                     console.log(f"   SVM best params: {best_svm_params}")
 
                                     # Random Forest Classifier
+                                    # Regularization: Limit tree depth, min_samples_split, min_samples_leaf
+                                    # This prevents trees from memorizing individual samples
                                     grid_rf = GridSearchCV(
-                                        RandomForestClassifier(random_state=42),
-                                        {'n_estimators': [50, 100, 200], 'max_depth': [None, 10, 20]},
+                                        RandomForestClassifier(random_state=42, min_samples_leaf=10, min_samples_split=15),
+                                        {'n_estimators': [50, 100], 'max_depth': [3, 5, 8], 'min_samples_leaf': [10, 15, 20]},
                                         cv=cv_folds, scoring='accuracy', refit=False
                                     )
                                     grid_rf.fit(X_train_scaled, y_train)
@@ -440,8 +444,8 @@ async def startup_cache():
                                     console.log(f"   RF best params: {best_rf_params}")
 
                                     # K-Nearest Neighbors
-                                    max_k = min(11, n_train - 1)
-                                    knn_candidates = [k for k in [3, 5, 7, 9, 11] if k <= max_k] or [max_k]
+                                    max_k = min(15, n_train - 1)
+                                    knn_candidates = [k for k in [7, 9, 11, 13, 15] if k <= max_k] or [max_k]
                                     grid_knn = GridSearchCV(
                                         KNeighborsClassifier(),
                                         {'n_neighbors': knn_candidates},
@@ -457,9 +461,10 @@ async def startup_cache():
                                     console.log(f"   KNN best params: {best_knn_params}")
 
                                     # Logistic Regression
+                                    # Regularization via C: Lower C = stronger L2 regularization
                                     grid_lr = GridSearchCV(
                                         LogisticRegression(max_iter=1000),
-                                        {'C': [0.001, 0.01, 0.1, 1, 10, 100]},
+                                        {'C': [0.0001, 0.001, 0.01, 0.1]},
                                         cv=cv_folds, refit=False
                                     )
                                     grid_lr.fit(X_train_scaled, y_train)
