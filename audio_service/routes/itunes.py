@@ -337,8 +337,6 @@ def _classify_features(features: dict) -> str:
         mfcc_mean=features.get("mfcc_mean"),
         chroma_mean=features.get("chroma_mean"),
         spectral_contrast_mean=features.get("spectral_contrast_mean"),
-        current_cache_size=len(ml_service.audio_features_cache),
-        current_cache_items=ml_service.audio_features_cache,
     )
 
 
