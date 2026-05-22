@@ -399,6 +399,7 @@ async def startup_cache():
                                 # too small to be statistically meaningful (< 5 samples per fold).
                                 n_train = len(X_train_scaled)
                                 cv_folds = min(5, max(2, n_train // 5))
+                                
                                 if cv_folds < 2:
                                     console.log(f"   ⚠️ Too few training samples ({n_train}) for CV — skipping tuning")
                                     # Fall back to default hyperparameters
@@ -410,8 +411,8 @@ async def startup_cache():
                                         m.fit(X_train_scaled, y_train)
                                 else:
                                     grid_svm = GridSearchCV(
-                                        SVC(kernel='rbf', probability=True),
-                                        {'C': [0.0001, 0.001, 0.01, 0.1], 'gamma': ['scale', 0.001, 0.01]},
+                                        SVC(kernel='rbf', probability=True, class_weight='balanced'),
+                                        {'C': [0.001, 0.01, 0.1, 1], 'gamma': ['scale', 0.001, 0.01]},
                                         cv=cv_folds, scoring='accuracy', refit=True
                                     )
                                     grid_svm.fit(X_train_scaled, y_train)
@@ -429,8 +430,8 @@ async def startup_cache():
                                     rf_val_score = float(best_model_rf.score(X_valid_scaled, y_valid))
                                     console.log(f"   RF val-score: {rf_val_score:.4f}")
 
-                                    max_k = min(15, n_train - 1)
-                                    knn_candidates = [k for k in [7, 9, 11, 13, 15] if k <= max_k] or [max_k]
+                                    max_k = min(17, n_train - 1)
+                                    knn_candidates = [k for k in [3, 5, 7, 9, 11, 13, 15, 17] if k <= max_k] or [max_k]
                                     grid_knn = GridSearchCV(
                                         KNeighborsClassifier(),
                                         {'n_neighbors': knn_candidates},
@@ -442,8 +443,8 @@ async def startup_cache():
                                     console.log(f"   KNN val-score: {knn_val_score:.4f}")
 
                                     grid_lr = GridSearchCV(
-                                        LogisticRegression(max_iter=1000),
-                                        {'C': [0.00001, 0.0001, 0.001, 0.01]},
+                                        LogisticRegression(max_iter=1000, class_weight='balanced'),
+                                        {'C': [0.001, 0.01, 0.1, 1, 10]},
                                         cv=cv_folds, refit=True
                                     )
                                     grid_lr.fit(X_train_scaled, y_train)
@@ -465,7 +466,13 @@ async def startup_cache():
                                 }
 
                                 for mname, mdl in tuned_models.items():
-                                    train_sc = round(float(mdl.score(X_train_scaled, y_train)), 4)
+                                    try:
+                                        cv_train = max(2, min(cv_folds, len(X_train_scaled)))
+                                        train_scores = cross_val_score(mdl, X_train_scaled, y_train, cv=cv_train, scoring='accuracy')
+                                        train_sc = round(float(train_scores.mean()), 4)
+                                    except Exception:
+                                        train_sc = round(float(mdl.score(X_train_scaled, y_train)), 4)
+
                                     val_sc = round(float(mdl.score(X_valid_scaled, y_valid)), 4)
 
                                     mdl_full = clone(mdl)
@@ -495,7 +502,14 @@ async def startup_cache():
                                     voting='soft'
                                 )
                                 ens_val_model.fit(X_train_scaled, y_train)
-                                ens_train_sc = round(float(ens_val_model.score(X_train_scaled, y_train)), 4)
+                                
+                                try:
+                                    cv_train = max(2, min(cv_folds, len(X_train_scaled)))
+                                    ens_train_scores = cross_val_score(ens_val_model, X_train_scaled, y_train, cv=cv_train, scoring='accuracy')
+                                    ens_train_sc = round(float(ens_train_scores.mean()), 4)
+                                except Exception:
+                                    ens_train_sc = round(float(ens_val_model.score(X_train_scaled, y_train)), 4)
+                                
                                 ens_val_sc = round(float(ens_val_model.score(X_valid_scaled, y_valid)), 4)
 
                                 ensemble_classifier = VotingClassifier(
