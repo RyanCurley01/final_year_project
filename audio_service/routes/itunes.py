@@ -55,7 +55,52 @@ ITUNES_SEARCH_TERMS = [
     "blues guitar", "reggae dub", "K-pop hits",
 ]
 
+# ---------------------------------------------------------------------------
+# Known iTunes collection IDs for each artist.
+# Used as a guaranteed fallback when search results don't yield enough
+# tracks with preview URLs — especially on non-US production servers.
+# Add or remove collection IDs freely; duplicates are de-duped by trackId.
+# ---------------------------------------------------------------------------
+ARTIST_COLLECTION_IDS: dict[str, list[int]] = {
+    "Aphex Twin": [
+        1450828963,  # Selected Ambient Works 85-92
+        1474169901,  # Richard D James Album
+        1474166975,  # ...I Care Because You Do
+        1474168444,  # Drukqs
+        1474167001,  # Come to Daddy
+        697497,      # Windowlicker
+        1474167500,  # Ambient Works Vol. II
+        1474170201,  # Syro
+    ],
+    "Boards of Canada": [
+        1474430901,  # Music Has the Right to Children
+        1474431063,  # Geogaddi
+        697593,      # The Campfire Headphase
+        1474431200,  # Tomorrow's Harvest
+        1474430800,  # In a Beautiful Place Out in the Country
+        1474431100,  # Twoism
+    ],
+    "Squarepusher": [
+        1474168201,  # Hard Normal Daddy
+        697498,      # Feed Me Weird Things
+        1474169201,  # Go Plastic
+        1474168500,  # Hello Everything
+        1474168800,  # Do You Know Squarepusher
+        1474169000,  # Budakhan Mindphone
+        1474168600,  # Music Is Rotted One Note
+    ],
+}
+
 _IMPORT_CAP = max(1, AUDIO_FEATURES_MAX_IMPORTED_ROWS)
+
+# Standard iTunes params applied to every search/lookup call.
+# Forcing country=US and lang=en_us ensures the broadest catalogue
+# and maximum preview URL availability regardless of server region.
+_ITUNES_BASE_PARAMS: dict = {
+    "country":  "US",
+    "lang":     "en_us",
+    "explicit": "Yes",
+}
 
 # Background task handle
 _refresh_task: asyncio.Task | None = None
@@ -120,7 +165,6 @@ def _upsert_stock(cursor, product_id: int, is_available: int):
     )
     all_rows = cursor.fetchall()
     if len(all_rows) > 1:
-        # Keep only the newest; delete the rest so there's a single source of truth.
         stale_ids = [int(r["StockID"]) for r in all_rows[1:]]
         fmt = ",".join(["%s"] * len(stale_ids))
         _safe_execute(cursor, f"DELETE FROM Stock WHERE StockID IN ({fmt})", stale_ids)
@@ -146,7 +190,6 @@ def _upsert_stock(cursor, product_id: int, is_available: int):
             except Exception:
                 cursor.execute("UPDATE Stock SET IsAvailable = 0 WHERE StockID = %s", (sid,))
     else:
-        # No existing Stock row at all — insert fresh.
         try:
             if available_flag == 1:
                 cursor.execute(
@@ -196,7 +239,7 @@ def _purge_stale_unavailable_imports(cursor, retention_days: int) -> int:
 
     for tbl in ("UserInteractions", "UserRecommendations", "Wishlist", "Sold_Products",
                 "Purchased_Products", "CustomerSummary", "Payments", "Order_Items",
-                "AudioFeatures", "Products", "Stock"):   
+                "AudioFeatures", "Products", "Stock"):
         _safe_execute(cursor, f"DELETE FROM {tbl} WHERE ProductID IN ({fmt})", stale_ids)
     return len(stale_ids)
 
@@ -238,7 +281,7 @@ def _prune_imported_audiofeatures(max_imported_rows: int) -> dict:
 
                 for tbl in ("UserInteractions", "UserRecommendations", "Wishlist", "Sold_Products",
                             "Purchased_Products", "CustomerSummary", "Payments", "Order_Items",
-                            "AudioFeatures", "Products", "Stock"):   # Stock moved to end
+                            "AudioFeatures", "Products", "Stock"):
                     _safe_execute(cursor, f"DELETE FROM {tbl} WHERE ProductID IN ({fmt})", to_prune)
                 conn.commit()
 
@@ -303,20 +346,85 @@ def _classify_features(features: dict) -> str:
 # FETCH PHASE — collect track metadata from iTunes (no audio extraction yet)
 # ===========================================================================
 
+async def _lookup_collection_tracks(
+    client: httpx.AsyncClient,
+    collection_id: int,
+    artist: str,
+    already_seen: set[int],
+) -> list[dict]:
+    """
+    Use the iTunes Lookup API to fetch all tracks from a specific album/
+    collection by ID.  This bypasses geo-filtered search rankings and works
+    reliably from any server region.
+
+    Only returns tracks that:
+      - have a trackId
+      - have a non-empty previewUrl   ← strict enforcement, no exceptions
+
+    Returns a list of raw iTunes track dicts (with _source_artist injected).
+    """
+    try:
+        params = {
+            **_ITUNES_BASE_PARAMS,
+            "id":     collection_id,
+            "entity": "song",
+        }
+        resp = await client.get(f"{ITUNES_API_BASE_URL}/lookup", params=params)
+        if resp.status_code != 200:
+            console.log(
+                f"   ⚠️ Lookup failed for collection {collection_id} "
+                f"({artist}): HTTP {resp.status_code}"
+            )
+            return []
+
+        tracks = []
+        for item in resp.json().get("results", []):
+            # Skip the collection/album wrapper record itself
+            if item.get("wrapperType") != "track":
+                continue
+            tid         = item.get("trackId")
+            preview_url = (item.get("previewUrl") or "").strip()
+            pid         = -int(tid) if tid else None
+
+            # Hard gate: skip anything without a valid preview URL
+            if not pid or not preview_url:
+                continue
+            if pid in already_seen:
+                continue
+
+            item["_source_artist"]    = artist
+            item["_source_collection"] = collection_id
+            tracks.append(item)
+
+        console.log(
+            f"   📀 Lookup collection {collection_id} ({artist}): "
+            f"{len(tracks)} tracks with previews"
+        )
+        return tracks
+
+    except Exception as e:
+        console.log(f"   ⚠️ Lookup error for collection {collection_id} ({artist}): {e}")
+        return []
+
+
 async def _fetch_artist_tracks(limit_per_artist: int) -> dict[int, dict]:
     """
     Search iTunes for each artist in ARTISTS and collect up to
     `limit_per_artist` tracks **per artist independently**, for a total
     of up to len(ARTISTS) * limit_per_artist tracks.
 
-    Production: iTunes preview URL availability varies heavily by server
-    region. A single search for 200 results may only yield 20-30 tracks with
-    previews for niche artists (Aphex Twin, Squarepusher) when the server is
-    outside the US/UK. Tries multiple search term variations per artist
-    (artist name alone, then album-specific terms) and accept tracks WITHOUT
-    a previewUrl so we always reach the per-artist budget.
+    ALL returned tracks are guaranteed to have a previewUrl — tracks without
+    one are never accepted at any stage.
+
+    Strategy (in priority order for each artist):
+      Pass A — Search by term variation, accept only tracks WITH previewUrl.
+      Pass B — Lookup known album collection IDs via the iTunes Lookup API
+               for any remaining budget.  Lookup results are region-agnostic
+               and have consistent preview availability on the US storefront.
+
+    Both passes use country=US, lang=en_us, explicit=Yes to maximise the
+    pool of available previews regardless of the server's geographic region.
     """
-    # Per-artist search term variations — tried in order until budget is met.
     ARTIST_SEARCH_TERMS: dict[str, list[str]] = {
         "Aphex Twin": [
             "Aphex Twin",
@@ -325,6 +433,8 @@ async def _fetch_artist_tracks(limit_per_artist: int) -> dict[int, dict]:
             "Aphex Twin Drukqs",
             "Aphex Twin Come to Daddy",
             "Aphex Twin Windowlicker",
+            "Aphex Twin Syro",
+            "Richard D James",
         ],
         "Boards of Canada": [
             "Boards of Canada",
@@ -332,6 +442,7 @@ async def _fetch_artist_tracks(limit_per_artist: int) -> dict[int, dict]:
             "Boards of Canada Geogaddi",
             "Boards of Canada Tomorrow's Harvest",
             "Boards of Canada Campfire Headphase",
+            "Boards of Canada Twoism",
         ],
         "Squarepusher": [
             "Squarepusher",
@@ -340,6 +451,7 @@ async def _fetch_artist_tracks(limit_per_artist: int) -> dict[int, dict]:
             "Squarepusher Go Plastic",
             "Squarepusher Hello Everything",
             "Tom Jenkinson Squarepusher",
+            "Squarepusher Budakhan Mindphone",
         ],
     }
 
@@ -349,54 +461,50 @@ async def _fetch_artist_tracks(limit_per_artist: int) -> dict[int, dict]:
     async with httpx.AsyncClient(timeout=30.0) as client:
         for artist in ARTISTS:
             artist_collected: dict[int, dict] = {}
-            search_terms = ARTIST_SEARCH_TERMS.get(artist, [artist])
+            search_terms  = ARTIST_SEARCH_TERMS.get(artist, [artist])
+            collection_ids = ARTIST_COLLECTION_IDS.get(artist, [])
 
+            # ── Pass A: search-based, previews only ──────────────────────────
             for term in search_terms:
-                # Budget already met for this artist — stop trying more terms.
                 if len(artist_collected) >= per_artist:
                     break
                 try:
-                    params = {"term": term, "limit": 200, "media": "music", "entity": "song"}
+                    params = {
+                        **_ITUNES_BASE_PARAMS,
+                        "term":   term,
+                        "limit":  200,
+                        "media":  "music",
+                        "entity": "song",
+                    }
                     resp = await client.get(f"{ITUNES_API_BASE_URL}/search", params=params)
                     if resp.status_code != 200:
-                        console.log(f"   ⚠️ iTunes search failed for '{term}': HTTP {resp.status_code}")
+                        console.log(
+                            f"   ⚠️ iTunes search failed for '{term}': "
+                            f"HTTP {resp.status_code}"
+                        )
                         await asyncio.sleep(0.5)
                         continue
 
-                    results = resp.json().get("results", [])
-                    # Pass 1: prefer tracks WITH a previewUrl to fill the budget.
-                    for track in results:
+                    for track in resp.json().get("results", []):
                         if len(artist_collected) >= per_artist:
                             break
-                        tid = track.get("trackId")
-                        pid = -int(tid) if tid else None
-                        if (pid and track.get("previewUrl")
-                                and pid not in collected
-                                and pid not in artist_collected):
-                            track["_source_artist"] = artist
-                            track["_search_term"] = term
-                            artist_collected[pid] = track
+                        tid         = track.get("trackId")
+                        preview_url = (track.get("previewUrl") or "").strip()
+                        pid         = -int(tid) if tid else None
 
-                    # Pass 2: if still under budget, accept tracks WITHOUT a
-                    # previewUrl so the per-artist slot count is accurate.
-                    # _upsert_track_to_db will skip these during audio extraction
-                    # but they won't starve other artists' budgets.
-                    if len(artist_collected) < per_artist:
-                        for track in results:
-                            if len(artist_collected) >= per_artist:
-                                break
-                            tid = track.get("trackId")
-                            pid = -int(tid) if tid else None
-                            if (pid
-                                    and pid not in collected
-                                    and pid not in artist_collected):
-                                track["_source_artist"] = artist
-                                track["_search_term"] = term
-                                track["_no_preview"] = True
-                                artist_collected[pid] = track
+                        # Hard gate: only accept tracks with a real preview URL
+                        if not pid or not preview_url:
+                            continue
+                        if pid in collected or pid in artist_collected:
+                            continue
+
+                        track["_source_artist"] = artist
+                        track["_search_term"]   = term
+                        artist_collected[pid]   = track
 
                     console.log(
-                        f"   🎵 '{term}': {len(artist_collected)}/{per_artist} for {artist}"
+                        f"   🎵 Search '{term}': "
+                        f"{len(artist_collected)}/{per_artist} for {artist}"
                     )
                     await asyncio.sleep(0.2)
 
@@ -404,17 +512,47 @@ async def _fetch_artist_tracks(limit_per_artist: int) -> dict[int, dict]:
                     console.log(f"   ⚠️ Artist fetch error for '{term}': {e}")
                     await asyncio.sleep(0.5)
 
+            # ── Pass B: lookup-based fallback if still under budget ──────────
+            if len(artist_collected) < per_artist and collection_ids:
+                console.log(
+                    f"   🔍 {artist}: {len(artist_collected)}/{per_artist} after search — "
+                    f"trying {len(collection_ids)} collection lookups"
+                )
+                already_seen = set(collected.keys()) | set(artist_collected.keys())
+
+                for cid in collection_ids:
+                    if len(artist_collected) >= per_artist:
+                        break
+
+                    lookup_tracks = await _lookup_collection_tracks(
+                        client, cid, artist, already_seen
+                    )
+                    for track in lookup_tracks:
+                        if len(artist_collected) >= per_artist:
+                            break
+                        tid = track.get("trackId")
+                        pid = -int(tid) if tid else None
+                        if not pid or pid in already_seen:
+                            continue
+                        artist_collected[pid] = track
+                        already_seen.add(pid)
+
+                    await asyncio.sleep(0.2)
+
             collected.update(artist_collected)
             console.log(
-                f"   ✅ Artist '{artist}': {len(artist_collected)} tracks collected "
-                f"across {len(search_terms)} search terms (budget={per_artist})"
+                f"   ✅ Artist '{artist}': {len(artist_collected)} tracks with previews "
+                f"(budget={per_artist})"
             )
 
-    # Final trim to global cap — safety net only.
+    # Safety trim to global cap
     if len(collected) > TOPCHARTS_TARGET_COUNT:
         collected = dict(list(collected.items())[:TOPCHARTS_TARGET_COUNT])
 
-    console.log(f"   ✅ _fetch_artist_tracks: {len(collected)} total across {len(ARTISTS)} artists")
+    console.log(
+        f"   ✅ _fetch_artist_tracks: {len(collected)} total across {len(ARTISTS)} artists "
+        f"(all have previewUrl)"
+    )
     return collected
 
 
@@ -422,6 +560,10 @@ async def _fetch_broad_tracks(exclude_pids: set[int], target: int) -> dict[int, 
     """
     Fetch up to `target` popular iTunes tracks via ITUNES_SEARCH_TERMS,
     skipping any pid already in `exclude_pids`.
+
+    ALL returned tracks are guaranteed to have a previewUrl.
+    Uses country=US, lang=en_us, explicit=Yes for maximum availability.
+
     Returns a pid → track dict.
     """
     collected: dict[int, dict] = {}
@@ -431,25 +573,40 @@ async def _fetch_broad_tracks(exclude_pids: set[int], target: int) -> dict[int, 
             if len(collected) >= target:
                 break
             try:
-                params = {"term": term, "limit": 200, "media": "music", "entity": "song"}
+                params = {
+                    **_ITUNES_BASE_PARAMS,
+                    "term":   term,
+                    "limit":  200,
+                    "media":  "music",
+                    "entity": "song",
+                }
                 resp = await client.get(f"{ITUNES_API_BASE_URL}/search", params=params)
                 if resp.status_code != 200:
                     continue
+
                 for track in resp.json().get("results", []):
                     if len(collected) >= target:
                         break
-                    tid = track.get("trackId")
-                    pid = -int(tid) if tid else None
-                    if (pid and track.get("previewUrl")
-                            and pid not in exclude_pids
-                            and pid not in collected):
-                        track["_source_term"] = term
-                        collected[pid] = track
+                    tid         = track.get("trackId")
+                    preview_url = (track.get("previewUrl") or "").strip()
+                    pid         = -int(tid) if tid else None
+
+                    # Hard gate: only accept tracks with a real preview URL
+                    if not pid or not preview_url:
+                        continue
+                    if pid in exclude_pids or pid in collected:
+                        continue
+
+                    track["_source_term"] = term
+                    collected[pid]        = track
+
                 await asyncio.sleep(0.1)
             except Exception as e:
                 console.log(f"   ⚠️ Broad fetch error for '{term}': {e}")
 
-    console.log(f"   ✅ _fetch_broad_tracks: {len(collected)} total")
+    console.log(
+        f"   ✅ _fetch_broad_tracks: {len(collected)} total (all have previewUrl)"
+    )
     return collected
 
 
@@ -461,13 +618,21 @@ async def _upsert_track_to_db(track: dict, loop) -> bool:
     """
     Extract audio features for `track` and INSERT or UPDATE the row in
     Products + AudioFeatures + Stock.  Returns True on success.
-    Existing rows have their audio features re-extracted so every hourly
-    refresh reflects the latest feature data.
 
+    Requires both trackId AND a non-empty previewUrl — tracks missing either
+    are rejected immediately.  By the time a track reaches this function it
+    should already have a previewUrl (enforced in _fetch_artist_tracks and
+    _fetch_broad_tracks), but this is a final safety net.
     """
     tid         = track.get("trackId")
-    preview_url = track.get("previewUrl")
+    preview_url = (track.get("previewUrl") or "").strip()
+
+    # Final hard gate — should never trigger if fetch functions did their job
     if not tid or not preview_url:
+        console.log(
+            f"   ⚠️ _upsert_track_to_db: rejecting track "
+            f"'{track.get('trackName', tid)}' — missing trackId or previewUrl"
+        )
         return False
 
     product_id = -int(tid)
@@ -478,8 +643,8 @@ async def _upsert_track_to_db(track: dict, loop) -> bool:
     if not features:
         return False
 
-    genre_label  = _classify_features(features)
-    actual_genre = track.get("primaryGenreName", "Unknown")
+    genre_label     = _classify_features(features)
+    actual_genre    = track.get("primaryGenreName", "Unknown")
     predicted_genre = ml_service.predict_real_genre(features) or genre_label
 
     mfcc_list              = _parse_json_list(features.get("mfcc_mean"), 13)
@@ -669,6 +834,7 @@ async def get_topcharts(artists: str | None = None, limit_per_artist: int = 50):
                     LEFT JOIN Stock s     ON s.ProductID  = p.ProductID
                     WHERE p.ProductID < 0
                       AND COALESCE(s.IsAvailable, 1) = 1
+                      AND (p.preview_url IS NOT NULL AND p.preview_url != '')
                     ORDER BY p.ProductID DESC
                     """
                 )
@@ -697,8 +863,12 @@ async def get_topcharts(artists: str | None = None, limit_per_artist: int = 50):
         for row in rows:
             pid     = int(row["ProductID"])
             abs_tid = abs(pid)
-            preview = row.get("preview_url") or ""
+            preview = (row.get("preview_url") or "").strip()
             artwork = row.get("albumCoverImageUrl") or ""
+
+            # Extra safety: skip any DB row that somehow has no preview URL
+            if not preview:
+                continue
 
             song = {
                 "id":               abs_tid,
@@ -746,7 +916,7 @@ async def get_topcharts(artists: str | None = None, limit_per_artist: int = 50):
             features_map[str(abs_tid)]  = entry
             features_map[str(-abs_tid)] = entry
 
-        console.log(f"✅ get_topcharts: serving {len(songs)} songs from DB")
+        console.log(f"✅ get_topcharts: serving {len(songs)} songs from DB (all have previewUrl)")
         return {
             "status":   "success",
             "count":    len(songs),
@@ -768,7 +938,13 @@ async def get_topcharts(artists: str | None = None, limit_per_artist: int = 50):
 async def search_itunes(term: str, limit: int = 200, media: str = "music", entity: str = "song"):
     """Proxy endpoint for iTunes Search API."""
     try:
-        params = {"term": term, "limit": limit, "media": media, "entity": entity}
+        params = {
+            **_ITUNES_BASE_PARAMS,
+            "term":   term,
+            "limit":  limit,
+            "media":  media,
+            "entity": entity,
+        }
         async with httpx.AsyncClient(timeout=15.0) as client:
             response = await client.get(f"{ITUNES_API_BASE_URL}/search", params=params)
             if response.status_code != 200:
@@ -790,7 +966,6 @@ async def clear_imported_songs():
     """Delete all imported iTunes songs (negative ProductIDs) from the database."""
     try:
         console.log("🗑️  Starting cleanup of imported songs...")
-        deleted_count = 0
 
         with get_db_connection() as conn:
             if conn:
@@ -799,19 +974,15 @@ async def clear_imported_songs():
                                 "Sold_Products", "Purchased_Products", "CustomerSummary",
                                 "Payments", "Order_Items", "AudioFeatures", "Products", "Stock"):
                         _safe_execute(cursor, f"DELETE FROM {tbl} WHERE ProductID < 0")
-
-                    cursor.execute("SELECT ROW_COUNT() AS c")
-                    products_deleted = deleted_count  # already 0; row count tracked below
                     conn.commit()
-                    # Re-query for accurate count
                     cursor.execute("SELECT COUNT(*) AS c FROM Products WHERE ProductID < 0")
                     still_remaining = int((cursor.fetchone() or {}).get("c") or 0)
                     console.log(f"   ✅ Cleanup complete — {still_remaining} imported products remaining")
 
-        console.log(f"🎉 Cleanup complete")
+        console.log("🎉 Cleanup complete")
         return {
-            "status":        "success",
-            "message":       "Successfully removed all imported songs from database",
+            "status":  "success",
+            "message": "Successfully removed all imported songs from database",
         }
 
     except Exception as e:
@@ -850,13 +1021,16 @@ async def refresh_topcharts():
     Step 1  Fetch up to TOPCHARTS_TARGET_COUNT (150) tracks from ARTISTS
             (Aphex Twin, Boards of Canada, Squarepusher) via iTunes Search.
             Each artist gets its own independent budget of
-            TOPCHARTS_TARGET_COUNT // len(ARTISTS) = 50 tracks so that a
-            slow or thin artist catalogue never starves the others.
+            TOPCHARTS_TARGET_COUNT // len(ARTISTS) = 50 tracks.
+            Pass A uses search terms; Pass B falls back to iTunes Lookup API
+            against known collection IDs if search yields too few previews.
+            ALL tracks are guaranteed to have a previewUrl.
     Step 2  Fetch up to ITUNES_SEARCH_TARGET_COUNT (75) additional popular
             tracks via broad ITUNES_SEARCH_TERMS, excluding artist tracks.
+            ALL tracks are guaranteed to have a previewUrl.
     Step 3  For every track in both pools — whether new or already in DB —
             re-extract audio features and UPDATE (or INSERT) Products +
-            AudioFeatures + Stock, so every hourly cycle refreshes feature data.
+            AudioFeatures + Stock.
     Step 4  Mark any previously-available imported track that is no longer in
             the live pool as unavailable in Stock.
     Step 5  Validate library songs (ProductID > 0).
@@ -880,7 +1054,7 @@ async def refresh_topcharts():
         artist_tracks = await _fetch_artist_tracks(per_artist)
 
         # ── STEP 2: fetch broad popular tracks (up to 75, no artist overlap) ─
-        broad_tracks  = await _fetch_broad_tracks(
+        broad_tracks = await _fetch_broad_tracks(
             exclude_pids=set(artist_tracks.keys()),
             target=ITUNES_SEARCH_TARGET_COUNT,
         )
@@ -891,10 +1065,11 @@ async def refresh_topcharts():
 
         console.log(
             f"   📡 Fetched: {len(artist_tracks)} artist + "
-            f"{len(broad_tracks)} broad = {len(live_pids)} total"
+            f"{len(broad_tracks)} broad = {len(live_pids)} total "
+            f"(all have previewUrl)"
         )
 
-        # ── STEP 3: upsert every live track (extract + INSERT/UPDATE) ─────────
+        # ── STEP 3: upsert every live track (extract + INSERT/UPDATE) ────────
         loop           = asyncio.get_running_loop()
         upserted_count = 0
         error_count    = 0
@@ -1045,7 +1220,7 @@ async def refresh_topcharts():
         console.log(f"❌ Store refresh error: {e}")
         import traceback; traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Refresh failed: {str(e)}")
-    
+
 
 @router.get("/api/itunes/topcharts-ranked")
 async def get_topcharts_ranked():
@@ -1060,8 +1235,7 @@ async def get_topcharts_ranked():
          popularity by default).
       3. Build a rank map: abs(trackId) → position (lower = more popular).
       4. Sort the DB songs by that rank, artist by artist in ARTISTS order.
-         Songs with no iTunes rank (e.g. newly imported, lookup miss) are
-         appended at the end of their artist group.
+         Songs with no iTunes rank are appended at the end of their artist group.
       5. Return the sorted list plus the features map (same shape as
          get_topcharts so the frontend can drop in as a replacement).
     """
@@ -1085,6 +1259,7 @@ async def get_topcharts_ranked():
                     LEFT JOIN Stock s     ON s.ProductID  = p.ProductID
                     WHERE p.ProductID < 0
                       AND COALESCE(s.IsAvailable, 1) = 1
+                      AND (p.preview_url IS NOT NULL AND p.preview_url != '')
                     """
                 )
                 return cursor.fetchall()
@@ -1097,12 +1272,11 @@ async def get_topcharts_ranked():
         if not rows:
             return {"status": "success", "count": 0, "songs": [], "features": {}, "source": "empty"}
 
-        # Build a quick lookup: abs_tid → row
+        # Build a quick lookup: abs_tid → row (IDM artists only)
         db_by_tid: dict[int, dict] = {}
         for row in rows:
             abs_tid = abs(int(row["ProductID"]))
             artist  = (row.get("ArtistName") or "").lower()
-            # Only include IDM artists
             if any(frag in artist for frag in ["aphex twin", "boards of canada", "squarepusher"]):
                 db_by_tid[abs_tid] = row
 
@@ -1110,12 +1284,13 @@ async def get_topcharts_ranked():
             return {"status": "success", "count": 0, "songs": [], "features": {}, "source": "empty"}
 
         # ── Step 2: fetch iTunes popularity rank for each artist ─────────────
-        rank_map: dict[int, int] = {}   # abs_tid → rank (0 = most popular)
+        rank_map: dict[int, int] = {}
 
         async with httpx.AsyncClient(timeout=20.0) as client:
             for artist in ARTISTS:
                 try:
                     params = {
+                        **_ITUNES_BASE_PARAMS,
                         "term":   artist,
                         "limit":  200,
                         "media":  "music",
@@ -1123,7 +1298,10 @@ async def get_topcharts_ranked():
                     }
                     resp = await client.get(f"{ITUNES_API_BASE_URL}/search", params=params)
                     if resp.status_code != 200:
-                        console.log(f"   ⚠️ iTunes rank fetch failed for '{artist}': HTTP {resp.status_code}")
+                        console.log(
+                            f"   ⚠️ iTunes rank fetch failed for '{artist}': "
+                            f"HTTP {resp.status_code}"
+                        )
                         continue
 
                     results = resp.json().get("results", [])
@@ -1132,7 +1310,9 @@ async def get_topcharts_ranked():
                         if tid:
                             rank_map[int(tid)] = position
 
-                    console.log(f"   🎵 iTunes rank fetch for '{artist}': {len(results)} results")
+                    console.log(
+                        f"   🎵 iTunes rank fetch for '{artist}': {len(results)} results"
+                    )
                     await asyncio.sleep(0.15)
 
                 except Exception as e:
@@ -1156,15 +1336,19 @@ async def get_topcharts_ranked():
             group.sort(key=lambda r: rank_map.get(abs(int(r["ProductID"])), 99999))
             sorted_rows.extend(group)
 
-        # ── Step 4: build response (same shape as get_topcharts) ────────────
+        # ── Step 4: build response (same shape as get_topcharts) ─────────────
         songs        = []
         features_map = {}
 
         for row in sorted_rows:
             pid     = int(row["ProductID"])
             abs_tid = abs(pid)
-            preview = row.get("preview_url") or ""
+            preview = (row.get("preview_url") or "").strip()
             artwork = row.get("albumCoverImageUrl") or ""
+
+            # Skip any DB row that somehow has no preview URL
+            if not preview:
+                continue
 
             song = {
                 "id":               abs_tid,
@@ -1213,7 +1397,9 @@ async def get_topcharts_ranked():
             features_map[str(abs_tid)]  = entry
             features_map[str(-abs_tid)] = entry
 
-        console.log(f"✅ get_topcharts_ranked: returning {len(songs)} songs sorted by iTunes popularity")
+        console.log(
+            f"✅ get_topcharts_ranked: returning {len(songs)} songs sorted by iTunes popularity"
+        )
         return {
             "status":   "success",
             "count":    len(songs),
