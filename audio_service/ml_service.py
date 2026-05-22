@@ -412,7 +412,7 @@ async def startup_cache():
                                 else:
                                     grid_svm = GridSearchCV(
                                         SVC(kernel='rbf', probability=True, class_weight='balanced'),
-                                        {'C': [0.001, 0.01, 0.1, 1], 'gamma': ['scale', 0.001, 0.01]},
+                                        {'C': [0.1, 1, 10, 100], 'gamma': ['scale', 0.1, 1]},
                                         cv=cv_folds, scoring='accuracy', refit=True
                                     )
                                     grid_svm.fit(X_train_scaled, y_train)
@@ -430,10 +430,10 @@ async def startup_cache():
                                     rf_val_score = float(best_model_rf.score(X_valid_scaled, y_valid))
                                     console.log(f"   RF val-score: {rf_val_score:.4f}")
 
-                                    max_k = min(17, n_train - 1)
-                                    knn_candidates = [k for k in [3, 5, 7, 9, 11, 13, 15, 17] if k <= max_k] or [max_k]
+                                    max_k = min(15, n_train - 1)
+                                    knn_candidates = [k for k in [13, 15] if k <= max_k] or [max_k]
                                     grid_knn = GridSearchCV(
-                                        KNeighborsClassifier(),
+                                        KNeighborsClassifier(weights='distance'),
                                         {'n_neighbors': knn_candidates},
                                         cv=cv_folds, refit=True
                                     )
@@ -443,8 +443,8 @@ async def startup_cache():
                                     console.log(f"   KNN val-score: {knn_val_score:.4f}")
 
                                     grid_lr = GridSearchCV(
-                                        LogisticRegression(max_iter=1000, class_weight='balanced'),
-                                        {'C': [0.001, 0.01, 0.1, 1, 10]},
+                                        LogisticRegression(max_iter=10000, class_weight='balanced'),
+                                        {'C': [0.1, 1, 10, 100, 1000]},
                                         cv=cv_folds, refit=True
                                     )
                                     grid_lr.fit(X_train_scaled, y_train)
@@ -539,7 +539,7 @@ async def startup_cache():
 
                                 best_model_name, best_stats = max(
                                     per_model_metrics.items(),
-                                    key=lambda kv: float(kv[1].get('val_score', 0.0)),
+                                    key=lambda kv: (float(kv[1].get('val_score', 0.0)), float(kv[1].get('test_acc', 0.0))),
                                 )
                                 best_val = float(best_stats.get('val_score', 0.0))
 
