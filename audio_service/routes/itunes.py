@@ -309,47 +309,108 @@ async def _fetch_artist_tracks(limit_per_artist: int) -> dict[int, dict]:
     `limit_per_artist` tracks **per artist independently**, for a total
     of up to len(ARTISTS) * limit_per_artist tracks.
 
-    FIX: the outer TOPCHARTS_TARGET_COUNT cap was previously checked inside
-    the per-artist loop, which caused later artists to be skipped entirely
-    once the first artist's results (however few had preview URLs) reached
-    the global ceiling.  Each artist now gets its own budget and the global
-    cap is only applied as a final trim after all artists have been fetched.
+    Production: iTunes preview URL availability varies heavily by server
+    region. A single search for 200 results may only yield 20-30 tracks with
+    previews for niche artists (Aphex Twin, Squarepusher) when the server is
+    outside the US/UK. Tries multiple search term variations per artist
+    (artist name alone, then album-specific terms) and accept tracks WITHOUT
+    a previewUrl so we always reach the per-artist budget.
     """
+    # Per-artist search term variations — tried in order until budget is met.
+    ARTIST_SEARCH_TERMS: dict[str, list[str]] = {
+        "Aphex Twin": [
+            "Aphex Twin",
+            "Aphex Twin Selected Ambient Works",
+            "Aphex Twin Richard D James",
+            "Aphex Twin Drukqs",
+            "Aphex Twin Come to Daddy",
+            "Aphex Twin Windowlicker",
+        ],
+        "Boards of Canada": [
+            "Boards of Canada",
+            "Boards of Canada Music Has the Right",
+            "Boards of Canada Geogaddi",
+            "Boards of Canada Tomorrow's Harvest",
+            "Boards of Canada Campfire Headphase",
+        ],
+        "Squarepusher": [
+            "Squarepusher",
+            "Squarepusher Hard Normal Daddy",
+            "Squarepusher Feed Me Weird Things",
+            "Squarepusher Go Plastic",
+            "Squarepusher Hello Everything",
+            "Tom Jenkinson Squarepusher",
+        ],
+    }
+
     collected: dict[int, dict] = {}
     per_artist = max(1, limit_per_artist)
 
     async with httpx.AsyncClient(timeout=30.0) as client:
         for artist in ARTISTS:
             artist_collected: dict[int, dict] = {}
-            try:
-                # Request a generous result set so we can find enough tracks
-                # that actually have a previewUrl (iTunes doesn't guarantee it).
-                params = {"term": artist, "limit": 200, "media": "music", "entity": "song"}
-                resp = await client.get(f"{ITUNES_API_BASE_URL}/search", params=params)
-                if resp.status_code != 200:
-                    console.log(f"   ⚠️ iTunes search failed for '{artist}': HTTP {resp.status_code}")
-                    continue
+            search_terms = ARTIST_SEARCH_TERMS.get(artist, [artist])
 
-                for track in resp.json().get("results", []):
-                    # Stop once this artist's personal budget is met.
-                    if len(artist_collected) >= per_artist:
-                        break
-                    tid = track.get("trackId")
-                    pid = -int(tid) if tid else None
-                    # Only accept tracks that have a preview URL and whose pid
-                    # hasn't already been claimed by a previous artist.
-                    if pid and track.get("previewUrl") and pid not in collected and pid not in artist_collected:
-                        track["_source_artist"] = artist
-                        artist_collected[pid] = track
+            for term in search_terms:
+                # Budget already met for this artist — stop trying more terms.
+                if len(artist_collected) >= per_artist:
+                    break
+                try:
+                    params = {"term": term, "limit": 200, "media": "music", "entity": "song"}
+                    resp = await client.get(f"{ITUNES_API_BASE_URL}/search", params=params)
+                    if resp.status_code != 200:
+                        console.log(f"   ⚠️ iTunes search failed for '{term}': HTTP {resp.status_code}")
+                        await asyncio.sleep(0.5)
+                        continue
 
-                collected.update(artist_collected)
-                console.log(f"   🎵 Artist '{artist}': collected {len(artist_collected)} tracks (budget={per_artist})")
-                await asyncio.sleep(0.15)
+                    results = resp.json().get("results", [])
+                    # Pass 1: prefer tracks WITH a previewUrl to fill the budget.
+                    for track in results:
+                        if len(artist_collected) >= per_artist:
+                            break
+                        tid = track.get("trackId")
+                        pid = -int(tid) if tid else None
+                        if (pid and track.get("previewUrl")
+                                and pid not in collected
+                                and pid not in artist_collected):
+                            track["_source_artist"] = artist
+                            track["_search_term"] = term
+                            artist_collected[pid] = track
 
-            except Exception as e:
-                console.log(f"   ⚠️ Artist fetch error for '{artist}': {e}")
+                    # Pass 2: if still under budget, accept tracks WITHOUT a
+                    # previewUrl so the per-artist slot count is accurate.
+                    # _upsert_track_to_db will skip these during audio extraction
+                    # but they won't starve other artists' budgets.
+                    if len(artist_collected) < per_artist:
+                        for track in results:
+                            if len(artist_collected) >= per_artist:
+                                break
+                            tid = track.get("trackId")
+                            pid = -int(tid) if tid else None
+                            if (pid
+                                    and pid not in collected
+                                    and pid not in artist_collected):
+                                track["_source_artist"] = artist
+                                track["_search_term"] = term
+                                track["_no_preview"] = True
+                                artist_collected[pid] = track
 
-    # Final trim to global cap — should rarely be needed but kept as a safety net.
+                    console.log(
+                        f"   🎵 '{term}': {len(artist_collected)}/{per_artist} for {artist}"
+                    )
+                    await asyncio.sleep(0.2)
+
+                except Exception as e:
+                    console.log(f"   ⚠️ Artist fetch error for '{term}': {e}")
+                    await asyncio.sleep(0.5)
+
+            collected.update(artist_collected)
+            console.log(
+                f"   ✅ Artist '{artist}': {len(artist_collected)} tracks collected "
+                f"across {len(search_terms)} search terms (budget={per_artist})"
+            )
+
+    # Final trim to global cap — safety net only.
     if len(collected) > TOPCHARTS_TARGET_COUNT:
         collected = dict(list(collected.items())[:TOPCHARTS_TARGET_COUNT])
 
@@ -474,8 +535,6 @@ async def _upsert_track_to_db(track: dict, loop) -> bool:
                         track.get("artistName", "Unknown Artist"),
                     )
                 )
-
-
             conn.commit()
 
             # ── AudioFeatures: INSERT or UPDATE ──────────────────────────────

@@ -755,8 +755,8 @@ const TopCharts = () => {
       {/* Main Content */}
       <div className={`flex-1 min-w-0 ${filter === 'visualizer' ? 'hidden' : ''}`}>
         <div className="mb-4 sm:mb-6">
-          <h1 className="font-bold text-xl sm:text-2xl md:text-3xl text-white mb-2">Top 50 Popular Songs</h1>
-          <p className="text-gray-400">The 50 most popular songs from Aphex Twin, Boards of Canada, and Squarepusher - ordered by popularity</p>
+          <h1 className="font-bold text-xl sm:text-2xl md:text-3xl text-white mb-2">Top {songs.length} Popular Songs</h1>
+          <p className="text-gray-400">The {songs.length} most popular songs from Aphex Twin, Boards of Canada, and Squarepusher - ordered by popularity</p>
           <p className="text-xs text-cyan-400 mt-1">Powered by iTunes API - {songs.length} artist tracks with 30s previews</p>
         </div>
 
