@@ -19,32 +19,15 @@ const startOfIsoWeek = (date) => {
   return d;
 };
 
-/**
- * Parse a date value that may be:
- *  - a JS Date already
- *  - an ISO string WITH timezone (e.g. "2025-05-06T14:30:00Z")
- *  - a Java LocalDateTime string WITHOUT timezone (e.g. "2025-05-06T14:30:00")
- *
- * For the no-timezone case we treat the value as LOCAL time by appending no
- * suffix (default JS behaviour), which is correct because the Spring server
- * and the browser are typically in the same timezone in a local-dev setup.
- * If your server is UTC and the browser is not, append "Z" here instead.
- */
 const parseDate = (value) => {
   if (!value) return null;
   if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
-
   const str = String(value).trim();
   if (!str) return null;
-
   const d = new Date(str);
   return Number.isNaN(d.getTime()) ? null : d;
 };
 
-/**
- * Returns true when `value` falls within [start, end).
- * Accepts any value accepted by parseDate.
- */
 const inRange = (value, start, end) => {
   const d = parseDate(value);
   if (!d) return false;
@@ -52,14 +35,13 @@ const inRange = (value, start, end) => {
 };
 
 // ---------------------------------------------------------------------------
-// Field accessors (handle camelCase & PascalCase from the API)
+// Field accessors
 // ---------------------------------------------------------------------------
 
 const getAvailableSince   = (item) => item.availableSince   ?? item.AvailableSince   ?? null;
 const getUnavailableSince = (item) => item.unavailableSince ?? item.UnavailableSince ?? null;
 const isItemAvailable     = (item) => item.isAvailable !== undefined ? item.isAvailable : item.available;
 
-// True if the product is a library song (positive ID), false if iTunes import (negative ID)
 const isLibrarySong = (item) => {
   const pid = Number(item.productId);
   return Number.isFinite(pid) && pid > 0;
@@ -69,19 +51,13 @@ const isLibrarySong = (item) => {
 // Merge helpers
 // ---------------------------------------------------------------------------
 
-/**
- * Returns the "recency score" of a stock row so we can compare two rows for
- * the same productId and decide which is more authoritative.
- */
 const getRowRecency = (item) => {
   const unavail = parseDate(getUnavailableSince(item));
   const avail   = parseDate(getAvailableSince(item));
   const id      = Number(item.id ?? item.stockId ?? item.StockID ?? 0);
-
   const latestDate = [unavail, avail]
     .filter(Boolean)
     .reduce((max, d) => (d > max ? d : max), new Date(0));
-
   return { latestDate, id };
 };
 
@@ -93,27 +69,13 @@ const moreRecentRow = (a, b) => {
   return ra.id >= rb.id ? a : b;
 };
 
-/**
- * Merge duplicate stock rows for the same productId.
- *
- * KEY FIX: We now keep ALL removal records independently of whether an
- * available record exists for the same product.  A product that was removed
- * and then re-added should appear in BOTH "Current Stock" AND the relevant
- * "Removed …" section for the week it was removed.
- *
- * Strategy per productId:
- *  - available rows  → keep only the most-recent one (the canonical live row)
- *  - unavailable rows → keep the most-recent one per productId as well, but
- *    ALWAYS include it in the output so the "Removed" sections can see it.
- */
 const mergeStockRows = (rows) => {
-  const availableByProduct   = new Map(); // productId → best available row
-  const unavailableByProduct = new Map(); // productId → best unavailable row
+  const availableByProduct   = new Map();
+  const unavailableByProduct = new Map();
 
   rows.forEach((item) => {
     const key = item?.productId;
     if (key === null || key === undefined) return;
-
     if (isItemAvailable(item)) {
       const current = availableByProduct.get(key);
       availableByProduct.set(key, current ? moreRecentRow(current, item) : item);
@@ -123,9 +85,6 @@ const mergeStockRows = (rows) => {
     }
   });
 
-  // Always emit both the available row AND the unavailable row for any given
-  // productId.  The section filters (inRange + isItemAvailable) determine
-  // which sections each row appears in — we must not pre-filter here.
   return [
     ...Array.from(availableByProduct.values()),
     ...Array.from(unavailableByProduct.values()),
@@ -167,42 +126,12 @@ const StockSidebar = () => {
         .getAllStock(email, currentUser?.password)
         .then(async (res) => {
           clearTimeout(timeout);
-
           const raw = res || [];
           console.log("RAW STOCK COUNT:", raw.length);
-
-          // ── Debug: log raw unavailable rows ──────────────────────────────
-          const rawUnavailable = raw.filter(
-            (item) => !isItemAvailable(item)
-          );
-          console.log("RAW UNAVAILABLE ROWS:", rawUnavailable.length, rawUnavailable);
-
-          // ── Debug: log all unique availableSince / unavailableSince values
-          raw.forEach((item) => {
-            const as = getAvailableSince(item);
-            const us = getUnavailableSince(item);
-            if (as || us) {
-              console.log(
-                `productId=${item.productId}`,
-                `available=${isItemAvailable(item)}`,
-                `availableSince=${as}`,
-                `unavailableSince=${us}`,
-                `parsed_as=${parseDate(as)}`,
-                `parsed_us=${parseDate(us)}`
-              );
-            }
-          });
-
           const merged = mergeStockRows(raw);
           console.log("MERGED STOCK COUNT:", merged.length);
-          console.log(
-            "MERGED UNAVAILABLE:",
-            merged.filter((i) => !isItemAvailable(i)).length,
-            merged.filter((i) => !isItemAvailable(i))
-          );
           setData(merged);
 
-          // Enrich with product names
           const uniqueProductIds = [...new Set(merged.map((r) => r.productId))];
           const map = {};
           await Promise.all(
@@ -397,32 +326,13 @@ const StockSidebar = () => {
                     const lastWeekStart = new Date(thisWeekStart);
                     lastWeekStart.setDate(lastWeekStart.getDate() - 7);
 
-                    // ── Debug week boundaries ─────────────────────────────
-                    console.log("Week boundaries:",
-                      "lastWeek:", lastWeekStart.toISOString(),
-                      "thisWeek:", thisWeekStart.toISOString(),
-                      "nextWeek:", nextWeekStart.toISOString()
-                    );
-
                     // ── Currently available ───────────────────────────────
                     const available = filteredData.filter(isItemAvailable);
-
-                    // ── Detect bulk-seeded timestamps ─────────────────────
-                    // Items added in the same second as 5+ other items are
-                    // considered bulk-seeded (migration/import) and must NOT
-                    // appear in "Added" sections — they weren't really "added
-                    // this week", they just got stamped during a data seed.
-                    const isBulkSeeded = (item) => {
-                      const d = parseDate(getAvailableSince(item));
-                      if (!d) return true;
-                      return d < thisWeekStart;
-                    };
 
                     // ── Added this week ───────────────────────────────────
                     const addedThisWeek = filteredData
                       .filter((item) =>
                         isItemAvailable(item) &&
-                        !isBulkSeeded(item) &&
                         inRange(getAvailableSince(item), thisWeekStart, nextWeekStart)
                       )
                       .sort((a, b) =>
@@ -434,7 +344,6 @@ const StockSidebar = () => {
                     const addedLastWeek = filteredData
                       .filter((item) =>
                         isItemAvailable(item) &&
-                        !isBulkSeeded(item) &&
                         inRange(getAvailableSince(item), lastWeekStart, thisWeekStart)
                       )
                       .sort((a, b) =>
@@ -443,11 +352,6 @@ const StockSidebar = () => {
                       );
 
                     // ── Removed this week ─────────────────────────────────
-                    // FIX: We check ALL rows (not just unavailable ones from
-                    // mergeStockRows) because a product may have been removed
-                    // AND re-added — in that case both an available AND an
-                    // unavailable row survive the merge and we want to show
-                    // the removal in the right section.
                     const removedThisWeek = filteredData
                       .filter((item) =>
                         !isItemAvailable(item) &&
@@ -469,7 +373,6 @@ const StockSidebar = () => {
                         (parseDate(getUnavailableSince(a))?.getTime() ?? 0)
                       );
 
-                    // ── Debug section counts ──────────────────────────────
                     console.log("Section counts →",
                       "available:", available.length,
                       "addedThisWeek:", addedThisWeek.length,
