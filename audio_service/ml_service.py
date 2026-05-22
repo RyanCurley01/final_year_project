@@ -126,11 +126,10 @@ visualization_data = None
 feature_scaler = None
 pca_reducer = None
 knn_classifier = None
-ensemble_classifier = None  # Voting ensemble: KNN + Random Forest + SVM
-best_classifier = None  # Whichever model scored highest during cross-validation
+ensemble_classifier = None
+best_classifier = None
 
-# Cache for extracted iTunes audio features
-itunes_features_cache: Dict[int, Dict] = {}
+_genre_knn_model_labels_hash = None
 
 # EXECUTION ORDER: Must be called at application startup (FastAPI 'on_event("startup")').
 # Initializes the cache and trains the scaler.
@@ -312,26 +311,22 @@ async def startup_cache():
                                     ('MinMaxScaler',   MinMaxScaler()),
                                     ('StandardScaler', StandardScaler()),
                                 ]:
-                                    # Fit on training data only — transform all splits
                                     scaler_obj.fit(X_train_raw)
                                     Xtr = scaler_obj.transform(X_train_raw)
                                     Xva = scaler_obj.transform(X_valid_raw)
+                                    Xte = scaler_obj.transform(X_test_raw)
 
-                                    # Clusters in full 51D scaled space 
                                     n_clusters_tmp = _select_n_clusters(Xtr)
                                     km_tmp = KMeans(n_clusters=n_clusters_tmp, random_state=42, n_init=10)
                                     y_tmp = np.array([f"Cluster {l}" for l in km_tmp.fit_predict(Xtr)])
-
-                                    # Map val indices to cluster labels using the fitted KMeans
                                     y_val_tmp = np.array([f"Cluster {l}" for l in km_tmp.predict(Xva)])
 
-                                    # Quick KNN cross-val accuracy as the scaler proxy metric
                                     knn_probe = KNeighborsClassifier(n_neighbors=min(5, len(Xtr)))
-                                    knn_probe.fit(Xtr, y_tmp)
-                                    probe_acc = float(knn_probe.score(Xva, y_val_tmp))
+                                    cv_scores = cross_val_score(knn_probe, Xtr, y_tmp, cv=min(3, len(Xtr)//2))
+                                    probe_acc = float(cv_scores.mean())
 
                                     model_performance_metrics[f"{scaler_name}_train"] = round(probe_acc, 4)
-                                    console.log(f"   {scaler_name} probe val-acc: {probe_acc:.4f}")
+                                    console.log(f"   {scaler_name} probe CV-acc: {probe_acc:.4f}")
 
                                     if probe_acc > best_val_acc:
                                         best_val_acc     = probe_acc
@@ -339,7 +334,7 @@ async def startup_cache():
                                         feature_scaler   = scaler_obj
                                         X_train_scaled   = Xtr
                                         X_valid_scaled   = Xva
-                                        X_test_scaled    = feature_scaler.transform(X_test_raw)
+                                        X_test_scaled    = Xte
 
                                 console.log(f"   ✅ Best scaler: {best_scaler_name} (probe val-acc={best_val_acc:.4f})")
                                 
@@ -358,10 +353,14 @@ async def startup_cache():
                                 best_sil = silhouette_score(X_train_scaled, y_train)
                                 console.log(f"   51D KMeans silhouette (train): {best_sil:.4f}")
 
-                                # PCA fitted on training data only
                                 pca_reducer = PCA(n_components=2)
                                 pca_reducer.fit(X_train_scaled)
-                                X_pca = pca_reducer.transform(X_train_scaled)
+                                X_pca_train = pca_reducer.transform(X_train_scaled)
+                                X_pca_valid = pca_reducer.transform(X_valid_scaled)
+                                X_pca_test = pca_reducer.transform(X_test_scaled)
+                                X_pca = np.vstack([X_pca_train, X_pca_valid, X_pca_test])
+
+                                y_all = np.concatenate([y_train, y_valid, y_test])
 
                                 # Update genre_cluster in cache for ALL samples using KMeans
                                 all_indices = np.concatenate([idx_train, idx_valid, idx_test])
@@ -381,14 +380,16 @@ async def startup_cache():
                                     with get_db_connection() as conn2:
                                         if conn2:
                                             with conn2.cursor() as cur2:
+                                                num_updated = 0
                                                 for i, orig_idx in enumerate(all_indices):
                                                     pid = feature_product_ids[orig_idx]
                                                     cur2.execute(
                                                         "UPDATE AudioFeatures SET GenreCluster = %s WHERE ProductID = %s",
                                                         (all_cluster_labels[i], pid)
                                                     )
+                                                    num_updated += cur2.rowcount
                                                 conn2.commit()
-                                    console.log(f"   ✅ Updated GenreCluster in DB for {len(feature_product_ids)} songs")
+                                    console.log(f"   ✅ Updated GenreCluster in DB for {num_updated} songs")
                                 except Exception as db_e:
                                     console.log(f"   ⚠️ Failed to write GenreCluster to DB: {db_e}")
                             
@@ -408,92 +409,64 @@ async def startup_cache():
                                     for m in [best_model_svm, best_model_rf, best_model_knn, best_model_lr]:
                                         m.fit(X_train_scaled, y_train)
                                 else:
-                                    # Support Vector Machine (RBF kernel for non-linear boundaries)
-                                    # refit=False: we select the best params manually by validation set score below
-                                    # Regularization: Lower C values = stronger regularization (more underfitting)
-                                    # Larger gamma = narrower kernel influence (can overfit with high C)
                                     grid_svm = GridSearchCV(
                                         SVC(kernel='rbf', probability=True),
                                         {'C': [0.0001, 0.001, 0.01, 0.1], 'gamma': ['scale', 0.001, 0.01]},
-                                        cv=cv_folds, scoring='accuracy', refit=False
+                                        cv=cv_folds, scoring='accuracy', refit=True
                                     )
                                     grid_svm.fit(X_train_scaled, y_train)
-                                    best_svm_params = max(
-                                        grid_svm.cv_results_['params'],
-                                        key=lambda p: SVC(kernel='rbf', probability=True, **p).fit(X_train_scaled, y_train).score(X_valid_scaled, y_valid)
-                                    )
-                                    best_model_svm = SVC(kernel='rbf', probability=True, **best_svm_params)
-                                    best_model_svm.fit(X_train_scaled, y_train)
-                                    console.log(f"   SVM best params: {best_svm_params}")
+                                    best_model_svm = grid_svm.best_estimator_
+                                    svm_val_score = float(best_model_svm.score(X_valid_scaled, y_valid))
+                                    console.log(f"   SVM val-score: {svm_val_score:.4f}")
 
-                                    # Random Forest Classifier
-                                    # Regularization: Limit tree depth, min_samples_split, min_samples_leaf
-                                    # This prevents trees from memorizing individual samples
                                     grid_rf = GridSearchCV(
                                         RandomForestClassifier(random_state=42, min_samples_leaf=10, min_samples_split=15),
                                         {'n_estimators': [50, 100], 'max_depth': [3, 5, 8], 'min_samples_leaf': [10, 15, 20]},
-                                        cv=cv_folds, scoring='accuracy', refit=False
+                                        cv=cv_folds, scoring='accuracy', refit=True
                                     )
                                     grid_rf.fit(X_train_scaled, y_train)
-                                    best_rf_params = max(
-                                        grid_rf.cv_results_['params'],
-                                        key=lambda p: RandomForestClassifier(random_state=42, **p).fit(X_train_scaled, y_train).score(X_valid_scaled, y_valid)
-                                    )
-                                    best_model_rf = RandomForestClassifier(random_state=42, **best_rf_params)
-                                    best_model_rf.fit(X_train_scaled, y_train)
-                                    console.log(f"   RF best params: {best_rf_params}")
+                                    best_model_rf = grid_rf.best_estimator_
+                                    rf_val_score = float(best_model_rf.score(X_valid_scaled, y_valid))
+                                    console.log(f"   RF val-score: {rf_val_score:.4f}")
 
-                                    # K-Nearest Neighbors
                                     max_k = min(15, n_train - 1)
                                     knn_candidates = [k for k in [7, 9, 11, 13, 15] if k <= max_k] or [max_k]
                                     grid_knn = GridSearchCV(
                                         KNeighborsClassifier(),
                                         {'n_neighbors': knn_candidates},
-                                        cv=cv_folds, refit=False
+                                        cv=cv_folds, refit=True
                                     )
                                     grid_knn.fit(X_train_scaled, y_train)
-                                    best_knn_params = max(
-                                        grid_knn.cv_results_['params'],
-                                        key=lambda p: KNeighborsClassifier(**p).fit(X_train_scaled, y_train).score(X_valid_scaled, y_valid)
-                                    )
-                                    best_model_knn = KNeighborsClassifier(**best_knn_params)
-                                    best_model_knn.fit(X_train_scaled, y_train)
-                                    console.log(f"   KNN best params: {best_knn_params}")
+                                    best_model_knn = grid_knn.best_estimator_
+                                    knn_val_score = float(best_model_knn.score(X_valid_scaled, y_valid))
+                                    console.log(f"   KNN val-score: {knn_val_score:.4f}")
 
-                                    # Logistic Regression
-                                    # Regularization via C: Lower C = stronger L2 regularization
                                     grid_lr = GridSearchCV(
                                         LogisticRegression(max_iter=1000),
-                                        {'C': [0.0001, 0.001, 0.01, 0.1]},
-                                        cv=cv_folds, refit=False
+                                        {'C': [0.00001, 0.0001, 0.001, 0.01]},
+                                        cv=cv_folds, refit=True
                                     )
                                     grid_lr.fit(X_train_scaled, y_train)
-                                    best_lr_params = max(
-                                        grid_lr.cv_results_['params'],
-                                        key=lambda p: LogisticRegression(max_iter=1000, **p).fit(X_train_scaled, y_train).score(X_valid_scaled, y_valid)
-                                    )
-                                    best_model_lr = LogisticRegression(max_iter=1000, **best_lr_params)
-                                    best_model_lr.fit(X_train_scaled, y_train)
-                                    console.log(f"   LR best params: {best_lr_params}")
+                                    best_model_lr = grid_lr.best_estimator_
+                                    lr_val_score = float(best_model_lr.score(X_valid_scaled, y_valid))
+                                    console.log(f"   LR val-score: {lr_val_score:.4f}")
 
-                                # 6. Combine training + validation sets for final model refit
                                 X_train_final = np.concatenate((X_train_scaled, X_valid_scaled), axis=0)
                                 y_train_final = np.concatenate((y_train, y_valid), axis=0)
 
-                                # 7. Per-model metrics
-                                per_model_metrics    = {}
+                                per_model_metrics = {}
                                 individual_full_models = {}
 
                                 tuned_models = {
-                                    'SVM':              best_model_svm,
-                                    'RandomForest':     best_model_rf,
-                                    'KNN':              best_model_knn,
+                                    'SVM': best_model_svm,
+                                    'RandomForest': best_model_rf,
+                                    'KNN': best_model_knn,
                                     'LogisticRegression': best_model_lr
                                 }
 
                                 for mname, mdl in tuned_models.items():
                                     train_sc = round(float(mdl.score(X_train_scaled, y_train)), 4)
-                                    val_sc   = round(float(mdl.score(X_valid_scaled, y_valid)), 4)
+                                    val_sc = round(float(mdl.score(X_valid_scaled, y_valid)), 4)
 
                                     mdl_full = clone(mdl)
                                     mdl_full.fit(X_train_final, y_train_final)
@@ -502,36 +475,35 @@ async def startup_cache():
                                     y_pred_m = mdl_full.predict(X_test_scaled)
                                     per_model_metrics[mname] = {
                                         'train_score': train_sc,
-                                        'val_score':   val_sc,
-                                        'test_acc':    round(float(mdl_full.score(X_test_scaled, y_test)), 4),
+                                        'val_score': val_sc,
+                                        'test_acc': round(float(mdl_full.score(X_test_scaled, y_test)), 4),
                                         'silhouette_score': round(float(best_sil), 4),
-                                        'optimal_k':   n_clusters,
-                                        'precision':   round(float(precision_score(y_test, y_pred_m, average='weighted', zero_division=0)), 4),
-                                        'recall':      round(float(recall_score(y_test, y_pred_m, average='weighted', zero_division=0)), 4),
-                                        'f1_score':    round(float(f1_score(y_test, y_pred_m, average='weighted', zero_division=0)), 4),
+                                        'optimal_k': n_clusters,
+                                        'precision': round(float(precision_score(y_test, y_pred_m, average='weighted', zero_division=0)), 4),
+                                        'recall': round(float(recall_score(y_test, y_pred_m, average='weighted', zero_division=0)), 4),
+                                        'f1_score': round(float(f1_score(y_test, y_pred_m, average='weighted', zero_division=0)), 4),
                                     }
                                     console.log(f"   {mname}: val={val_sc}, test={per_model_metrics[mname]['test_acc']}")
 
-                                # 8. Ensemble classifier (all 4 models)
                                 ens_val_model = VotingClassifier(
                                     estimators=[
                                         ('knn', best_model_knn),
-                                        ('rf',  best_model_rf),
+                                        ('rf', best_model_rf),
                                         ('svm', best_model_svm),
-                                        ('lr',  best_model_lr),
+                                        ('lr', best_model_lr),
                                     ],
                                     voting='soft'
                                 )
                                 ens_val_model.fit(X_train_scaled, y_train)
                                 ens_train_sc = round(float(ens_val_model.score(X_train_scaled, y_train)), 4)
-                                ens_val_sc   = round(float(ens_val_model.score(X_valid_scaled, y_valid)), 4)
+                                ens_val_sc = round(float(ens_val_model.score(X_valid_scaled, y_valid)), 4)
 
                                 ensemble_classifier = VotingClassifier(
                                     estimators=[
                                         ('knn', clone(best_model_knn)),
-                                        ('rf',  clone(best_model_rf)),
+                                        ('rf', clone(best_model_rf)),
                                         ('svm', clone(best_model_svm)),
-                                        ('lr',  clone(best_model_lr)),
+                                        ('lr', clone(best_model_lr)),
                                     ],
                                     voting='soft'
                                 )
@@ -541,31 +513,26 @@ async def startup_cache():
                                 y_pred_ens = ensemble_classifier.predict(X_test_scaled)
                                 per_model_metrics['Ensemble'] = {
                                     'train_score': ens_train_sc,
-                                    'val_score':   ens_val_sc,
-                                    'test_acc':    round(float(ensemble_classifier.score(X_test_scaled, y_test)), 4),
+                                    'val_score': ens_val_sc,
+                                    'test_acc': round(float(ensemble_classifier.score(X_test_scaled, y_test)), 4),
                                     'silhouette_score': round(float(best_sil), 4),
-                                    'optimal_k':   n_clusters,
-                                    'precision':   round(float(precision_score(y_test, y_pred_ens, average='weighted', zero_division=0)), 4),
-                                    'recall':      round(float(recall_score(y_test, y_pred_ens, average='weighted', zero_division=0)), 4),
-                                    'f1_score':    round(float(f1_score(y_test, y_pred_ens, average='weighted', zero_division=0)), 4),
+                                    'optimal_k': n_clusters,
+                                    'precision': round(float(precision_score(y_test, y_pred_ens, average='weighted', zero_division=0)), 4),
+                                    'recall': round(float(recall_score(y_test, y_pred_ens, average='weighted', zero_division=0)), 4),
+                                    'f1_score': round(float(f1_score(y_test, y_pred_ens, average='weighted', zero_division=0)), 4),
                                 }
                                 console.log(f"   Ensemble: val={ens_val_sc}, test={per_model_metrics['Ensemble']['test_acc']}")
 
-                                # 9. Select production classifier by highest validation score
                                 best_model_name, best_stats = max(
                                     per_model_metrics.items(),
-                                    key=lambda kv: (
-                                        float(kv[1].get('val_score', 0.0)),
-                                        float(kv[1].get('test_acc', 0.0)),
-                                        float(kv[1].get('precision', 0.0)),
-                                    ),
+                                    key=lambda kv: float(kv[1].get('val_score', 0.0)),
                                 )
                                 best_val = float(best_stats.get('val_score', 0.0))
 
                                 best_classifier = individual_full_models[best_model_name]
-                                knn_classifier  = individual_full_models.get('KNN')
+                                knn_classifier = individual_full_models.get('KNN')
                                 model_performance_metrics['best_model'] = best_model_name
-                                console.log(f"   ★ Selected model: {best_model_name} (val={best_val:.4f})")
+                                console.log(f"   ★ Selected model: {best_model_name} (val={best_val:.4f}, test={best_stats.get('test_acc', 0.0):.4f})")
 
                                 # 10. Decision boundary grids for visualisation.
                                 # Boundaries are computed in the 51D classifier
@@ -608,16 +575,15 @@ async def startup_cache():
 
                                 console.log(f"   🗺️ Decision boundaries generated for: {', '.join(all_model_boundaries.keys())}")
 
-                                # 11. Build visualization data for frontend
                                 visualization_data = {
-                                    "x":       X_pca[:, 0].tolist(),
-                                    "y":       X_pca[:, 1].tolist(),
-                                    "genres":  y_train.tolist(),   # 51D-derived cluster labels
-                                    "scaler":  best_scaler_name,
+                                    "x": X_pca[:, 0].tolist(),
+                                    "y": X_pca[:, 1].tolist(),
+                                    "genres": y_all.tolist(),
+                                    "scaler": best_scaler_name,
                                     "metrics": {**model_performance_metrics, "best_model": best_model_name},
-                                    "per_model_metrics":  per_model_metrics,
-                                    "decision_boundary":  all_model_boundaries.get('Ensemble', all_model_boundaries.get('KNN')),
-                                    "model_boundaries":   all_model_boundaries
+                                    "per_model_metrics": per_model_metrics,
+                                    "decision_boundary": all_model_boundaries.get('Ensemble', all_model_boundaries.get('KNN')),
+                                    "model_boundaries": all_model_boundaries
                                 }
                                 console.log("   ✅ Visualization data ready")
                             else:
@@ -714,9 +680,7 @@ def classify_genre_from_features(
     time_signature: str = '4/4',
     mfcc_mean: List[float] = None,
     chroma_mean: List[float] = None,
-    spectral_contrast_mean: List[float] = None,
-    current_cache_size: int = 0, 
-    current_cache_items: Dict = {}
+    spectral_contrast_mean: List[float] = None
 ) -> str:
     """
     Takes raw audio features from a new song and predicts its GenreCluster
@@ -767,17 +731,10 @@ def classify_genre_from_features(
             console.log(f"⚠️ classify_genre_from_features: expected 51D vector, got {len(input_vector)}D")
             return "Unknown"
 
-        features_array  = np.array([input_vector])
+        features_array = np.array([input_vector])
         features_scaled = feature_scaler.transform(features_array)
 
-        # Use best model → ensemble → KNN as fallback chain
-        if best_classifier is not None:
-            predicted = best_classifier.predict(features_scaled)[0]
-        elif ensemble_classifier is not None:
-            predicted = ensemble_classifier.predict(features_scaled)[0]
-        else:
-            predicted = knn_classifier.predict(features_scaled)[0]
-
+        predicted = best_classifier.predict(features_scaled)[0]
         return str(predicted)
         
     except Exception as e:
@@ -786,9 +743,9 @@ def classify_genre_from_features(
 
 
 # ── KNN-based real genre predictor (uses iTunes genres as training data) ────
-_genre_knn_model    = None
-_genre_knn_labels   = None
-_genre_knn_cache_size = 0
+_genre_knn_model = None
+_genre_knn_labels = None
+_genre_knn_model_labels_hash = None
 
 
 def _is_real_genre(genre: str) -> bool:
@@ -800,8 +757,7 @@ def _is_real_genre(genre: str) -> bool:
 
 
 def _train_genre_knn():
-    """Train (or retrain) the genre KNN from cached songs with real genre labels."""
-    global _genre_knn_model, _genre_knn_labels, _genre_knn_cache_size
+    global _genre_knn_model, _genre_knn_labels, _genre_knn_model_labels_hash
 
     train_vectors, train_labels = [], []
     for pid, data in audio_features_cache.items():
@@ -809,8 +765,6 @@ def _train_genre_knn():
         if not _is_real_genre(genre):
             continue
         
-        # Uses the shared builder so genre-KNN vectors are always
-        # structured identically to the cluster classifier training vectors.
         vec = _build_feature_vector(data)
         if len(vec) != 51:
             continue
@@ -818,40 +772,38 @@ def _train_genre_knn():
         train_labels.append(genre)
 
     if len(train_vectors) < 3:
-        _genre_knn_model  = None
+        _genre_knn_model = None
         _genre_knn_labels = None
+        _genre_knn_model_labels_hash = None
+        return
+
+    labels_hash = hash(tuple(sorted(set(train_labels))))
+    if _genre_knn_model is not None and _genre_knn_model_labels_hash == labels_hash:
         return
 
     X = np.array(train_vectors)
     if feature_scaler is not None:
         X = feature_scaler.transform(X)
 
-    k   = min(5, len(train_vectors))
+    k = min(5, len(train_vectors))
     clf = KNeighborsClassifier(n_neighbors=k)
     clf.fit(X, train_labels)
 
-    _genre_knn_model    = clf
-    _genre_knn_labels   = list(set(train_labels))
-    _genre_knn_cache_size = len(audio_features_cache)
+    _genre_knn_model = clf
+    _genre_knn_labels = list(set(train_labels))
+    _genre_knn_model_labels_hash = labels_hash
     console.log(f"🎵 Trained genre KNN: {len(train_vectors)} songs, {len(_genre_knn_labels)} genres")
 
 
 def predict_real_genre(features: dict) -> Optional[str]:
-    """
-    Predict a real genre label (e.g. 'Electronic', 'Pop') for a song
-    using KNN trained on iTunes songs with known genres.
-    Returns None if not enough training data is available.
-    """
-    global _genre_knn_model, _genre_knn_cache_size
+    global _genre_knn_model, _genre_knn_model_labels_hash
 
-    if _genre_knn_model is None or len(audio_features_cache) - _genre_knn_cache_size > 20:
-        _train_genre_knn()
+    _train_genre_knn()
 
     if _genre_knn_model is None:
         return None
 
     try:
-        # Shared builder ensures consistent vector structure
         vec = _build_feature_vector(features)
         if len(vec) != 51:
             return None
