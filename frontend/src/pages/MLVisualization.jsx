@@ -218,7 +218,7 @@ const MLVisualization = () => {
 
           <div className="bg-gray-700/50 p-4 rounded-lg">
             <h4 className="text-gray-400 text-sm mb-1">Validation Score</h4>
-            <p className="text-2xl font-bold" style={{ color: accentColor }}>{modelMetrics.val_score !== undefined ? modelMetrics.val_score : 'N/A'}</p>
+            <p className="text-2xl font-bold" style={{ color: accentColor }}>{modelMetrics.val_score !== undefined ? Number(modelMetrics.val_score).toFixed(4) : 'N/A'}</p>
             <p className="text-xs text-gray-500">Cross-validated validation accuracy</p>
           </div>
 
@@ -365,7 +365,7 @@ const MLVisualization = () => {
                           </div>
                         </td>
                         <td className={`py-3 text-center ${isBest ? 'text-yellow-300 font-bold' : 'text-gray-300'}`}>{m.train_score !== undefined ? m.train_score : 'N/A'}</td>
-                        <td className={`py-3 text-center ${isBest ? 'text-yellow-300 font-bold' : 'text-gray-300'}`}>{m.val_score !== undefined ? m.val_score : 'N/A'}</td>
+                        <td className={`py-3 text-center ${isBest ? 'text-yellow-300 font-bold' : 'text-gray-300'}`}>{m.val_score !== undefined ? Number(m.val_score).toFixed(4) : 'N/A'}</td>
                         <td className={`py-3 text-center ${isBest ? 'text-yellow-300 font-bold' : 'text-gray-300'}`}>{m.test_acc !== undefined ? m.test_acc : 'N/A'}</td>
                         <td className={`py-3 text-center ${isBest ? 'text-yellow-300 font-bold' : 'text-gray-300'}`}>{m.precision !== undefined ? m.precision : 'N/A'}</td>
                         <td className={`py-3 text-center ${isBest ? 'text-yellow-300 font-bold' : 'text-gray-300'}`}>{m.recall !== undefined ? m.recall : 'N/A'}</td>
