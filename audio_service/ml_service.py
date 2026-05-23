@@ -417,7 +417,7 @@ async def startup_cache():
                                 else:
                                     grid_svm = GridSearchCV(
                                         SVC(kernel='rbf', probability=True, class_weight='balanced'),
-                                        {'C': [0.01, 0.1, 1.0], 'gamma': ['scale', 'auto', 0.1]},
+                                        {'C': [0.01, 0.1], 'gamma': ['scale', 'auto', 0.1]},
                                         cv=cv_folds, scoring='accuracy', refit=True, return_train_score=True
                                     )
                                     grid_svm.fit(X_train_scaled, y_train)
@@ -449,7 +449,7 @@ async def startup_cache():
 
                                     grid_lr = GridSearchCV(
                                         LogisticRegression(max_iter=10000, solver='lbfgs'),
-                                        {'C': [0.001, 0.01, 0.1, 1.0]},
+                                        {'C': [0.001, 0.01, 0.1]},
                                         cv=cv_folds, refit=True, return_train_score=True
                                     )
                                     grid_lr.fit(X_train_scaled, y_train)
