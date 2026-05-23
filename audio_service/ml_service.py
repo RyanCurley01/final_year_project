@@ -444,7 +444,7 @@ async def startup_cache():
 
                                     grid_lr = GridSearchCV(
                                         LogisticRegression(max_iter=10000, class_weight='balanced'),
-                                        {'C': [0.1, 1, 10, 100, 1000]},
+                                        {'C': [0.001, 0.01, 0.1, 1]},
                                         cv=cv_folds, refit=True
                                     )
                                     grid_lr.fit(X_train_scaled, y_train)
@@ -458,6 +458,13 @@ async def startup_cache():
                                 per_model_metrics = {}
                                 individual_full_models = {}
 
+                                grid_searches = {
+                                    'SVM': grid_svm,
+                                    'RandomForest': grid_rf,
+                                    'KNN': grid_knn,
+                                    'LogisticRegression': grid_lr
+                                }
+                                
                                 tuned_models = {
                                     'SVM': best_model_svm,
                                     'RandomForest': best_model_rf,
@@ -466,13 +473,9 @@ async def startup_cache():
                                 }
 
                                 for mname, mdl in tuned_models.items():
-                                    try:
-                                        cv_train = max(2, min(cv_folds, len(X_train_scaled)))
-                                        train_scores = cross_val_score(mdl, X_train_scaled, y_train, cv=cv_train, scoring='accuracy')
-                                        train_sc = round(float(train_scores.mean()), 4)
-                                    except Exception:
-                                        train_sc = round(float(mdl.score(X_train_scaled, y_train)), 4)
-
+                                    # Use GridSearchCV's CV results for honest training score (from CV folds, not re-fit on same data)
+                                    grid = grid_searches[mname]
+                                    train_sc = round(float(grid.cv_results_['mean_train_score'][grid.best_index_]), 4)
                                     val_sc = round(float(mdl.score(X_valid_scaled, y_valid)), 4)
 
                                     mdl_full = clone(mdl)
@@ -501,15 +504,27 @@ async def startup_cache():
                                     ],
                                     voting='soft'
                                 )
+                                
+                                # Use StratifiedKFold for honest ensemble training score evaluation
+                                skf = StratifiedKFold(n_splits=cv_folds, shuffle=True, random_state=42)
+                                ens_train_scores = []
+                                for train_idx, val_idx in skf.split(X_train_scaled, y_train):
+                                    X_tr, X_vl = X_train_scaled[train_idx], X_train_scaled[val_idx]
+                                    y_tr, y_vl = y_train[train_idx], y_train[val_idx]
+                                    ens_model_cv = VotingClassifier(
+                                        estimators=[
+                                            ('knn', clone(best_model_knn)),
+                                            ('rf', clone(best_model_rf)),
+                                            ('svm', clone(best_model_svm)),
+                                            ('lr', clone(best_model_lr)),
+                                        ],
+                                        voting='soft'
+                                    )
+                                    ens_model_cv.fit(X_tr, y_tr)
+                                    ens_train_scores.append(ens_model_cv.score(X_tr, y_tr))
+                                ens_train_sc = round(float(np.mean(ens_train_scores)), 4)
+                                
                                 ens_val_model.fit(X_train_scaled, y_train)
-                                
-                                try:
-                                    cv_train = max(2, min(cv_folds, len(X_train_scaled)))
-                                    ens_train_scores = cross_val_score(ens_val_model, X_train_scaled, y_train, cv=cv_train, scoring='accuracy')
-                                    ens_train_sc = round(float(ens_train_scores.mean()), 4)
-                                except Exception:
-                                    ens_train_sc = round(float(ens_val_model.score(X_train_scaled, y_train)), 4)
-                                
                                 ens_val_sc = round(float(ens_val_model.score(X_valid_scaled, y_valid)), 4)
 
                                 ensemble_classifier = VotingClassifier(
