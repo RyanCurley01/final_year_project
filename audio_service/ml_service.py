@@ -481,8 +481,9 @@ async def startup_cache():
                                     # Get training score: from GridSearchCV CV results if available, else from cross_val_score
                                     grid = grid_searches[mname]
                                     if grid is not None and used_gridsearch:
-                                        # Use GridSearchCV's CV results for honest training score (from CV folds, not re-fit on same data)
-                                        train_sc = round(float(grid.cv_results_['mean_train_score'][grid.best_index_]), 4)
+                                        # Use GridSearchCV's CV *test* score for an honest estimate
+                                        # (mean_test_score is the score on held-out folds during CV)
+                                        train_sc = round(float(grid.cv_results_['mean_test_score'][grid.best_index_]), 4)
                                     else:
                                         # Fallback: compute via cross_val_score on the already-fitted model
                                         try:
@@ -524,7 +525,7 @@ async def startup_cache():
                                 # Use StratifiedKFold for honest ensemble training score evaluation (if we have enough folds)
                                 if used_gridsearch and cv_folds >= 2:
                                     skf = StratifiedKFold(n_splits=cv_folds, shuffle=True, random_state=42)
-                                    ens_train_scores = []
+                                    ens_val_scores = []
                                     for train_idx, val_idx in skf.split(X_train_scaled, y_train):
                                         X_tr, X_vl = X_train_scaled[train_idx], X_train_scaled[val_idx]
                                         y_tr, y_vl = y_train[train_idx], y_train[val_idx]
@@ -538,12 +539,27 @@ async def startup_cache():
                                             voting='soft'
                                         )
                                         ens_model_cv.fit(X_tr, y_tr)
-                                        ens_train_scores.append(ens_model_cv.score(X_tr, y_tr))
-                                    ens_train_sc = round(float(np.mean(ens_train_scores)), 4)
+                                        # Evaluate on the held-out fold (validation) to avoid optimistic train scores
+                                        ens_val_scores.append(ens_model_cv.score(X_vl, y_vl))
+                                    ens_train_sc = round(float(np.mean(ens_val_scores)), 4)
                                 else:
-                                    # Fallback: fit ensemble on full training set and evaluate on same data
-                                    ens_val_model.fit(X_train_scaled, y_train)
-                                    ens_train_sc = round(float(ens_val_model.score(X_train_scaled, y_train)), 4)
+                                    # Fallback: use cross_val_score on a fresh VotingClassifier to get held-out fold scores
+                                    try:
+                                        cv_train = max(2, min(cv_folds, len(X_train_scaled)))
+                                        vc = VotingClassifier(
+                                            estimators=[
+                                                ('knn', clone(best_model_knn)),
+                                                ('rf', clone(best_model_rf)),
+                                                ('svm', clone(best_model_svm)),
+                                                ('lr', clone(best_model_lr)),
+                                            ],
+                                            voting='soft'
+                                        )
+                                        ens_cv_scores = cross_val_score(vc, X_train_scaled, y_train, cv=cv_train, scoring='accuracy')
+                                        ens_train_sc = round(float(ens_cv_scores.mean()), 4)
+                                    except Exception:
+                                        ens_val_model.fit(X_train_scaled, y_train)
+                                        ens_train_sc = round(float(ens_val_model.score(X_train_scaled, y_train)), 4)
                                 
                                 ens_val_model.fit(X_train_scaled, y_train)
                                 ens_val_sc = round(float(ens_val_model.score(X_valid_scaled, y_valid)), 4)
