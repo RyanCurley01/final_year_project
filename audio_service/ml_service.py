@@ -417,7 +417,7 @@ async def startup_cache():
                                 else:
                                     grid_svm = GridSearchCV(
                                         SVC(kernel='rbf', probability=True),
-                                        {'C': [0.1, 1, 10, 100], 'gamma': ['scale', 0.1, 1]},
+                                        {'C': [0.001, 0.01, 0.1, 1], 'gamma': ['scale', 0.1, 1]},
                                         cv=cv_folds, scoring='accuracy', refit=True, return_train_score=True
                                     )
                                     grid_svm.fit(X_train_scaled, y_train)
@@ -427,7 +427,7 @@ async def startup_cache():
 
                                     grid_rf = GridSearchCV(
                                         RandomForestClassifier(random_state=42, min_samples_leaf=10, min_samples_split=15),
-                                        {'n_estimators': [50, 100], 'max_depth': [3, 5, 8], 'min_samples_leaf': [10, 15, 20]},
+                                        {'n_estimators': [25, 50], 'max_depth': [3, 5, 8], 'min_samples_leaf': [10, 15, 20]},
                                         cv=cv_folds, scoring='accuracy', refit=True, return_train_score=True
                                     )
                                     grid_rf.fit(X_train_scaled, y_train)
