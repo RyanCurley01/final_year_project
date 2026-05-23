@@ -493,7 +493,7 @@ async def startup_cache():
                                         except Exception:
                                             train_sc = round(float(mdl.score(X_train_scaled, y_train)), 4)
                                     
-                                    val_sc = round(float(mdl.score(X_valid_scaled, y_valid)), 4)
+                                    val_sc = float(mdl.score(X_valid_scaled, y_valid))
 
                                     mdl_full = clone(mdl)
                                     mdl_full.fit(X_train_final, y_train_final)
