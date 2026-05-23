@@ -416,7 +416,7 @@ async def startup_cache():
                                     grid_lr = None
                                 else:
                                     grid_svm = GridSearchCV(
-                                        SVC(kernel='rbf', probability=True, class_weight='balanced'),
+                                        SVC(kernel='rbf', probability=True),
                                         {'C': [0.1, 1, 10, 100], 'gamma': ['scale', 0.1, 1]},
                                         cv=cv_folds, scoring='accuracy', refit=True, return_train_score=True
                                     )
@@ -448,7 +448,7 @@ async def startup_cache():
                                     console.log(f"   KNN val-score: {knn_val_score:.4f}")
 
                                     grid_lr = GridSearchCV(
-                                        LogisticRegression(max_iter=10000, class_weight='balanced'),
+                                        LogisticRegression(max_iter=10000),
                                         {'C': [0.001, 0.01, 0.1, 1]},
                                         cv=cv_folds, refit=True, return_train_score=True
                                     )
