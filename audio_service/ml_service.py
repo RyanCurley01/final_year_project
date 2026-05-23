@@ -416,7 +416,7 @@ async def startup_cache():
                                     grid_lr = None
                                 else:
                                     grid_svm = GridSearchCV(
-                                        SVC(kernel='rbf', probability=True, class_weight='balanced'),
+                                        SVC(kernel='linear', probability=True, class_weight='balanced'),
                                         {'C': [0.01, 0.1], 'gamma': ['scale', 'auto']},
                                         cv=cv_folds, scoring='accuracy', refit=True, return_train_score=True
                                     )
