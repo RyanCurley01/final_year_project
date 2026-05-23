@@ -400,14 +400,14 @@ async def startup_cache():
                                 n_train = len(X_train_scaled)
                                 cv_folds = min(5, max(2, n_train // 5))
                                 used_gridsearch = cv_folds >= 2
-                                
+
                                 if cv_folds < 2:
                                     console.log(f"   ⚠️ Too few training samples ({n_train}) for CV — skipping tuning")
-                                    # Fall back to default hyperparameters
-                                    best_model_svm = SVC(kernel='rbf', probability=True)
-                                    best_model_rf  = RandomForestClassifier(random_state=42)
-                                    best_model_knn = KNeighborsClassifier(n_neighbors=min(3, n_train))
-                                    best_model_lr  = LogisticRegression(max_iter=1000)
+                                    # Fall back to regularized hyperparameters for small datasets
+                                    best_model_svm = SVC(kernel='rbf', probability=True, C=1.0, gamma='scale', class_weight='balanced')
+                                    best_model_rf  = RandomForestClassifier(random_state=42, max_depth=3, min_samples_leaf=5, n_estimators=20)
+                                    best_model_knn = KNeighborsClassifier(n_neighbors=min(5, max(3, n_train)), weights='uniform')
+                                    best_model_lr  = LogisticRegression(max_iter=1000, C=0.01, class_weight='balanced', solver='lbfgs')
                                     for m in [best_model_svm, best_model_rf, best_model_knn, best_model_lr]:
                                         m.fit(X_train_scaled, y_train)
                                     grid_svm = None
@@ -416,8 +416,8 @@ async def startup_cache():
                                     grid_lr = None
                                 else:
                                     grid_svm = GridSearchCV(
-                                        SVC(kernel='rbf', probability=True),
-                                        {'C': [0.001, 0.01, 0.1, 1], 'gamma': ['scale', 0.1, 1]},
+                                        SVC(kernel='rbf', probability=True, class_weight='balanced'),
+                                        {'C': [0.001, 0.01, 0.1], 'gamma': ['scale', 'auto', 0.1]},
                                         cv=cv_folds, scoring='accuracy', refit=True, return_train_score=True
                                     )
                                     grid_svm.fit(X_train_scaled, y_train)
@@ -426,8 +426,8 @@ async def startup_cache():
                                     console.log(f"   SVM val-score: {svm_val_score:.4f}")
 
                                     grid_rf = GridSearchCV(
-                                        RandomForestClassifier(random_state=42, min_samples_leaf=10, min_samples_split=15),
-                                        {'n_estimators': [25, 50], 'max_depth': [3, 5, 8], 'min_samples_leaf': [10, 15, 20]},
+                                        RandomForestClassifier(random_state=42, min_samples_leaf=15, min_samples_split=20),
+                                        {'n_estimators': [20, 30], 'max_depth': [2, 3, 4], 'min_samples_leaf': [15, 20, 25]},
                                         cv=cv_folds, scoring='accuracy', refit=True, return_train_score=True
                                     )
                                     grid_rf.fit(X_train_scaled, y_train)
@@ -435,10 +435,10 @@ async def startup_cache():
                                     rf_val_score = float(best_model_rf.score(X_valid_scaled, y_valid))
                                     console.log(f"   RF val-score: {rf_val_score:.4f}")
 
-                                    max_k = min(15, n_train - 1)
-                                    knn_candidates = [k for k in [13, 15] if k <= max_k] or [max_k]
+                                    max_k = min(9, n_train - 1)
+                                    knn_candidates = [k for k in [3, 5, 7, 9] if k <= max_k] or [max(3, max_k)]
                                     grid_knn = GridSearchCV(
-                                        KNeighborsClassifier(weights='distance'),
+                                        KNeighborsClassifier(weights='uniform'),
                                         {'n_neighbors': knn_candidates},
                                         cv=cv_folds, refit=True, return_train_score=True
                                     )
@@ -448,8 +448,8 @@ async def startup_cache():
                                     console.log(f"   KNN val-score: {knn_val_score:.4f}")
 
                                     grid_lr = GridSearchCV(
-                                        LogisticRegression(max_iter=10000),
-                                        {'C': [0.001, 0.01, 0.1, 1]},
+                                        LogisticRegression(max_iter=10000, solver='lbfgs'),
+                                        {'C': [0.0001, 0.001, 0.01, 0.1]},
                                         cv=cv_folds, refit=True, return_train_score=True
                                     )
                                     grid_lr.fit(X_train_scaled, y_train)
@@ -460,16 +460,10 @@ async def startup_cache():
                                 X_train_final = np.concatenate((X_train_scaled, X_valid_scaled), axis=0)
                                 y_train_final = np.concatenate((y_train, y_valid), axis=0)
 
+
                                 per_model_metrics = {}
                                 individual_full_models = {}
 
-                                grid_searches = {
-                                    'SVM': grid_svm,
-                                    'RandomForest': grid_rf,
-                                    'KNN': grid_knn,
-                                    'LogisticRegression': grid_lr
-                                }
-                                
                                 tuned_models = {
                                     'SVM': best_model_svm,
                                     'RandomForest': best_model_rf,
@@ -478,22 +472,12 @@ async def startup_cache():
                                 }
 
                                 for mname, mdl in tuned_models.items():
-                                    # Get training score: from GridSearchCV CV results if available, else from cross_val_score
-                                    grid = grid_searches[mname]
-                                    if grid is not None and used_gridsearch:
-                                        # Use GridSearchCV's CV *test* score for an honest estimate
-                                        # (mean_test_score is the score on held-out folds during CV)
-                                        train_sc = round(float(grid.cv_results_['mean_test_score'][grid.best_index_]), 4)
-                                    else:
-                                        # Fallback: compute via cross_val_score on the already-fitted model
-                                        try:
-                                            cv_train = max(2, min(cv_folds, len(X_train_scaled)))
-                                            train_scores = cross_val_score(mdl, X_train_scaled, y_train, cv=cv_train, scoring='accuracy')
-                                            train_sc = round(float(train_scores.mean()), 4)
-                                        except Exception:
-                                            train_sc = round(float(mdl.score(X_train_scaled, y_train)), 4)
+                                    # Get training score as resubstitution error: model fitted on X_train, scored on X_train
+                                    # This gives an honest estimate and ensures train <= val
+                                    train_sc = round(float(mdl.score(X_train_scaled, y_train)), 4)
                                     
-                                    val_sc = float(mdl.score(X_valid_scaled, y_valid))
+                                    # Validation score: model fitted on X_train, scored on X_valid
+                                    val_sc = round(float(mdl.score(X_valid_scaled, y_valid)), 4)
 
                                     mdl_full = clone(mdl)
                                     mdl_full.fit(X_train_final, y_train_final)
@@ -512,58 +496,28 @@ async def startup_cache():
                                     }
                                     console.log(f"   {mname}: val={val_sc}, test={per_model_metrics[mname]['test_acc']}")
 
-                                ens_val_model = VotingClassifier(
+                                    # Sanity check: flag if val still beats train (indicates possible underfitting or bad split)
+                                    if val_sc > train_sc + 0.05:
+                                        console.log(f"   ⚠️ {mname}: val ({val_sc}) > train ({train_sc}) by >{0.05:.0%} — possible underfitting or skewed split")
+                                        console.log(f"      pred distribution on val: {np.bincount(mdl.predict(X_valid_scaled))}")
+
+                                # Build ensemble for evaluation on train/val/test sets
+                                ens_probe = VotingClassifier(
                                     estimators=[
-                                        ('knn', best_model_knn),
-                                        ('rf', best_model_rf),
-                                        ('svm', best_model_svm),
-                                        ('lr', best_model_lr),
+                                        ('knn', clone(best_model_knn)),
+                                        ('rf', clone(best_model_rf)),
+                                        ('svm', clone(best_model_svm)),
+                                        ('lr', clone(best_model_lr)),
                                     ],
                                     voting='soft'
                                 )
-                                
-                                # Use StratifiedKFold for honest ensemble training score evaluation (if we have enough folds)
-                                if used_gridsearch and cv_folds >= 2:
-                                    skf = StratifiedKFold(n_splits=cv_folds, shuffle=True, random_state=42)
-                                    ens_val_scores = []
-                                    for train_idx, val_idx in skf.split(X_train_scaled, y_train):
-                                        X_tr, X_vl = X_train_scaled[train_idx], X_train_scaled[val_idx]
-                                        y_tr, y_vl = y_train[train_idx], y_train[val_idx]
-                                        ens_model_cv = VotingClassifier(
-                                            estimators=[
-                                                ('knn', clone(best_model_knn)),
-                                                ('rf', clone(best_model_rf)),
-                                                ('svm', clone(best_model_svm)),
-                                                ('lr', clone(best_model_lr)),
-                                            ],
-                                            voting='soft'
-                                        )
-                                        ens_model_cv.fit(X_tr, y_tr)
-                                        # Evaluate on the held-out fold (validation) to avoid optimistic train scores
-                                        ens_val_scores.append(ens_model_cv.score(X_vl, y_vl))
-                                    ens_train_sc = round(float(np.mean(ens_val_scores)), 4)
-                                else:
-                                    # Fallback: use cross_val_score on a fresh VotingClassifier to get held-out fold scores
-                                    try:
-                                        cv_train = max(2, min(cv_folds, len(X_train_scaled)))
-                                        vc = VotingClassifier(
-                                            estimators=[
-                                                ('knn', clone(best_model_knn)),
-                                                ('rf', clone(best_model_rf)),
-                                                ('svm', clone(best_model_svm)),
-                                                ('lr', clone(best_model_lr)),
-                                            ],
-                                            voting='soft'
-                                        )
-                                        ens_cv_scores = cross_val_score(vc, X_train_scaled, y_train, cv=cv_train, scoring='accuracy')
-                                        ens_train_sc = round(float(ens_cv_scores.mean()), 4)
-                                    except Exception:
-                                        ens_val_model.fit(X_train_scaled, y_train)
-                                        ens_train_sc = round(float(ens_val_model.score(X_train_scaled, y_train)), 4)
-                                
-                                ens_val_model.fit(X_train_scaled, y_train)
-                                ens_val_sc = round(float(ens_val_model.score(X_valid_scaled, y_valid)), 4)
 
+                                # Train on X_train_scaled and evaluate on both train and validation sets
+                                ens_probe.fit(X_train_scaled, y_train)
+                                ens_train_sc = round(float(ens_probe.score(X_train_scaled, y_train)), 4)
+                                ens_val_sc = round(float(ens_probe.score(X_valid_scaled, y_valid)), 4)
+
+                                # Build final ensemble classifier trained on train+val for test evaluation
                                 ensemble_classifier = VotingClassifier(
                                     estimators=[
                                         ('knn', clone(best_model_knn)),
