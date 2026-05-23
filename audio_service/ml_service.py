@@ -418,7 +418,7 @@ async def startup_cache():
                                     grid_svm = GridSearchCV(
                                         SVC(kernel='rbf', probability=True, class_weight='balanced'),
                                         {'C': [0.1, 1, 10, 100], 'gamma': ['scale', 0.1, 1]},
-                                        cv=cv_folds, scoring='accuracy', refit=True
+                                        cv=cv_folds, scoring='accuracy', refit=True, return_train_score=True
                                     )
                                     grid_svm.fit(X_train_scaled, y_train)
                                     best_model_svm = grid_svm.best_estimator_
@@ -428,7 +428,7 @@ async def startup_cache():
                                     grid_rf = GridSearchCV(
                                         RandomForestClassifier(random_state=42, min_samples_leaf=10, min_samples_split=15),
                                         {'n_estimators': [50, 100], 'max_depth': [3, 5, 8], 'min_samples_leaf': [10, 15, 20]},
-                                        cv=cv_folds, scoring='accuracy', refit=True
+                                        cv=cv_folds, scoring='accuracy', refit=True, return_train_score=True
                                     )
                                     grid_rf.fit(X_train_scaled, y_train)
                                     best_model_rf = grid_rf.best_estimator_
@@ -440,7 +440,7 @@ async def startup_cache():
                                     grid_knn = GridSearchCV(
                                         KNeighborsClassifier(weights='distance'),
                                         {'n_neighbors': knn_candidates},
-                                        cv=cv_folds, refit=True
+                                        cv=cv_folds, refit=True, return_train_score=True
                                     )
                                     grid_knn.fit(X_train_scaled, y_train)
                                     best_model_knn = grid_knn.best_estimator_
@@ -450,7 +450,7 @@ async def startup_cache():
                                     grid_lr = GridSearchCV(
                                         LogisticRegression(max_iter=10000, class_weight='balanced'),
                                         {'C': [0.001, 0.01, 0.1, 1]},
-                                        cv=cv_folds, refit=True
+                                        cv=cv_folds, refit=True, return_train_score=True
                                     )
                                     grid_lr.fit(X_train_scaled, y_train)
                                     best_model_lr = grid_lr.best_estimator_
