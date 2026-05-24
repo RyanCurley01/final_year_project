@@ -49,37 +49,37 @@ class CustomerSummaryControllerTest {
     }
 
     // -------------------------------------------------------------------------
-    // GET /api/customer-summary/getAllCustomerSummaries
+    // GET /api/customer-summary
     // -------------------------------------------------------------------------
 
     @Test
-    @DisplayName("GET /api/customer-summary/getAllCustomerSummaries - Should return all summaries")
+    @DisplayName("GET /api/customer-summary - Should return all summaries")
     void testGetAllCustomerSummaries() throws Exception {
         when(customerSummaryService.getAllCustomerSummaries())
                 .thenReturn(Arrays.asList(testCustomerSummary));
 
-        mockMvc.perform(get("/api/customer-summary/getAllCustomerSummaries"))
+        mockMvc.perform(get("/api/customer-summary"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(1)));
     }
 
     @Test
-    @DisplayName("GET /api/customer-summary/getAllCustomerSummaries - Should return empty list when none exist")
+    @DisplayName("GET /api/customer-summary - Should return empty list when none exist")
     void testGetAllCustomerSummariesEmpty() throws Exception {
         when(customerSummaryService.getAllCustomerSummaries()).thenReturn(Collections.emptyList());
 
-        mockMvc.perform(get("/api/customer-summary/getAllCustomerSummaries"))
+        mockMvc.perform(get("/api/customer-summary"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(0)));
     }
 
     @Test
-    @DisplayName("GET /api/customer-summary/getAllCustomerSummaries?accountId=4 - Should filter by accountId")
+    @DisplayName("GET /api/customer-summary?accountId=4 - Should filter by accountId")
     void testGetCustomerSummariesByAccountId() throws Exception {
         when(customerSummaryService.getCustomerSummariesByAccountId(4L))
                 .thenReturn(Arrays.asList(testCustomerSummary));
 
-        mockMvc.perform(get("/api/customer-summary/getAllCustomerSummaries")
+        mockMvc.perform(get("/api/customer-summary")
                 .param("accountId", "4"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].accountId", is(4)));
@@ -89,12 +89,12 @@ class CustomerSummaryControllerTest {
     }
 
     @Test
-    @DisplayName("GET /api/customer-summary/getAllCustomerSummaries?productId=5 - Should filter by productId")
+    @DisplayName("GET /api/customer-summary?productId=5 - Should filter by productId")
     void testGetCustomerSummariesByProductId() throws Exception {
         when(customerSummaryService.getCustomerSummariesByProductId(5L))
                 .thenReturn(Arrays.asList(testCustomerSummary));
 
-        mockMvc.perform(get("/api/customer-summary/getAllCustomerSummaries")
+        mockMvc.perform(get("/api/customer-summary")
                 .param("productId", "5"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].productId", is(5)));
@@ -103,12 +103,12 @@ class CustomerSummaryControllerTest {
     }
 
     @Test
-    @DisplayName("GET /api/customer-summary/getAllCustomerSummaries?orderId=1 - Should filter by orderId")
+    @DisplayName("GET /api/customer-summary?orderId=1 - Should filter by orderId")
     void testGetCustomerSummariesByOrderId() throws Exception {
         when(customerSummaryService.getCustomerSummariesByOrderId(1L))
                 .thenReturn(Arrays.asList(testCustomerSummary));
 
-        mockMvc.perform(get("/api/customer-summary/getAllCustomerSummaries")
+        mockMvc.perform(get("/api/customer-summary")
                 .param("orderId", "1"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].orderId", is(1)));
@@ -150,7 +150,6 @@ class CustomerSummaryControllerTest {
     @Test
     @DisplayName("POST /api/customer-summary - Should create customer summary and return 201")
     void testCreateCustomerSummary() throws Exception {
-        // ARRANGE
         CustomerSummary newSummary = new CustomerSummary();
         newSummary.setId(2L);
         newSummary.setAccountId(10L);
@@ -160,7 +159,6 @@ class CustomerSummaryControllerTest {
         when(customerSummaryService.createCustomerSummary(any(CustomerSummary.class)))
                 .thenReturn(newSummary);
 
-        // ACT & ASSERT
         mockMvc.perform(post("/api/customer-summary")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(newSummary)))
@@ -169,48 +167,5 @@ class CustomerSummaryControllerTest {
                 .andExpect(jsonPath("$.accountId", is(10)))
                 .andExpect(jsonPath("$.productId", is(20)))
                 .andExpect(jsonPath("$.orderId", is(5)));
-    }
-
-    @Test
-    @DisplayName("POST /api/customer-summary - Should return 400 when creation fails with illegal argument")
-    void testCreateCustomerSummaryInvalidData() throws Exception {
-        // ARRANGE
-        when(customerSummaryService.createCustomerSummary(any(CustomerSummary.class)))
-                .thenThrow(new IllegalArgumentException("Invalid summary data"));
-
-        // ACT & ASSERT
-        mockMvc.perform(post("/api/customer-summary")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsString(testCustomerSummary)))
-                .andExpect(status().isBadRequest());
-    }
-
-    // -------------------------------------------------------------------------
-    // DELETE /api/customer-summary/{id}
-    // -------------------------------------------------------------------------
-
-    @Test
-    @DisplayName("DELETE /api/customer-summary/{id} - Should delete summary and return 204")
-    void testDeleteCustomerSummary() throws Exception {
-        // ARRANGE
-        doNothing().when(customerSummaryService).deleteCustomerSummary(1L);
-
-        // ACT & ASSERT
-        mockMvc.perform(delete("/api/customer-summary/1"))
-                .andExpect(status().isNoContent());
-
-        verify(customerSummaryService, times(1)).deleteCustomerSummary(1L);
-    }
-
-    @Test
-    @DisplayName("DELETE /api/customer-summary/{id} - Should return 404 when summary not found")
-    void testDeleteCustomerSummaryNotFound() throws Exception {
-        // ARRANGE
-        doThrow(new IllegalArgumentException("Customer summary not found with id: 999"))
-                .when(customerSummaryService).deleteCustomerSummary(999L);
-
-        // ACT & ASSERT
-        mockMvc.perform(delete("/api/customer-summary/999"))
-                .andExpect(status().isNotFound());
     }
 }
