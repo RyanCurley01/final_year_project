@@ -64,8 +64,8 @@ public class SecurityConfig
                 .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                 
                 // Manager-only endpoints 
-                .requestMatchers(HttpMethod.GET, "/api/accounts/getAllAccounts").hasRole("MANAGER")
-                .requestMatchers(HttpMethod.DELETE, "/api/accounts /**").hasRole("MANAGER")
+                .requestMatchers(HttpMethod.GET, "/api/accounts").hasRole("MANAGER")
+                .requestMatchers(HttpMethod.DELETE, "/api/accounts/**").hasRole("MANAGER")
 
                 // Manager and Employee only endpoints 
                 .requestMatchers(HttpMethod.GET, "/api/accounts/{id}").hasAnyRole("MANAGER", "EMPLOYEE")
@@ -84,4 +84,4 @@ public class SecurityConfig
 
         return http.build();
     }
-}
+}

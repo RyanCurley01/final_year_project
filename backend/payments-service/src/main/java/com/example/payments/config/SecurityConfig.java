@@ -44,26 +44,24 @@ public class SecurityConfig {
             .csrf(csrf -> csrf.disable())
             .cors(Customizer.withDefaults())
             .authorizeHttpRequests(auth -> auth
-                // PayPal endpoints - authenticated customers can create/capture orders
-                .requestMatchers(HttpMethod.POST, "/api/payments/paypal/create-order").permitAll()
-                .requestMatchers(HttpMethod.POST, "/api/payments/paypal/capture-order/**").permitAll()
-                .requestMatchers(HttpMethod.GET, "/api/payments/paypal/order/**").permitAll()
-                
+                // PayPal endpoints  (updated to match new REST paths)
+                .requestMatchers(HttpMethod.POST, "/api/payments/paypal/orders").permitAll()
+                .requestMatchers(HttpMethod.POST, "/api/payments/paypal/orders/*/capture").permitAll()
+                .requestMatchers(HttpMethod.GET, "/api/payments/paypal/orders/*").permitAll()
+
                 // View individual payment or PayPal payment by ID
                 .requestMatchers(HttpMethod.GET, "/api/payments/{id}").permitAll()
                 .requestMatchers(HttpMethod.GET, "/api/payments/paypal/**").permitAll()
-                
+
                 // Manager and Employee can view all payments
                 .requestMatchers(HttpMethod.GET, "/api/payments").hasAnyRole("MANAGER", "EMPLOYEE")
-                .requestMatchers(HttpMethod.GET, "/api/payments/getAllPayments").hasAnyRole("MANAGER", "EMPLOYEE")
-                
+
                 // Manager and Employee can update payments
                 .requestMatchers(HttpMethod.PUT, "/api/payments/**").hasAnyRole("MANAGER", "EMPLOYEE")
-                
+
                 // Only Manager can delete payments
                 .requestMatchers(HttpMethod.DELETE, "/api/payments/**").hasRole("MANAGER")
-                
-                // All other requests must be authenticated
+
                 .anyRequest().authenticated()
             )
             .httpBasic(Customizer.withDefaults())

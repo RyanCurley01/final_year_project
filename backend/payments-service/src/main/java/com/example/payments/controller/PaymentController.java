@@ -25,7 +25,7 @@ public class PaymentController {
 
     // GET endpoint: Retrieves a list of payments. Supports optional filter query params.
     // e.g. /api/payments/getAllPayments?status=COMPLETED
-    @GetMapping("/getAllPayments")
+    @GetMapping
     public ResponseEntity<List<Payment>> getAllPayments(
             @RequestParam(required = false) Long orderId,
             @RequestParam(required = false) Long customerId,
@@ -92,74 +92,35 @@ public class PaymentController {
     // ===== PayPal REST Endpoints ===== //
 
     // POST endpoint: Start the PayPal payment loop before showing the frontend popup to the user
-    @PostMapping("/paypal/create-order")
+    @PostMapping("/paypal/orders")
     public ResponseEntity<?> createPayPalOrder(@RequestBody CreatePayPalOrderRequest request) {
         try {
-            // Delegate the remote initialization call to the service using variables from the Request body
             com.paypal.orders.Order order = paymentService.createPayPalOrder(
-                request.getAmount(), 
+                request.getAmount(),
                 request.getCurrency(),
                 request.getOrderId(),
                 request.getProductId(),
                 request.getAccountId()
             );
-            
-            // Re-package specific minimal data fields for the frontend so it is simpler to interpret
-            com.example.payments.dto.PayPalOrderResponse response = new com.example.payments.dto.PayPalOrderResponse();
-            response.setId(order.id());
-            response.setStatus(order.status());
-            
-            // Format external HATEOAS references given by PayPal (like approval links and actions)
-            if (order.links() != null) {
-                java.util.List<com.example.payments.dto.PayPalOrderResponse.Link> links = order.links().stream()
-                    .map(link -> new com.example.payments.dto.PayPalOrderResponse.Link(
-                        link.href(), 
-                        link.rel(), 
-                        link.method()
-                    ))
-                    .collect(java.util.stream.Collectors.toList());
-                response.setLinks(links);
-            }
-            
-            // Return to frontend to begin the UI popup
-            return ResponseEntity.ok(response);
+            return ResponseEntity.ok(toPayPalResponse(order));
         } catch (Exception e) {
-            // Dump basic HTTP 500 block if checkout fails to prepare remotely
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                 .body("Error creating PayPal order: " + e.getMessage());
         }
     }
 
     // POST endpoint: Secure funds and finalized completed state once the frontend user validates the charge
-    @PostMapping("/paypal/capture-order/{orderId}")
-    public ResponseEntity<?> capturePayPalOrder(@PathVariable String orderId, @RequestBody(required = false) CapturePayPalOrderRequest captureRequest) {
+    @PostMapping("/paypal/orders/{orderId}/capture")
+    public ResponseEntity<?> capturePayPalOrder(
+            @PathVariable String orderId,
+            @RequestBody(required = false) CapturePayPalOrderRequest captureRequest) {
         try {
-            // Extract optional metadata from the request body
             Long internalOrderId = captureRequest != null ? captureRequest.getOrderId() : null;
-            Long productId = captureRequest != null ? captureRequest.getProductId() : null;
-            Long accountId = captureRequest != null ? captureRequest.getAccountId() : null;
+            Long productId       = captureRequest != null ? captureRequest.getProductId() : null;
+            Long accountId       = captureRequest != null ? captureRequest.getAccountId() : null;
 
-            // Force capture action
             com.paypal.orders.Order order = paymentService.capturePayPalOrder(orderId, internalOrderId, productId, accountId);
-            
-            // Return structured success confirmation identical to the schema used in create
-            com.example.payments.dto.PayPalOrderResponse response = new com.example.payments.dto.PayPalOrderResponse();
-            response.setId(order.id());
-            response.setStatus(order.status());
-            
-            // Copy HATEOAS capture validation resources
-            if (order.links() != null) {
-                java.util.List<com.example.payments.dto.PayPalOrderResponse.Link> links = order.links().stream()
-                    .map(link -> new com.example.payments.dto.PayPalOrderResponse.Link(
-                        link.href(), 
-                        link.rel(), 
-                        link.method()
-                    ))
-                    .collect(java.util.stream.Collectors.toList());
-                response.setLinks(links);
-            }
-            
-            return ResponseEntity.ok(response);
+            return ResponseEntity.ok(toPayPalResponse(order));
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                 .body("Error capturing PayPal order: " + e.getMessage());
@@ -167,30 +128,11 @@ public class PaymentController {
     }
 
     // GET endpoint: Manual fallback query checking actual external status if web hooks fail
-    @GetMapping("/paypal/order/{orderId}")
+    @GetMapping("/paypal/orders/{orderId}")
     public ResponseEntity<?> getPayPalOrderDetails(@PathVariable String orderId) {
         try {
-            // Request PayPal external REST service API loop directly
             com.paypal.orders.Order order = paymentService.getPayPalOrderDetails(orderId);
-            
-            // Convert to lightweight JSON DTO wrapper
-            com.example.payments.dto.PayPalOrderResponse response = new com.example.payments.dto.PayPalOrderResponse();
-            response.setId(order.id());
-            response.setStatus(order.status());
-            
-            // Re-package API metadata pointers
-            if (order.links() != null) {
-                java.util.List<com.example.payments.dto.PayPalOrderResponse.Link> links = order.links().stream()
-                    .map(link -> new com.example.payments.dto.PayPalOrderResponse.Link(
-                        link.href(), 
-                        link.rel(), 
-                        link.method()
-                    ))
-                    .collect(java.util.stream.Collectors.toList());
-                response.setLinks(links);
-            }
-            
-            return ResponseEntity.ok(response);
+            return ResponseEntity.ok(toPayPalResponse(order));
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND)
                 .body("PayPal order not found: " + e.getMessage());
@@ -218,6 +160,19 @@ public class PaymentController {
             "<p>You cancelled the PayPal payment.</p>" +
             "</body></html>"
         );
+    }
+
+    // Extracted helper to avoid the identical 3x link-mapping block being repeated
+    private com.example.payments.dto.PayPalOrderResponse toPayPalResponse(com.paypal.orders.Order order) {
+        com.example.payments.dto.PayPalOrderResponse response = new com.example.payments.dto.PayPalOrderResponse();
+        response.setId(order.id());
+        response.setStatus(order.status());
+        if (order.links() != null) {
+            response.setLinks(order.links().stream()
+                .map(l -> new com.example.payments.dto.PayPalOrderResponse.Link(l.href(), l.rel(), l.method()))
+                .collect(java.util.stream.Collectors.toList()));
+        }
+        return response;
     }
 
     // Inner DTO class representing incoming JSON request body structures during the initial Checkout stage 

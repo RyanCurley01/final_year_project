@@ -16,7 +16,7 @@ public class PurchasedProductController {
 
     private final PurchasedProductService purchasedProductService;
 
-    @GetMapping("/getAllPurchasedProducts")
+    @GetMapping
     public ResponseEntity<List<PurchasedProduct>> getAllPurchasedProducts(
             @RequestParam(required = false) Long orderItemId,
             @RequestParam(required = false) Long productId) {

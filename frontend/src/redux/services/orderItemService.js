@@ -1,44 +1,33 @@
 import { getServiceUrl, apiCall, getBasicAuthHeaders } from './api';
 
 const BASE_URL = `${getServiceUrl('ORDER_ITEMS')}/api/order-items`;
-
 export const orderItemService = {
-  // Get all order items
   getAllOrderItems: async (email, password) => {
-    return apiCall(`${BASE_URL}/getAllOrderItems`, {
+    return apiCall(BASE_URL, {
       headers: getBasicAuthHeaders(email, password),
     });
   },
 
-  // Get order item by ID
   getOrderItemById: async (id, email, password) => {
     return apiCall(`${BASE_URL}/${id}`, {
       headers: getBasicAuthHeaders(email, password),
     });
   },
 
-  // Get order items by order ID
   getOrderItemsByOrderId: async (orderId, email, password) => {
     const options = {};
     if (email && password && password !== 'undefined') {
-        options.headers = getBasicAuthHeaders(email, password);
+      options.headers = getBasicAuthHeaders(email, password);
     }
     return apiCall(`${BASE_URL}/order/${orderId}`, options);
   },
 
-  // Create order item
   createOrderItem: async (orderItemData, email, password) => {
-    const options = {
-      method: 'POST',
-      body: JSON.stringify(orderItemData),
-    };
-    if (email && password) {
-      options.headers = getBasicAuthHeaders(email, password);
-    }
+    const options = { method: 'POST', body: JSON.stringify(orderItemData) };
+    if (email && password) options.headers = getBasicAuthHeaders(email, password);
     return apiCall(BASE_URL, options);
   },
 
-  // Update order item
   updateOrderItem: async (id, orderItemData, email, password) => {
     return apiCall(`${BASE_URL}/${id}`, {
       method: 'PUT',
@@ -47,7 +36,6 @@ export const orderItemService = {
     });
   },
 
-  // Delete order item
   deleteOrderItem: async (id, email, password) => {
     return apiCall(`${BASE_URL}/${id}`, {
       method: 'DELETE',

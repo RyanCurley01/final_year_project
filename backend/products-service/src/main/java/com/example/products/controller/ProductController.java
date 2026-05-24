@@ -26,7 +26,7 @@ public class ProductController {
         return ResponseEntity.ok("Products Service is Healthy");
     }
 
-    @GetMapping(value = {"", "/", "/getAllProducts"})
+    @GetMapping(value = {"", "/"})
     public ResponseEntity<List<ProductResponse>> getAllProducts(
             @RequestParam(required = false) String albumCoverImageUrl) {
         log.info("Received request to get all products");

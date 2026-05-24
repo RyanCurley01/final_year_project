@@ -18,7 +18,7 @@ public class WishlistController {
 
     private final WishlistService wishlistService;
 
-    @GetMapping("/getAllWishlists")
+    @GetMapping
     public ResponseEntity<List<Wishlist>> getAllWishlists(
             @RequestParam(required = false) Long accountId,
             @RequestParam(required = false) Long productId) {

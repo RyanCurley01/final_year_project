@@ -25,7 +25,7 @@ public class AccountController {
 
     private final AccountService accountService;
 
-    @GetMapping("/getAllAccounts")
+    @GetMapping
     public ResponseEntity<List<AccountResponse>> getAllAccounts(
             @RequestParam(required = false) String accountType) {
         

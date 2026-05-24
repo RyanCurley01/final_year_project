@@ -10,29 +10,21 @@ const getBaseUrl = () => {
   }
   return `${getServiceUrl('PRODUCTS')}/api/products`;
 };
-
 export const productService = {
-  // Get all products
   getAllProducts: async (email, password) => {
     const baseUrl = getBaseUrl();
     const options = {};
-    if (email && password) {
-      options.headers = getBasicAuthHeaders(email, password);
-    }
-    return apiCall(`${baseUrl}/getAllProducts`, options);
+    if (email && password) options.headers = getBasicAuthHeaders(email, password);
+    return apiCall(baseUrl, options);
   },
 
-  // Get product by ID
   getProductById: async (id, email, password) => {
     const baseUrl = getBaseUrl();
     const options = {};
-    if (email && password) {
-      options.headers = getBasicAuthHeaders(email, password);
-    }
+    if (email && password) options.headers = getBasicAuthHeaders(email, password);
     return apiCall(`${baseUrl}/${id}`, options);
   },
 
-  // Create product (Manager only)
   createProduct: async (productData, email, password) => {
     const baseUrl = getBaseUrl();
     return apiCall(baseUrl, {
@@ -42,26 +34,27 @@ export const productService = {
     });
   },
 
-  // Update product (Manager only)
   updateProduct: async (id, productData, email, password) => {
-    return apiCall(`${BASE_URL}/${id}`, {
+    const baseUrl = getBaseUrl();   // was incorrectly BASE_URL (undefined)
+    return apiCall(`${baseUrl}/${id}`, {
       method: 'PUT',
       headers: getBasicAuthHeaders(email, password),
       body: JSON.stringify(productData),
     });
   },
 
-  // Delete product (Manager only)
   deleteProduct: async (id, email, password) => {
-    return apiCall(`${BASE_URL}/${id}`, {
+    const baseUrl = getBaseUrl();   // was incorrectly BASE_URL (undefined)
+    return apiCall(`${baseUrl}/${id}`, {
       method: 'DELETE',
       headers: getBasicAuthHeaders(email, password),
     });
   },
 
-  // Search products by title
+  // GET /products?search=  (was /search?q=)
   searchProducts: async (searchTerm, email, password) => {
-    return apiCall(`${BASE_URL}/search?q=${encodeURIComponent(searchTerm)}`, {
+    const baseUrl = getBaseUrl();   // was incorrectly BASE_URL (undefined)
+    return apiCall(`${baseUrl}?search=${encodeURIComponent(searchTerm)}`, {
       headers: getBasicAuthHeaders(email, password),
     });
   },

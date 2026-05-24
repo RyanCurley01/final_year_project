@@ -18,7 +18,7 @@ public class CustomerSummaryController {
 
     private final CustomerSummaryService customerSummaryService;
 
-    @GetMapping("/getAllCustomerSummaries")
+    @GetMapping
     public ResponseEntity<List<CustomerSummary>> getAllCustomerSummaries(
             @RequestParam(required = false) Long accountId,
             @RequestParam(required = false) Long productId,

@@ -17,25 +17,25 @@ const getWishlistAuthHeaders = (email, password, firebaseToken) => {
 export const wishlistService = {
   // Get all wishlist items (with optional filters)
   getAllWishlist: async (email, password, firebaseToken) => {
-    return apiCall(`${BASE_URL}/getAllWishlists`, {
+    return apiCall(BASE_URL, {
       headers: getWishlistAuthHeaders(email, password, firebaseToken),
     });
   },
 
-  // Get wishlist by account ID
+  // Get wishlist by AccountID
   getWishlistByAccountId: async (accountId, email, password, firebaseToken) => {
-    return apiCall(`${BASE_URL}/getAllWishlists?accountId=${accountId}`, {
+    return apiCall(`${BASE_URL}?accountId=${accountId}`, {
       headers: getWishlistAuthHeaders(email, password, firebaseToken),
     });
   },
 
-  // Get wishlist items by product ID (for manager tracking)
+  // Get wishlist by ProductID
   getWishlistByProductId: async (productId, email, password, firebaseToken) => {
-    return apiCall(`${BASE_URL}/getAllWishlists?productId=${productId}`, {
+    return apiCall(`${BASE_URL}?productId=${productId}`, {
       headers: getWishlistAuthHeaders(email, password, firebaseToken),
     });
   },
-
+  
   // Get wishlist item by ID
   getWishlistById: async (id, email, password, firebaseToken) => {
     return apiCall(`${BASE_URL}/${id}`, {

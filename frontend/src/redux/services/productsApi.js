@@ -70,17 +70,11 @@ export const productsApi = createApi({
   keepUnusedDataFor: 1800, // Cache for 30 minutes (presigned URLs valid for 1 hour)
   endpoints: (builder) => ({
     getAllProducts: builder.query({
-      query: (auth) => ({
-        url: '/getAllProducts',
-        auth: auth, // Pass auth object { email, password } here
-      }),
+      query: (auth) => ({ url: '', auth }),   // resolves to BASE_URL itself
       providesTags: ['Products'],
     }),
     getProductById: builder.query({
-      query: ({ id, auth }) => ({
-        url: `/${id}`,
-        auth: auth,
-      }),
+      query: ({ id, auth }) => ({ url: `/${id}`, auth }),
       providesTags: (result, error, id) => [{ type: 'Products', id }],
     }),
   }),

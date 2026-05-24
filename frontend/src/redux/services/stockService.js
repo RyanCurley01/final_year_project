@@ -5,21 +5,14 @@ const BASE_URL = `${getServiceUrl('STOCK')}/api/stock`;
 export const stockService = {
   // Get all stock
   getAllStock: async (email, password) => {
-    return apiCall(`${BASE_URL}/getAllStock`, {
-      headers: getBasicAuthHeaders(email, password),
-    });
-  },
-
-  // Get stock by StockID
-  getStockById: async (id, email, password) => {
-    return apiCall(`${BASE_URL}/${id}`, {
+    return apiCall(BASE_URL, {
       headers: getBasicAuthHeaders(email, password),
     });
   },
 
   // Get stock by ProductID
   getStockByProductId: async (productId, email, password) => {
-    return apiCall(`${BASE_URL}/getAllStock?productId=${productId}`, {
+    return apiCall(`${BASE_URL}?productId=${productId}`, {
       headers: getBasicAuthHeaders(email, password),
     });
   },

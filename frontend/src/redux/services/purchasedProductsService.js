@@ -1,11 +1,10 @@
 import { getServiceUrl, apiCall, getBasicAuthHeaders } from './api';
 
 const BASE_URL = `${getServiceUrl('PURCHASED_PRODUCTS')}/api/purchased-products`;
-
 export const purchasedProductsService = {
   // Get all purchased products
   getAllPurchasedProducts: async (email, password) => {
-    return apiCall(`${BASE_URL}/getAllPurchasedProducts`, {
+    return apiCall(BASE_URL, {
       headers: getBasicAuthHeaders(email, password),
     });
   },

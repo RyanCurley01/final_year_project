@@ -5,7 +5,7 @@ const BASE_URL = `${getServiceUrl('SOLD_PRODUCTS')}/api/sold-products`;
 export const soldProductsService = {
   // Get all sold products
   getAllSoldProducts: async (email, password) => {
-    return apiCall(`${BASE_URL}/getAllSoldProducts`, {
+    return apiCall(BASE_URL, {
       headers: getBasicAuthHeaders(email, password),
     });
   },

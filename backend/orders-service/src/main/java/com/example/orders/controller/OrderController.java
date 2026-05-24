@@ -24,7 +24,7 @@ public class OrderController {
     private final OrderService orderService;
 
     // GET mapping to list all orders globally
-    @GetMapping("/getAllOrders")
+    @GetMapping
     public ResponseEntity<List<Order>> getAllOrders(
             // Optional query parameter (e.g. ?customerId=10)
             @RequestParam(required = false) Long customerId) {
