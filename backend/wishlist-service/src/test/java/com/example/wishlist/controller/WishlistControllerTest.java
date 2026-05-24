@@ -58,7 +58,7 @@ class WishlistControllerTest {
     }
 
     @Test
-    @DisplayName("GET /api/wishlist/getAllWishlists - Should return all wishlists")
+    @DisplayName("GET /api/wishlist - Should return all wishlists")
     void testGetAllWishlists() throws Exception {
         // ARRANGE
         Wishlist wishlist2 = new Wishlist();
@@ -70,7 +70,7 @@ class WishlistControllerTest {
         when(wishlistService.getAllWishlists()).thenReturn(wishlists);
 
         // ACT & ASSERT
-        mockMvc.perform(get("/api/wishlist/getAllWishlists")
+        mockMvc.perform(get("/api/wishlist")
                 .contentType(MediaType.APPLICATION_JSON))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(2)))
@@ -80,14 +80,14 @@ class WishlistControllerTest {
     }
 
     @Test
-    @DisplayName("GET /api/wishlist/getAllWishlists - Should filter by accountId")
+    @DisplayName("GET /api/wishlist - Should filter by accountId")
     void testGetAllWishlistsByAccountId() throws Exception {
         // ARRANGE
         List<Wishlist> wishlists = Arrays.asList(testWishlist);
         when(wishlistService.getWishlistsByAccountId(4L)).thenReturn(wishlists);
 
         // ACT & ASSERT
-        mockMvc.perform(get("/api/wishlist/getAllWishlists")
+        mockMvc.perform(get("/api/wishlist")
                 .param("accountId", "4")
                 .contentType(MediaType.APPLICATION_JSON))
                 .andExpect(status().isOk())
@@ -96,14 +96,14 @@ class WishlistControllerTest {
     }
 
     @Test
-    @DisplayName("GET /api/wishlist/getAllWishlists - Should filter by productId")
+    @DisplayName("GET /api/wishlist - Should filter by productId")
     void testGetAllWishlistsByProductId() throws Exception {
         // ARRANGE
         List<Wishlist> wishlists = Arrays.asList(testWishlist);
         when(wishlistService.getWishlistsByProductId(5L)).thenReturn(wishlists);
 
         // ACT & ASSERT
-        mockMvc.perform(get("/api/wishlist/getAllWishlists")
+        mockMvc.perform(get("/api/wishlist")
                 .param("productId", "5")
                 .contentType(MediaType.APPLICATION_JSON))
                 .andExpect(status().isOk())

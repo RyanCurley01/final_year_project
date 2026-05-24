@@ -41,31 +41,31 @@ class PurchasedProductControllerTest {
     }
 
     @Test
-    @DisplayName("GET /api/purchased-products/getAllPurchasedProducts - Should return all purchased products")
+    @DisplayName("GET /api/purchased-products - Should return all purchased products")
     void testGetAllPurchasedProducts() throws Exception {
         when(purchasedProductService.getAllPurchasedProducts()).thenReturn(Arrays.asList(testPurchasedProduct));
 
-        mockMvc.perform(get("/api/purchased-products/getAllPurchasedProducts"))
+        mockMvc.perform(get("/api/purchased-products"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(1)));
     }
 
     @Test
-    @DisplayName("GET /api/purchased-products/getAllPurchasedProducts - Should filter by orderItemId")
+    @DisplayName("GET /api/purchased-products - Should filter by orderItemId")
     void testGetPurchasedProductsByOrderItemId() throws Exception {
         when(purchasedProductService.getPurchasedProductsByOrderItemId(1L)).thenReturn(Arrays.asList(testPurchasedProduct));
 
-        mockMvc.perform(get("/api/purchased-products/getAllPurchasedProducts").param("orderItemId", "1"))
+        mockMvc.perform(get("/api/purchased-products").param("orderItemId", "1"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].orderItemId", is(1)));
     }
 
     @Test
-    @DisplayName("GET /api/purchased-products/getAllPurchasedProducts - Should filter by productId")
+    @DisplayName("GET /api/purchased-products - Should filter by productId")
     void testGetPurchasedProductsByProductId() throws Exception {
         when(purchasedProductService.getPurchasedProductsByProductId(5L)).thenReturn(Arrays.asList(testPurchasedProduct));
 
-        mockMvc.perform(get("/api/purchased-products/getAllPurchasedProducts").param("productId", "5"))
+        mockMvc.perform(get("/api/purchased-products").param("productId", "5"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].productId", is(5)));
     }

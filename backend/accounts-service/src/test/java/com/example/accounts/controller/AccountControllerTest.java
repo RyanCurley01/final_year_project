@@ -39,7 +39,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 /**
  * Integration Tests for AccountController
- * These tests simulate HTTP requests and verify responses
+ * These tests simulate HTTP requests and verify responses.
+ *
+ * Note: The base GET endpoint is mapped to /api/accounts (no trailing path segment).
+ * The accountType query parameter filters results when provided.
  */
 @WebMvcTest(AccountController.class)
 @AutoConfigureMockMvc(addFilters = false)
@@ -76,20 +79,24 @@ class AccountControllerTest {
         testAccountResponse.setAccountType("Customer");
     }
 
+    // -------------------------------------------------------------------------
+    // GET /api/accounts
+    // -------------------------------------------------------------------------
+
     @Test
-    @DisplayName("GET /api/accounts/getAllAccounts - Should return all accounts")
+    @DisplayName("GET /api/accounts - Should return all accounts when no filter supplied")
     void testGetAllAccounts() throws Exception {
         // ARRANGE
         AccountResponse response2 = new AccountResponse();
         response2.setId(2L);
         response2.setAccountName("Jane Smith");
         response2.setAccountEmailAddress("jane@example.com");
-        
+
         List<AccountResponse> accounts = Arrays.asList(testAccountResponse, response2);
         when(accountService.getAllAccountsResponse()).thenReturn(accounts);
 
         // ACT & ASSERT
-        mockMvc.perform(get("/api/accounts/getAllAccounts")
+        mockMvc.perform(get("/api/accounts")
                 .contentType(MediaType.APPLICATION_JSON))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(2)))
@@ -98,20 +105,55 @@ class AccountControllerTest {
     }
 
     @Test
-    @DisplayName("GET /api/accounts/getAllAccounts - Should filter by account type")
+    @DisplayName("GET /api/accounts - Should return empty list when no accounts exist")
+    void testGetAllAccountsEmpty() throws Exception {
+        // ARRANGE
+        when(accountService.getAllAccountsResponse()).thenReturn(Collections.emptyList());
+
+        // ACT & ASSERT
+        mockMvc.perform(get("/api/accounts")
+                .contentType(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(0)));
+    }
+
+    @Test
+    @DisplayName("GET /api/accounts?accountType=Customer - Should filter by account type")
     void testGetAllAccountsByType() throws Exception {
         // ARRANGE
         List<AccountResponse> customerAccounts = Arrays.asList(testAccountResponse);
         when(accountService.getAccountsByTypeResponse("Customer")).thenReturn(customerAccounts);
 
         // ACT & ASSERT
-        mockMvc.perform(get("/api/accounts/getAllAccounts")
+        mockMvc.perform(get("/api/accounts")
                 .param("accountType", "Customer")
                 .contentType(MediaType.APPLICATION_JSON))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(1)))
                 .andExpect(jsonPath("$[0].accountType", is("Customer")));
     }
+
+    @Test
+    @DisplayName("GET /api/accounts?accountType= - Should ignore blank accountType and return all accounts")
+    void testGetAllAccountsBlankType() throws Exception {
+        // ARRANGE — blank string should fall through to getAllAccountsResponse
+        List<AccountResponse> all = Arrays.asList(testAccountResponse);
+        when(accountService.getAllAccountsResponse()).thenReturn(all);
+
+        // ACT & ASSERT
+        mockMvc.perform(get("/api/accounts")
+                .param("accountType", "")
+                .contentType(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(1)));
+
+        verify(accountService).getAllAccountsResponse();
+        verify(accountService, never()).getAccountsByTypeResponse(any());
+    }
+
+    // -------------------------------------------------------------------------
+    // GET /api/accounts/{id}
+    // -------------------------------------------------------------------------
 
     @Test
     @DisplayName("GET /api/accounts/{id} - Should return account by id")
@@ -140,8 +182,12 @@ class AccountControllerTest {
                 .andExpect(status().isNotFound());
     }
 
+    // -------------------------------------------------------------------------
+    // POST /api/accounts
+    // -------------------------------------------------------------------------
+
     @Test
-    @DisplayName("POST /api/accounts - Should create new account")
+    @DisplayName("POST /api/accounts - Should create new account and return 201")
     void testCreateAccount() throws Exception {
         // ARRANGE
         when(accountService.createAccountResponse(any(Account.class))).thenReturn(testAccountResponse);
@@ -160,7 +206,7 @@ class AccountControllerTest {
     void testCreateAccountInvalidData() throws Exception {
         // ARRANGE
         when(accountService.createAccountResponse(any(Account.class)))
-                .thenThrow(new IllegalArgumentException("Invalid data"));
+                .thenThrow(new IllegalArgumentException("Email already exists"));
 
         // ACT & ASSERT
         mockMvc.perform(post("/api/accounts")
@@ -169,8 +215,12 @@ class AccountControllerTest {
                 .andExpect(status().isBadRequest());
     }
 
+    // -------------------------------------------------------------------------
+    // PUT /api/accounts/{id}
+    // -------------------------------------------------------------------------
+
     @Test
-    @DisplayName("PUT /api/accounts/{id} - Should update account")
+    @DisplayName("PUT /api/accounts/{id} - Should update account and return updated response")
     void testUpdateAccount() throws Exception {
         // ARRANGE
         AccountResponse updatedResponse = new AccountResponse();
@@ -204,8 +254,12 @@ class AccountControllerTest {
                 .andExpect(status().isNotFound());
     }
 
+    // -------------------------------------------------------------------------
+    // DELETE /api/accounts/{id}
+    // -------------------------------------------------------------------------
+
     @Test
-    @DisplayName("DELETE /api/accounts/{id} - Should delete account")
+    @DisplayName("DELETE /api/accounts/{id} - Should delete account and return 204")
     void testDeleteAccount() throws Exception {
         // ARRANGE
         doNothing().when(accountService).deleteAccount(1L);
@@ -213,7 +267,7 @@ class AccountControllerTest {
         // ACT & ASSERT
         mockMvc.perform(delete("/api/accounts/1"))
                 .andExpect(status().isNoContent());
-        
+
         verify(accountService, times(1)).deleteAccount(1L);
     }
 
@@ -228,6 +282,10 @@ class AccountControllerTest {
         mockMvc.perform(delete("/api/accounts/99"))
                 .andExpect(status().isNotFound());
     }
+
+    // -------------------------------------------------------------------------
+    // POST /api/accounts/login
+    // -------------------------------------------------------------------------
 
     @Test
     @DisplayName("POST /api/accounts/login - Should authenticate user successfully")
@@ -254,8 +312,8 @@ class AccountControllerTest {
     }
 
     @Test
-    @DisplayName("POST /api/accounts/login - Should return error for invalid credentials")
-    void testLoginFailure() throws Exception {
+    @DisplayName("POST /api/accounts/login - Should return 200 with success=false for wrong password")
+    void testLoginFailureWrongPassword() throws Exception {
         // ARRANGE
         LoginRequest loginRequest = new LoginRequest();
         loginRequest.setEmail("john@example.com");
@@ -263,12 +321,11 @@ class AccountControllerTest {
 
         LoginResponse loginResponse = new LoginResponse(
                 false, "Invalid password", null, null, null, null);
-        
+
         when(accountService.authenticateUser("john@example.com", "wrongpassword"))
                 .thenReturn(loginResponse);
 
-        // ACT & ASSERT
-        // Controller always returns 200 OK with success=false in body for failed login
+        // ACT & ASSERT — controller always returns 200 OK; success=false is in the body
         mockMvc.perform(post("/api/accounts/login")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(loginRequest)))
@@ -276,6 +333,56 @@ class AccountControllerTest {
                 .andExpect(jsonPath("$.success", is(false)))
                 .andExpect(jsonPath("$.message", is("Invalid password")));
     }
+
+    @Test
+    @DisplayName("POST /api/accounts/login - Should return 200 with FIREBASE_ACCOUNT message for Firebase users")
+    void testLoginFailureFirebaseAccount() throws Exception {
+        // ARRANGE
+        LoginRequest loginRequest = new LoginRequest();
+        loginRequest.setEmail("firebase@example.com");
+        loginRequest.setPassword("anypassword");
+
+        LoginResponse loginResponse = new LoginResponse(
+                false, "FIREBASE_ACCOUNT", null, null, null, null);
+
+        when(accountService.authenticateUser("firebase@example.com", "anypassword"))
+                .thenReturn(loginResponse);
+
+        // ACT & ASSERT
+        mockMvc.perform(post("/api/accounts/login")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(loginRequest)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success", is(false)))
+                .andExpect(jsonPath("$.message", is("FIREBASE_ACCOUNT")));
+    }
+
+    @Test
+    @DisplayName("POST /api/accounts/login - Should return 200 with success=false when user not found")
+    void testLoginFailureUserNotFound() throws Exception {
+        // ARRANGE
+        LoginRequest loginRequest = new LoginRequest();
+        loginRequest.setEmail("nobody@example.com");
+        loginRequest.setPassword("pass");
+
+        LoginResponse loginResponse = new LoginResponse(
+                false, "User not found", null, null, null, null);
+
+        when(accountService.authenticateUser("nobody@example.com", "pass"))
+                .thenReturn(loginResponse);
+
+        // ACT & ASSERT
+        mockMvc.perform(post("/api/accounts/login")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(loginRequest)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success", is(false)))
+                .andExpect(jsonPath("$.message", is("User not found")));
+    }
+
+    // -------------------------------------------------------------------------
+    // POST /api/accounts/firebase-login
+    // -------------------------------------------------------------------------
 
     @Test
     @DisplayName("POST /api/accounts/firebase-login - Should return 400 when token is missing")
@@ -290,7 +397,7 @@ class AccountControllerTest {
     }
 
     @Test
-    @DisplayName("POST /api/accounts/firebase-login - Should return 400 when token is empty")
+    @DisplayName("POST /api/accounts/firebase-login - Should return 400 when token is empty string")
     void testFirebaseLoginEmptyToken() throws Exception {
         Map<String, String> payload = new HashMap<>();
         payload.put("token", "");
@@ -302,7 +409,7 @@ class AccountControllerTest {
     }
 
     @Test
-    @DisplayName("POST /api/accounts/firebase-login - Should use fallback when Firebase SDK not initialized")
+    @DisplayName("POST /api/accounts/firebase-login - Should use fallback when Firebase SDK not initialised")
     void testFirebaseLoginFallback() throws Exception {
         Map<String, String> payload = new HashMap<>();
         payload.put("token", "some-token");
@@ -320,7 +427,8 @@ class AccountControllerTest {
         account.setAccountPhoneNumber("1234567890");
         account.setAccountType("Customer");
 
-        when(accountService.registerFirebaseUser("firebase-uid-123", "test@example.com", "Test User", "1234567890", "password123"))
+        when(accountService.registerFirebaseUser(
+                "firebase-uid-123", "test@example.com", "Test User", "1234567890", "password123"))
                 .thenReturn(account);
 
         try (MockedStatic<FirebaseApp> firebaseAppMock = mockStatic(FirebaseApp.class)) {
@@ -341,6 +449,7 @@ class AccountControllerTest {
         Map<String, String> payload = new HashMap<>();
         payload.put("token", "some-token");
         payload.put("name", "Test User");
+        // uid and email intentionally omitted
 
         try (MockedStatic<FirebaseApp> firebaseAppMock = mockStatic(FirebaseApp.class)) {
             firebaseAppMock.when(FirebaseApp::getApps).thenReturn(Collections.emptyList());
@@ -375,8 +484,8 @@ class AccountControllerTest {
     }
 
     @Test
-    @DisplayName("POST /api/accounts/firebase-login - Should verify token when Firebase SDK initialized")
-    void testFirebaseLoginWithSdkInitialized() throws Exception {
+    @DisplayName("POST /api/accounts/firebase-login - Should verify token when Firebase SDK initialised")
+    void testFirebaseLoginWithSdkInitialised() throws Exception {
         Map<String, String> payload = new HashMap<>();
         payload.put("token", "valid-firebase-token");
         payload.put("name", "Payload Name");
@@ -399,7 +508,8 @@ class AccountControllerTest {
         FirebaseAuth mockAuth = mock(FirebaseAuth.class);
         when(mockAuth.verifyIdToken("valid-firebase-token")).thenReturn(mockToken);
 
-        when(accountService.registerFirebaseUser("decoded-uid-123", "decoded@example.com", "Payload Name", "5551234", "pass123"))
+        when(accountService.registerFirebaseUser(
+                "decoded-uid-123", "decoded@example.com", "Payload Name", "5551234", "pass123"))
                 .thenReturn(account);
 
         try (MockedStatic<FirebaseApp> firebaseAppMock = mockStatic(FirebaseApp.class);
@@ -417,10 +527,11 @@ class AccountControllerTest {
     }
 
     @Test
-    @DisplayName("POST /api/accounts/firebase-login - Should use decoded name when payload name is empty")
+    @DisplayName("POST /api/accounts/firebase-login - Should fall back to decoded name when payload name is absent")
     void testFirebaseLoginWithSdkNoPayloadName() throws Exception {
         Map<String, String> payload = new HashMap<>();
         payload.put("token", "valid-firebase-token");
+        // name intentionally absent — controller should use decodedToken.getName()
 
         Account account = new Account();
         account.setId(3L);

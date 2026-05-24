@@ -47,32 +47,32 @@ class StockControllerTest {
     }
 
     @Test
-    @DisplayName("GET /api/stock/getAllStock - Should return all stock")
+    @DisplayName("GET /api/stock - Should return all stock")
     void testGetAllStock() throws Exception {
         when(stockService.getAllStock()).thenReturn(Arrays.asList(testStock));
 
-        mockMvc.perform(get("/api/stock/getAllStock"))
+        mockMvc.perform(get("/api/stock"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(1)))
                 .andExpect(jsonPath("$[0].isAvailable", is(true)));
     }
 
     @Test
-    @DisplayName("GET /api/stock/getAllStock - Should filter by productId")
+    @DisplayName("GET /api/stock - Should filter by productId")
     void testGetStockByProductId() throws Exception {
         when(stockService.getStockByProductId(5L)).thenReturn(Optional.of(testStock));
 
-        mockMvc.perform(get("/api/stock/getAllStock").param("productId", "5"))
+        mockMvc.perform(get("/api/stock").param("productId", "5"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].productId", is(5)));
     }
 
     @Test
-    @DisplayName("GET /api/stock/getAllStock - Should return empty when productId not found")
+    @DisplayName("GET /api/stock - Should return empty when productId not found")
     void testGetStockByProductIdNotFound() throws Exception {
         when(stockService.getStockByProductId(99L)).thenReturn(Optional.empty());
 
-        mockMvc.perform(get("/api/stock/getAllStock").param("productId", "99"))
+        mockMvc.perform(get("/api/stock").param("productId", "99"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(0)));
     }

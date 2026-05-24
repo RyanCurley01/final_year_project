@@ -62,42 +62,42 @@ class PaymentControllerTest {
     }
 
     @Test
-    @DisplayName("GET /api/payments/getAllPayments - Should return all payments")
+    @DisplayName("GET /api/payments - Should return all payments")
     void testGetAllPayments() throws Exception {
         when(paymentService.getAllPayments()).thenReturn(Arrays.asList(testPayment));
 
-        mockMvc.perform(get("/api/payments/getAllPayments"))
+        mockMvc.perform(get("/api/payments"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(1)))
                 .andExpect(jsonPath("$[0].paymentStatus", is("Completed")));
     }
 
     @Test
-    @DisplayName("GET /api/payments/getAllPayments - Should filter by orderId")
+    @DisplayName("GET /api/payments - Should filter by orderId")
     void testGetPaymentsByOrderId() throws Exception {
         when(paymentService.getPaymentsByOrderId(1L)).thenReturn(Arrays.asList(testPayment));
 
-        mockMvc.perform(get("/api/payments/getAllPayments").param("orderId", "1"))
+        mockMvc.perform(get("/api/payments").param("orderId", "1"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].orderId", is(1)));
     }
 
     @Test
-    @DisplayName("GET /api/payments/getAllPayments - Should filter by customerId")
+    @DisplayName("GET /api/payments - Should filter by customerId")
     void testGetPaymentsByCustomerId() throws Exception {
         when(paymentService.getPaymentsByCustomerId(4L)).thenReturn(Arrays.asList(testPayment));
 
-        mockMvc.perform(get("/api/payments/getAllPayments").param("customerId", "4"))
+        mockMvc.perform(get("/api/payments").param("customerId", "4"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].accountId", is(4)));
     }
 
     @Test
-    @DisplayName("GET /api/payments/getAllPayments - Should filter by status")
+    @DisplayName("GET /api/payments - Should filter by status")
     void testGetPaymentsByStatus() throws Exception {
         when(paymentService.getPaymentsByStatus("Completed")).thenReturn(Arrays.asList(testPayment));
 
-        mockMvc.perform(get("/api/payments/getAllPayments").param("status", "Completed"))
+        mockMvc.perform(get("/api/payments").param("status", "Completed"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].paymentStatus", is("Completed")));
     }
@@ -183,7 +183,7 @@ class PaymentControllerTest {
     // ===== PayPal Integration Tests =====
 
     @Test
-    @DisplayName("POST /api/payments/paypal/create-order - Should create PayPal order successfully")
+    @DisplayName("POST /api/payments/paypal/orders - Should create PayPal order successfully")
     void testCreatePayPalOrder() throws Exception {
         // Create mock PayPal Order
         Order mockOrder = mock(Order.class);
@@ -216,7 +216,7 @@ class PaymentControllerTest {
         request.setProductId(5L);
         request.setAccountId(4L);
 
-        mockMvc.perform(post("/api/payments/paypal/create-order")
+        mockMvc.perform(post("/api/payments/paypal/orders")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isOk())
@@ -236,7 +236,7 @@ class PaymentControllerTest {
     }
 
     @Test
-    @DisplayName("POST /api/payments/paypal/create-order - Should handle IOException")
+    @DisplayName("POST /api/payments/paypal/orders - Should handle IOException")
     void testCreatePayPalOrderError() throws Exception {
         when(paymentService.createPayPalOrder(
             any(BigDecimal.class), 
@@ -253,7 +253,7 @@ class PaymentControllerTest {
         request.setProductId(5L);
         request.setAccountId(4L);
 
-        mockMvc.perform(post("/api/payments/paypal/create-order")
+        mockMvc.perform(post("/api/payments/paypal/orders")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isInternalServerError())
@@ -261,7 +261,7 @@ class PaymentControllerTest {
     }
 
     @Test
-    @DisplayName("POST /api/payments/paypal/capture-order/{orderId} - Should capture order successfully")
+    @DisplayName("POST /api/payments/paypal/orders/{orderId}/capture - Should capture order successfully")
     void testCapturePayPalOrder() throws Exception {
         Order mockOrder = mock(Order.class);
         when(mockOrder.id()).thenReturn("PAYPAL-ORDER-123");
@@ -277,7 +277,7 @@ class PaymentControllerTest {
 
         when(paymentService.capturePayPalOrder(eq("PAYPAL-ORDER-123"), isNull(), isNull(), isNull())).thenReturn(mockOrder);
 
-        mockMvc.perform(post("/api/payments/paypal/capture-order/PAYPAL-ORDER-123"))
+        mockMvc.perform(post("/api/payments/paypal/orders/PAYPAL-ORDER-123/capture"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id", is("PAYPAL-ORDER-123")))
                 .andExpect(jsonPath("$.status", is("COMPLETED")))
@@ -288,18 +288,18 @@ class PaymentControllerTest {
     }
 
     @Test
-    @DisplayName("POST /api/payments/paypal/capture-order/{orderId} - Should handle capture error")
+    @DisplayName("POST /api/payments/paypal/orders/{orderId}/capture - Should handle capture error")
     void testCapturePayPalOrderError() throws Exception {
         when(paymentService.capturePayPalOrder(eq("INVALID-ORDER"), isNull(), isNull(), isNull()))
                 .thenThrow(new IOException("Order not found"));
 
-        mockMvc.perform(post("/api/payments/paypal/capture-order/INVALID-ORDER"))
+        mockMvc.perform(post("/api/payments/paypal/orders/INVALID-ORDER/capture"))
                 .andExpect(status().isInternalServerError())
                 .andExpect(content().string(containsString("Error capturing PayPal order")));
     }
 
     @Test
-    @DisplayName("GET /api/payments/paypal/order/{orderId} - Should get PayPal order details")
+    @DisplayName("GET /api/payments/paypal/orders/{orderId} - Should get PayPal order details")
     void testGetPayPalOrderDetails() throws Exception {
         Order mockOrder = mock(Order.class);
         when(mockOrder.id()).thenReturn("PAYPAL-ORDER-123");
@@ -315,7 +315,7 @@ class PaymentControllerTest {
 
         when(paymentService.getPayPalOrderDetails("PAYPAL-ORDER-123")).thenReturn(mockOrder);
 
-        mockMvc.perform(get("/api/payments/paypal/order/PAYPAL-ORDER-123"))
+        mockMvc.perform(get("/api/payments/paypal/orders/PAYPAL-ORDER-123"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id", is("PAYPAL-ORDER-123")))
                 .andExpect(jsonPath("$.status", is("APPROVED")))
@@ -327,12 +327,12 @@ class PaymentControllerTest {
     }
 
     @Test
-    @DisplayName("GET /api/payments/paypal/order/{orderId} - Should handle order not found")
+    @DisplayName("GET /api/payments/paypal/orders/{orderId} - Should handle order not found")
     void testGetPayPalOrderDetailsNotFound() throws Exception {
         when(paymentService.getPayPalOrderDetails("NONEXISTENT"))
                 .thenThrow(new IOException("Order not found"));
 
-        mockMvc.perform(get("/api/payments/paypal/order/NONEXISTENT"))
+        mockMvc.perform(get("/api/payments/paypal/orders/NONEXISTENT"))
                 .andExpect(status().isNotFound())
                 .andExpect(content().string(containsString("PayPal order not found")));
     }
@@ -366,7 +366,7 @@ class PaymentControllerTest {
     }
 
     @Test
-    @DisplayName("POST /api/payments/paypal/create-order - Should handle order with null links")
+    @DisplayName("POST /api/payments/paypal/orders - Should handle order with null links")
     void testCreatePayPalOrderWithNullLinks() throws Exception {
         Order mockOrder = mock(Order.class);
         when(mockOrder.id()).thenReturn("PAYPAL-ORDER-456");
@@ -388,7 +388,7 @@ class PaymentControllerTest {
         request.setProductId(10L);
         request.setAccountId(7L);
 
-        mockMvc.perform(post("/api/payments/paypal/create-order")
+        mockMvc.perform(post("/api/payments/paypal/orders")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isOk())
@@ -398,7 +398,7 @@ class PaymentControllerTest {
     }
 
     @Test
-    @DisplayName("POST /api/payments/paypal/capture-order/{orderId} - Should handle order with empty links")
+    @DisplayName("POST /api/payments/paypal/orders/{orderId}/capture - Should handle order with empty links")
     void testCapturePayPalOrderWithEmptyLinks() throws Exception {
         Order mockOrder = mock(Order.class);
         when(mockOrder.id()).thenReturn("PAYPAL-ORDER-789");
@@ -407,7 +407,7 @@ class PaymentControllerTest {
 
         when(paymentService.capturePayPalOrder(eq("PAYPAL-ORDER-789"), isNull(), isNull(), isNull())).thenReturn(mockOrder);
 
-        mockMvc.perform(post("/api/payments/paypal/capture-order/PAYPAL-ORDER-789"))
+        mockMvc.perform(post("/api/payments/paypal/orders/PAYPAL-ORDER-789/capture"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id", is("PAYPAL-ORDER-789")))
                 .andExpect(jsonPath("$.status", is("COMPLETED")))

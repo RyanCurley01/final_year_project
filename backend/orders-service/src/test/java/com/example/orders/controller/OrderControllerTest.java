@@ -17,17 +17,25 @@ import org.springframework.test.web.servlet.MockMvc;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.is;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+/**
+ * Integration Tests for OrderController.
+ *
+ * The base list endpoint is @GetMapping (no path suffix), mapping to /api/orders.
+ * The optional ?customerId query parameter filters results when supplied.
+ * There is no /getAllOrders path on this controller.
+ */
 @WebMvcTest(OrderController.class)
 @AutoConfigureMockMvc(addFilters = false)
 @DisplayName("Order Controller Integration Tests")
@@ -47,7 +55,7 @@ class OrderControllerTest {
     @BeforeEach
     void setUp() {
         objectMapper.registerModule(new JavaTimeModule());
-        
+
         testOrder = new Order();
         testOrder.setId(1L);
         testOrder.setAccountId(4L);
@@ -55,8 +63,12 @@ class OrderControllerTest {
         testOrder.setTotalAmount(new BigDecimal("99.99"));
     }
 
+    // -------------------------------------------------------------------------
+    // GET /api/orders
+    // -------------------------------------------------------------------------
+
     @Test
-    @DisplayName("GET /api/orders/getAllOrders - Should return all orders")
+    @DisplayName("GET /api/orders - Should return all orders when no filter supplied")
     void testGetAllOrders() throws Exception {
         // ARRANGE
         Order order2 = new Order();
@@ -67,7 +79,7 @@ class OrderControllerTest {
         when(orderService.getAllOrders()).thenReturn(orders);
 
         // ACT & ASSERT
-        mockMvc.perform(get("/api/orders/getAllOrders")
+        mockMvc.perform(get("/api/orders")
                 .contentType(MediaType.APPLICATION_JSON))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(2)))
@@ -75,20 +87,40 @@ class OrderControllerTest {
     }
 
     @Test
-    @DisplayName("GET /api/orders/getAllOrders - Should filter by customerId")
+    @DisplayName("GET /api/orders - Should return empty list when no orders exist")
+    void testGetAllOrdersEmpty() throws Exception {
+        // ARRANGE
+        when(orderService.getAllOrders()).thenReturn(Collections.emptyList());
+
+        // ACT & ASSERT
+        mockMvc.perform(get("/api/orders")
+                .contentType(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(0)));
+    }
+
+    @Test
+    @DisplayName("GET /api/orders?customerId=4 - Should filter results by customerId")
     void testGetAllOrdersByCustomerId() throws Exception {
         // ARRANGE
         List<Order> orders = Arrays.asList(testOrder);
         when(orderService.getOrdersByCustomerId(4L)).thenReturn(orders);
 
         // ACT & ASSERT
-        mockMvc.perform(get("/api/orders/getAllOrders")
+        mockMvc.perform(get("/api/orders")
                 .param("customerId", "4")
                 .contentType(MediaType.APPLICATION_JSON))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(1)))
                 .andExpect(jsonPath("$[0].accountId", is(4)));
+
+        verify(orderService).getOrdersByCustomerId(4L);
+        verify(orderService, never()).getAllOrders();
     }
+
+    // -------------------------------------------------------------------------
+    // GET /api/orders/{id}
+    // -------------------------------------------------------------------------
 
     @Test
     @DisplayName("GET /api/orders/{id} - Should return order by id")
@@ -116,8 +148,44 @@ class OrderControllerTest {
                 .andExpect(status().isNotFound());
     }
 
+    // -------------------------------------------------------------------------
+    // GET /api/orders/account/{accountId}
+    // -------------------------------------------------------------------------
+
     @Test
-    @DisplayName("POST /api/orders - Should create new order")
+    @DisplayName("GET /api/orders/account/{accountId} - Should return orders for account")
+    void testGetOrdersByAccountId() throws Exception {
+        // ARRANGE
+        List<Order> orders = Arrays.asList(testOrder);
+        when(orderService.getOrdersByCustomerId(4L)).thenReturn(orders);
+
+        // ACT & ASSERT
+        mockMvc.perform(get("/api/orders/account/4")
+                .contentType(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(1)))
+                .andExpect(jsonPath("$[0].accountId", is(4)));
+    }
+
+    @Test
+    @DisplayName("GET /api/orders/account/{accountId} - Should return empty list when account has no orders")
+    void testGetOrdersByAccountIdEmpty() throws Exception {
+        // ARRANGE
+        when(orderService.getOrdersByCustomerId(99L)).thenReturn(Collections.emptyList());
+
+        // ACT & ASSERT
+        mockMvc.perform(get("/api/orders/account/99")
+                .contentType(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(0)));
+    }
+
+    // -------------------------------------------------------------------------
+    // POST /api/orders
+    // -------------------------------------------------------------------------
+
+    @Test
+    @DisplayName("POST /api/orders - Should create new order and return 201")
     void testCreateOrder() throws Exception {
         // ARRANGE
         Order newOrder = new Order();
@@ -142,6 +210,10 @@ class OrderControllerTest {
                 .andExpect(jsonPath("$.accountId", is(5)));
     }
 
+    // -------------------------------------------------------------------------
+    // PUT /api/orders/{id}
+    // -------------------------------------------------------------------------
+
     @Test
     @DisplayName("PUT /api/orders/{id} - Should update existing order")
     void testUpdateOrder() throws Exception {
@@ -160,7 +232,9 @@ class OrderControllerTest {
         mockMvc.perform(put("/api/orders/1")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(updateDetails)))
-                .andExpect(status().isOk());
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id", is(1)))
+                .andExpect(jsonPath("$.accountId", is(4)));
     }
 
     @Test
@@ -178,20 +252,5 @@ class OrderControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(updateDetails)))
                 .andExpect(status().isNotFound());
-    }
-
-    @Test
-    @DisplayName("GET /api/orders/account/{accountId} - Should return orders by account id")
-    void testGetOrdersByAccountId() throws Exception {
-        // ARRANGE
-        List<Order> orders = Arrays.asList(testOrder);
-        when(orderService.getOrdersByCustomerId(4L)).thenReturn(orders);
-
-        // ACT & ASSERT
-        mockMvc.perform(get("/api/orders/account/4")
-                .contentType(MediaType.APPLICATION_JSON))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$", hasSize(1)))
-                .andExpect(jsonPath("$[0].accountId", is(4)));
     }
 }

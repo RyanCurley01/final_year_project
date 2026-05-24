@@ -48,31 +48,31 @@ class SoldProductControllerTest {
     }
 
     @Test
-    @DisplayName("GET /api/sold-products/getAllSoldProducts - Should return all sold products")
+    @DisplayName("GET /api/sold-products - Should return all sold products")
     void testGetAllSoldProducts() throws Exception {
         when(soldProductService.getAllSoldProducts()).thenReturn(Arrays.asList(testSoldProduct));
 
-        mockMvc.perform(get("/api/sold-products/getAllSoldProducts"))
+        mockMvc.perform(get("/api/sold-products"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(1)));
     }
 
     @Test
-    @DisplayName("GET /api/sold-products/getAllSoldProducts - Should filter by orderItemId")
+    @DisplayName("GET /api/sold-products - Should filter by orderItemId")
     void testGetSoldProductsByOrderItemId() throws Exception {
         when(soldProductService.getSoldProductsByOrderItemId(1L)).thenReturn(Arrays.asList(testSoldProduct));
 
-        mockMvc.perform(get("/api/sold-products/getAllSoldProducts").param("orderItemId", "1"))
+        mockMvc.perform(get("/api/sold-products").param("orderItemId", "1"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].orderItemId", is(1)));
     }
 
     @Test
-    @DisplayName("GET /api/sold-products/getAllSoldProducts - Should filter by productId")
+    @DisplayName("GET /api/sold-products - Should filter by productId")
     void testGetSoldProductsByProductId() throws Exception {
         when(soldProductService.getSoldProductsByProductId(5L)).thenReturn(Arrays.asList(testSoldProduct));
 
-        mockMvc.perform(get("/api/sold-products/getAllSoldProducts").param("productId", "5"))
+        mockMvc.perform(get("/api/sold-products").param("productId", "5"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].productId", is(5)));
     }
