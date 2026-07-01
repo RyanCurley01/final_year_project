@@ -1820,6 +1820,35 @@ const SpectrogramCreator = () => {
     requestAnimationFrame(animatePlayhead);
   }, [isPlaying, isPaused, handlePause, handleStop]);
 
+  // ── Download Spectrogram Image ──
+  // Capture the current spectrogram canvas (and overlay visuals) as a PNG file.
+  const handleDownloadImage = useCallback(() => {
+    const baseCanvas = canvasRef.current;
+    if (!baseCanvas) return;
+
+    const overlayCanvas = overlayCanvasRef.current;
+    const exportCanvas = document.createElement('canvas');
+    exportCanvas.width = CANVAS_WIDTH;
+    exportCanvas.height = CANVAS_HEIGHT;
+    const ctx = exportCanvas.getContext('2d');
+    if (!ctx) return;
+
+    ctx.drawImage(baseCanvas, 0, 0);
+    if (overlayCanvas) {
+      ctx.drawImage(overlayCanvas, 0, 0);
+    }
+
+    exportCanvas.toBlob((blob) => {
+      if (!blob) return;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `spectrogram-${Date.now()}.png`;
+      a.click();
+      URL.revokeObjectURL(url);
+    }, 'image/png');
+  }, []);
+
   // ── Export WAV ──
   // Process the entire spatial grid immediately executing pure mathematical generation producing static offline WAV files.
   const handleExport = useCallback(async () => {
@@ -2606,6 +2635,15 @@ const SpectrogramCreator = () => {
                      hover:border-purple-500/40 transition-colors"
         >
           💾 Export WAV
+        </button>
+
+        <button
+          onClick={handleDownloadImage}
+          className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium
+                     bg-[#1a1640] hover:bg-[#252060] text-gray-200 border border-purple-500/20 
+                     hover:border-purple-500/40 transition-colors"
+        >
+          🖼️ Download Image
         </button>
 
         <button
