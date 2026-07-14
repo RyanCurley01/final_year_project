@@ -253,11 +253,23 @@ class ImagePoolManager {
   /**
    * Add images to a song's pool.
    */
+  _shuffleArray(items) {
+    for (let i = items.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [items[i], items[j]] = [items[j], items[i]];
+    }
+  }
+
   addImages(songId, imageUrls) {
     const pool = this.getPool(songId);
+    const shuffledUrls = Array.isArray(imageUrls) ? [...imageUrls] : [];
+    if (shuffledUrls.length > 1) {
+      this._shuffleArray(shuffledUrls);
+    }
+
     // O(1) dedup with Set
     const existing = new Set(pool.images);
-    for (const url of imageUrls) {
+    for (const url of shuffledUrls) {
       if (!existing.has(url)) {
         pool.images.push(url);
         existing.add(url);

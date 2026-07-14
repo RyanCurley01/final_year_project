@@ -316,20 +316,31 @@ def _decode_image_bgr(data: bytes):
         return None
 
 
+# Module-level cached detectors/clients to avoid repeated expensive loads.
+_NUDE_CLASSIFIER = None
+_HOG_PEOPLE_DETECTOR = None
+
+
+def _init_nude_classifier():
+    global _NUDE_CLASSIFIER
+    if _NUDE_CLASSIFIER is None:
+        try:
+            from nudenet import NudeClassifier
+
+            _NUDE_CLASSIFIER = NudeClassifier()
+        except Exception:
+            _NUDE_CLASSIFIER = False
+    return _NUDE_CLASSIFIER if _NUDE_CLASSIFIER else None
+
+
 def _detect_people_in_image(data: bytes) -> bool:
-    """Detect human presence using four Haar cascade layers.
+    """Detect human presence using a multi-method approach.
 
-    Skin-tone heuristic intentionally omitted: all images are sourced via
-    _VERIFIED_KEYWORDS (nature/landscape/abstract only), so warm-toned false
-    positives from sunset, sandstone, coral, and canyon keywords would far
-    outweigh the marginal benefit of catching the rare incidental silhouette
-    that slips past all four cascades.
+    Strategy (best-effort, safe fallbacks):
+      1. HOG + SVM pedestrian detector (fast, local, included in OpenCV)
+      2. Haar cascades (legacy, conservative)
 
-    Detection layers:
-      1. Frontal face  — direct portraits
-      2. Profile face  — side-on faces
-      3. Full body     — standing figures, even at distance
-      4. Upper body    — torsos when legs are out of frame
+    Returns True when a human figure (person/face/body) is detected.
     """
     try:
         cv2 = importlib.import_module("cv2")
@@ -344,34 +355,52 @@ def _detect_people_in_image(data: bytes) -> bool:
     if h < 20 or w < 20:
         return False
 
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    # 1) HOG + SVM people detector (more robust for full-body/person shapes)
+    try:
+        global _HOG_PEOPLE_DETECTOR
+        if _HOG_PEOPLE_DETECTOR is None:
+            hog = cv2.HOGDescriptor()
+            hog.setSVMDetector(cv2.HOGDescriptor_getDefaultPeopleDetector())
+            _HOG_PEOPLE_DETECTOR = hog
+        else:
+            hog = _HOG_PEOPLE_DETECTOR
 
-    cascade_configs = [
-        # (filename, scaleFactor, minNeighbors, minSize)
-        # Frontal: strict neighbors to avoid rock/cloud false positives.
-        ("haarcascade_frontalface_default.xml", 1.1, 8, (40, 40)),
-        # Profile: slightly relaxed since side-on hits are geometrically rarer.
-        ("haarcascade_profileface.xml",         1.1, 7, (40, 40)),
-        # Full body: finer scale steps to catch distant/small figures.
-        ("haarcascade_fullbody.xml",             1.05, 6, (60, 120)),
-        # Upper body: catches torsos when legs are cropped or occluded.
-        ("haarcascade_upperbody.xml",            1.1, 7, (50, 50)),
-    ]
-
-    for filename, scale, neighbors, min_size in cascade_configs:
-        cascade_path = os.path.join(cv2.data.haarcascades, filename)
-        detector = cv2.CascadeClassifier(cascade_path)
-        if detector.empty():
-            continue
-        hits = detector.detectMultiScale(
-            gray,
-            scaleFactor=scale,
-            minNeighbors=neighbors,
-            minSize=min_size,
-            flags=cv2.CASCADE_SCALE_IMAGE,
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        rects, weights = hog.detectMultiScale(
+            gray, winStride=(8, 8), padding=(8, 8), scale=1.05
         )
-        if len(hits) > 0:
+        if len(rects) > 0:
             return True
+    except Exception:
+        # HOG may not be available on some OpenCV builds; fall through.
+        pass
+
+    # 2) Haar cascades for faces/upper bodies as fallback
+    try:
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        cascade_configs = [
+            ("haarcascade_frontalface_default.xml", 1.1, 6, (30, 30)),
+            ("haarcascade_profileface.xml", 1.1, 5, (30, 30)),
+            ("haarcascade_fullbody.xml", 1.05, 5, (60, 120)),
+            ("haarcascade_upperbody.xml", 1.1, 5, (50, 50)),
+        ]
+
+        for filename, scale, neighbors, min_size in cascade_configs:
+            cascade_path = os.path.join(cv2.data.haarcascades, filename)
+            detector = cv2.CascadeClassifier(cascade_path)
+            if detector.empty():
+                continue
+            hits = detector.detectMultiScale(
+                gray,
+                scaleFactor=scale,
+                minNeighbors=neighbors,
+                minSize=min_size,
+                flags=cv2.CASCADE_SCALE_IMAGE,
+            )
+            if len(hits) > 0:
+                return True
+    except Exception:
+        pass
 
     return False
 
@@ -413,14 +442,162 @@ def _detect_red_border_in_image(data: bytes) -> bool:
     return red_ratio >= 0.75
 
 
+def _run_aws_rekognition_moderation(data: bytes) -> Optional[list]:
+    try:
+        import boto3
+        client = boto3.client("rekognition")
+        resp = client.detect_moderation_labels(Image={"Bytes": data}, MinConfidence=65)
+        return resp.get("ModerationLabels", [])
+    except Exception:
+        return None
+
+
+def _is_unsafe_rekognition_label(label: str) -> bool:
+    name = label.lower()
+    unsafe_terms = [
+        "animal abuse",
+        "animal cruelty",
+        "animal",
+        "violence",
+        "graphic",
+        "gore",
+        "blood",
+        "corpse",
+        "dead",
+        "injury",
+        "abuse",
+        "self harm",
+        "suicide",
+    ]
+    return any(term in name for term in unsafe_terms)
+
+
+def _run_aws_rekognition_label_detection(data: bytes) -> Optional[list]:
+    try:
+        import boto3
+        client = boto3.client("rekognition")
+        resp = client.detect_labels(Image={"Bytes": data}, MinConfidence=70, MaxLabels=20)
+        return resp.get("Labels", [])
+    except Exception:
+        return None
+
+
+def _run_nudenet_check(data: bytes) -> Optional[dict]:
+    try:
+        classifier = _init_nude_classifier()
+        if not classifier:
+            return None
+        # classify_bytes returns a dict mapping filename->predictions; we can
+        # call classify_bytes with raw bytes and examine returned scores.
+        res = classifier.classify_bytes(data)
+        # Normalize to a predictable structure: map labels to scores if present.
+        if isinstance(res, dict):
+            # nudenet returns { 'label': {'safe':0.1, 'sexual':0.9} } or similar
+            # We'll attempt to extract the first value's dict.
+            for v in res.values():
+                if isinstance(v, dict):
+                    return v
+        return None
+    except Exception:
+        return None
+
+
 def _moderation_rejection_reason(data: bytes) -> Optional[str]:
-    # Person check runs first as the strongest disqualifier.
-    if _detect_people_in_image(data):
-        return "person_detected"
-    # Secondary check rejects heavy red-border overlays.
-    if _detect_red_border_in_image(data):
-        return "red_border_detected"
-    # None means image passed moderation filters.
+    """Run a layered moderation pipeline and return rejection reason string.
+
+    Order of checks (conservative):
+      1. AWS Rekognition moderation labels
+      2. AWS Rekognition general labels for animal/violence detection
+      3. NudeNet local NSFW classifier
+      4. Person detection (HOG/Haar)
+      5. Red-border heuristic
+
+    Uses caching (_get_cached/_set_cached) to avoid reprocessing identical images.
+    """
+    key = "moderation:" + _hash_bytes(data)
+    try:
+        cached = _get_cached(key)
+        if cached is not None:
+            return cached
+    except Exception:
+        cached = None
+
+    # 1) AWS Rekognition moderation labels (if available)
+    try:
+        labels = _run_aws_rekognition_moderation(data)
+        if labels:
+            for lab in labels:
+                name = (lab.get("Name") or "").lower()
+                conf = float(lab.get("Confidence") or 0.0)
+                if conf >= 70.0 and _is_unsafe_rekognition_label(name):
+                    if "animal" in name or "dead" in name or "corpse" in name or "abuse" in name:
+                        _set_cached(key, "animal_harm_detected")
+                        return "animal_harm_detected"
+                    if "violence" in name or "graphic" in name or "gore" in name or "blood" in name:
+                        _set_cached(key, "violence_detected")
+                        return "violence_detected"
+                    _set_cached(key, "explicit_content_detected")
+                    return "explicit_content_detected"
+    except Exception:
+        pass
+
+    # 2) AWS Rekognition label detection for animals, blood, and graphic content
+    try:
+        labels = _run_aws_rekognition_label_detection(data)
+        if labels:
+            for lab in labels:
+                name = (lab.get("Name") or "").lower()
+                conf = float(lab.get("Confidence") or 0.0)
+                if conf >= 70.0 and _is_unsafe_rekognition_label(name):
+                    if "animal" in name or "dead" in name or "corpse" in name or "abuse" in name:
+                        _set_cached(key, "animal_harm_detected")
+                        return "animal_harm_detected"
+                    if "violence" in name or "graphic" in name or "gore" in name or "blood" in name:
+                        _set_cached(key, "violence_detected")
+                        return "violence_detected"
+                    _set_cached(key, "explicit_content_detected")
+                    return "explicit_content_detected"
+    except Exception:
+        pass
+
+    # 3) Local NSFW classifier (NudeNet) if available
+    try:
+        nres = _run_nudenet_check(data)
+        if nres:
+            # Look for common keys like 'safe'/'unsafe' or 'porn'/'sexy'
+            # If any explicit-related key has probability >= 0.6, reject.
+            for k, v in nres.items():
+                try:
+                    score = float(v)
+                except Exception:
+                    continue
+                if k.lower() in ("porn", "sex", "explicit", "unsafe", "sexy") and score >= 0.6:
+                    _set_cached(key, "explicit_content_detected")
+                    return "explicit_content_detected"
+    except Exception:
+        pass
+
+    # 4) Person detection (HOG + Haar cascades)
+    try:
+        if _detect_people_in_image(data):
+            _set_cached(key, "person_detected")
+            return "person_detected"
+    except Exception:
+        pass
+
+    # 5) Red-border heuristic
+    try:
+        if _detect_red_border_in_image(data):
+            _set_cached(key, "red_border_detected")
+            return "red_border_detected"
+    except Exception:
+        pass
+
+    # Nothing triggered: cache negative result and return None
+    try:
+        _set_cached(key, None)
+    except Exception:
+        pass
     return None
 
 

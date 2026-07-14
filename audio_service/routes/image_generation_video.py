@@ -2,7 +2,7 @@
 
 """Video export endpoint for hosted image pools.
 
-This module builds a slideshow MP4 from S3-hosted images and optionally muxes
+This module builds a slideshow MP4 from S3-hosted images and optionally mixes
 song audio, with range-response support for resumable downloads.
 """
 
@@ -18,6 +18,24 @@ import tempfile
 from . import image_generation as core
 
 router = APIRouter()
+
+
+def _generate_export_placeholder_frame(temp_dir: str, width: int = 1080, height: int = 1920) -> str:
+    """Generate a portrait procedural thumbnail frame for pool-video exports."""
+    placeholder_path = os.path.join(temp_dir, "placeholder_frame.ppm")
+    core._generate_procedural_frame(
+        out_path=placeholder_path,
+        width=width,
+        height=height,
+        energy=0.5,
+        lfc=0.5,
+        hfc=0.5,
+        spectral_centroid=0.5,
+        onset_type="percussion",
+        glitch=False,
+        seed=1337,
+    )
+    return placeholder_path
 
 
 @router.get("/pool-video")
@@ -58,14 +76,51 @@ def download_image_pool_video(
                 raise HTTPException(status_code=503, detail="Database connection unavailable")
             with conn.cursor() as cursor:
                 rows = core._db_fetch_hosted_image_rows(cursor, int(song_id))
+                if rows:
+                    # Use the same first-row selection logic as the frontend thumbnail.
+                    # The frontend calls /api/images/pool?count=1, which uses _db_fetch_images.
+                    thumb_rows = core._db_fetch_images(cursor, int(song_id), 1)
+                    if thumb_rows:
+                        thumb_url = thumb_rows[0].get("url")
+                        if thumb_url:
+                            match_index = next(
+                                (idx for idx, row in enumerate(rows) if (row or {}).get("ImageUrl") == thumb_url),
+                                None,
+                            )
+                            if match_index is not None and match_index > 0:
+                                thumb_row = rows.pop(match_index)
+                                rows.insert(0, thumb_row)
     except HTTPException:
         raise
     except Exception as e:
         core.console.log(f"❌ Pool video DB lookup failed for ProductID={song_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to load image pool metadata")
 
+    # If the backend pool is still empty, warm up a single LoremFlickr-hosted image
+    # so the exported video thumbnail matches the frontend's real pool thumbnail.
     if not rows:
-        raise HTTPException(status_code=404, detail="No hosted image pool found for this song")
+        try:
+            inserted = core._quick_warmup_s3_images(
+                int(song_id),
+                song_title,
+                mood=None,
+                energy=None,
+                valence=None,
+                tempo=None,
+                danceability=None,
+                acousticness=None,
+                genre=None,
+                max_images=1,
+            )
+            if inserted > 0:
+                with core.get_db_connection() as conn:
+                    if conn:
+                        with conn.cursor() as cursor:
+                            rows = core._db_fetch_hosted_image_rows(cursor, int(song_id))
+        except Exception as e:
+            core.console.log(f"⚠️ Pool video warmup failed for ProductID={song_id}: {e}")
+
+    placeholder_only = not bool(rows)
 
     # All intermediate frame/audio/video artifacts live in a temp workspace.
     with tempfile.TemporaryDirectory(prefix=f"pool_video_{int(song_id)}_") as tmp_dir:
@@ -108,7 +163,11 @@ def download_image_pool_video(
                 core.console.log(f"⚠️ Failed to normalize pool image frame ProductID={song_id} idx={idx}")
 
         if not frame_paths:
-            raise HTTPException(status_code=404, detail="Hosted pool images are missing in storage")
+            if placeholder_only:
+                placeholder_path = _generate_export_placeholder_frame(tmp_dir, width=1080, height=1920)
+                frame_paths.append(placeholder_path)
+            else:
+                raise HTTPException(status_code=404, detail="Hosted pool images are missing in storage")
 
         audio_file = ""
         if audio_url:
@@ -152,7 +211,7 @@ def download_image_pool_video(
             )
 
         silent_video_file = os.path.join(tmp_dir, "pool_video_silent.mp4")
-        # Pass 1: render silent slideshow video.
+        # Pass 1: render silent slideshow video in portrait TikTok dimensions.
         build_cmd = [
             ffmpeg_bin,
             "-y",
@@ -165,7 +224,7 @@ def download_image_pool_video(
             "-vsync",
             "vfr",
             "-vf",
-            "scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2:black",
+            "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920",
             "-c:v",
             "libx264",
             "-pix_fmt",
