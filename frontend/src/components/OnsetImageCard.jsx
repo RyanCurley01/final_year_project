@@ -15,6 +15,11 @@
 
 import { useRef, useEffect, useState, useCallback } from 'react';
 import { useSelector } from 'react-redux';
+import { createPortal } from 'react-dom';
+import { useAuth } from '../context/AuthContext';
+import envConfig from '../config/environment';
+import { productService } from '../redux/services/productService';
+import { FaDownload } from 'react-icons/fa';
 import globalAudioContext from '../utils/globalAudioContext';
 import imageGenerationService from '../utils/imageGenerationService';
 import { GLITCH_DURATION_MS, glitchStyle } from '../utils/glitchEffects';
@@ -70,6 +75,26 @@ const OnsetImageCard = ({
   const glitchTimeoutRef = useRef(null);
 
   const { activeSong } = useSelector((state) => state.player);
+  const { currentUser } = useAuth();
+  const [isExporting, setIsExporting] = useState(false);
+  const [buttonRect, setButtonRect] = useState(null);
+  const downloadControllerRef = useRef(null);
+  const downloadChunksRef = useRef([]);
+  const downloadLoadedRef = useRef(0);
+  const downloadTotalRef = useRef(0);
+  const [downloadProgress, setDownloadProgress] = useState(0);
+  const [downloadLoadedBytes, setDownloadLoadedBytes] = useState(0);
+  const [downloadTotalBytes, setDownloadTotalBytes] = useState(0);
+
+  const allowedAccountName = (envConfig.getPoolVideoExportUser().accountName || '').trim();
+  const canDownloadPoolVideo = Boolean(
+    allowedAccountName &&
+    currentUser &&
+    (currentUser.accountName || currentUser.displayName || '')
+      .toString()
+      .trim()
+      .toLowerCase() === allowedAccountName.toLowerCase()
+  );
 
   // Keep refs in sync
   useEffect(() => {
@@ -114,6 +139,125 @@ const OnsetImageCard = ({
       }
     };
   }, [songId]);
+
+  // Measure placeholder position for portalled button
+  useEffect(() => {
+    if (!containerRef.current) return;
+    const node = containerRef.current;
+    const update = () => {
+      const rect = node.getBoundingClientRect();
+      // position button 8px right/down from top-left of container
+      setButtonRect({ top: rect.top + 8, left: rect.left + 8, width: 92, height: 34 });
+    };
+    update();
+    window.addEventListener('resize', update);
+    window.addEventListener('scroll', update, true);
+    const ro = new ResizeObserver(update);
+    ro.observe(node);
+    return () => {
+      window.removeEventListener('resize', update);
+      window.removeEventListener('scroll', update, true);
+      try { ro.disconnect(); } catch (_) {}
+    };
+  }, [containerRef.current, songId]);
+
+  const streamPoolVideo = async ({ startByte = 0, existingChunks = [], knownTotal = 0 } = {}) => {
+    if (!songId) throw new Error('No song id');
+
+    const apiBaseUrl = envConfig.getApiBaseUrl();
+    const title = songTitle || `song-${songId}`;
+    // Try to resolve an audio url from product metadata so backend can use it
+    let audioUrl = '';
+    try {
+      const prod = await productService.getProductById(songId);
+      if (prod && prod.fileUrl) audioUrl = prod.fileUrl;
+    } catch (err) {
+      // ignore — fallback to empty audio_url
+    }
+
+    const endpoint = `${apiBaseUrl}/api/images/pool-video?song_id=${encodeURIComponent(songId)}&song_title=${encodeURIComponent(title)}&audio_url=${encodeURIComponent(audioUrl || '')}`;
+
+    const controller = new AbortController();
+    downloadControllerRef.current = controller;
+
+    setIsExporting(true);
+    setDownloadProgress(0);
+    downloadChunksRef.current = [...existingChunks];
+    downloadLoadedRef.current = startByte;
+
+    const headers = { Accept: 'video/mp4' };
+    if (startByte > 0) headers.Range = `bytes=${startByte}-`;
+
+    const response = await fetch(endpoint, { method: 'GET', headers, signal: controller.signal });
+    if (!response.ok && response.status !== 206) {
+      throw new Error(`Video export failed (${response.status})`);
+    }
+
+    const totalFromRange = (() => {
+      const contentRange = response.headers.get('content-range');
+      if (!contentRange) return 0;
+      const match = contentRange.match(/bytes\s+\d+-\d+\/(\d+)/i);
+      return match ? Number(match[1]) || 0 : 0;
+    })();
+
+    const responseLength = Number(response.headers.get('content-length')) || 0;
+    const total = totalFromRange || (startByte > 0 ? (knownTotal || startByte + responseLength) : responseLength);
+    if (total > 0) {
+      downloadTotalRef.current = total;
+    }
+
+    const reader = response.body?.getReader();
+    if (!reader) throw new Error('Download stream is unavailable');
+
+    // progress watchdog: abort if no progress for 120s
+    let lastProgressTs = Date.now();
+    const watchdog = setInterval(() => {
+      if (!downloadLoadedRef.current) return;
+      if (Date.now() - lastProgressTs > 120000) {
+        if (downloadControllerRef.current) downloadControllerRef.current.abort();
+      }
+    }, 5000);
+
+    try {
+        const chunks = existingChunks.slice();
+      let loaded = startByte;
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (!value) continue;
+        chunks.push(value);
+        loaded += value.byteLength;
+        downloadChunksRef.current = chunks;
+        downloadLoadedRef.current = loaded;
+        lastProgressTs = Date.now();
+        // update byte states for UI
+        setDownloadLoadedBytes(loaded);
+        if (downloadTotalRef.current > 0) {
+          setDownloadTotalBytes(downloadTotalRef.current);
+          setDownloadProgress(Math.min(100, (loaded / downloadTotalRef.current) * 100));
+        }
+      }
+
+      const blob = new Blob(chunks, { type: 'video/mp4' });
+      const objectUrl = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = objectUrl;
+      const safeTitle = String(title).trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || `song-${songId}`;
+      a.download = `${safeTitle}-image-pool.mp4`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(objectUrl);
+      setDownloadProgress(100);
+    } finally {
+      clearInterval(watchdog);
+      downloadControllerRef.current = null;
+      downloadChunksRef.current = [];
+      downloadLoadedRef.current = 0;
+      downloadTotalRef.current = 0;
+      setTimeout(() => setDownloadProgress(0), 1500);
+    }
+  };
 
   // Instant swap helper shared by subscription events and direct updates.
   // Guarding against identical URLs prevents unnecessary React re-renders.
@@ -389,6 +533,70 @@ const OnsetImageCard = ({
       className={`relative overflow-hidden ${className || ''}`}
       style={{ width: '100%', height: '100%', WebkitTransform: 'translateZ(0)', willChange: 'transform' }}
     >
+      {/* Download button for allowlisted account (env-controlled) */}
+      {canDownloadPoolVideo && songId && (
+        // Render a placeholder in-DOM for layout; actual clickable button is portalled
+        <div data-pool-download-placeholder style={{ position: 'absolute', top: 8, left: 8, width: 92, height: 34, pointerEvents: 'none', zIndex: 40 }} />
+      )}
+
+      {/* Portalled button to avoid stacking-context/pointer event blocking */}
+      {canDownloadPoolVideo && songId && buttonRect && createPortal(
+        <div style={{ position: 'fixed', top: 0, left: 0, width: 0, height: 0, pointerEvents: 'none', zIndex: 99999 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <button
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={async (e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            if (isExporting) return;
+            setIsExporting(true);
+            try {
+              await streamPoolVideo();
+            } catch (err) {
+              if (err?.name === 'AbortError') {
+                // user cancelled
+              } else {
+                console.error('[OnsetImageCard] Failed to export pool video:', err);
+                alert('Failed to generate/download image pool video.');
+              }
+            } finally {
+              setIsExporting(false);
+            }
+          }}
+          className="z-90 px-2 py-1.5 rounded-full bg-black/60 backdrop-blur-sm hover:bg-black/70 transition-all hover:scale-105 flex items-center gap-1.5"
+          style={{
+            position: 'fixed',
+            top: `${buttonRect.top}px`,
+            left: `${buttonRect.left}px`,
+            width: `${buttonRect.width}px`,
+            height: `${buttonRect.height}px`,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            pointerEvents: 'auto'
+          }}
+          title="Download image pool as video"
+        >
+          <FaDownload className="w-4 h-4 text-white/90" />
+          <span className="ml-2 text-[11px] text-white/90 font-semibold">
+            {isExporting ? 'Exporting...' : 'Pool'}
+          </span>
+          </button>
+
+          {/* Progress bar + bytes */}
+          <div style={{ width: buttonRect.width, display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'stretch', pointerEvents: 'none' }}>
+          <div style={{ height: 6, background: 'rgba(255,255,255,0.12)', borderRadius: 6, overflow: 'hidden' }}>
+            <div style={{ width: `${Math.max(0, Math.min(100, downloadProgress))}%`, height: '100%', background: 'linear-gradient(90deg,#06b6d4,#3b82f6)' }} />
+          </div>
+          <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.85)', display: 'flex', justifyContent: 'space-between', pointerEvents: 'none' }}>
+            <span>{downloadProgress.toFixed(0)}%</span>
+            <span>{downloadTotalBytes > 0 ? `${(downloadLoadedBytes / (1024*1024)).toFixed(2)} MB / ${(downloadTotalBytes / (1024*1024)).toFixed(2)} MB` : `${(downloadLoadedBytes / (1024*1024)).toFixed(2)} MB`}</span>
+          </div>
+          </div>
+          </div>
+        </div>,
+        document.body
+      )}
       {/* Image layer — instant swap, no crossfade */}
       {currentImage && (
         <img

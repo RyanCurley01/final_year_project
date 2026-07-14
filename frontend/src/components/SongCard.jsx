@@ -481,11 +481,13 @@ const SongCard = ({ product, payment, i, data, onWishlistToggle }) => {
 
         {canDownloadPoolVideo && (
           <button
-            onClick={handleDownloadPoolVideo}
-            disabled={isDownloadingPoolVideo}
-            className="absolute top-2 left-2 z-20 px-2 py-1.5 rounded-full bg-black/50 backdrop-blur-sm hover:bg-black/70 transition-all hover:scale-105 disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-1.5"
-            title="Download image pool as video"
-          >
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={(e) => { e.stopPropagation(); e.preventDefault(); handleDownloadPoolVideo(e); }}
+              disabled={isDownloadingPoolVideo}
+              className="absolute top-2 left-2 z-50 px-2 py-1.5 rounded-full bg-black/50 backdrop-blur-sm hover:bg-black/70 transition-all hover:scale-105 disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-1.5"
+              style={{ pointerEvents: 'auto' }}
+              title="Download image pool as video"
+            >
             <FaDownload className="w-3.5 h-3.5 text-white/90" />
             <span className="text-[11px] text-white/90 font-semibold">
               {isDownloadingPoolVideo ? 'Downloading...' : 'Pool Video'}

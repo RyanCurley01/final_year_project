@@ -137,6 +137,12 @@ class EnvironmentConfig {
       ''
     )
       .trim();
+    // Optional allowlist account name for pool-video export controls
+    config.poolVideoExportAccountName = (
+      runtimeEnv.VITE_POOL_VIDEO_EXPORT_ACCOUNT_NAME ||
+      viteEnv.VITE_POOL_VIDEO_EXPORT_ACCOUNT_NAME ||
+      ''
+    ).trim();
 
     return config;
   }
@@ -177,6 +183,7 @@ class EnvironmentConfig {
     return {
       email: this.config.poolVideoExportUserEmail,
       firebaseUid: this.config.poolVideoExportUserFirebaseUid,
+      accountName: this.config.poolVideoExportAccountName,
     };
   }
 
