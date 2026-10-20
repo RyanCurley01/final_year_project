@@ -23,7 +23,7 @@ DB_CONFIG = {
     'charset': 'utf8mb4',
     'cursorclass': 'dict', # String here, converted in usage or imported elsewhere if needed
     'connect_timeout': 3,  # Fast timeout to avoid blocking
-    'read_timeout': 5,
+    'read_timeout': 60,
     'write_timeout': 5
 }
 
