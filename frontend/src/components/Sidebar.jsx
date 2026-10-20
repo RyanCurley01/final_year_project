@@ -182,6 +182,14 @@ const NavLinks = ({ handleClick, onResetPlayer, onClearWishlist, isMobile = fals
     <SoldProductsSidebar />
     <CustomerSummarySidebar />
 
+    <NavLink
+      to="/privacy-policy"
+      className="flex flex-row justify-start items-center my-8 text-sm font-medium text-gray-300 hover:text-primary-light"
+      onClick={() => handleClick && handleClick()}
+    >
+      Privacy Policy
+    </NavLink>
+
     {/* Logout Button: Executes the full handleLogout teardown. */}
     <button
       type="button"

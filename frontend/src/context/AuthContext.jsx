@@ -13,6 +13,26 @@ import {
 
 const AuthContext = React.createContext();
 
+function getStoredUser() {
+  const storedUser = localStorage.getItem('currentUser');
+  if (!storedUser) return null;
+
+  try {
+    const user = JSON.parse(storedUser);
+    if (!user || typeof user !== 'object' || Array.isArray(user)) return null;
+
+    if (Object.hasOwn(user, 'password')) {
+      delete user.password;
+      localStorage.setItem('currentUser', JSON.stringify(user));
+    }
+
+    return user;
+  } catch {
+    localStorage.removeItem('currentUser');
+    return null;
+  }
+}
+
 export function useAuth() {
   return useContext(AuthContext);
 }
@@ -61,29 +81,24 @@ export function AuthProvider({ children }) {
   function setUser(user) {
     setCurrentUser(user);
     if (user) {
-      localStorage.setItem('currentUser', JSON.stringify(user));
+      const storedUser = { ...user };
+      delete storedUser.password;
+      localStorage.setItem('currentUser', JSON.stringify(storedUser));
     } else {
       localStorage.removeItem('currentUser');
     }
   }
 
   useEffect(() => {
-    // Check local storage first (for legacy login or persisted backend user)
-    const stored = localStorage.getItem('currentUser');
-    if (stored) {
-      setCurrentUser(JSON.parse(stored));
-    }
+    setCurrentUser(getStoredUser());
 
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       // If Firebase detects a user, we generally want to respect it.
       // However, if we already have a "richer" user object from localStorage (with DB ID),
       // we might want to keep that, unless the UIDs don't match.
       if (user) {
-         // If we don't have a current user, or the current user is just the firebase one (no ID),
-         // try to load from local storage to get the full profile.
-         const local = localStorage.getItem('currentUser');
-         if (local) {
-            const localUser = JSON.parse(local);
+        const localUser = getStoredUser();
+        if (localUser) {
             // Verify it matches the firebase user (email or uid)
             // Handle different email field names (legacy 'email' vs backend 'accountEmailAddress')
             const localEmail = localUser.email || localUser.accountEmailAddress;
@@ -101,9 +116,8 @@ export function AuthProvider({ children }) {
          // Firebase says no user. 
          // Check if we have a legacy user (Basic Auth) in local storage?
          // If we do, we keep it. If not, we are logged out.
-         const local = localStorage.getItem('currentUser');
-         if (local) {
-            const localUser = JSON.parse(local);
+        const localUser = getStoredUser();
+        if (localUser) {
             // If it has a firebaseUid, and firebase says we are out, then we are out.
             // If it has NO firebaseUid (Legacy/Seeded), then we act as logged in.
             if (localUser.firebaseUid) {

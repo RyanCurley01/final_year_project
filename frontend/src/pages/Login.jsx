@@ -169,6 +169,9 @@ export default function Login() {
         <div className="text-center mt-4">
           Need an account? <Link to="/register" className="text-cyan-400 hover:text-cyan-300">Sign Up</Link>
         </div>
+        <div className="text-center text-sm text-gray-400">
+          <Link to="/privacy-policy" className="text-cyan-400 hover:text-cyan-300">Privacy Policy</Link>
+        </div>
       </div>
     </div>
   );

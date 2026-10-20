@@ -11,6 +11,7 @@ import { ArtistDetails, Discover, Search, SongDetails, TopCharts, SimilarSongs, 
 import AlbumDetails from './pages/AlbumDetails';
 import Cart from './pages/Cart';
 import PurchaseHistory from './pages/PurchaseHistory';
+import PrivacyPolicy from './pages/PrivacyPolicy';
 import DiscoverVisualizer from './components/DiscoverVisualizer';
 
 // Global Context Providers for feature-specific state that doesn't live in Redux.
@@ -226,6 +227,7 @@ const AppRoutes = () => {
   
   return (
     <Routes>
+      <Route path="/privacy-policy" element={<PrivacyPolicy />} />
       {/* If NOT logged in, show Login. If they ARE logged in but hit /login route, bounce them to Home. */}
       <Route path="/login" element={!currentUser ? <Login /> : <Navigate to="/" />} />
       <Route path="/register" element={!currentUser ? <Register /> : <Navigate to="/" />} />
