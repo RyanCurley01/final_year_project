@@ -101,6 +101,7 @@ _ITUNES_BASE_PARAMS: dict = {
     "lang":     "en_us",
     "explicit": "Yes",
 }
+_TRACK_VIEW_URL_CACHE: dict[int, str] = {}
 
 # Background task handle
 _refresh_task: asyncio.Task | None = None
@@ -858,6 +859,10 @@ async def get_topcharts(artists: str | None = None, limit_per_artist: int = 50):
             console.log("❌ get_topcharts: still no songs after cold-start refresh")
             return {"status": "success", "count": 0, "songs": [], "features": {}, "source": "empty"}
 
+        track_view_urls = await _lookup_track_view_urls(
+            [abs(int(row["ProductID"])) for row in rows]
+        )
+
         for row in rows:
             pid     = int(row["ProductID"])
             abs_tid = abs(pid)
@@ -878,6 +883,7 @@ async def get_topcharts(artists: str | None = None, limit_per_artist: int = 50):
                 "artworkUrl100":    artwork,
                 "previewUrl":       preview,
                 "fileUrl":          preview,
+                "trackViewUrl":     track_view_urls.get(abs_tid),
                 "primaryGenreName": row.get("Genre"),
                 "source":           "db_stock",
             }
@@ -953,6 +959,39 @@ async def search_itunes(term: str, limit: int = 200, media: str = "music", entit
     except Exception as e:
         console.log(f"❌ iTunes search error: {e}")
         raise HTTPException(status_code=500, detail=f"Error searching iTunes: {str(e)}")
+
+
+async def _lookup_track_view_urls(track_ids: list[int]) -> dict[int, str]:
+    """Resolve canonical iTunes store links for imported track IDs."""
+    ids = sorted({int(track_id) for track_id in track_ids if int(track_id) > 0})
+    if not ids:
+        return {}
+
+    urls = {
+        track_id: _TRACK_VIEW_URL_CACHE[track_id]
+        for track_id in ids
+        if track_id in _TRACK_VIEW_URL_CACHE
+    }
+    ids_to_lookup = [track_id for track_id in ids if track_id not in urls]
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        for start in range(0, len(ids_to_lookup), 100):
+            batch = ids_to_lookup[start:start + 100]
+            try:
+                response = await client.get(
+                    f"{ITUNES_API_BASE_URL}/lookup",
+                    params={**_ITUNES_BASE_PARAMS, "id": ",".join(map(str, batch))},
+                )
+                response.raise_for_status()
+                for item in response.json().get("results", []):
+                    track_id = item.get("trackId")
+                    track_url = item.get("trackViewUrl")
+                    if track_id and track_url:
+                        resolved_id = int(track_id)
+                        urls[resolved_id] = str(track_url)
+                        _TRACK_VIEW_URL_CACHE[resolved_id] = str(track_url)
+            except (httpx.HTTPError, ValueError, TypeError) as exc:
+                console.log(f"⚠️ iTunes store-link lookup failed for batch: {exc}")
+    return urls
 
 
 # ===========================================================================
@@ -1334,6 +1373,10 @@ async def get_topcharts_ranked():
             group.sort(key=lambda r: rank_map.get(abs(int(r["ProductID"])), 99999))
             sorted_rows.extend(group)
 
+        track_view_urls = await _lookup_track_view_urls(
+            [abs(int(row["ProductID"])) for row in sorted_rows]
+        )
+
         # ── Step 4: build response (same shape as get_topcharts) ─────────────
         songs        = []
         features_map = {}
@@ -1358,6 +1401,7 @@ async def get_topcharts_ranked():
                 "artworkUrl100":    artwork,
                 "previewUrl":       preview,
                 "fileUrl":          preview,
+                "trackViewUrl":     track_view_urls.get(abs_tid),
                 "primaryGenreName": row.get("Genre"),
                 "source":           "db_stock",
                 "popularityRank":   rank_map.get(abs_tid),

@@ -18,6 +18,7 @@ import { FiShoppingCart, FiMaximize2, FiMinimize2 } from 'react-icons/fi';
 import envConfig from '../config/environment';
 import { fixTextDeep } from '../utils/fixText';
 import { useActionToast } from '../components/CartToast';
+import ApplePreviewAttribution from '../components/ApplePreviewAttribution';
 
 const ARTISTS = ['Aphex Twin', 'Boards of Canada', 'Squarepusher'];
 
@@ -205,7 +206,6 @@ const SongCard = ({ song, isPlaying, activeSong, onPlay, onPause, index, onSongN
             )}
           </div>
         )}
-
         {(isVideo || useOnsetImages) && (
           <button
             onClick={(e) => { e.stopPropagation(); setIsFullscreen(true); }}
@@ -343,13 +343,21 @@ const SongCard = ({ song, isPlaying, activeSong, onPlay, onPause, index, onSongN
       ) : (
         <>
           <div className="mt-3 flex flex-col gap-1">
-            <p 
-              className="font-semibold text-sm text-gray-300 truncate leading-tight hover:text-cyan-400 transition-colors cursor-pointer"
-              onClick={handleSongNameClick}
-              title="Click to see similar songs by this artist"
-            >
-              {song.trackName || song.albumTitle}
-            </p>
+            <div className="flex items-start justify-between gap-2">
+              <p
+                className="min-w-0 flex-1 font-semibold text-sm text-gray-300 truncate leading-tight hover:text-cyan-400 transition-colors cursor-pointer"
+                onClick={handleSongNameClick}
+                title="Click to see similar songs by this artist"
+              >
+                {song.trackName || song.albumTitle}
+              </p>
+              <ApplePreviewAttribution
+                previewUrl={song.previewUrl}
+                trackViewUrl={song.trackViewUrl}
+                trackId={song.trackId || song.id}
+                className="shrink-0"
+              />
+            </div>
             <p 
               className="text-xs text-gray-400 truncate hover:text-cyan-400 transition-colors cursor-pointer"
               onClick={handleArtistClick}
@@ -588,6 +596,7 @@ const Search = () => {
                 collectionName: track.collectionName,
                 artworkUrl100: track.artworkUrl100,
                 previewUrl: track.previewUrl,
+                trackViewUrl: track.trackViewUrl,
                 fileUrl: track.previewUrl,
                 price: track.trackPrice || 1.29,
                 primaryGenreName: track.primaryGenreName,
@@ -769,6 +778,7 @@ const Search = () => {
                 trackName: s.trackName || '',
                 artistName: s.artistName || '',
                 previewUrl: s.previewUrl || s.fileUrl || '',
+                trackViewUrl: s.trackViewUrl,
               };
 
               if (audioFeatures) {

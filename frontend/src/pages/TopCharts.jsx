@@ -10,6 +10,7 @@ import { FaPauseCircle, FaPlayCircle } from 'react-icons/fa';
 import envConfig from '../config/environment';
 import { fixTextDeep } from '../utils/fixText';
 import OnsetImageCard from '../components/OnsetImageCard';
+import ApplePreviewAttribution from '../components/ApplePreviewAttribution';
 
 const ARTISTS = ['Aphex Twin', 'Boards of Canada', 'Squarepusher'];
 
@@ -193,13 +194,21 @@ const SongCard = ({ song, isPlaying, activeSong, onPlay, onPause, index, onSongN
       </div>
 
       <div className="mt-3 flex flex-col gap-1">
-        <p 
-          className="font-semibold text-sm text-gray-300 truncate leading-tight hover:text-cyan-400 transition-colors cursor-pointer"
-          onClick={handleSongNameClick}
-          title="Click to see similar songs by this artist"
-        >
-          {song.trackName || song.albumTitle}
-        </p>
+        <div className="flex items-start justify-between gap-2">
+          <p
+            className="min-w-0 flex-1 font-semibold text-sm text-gray-300 truncate leading-tight hover:text-cyan-400 transition-colors cursor-pointer"
+            onClick={handleSongNameClick}
+            title="Click to see similar songs by this artist"
+          >
+            {song.trackName || song.albumTitle}
+          </p>
+          <ApplePreviewAttribution
+            previewUrl={song.previewUrl}
+            trackViewUrl={song.trackViewUrl}
+            trackId={song.trackId || song.id}
+            className="shrink-0"
+          />
+        </div>
         <p 
           className="text-xs text-gray-400 truncate hover:text-cyan-400 transition-colors cursor-pointer"
           onClick={handleArtistClick}
@@ -455,7 +464,7 @@ const TopCharts = () => {
 
                // Recover real iTunes metadata for recommendations with placeholder artists.
                const unresolvedArtistRecs = (data.recommendations || []).filter((rec) =>
-                 isPlaceholderArtist(rec.artistName)
+                 isPlaceholderArtist(rec.artistName) || !rec.trackViewUrl || !rec.previewUrl
                );
                if (unresolvedArtistRecs.length > 0) {
                  try {
@@ -492,6 +501,7 @@ const TopCharts = () => {
                            collectionName: rec.collectionName || lookup.collectionName,
                            artworkUrl100: rec.artworkUrl100 || lookup.artworkUrl100,
                            previewUrl: rec.previewUrl || lookup.previewUrl,
+                           trackViewUrl: rec.trackViewUrl || lookup.trackViewUrl,
                          };
                        });
                      }
@@ -501,18 +511,19 @@ const TopCharts = () => {
                  }
                }
 
-               // Also fallback from loaded chart songs by normalized ID to avoid placeholder artists.
+               // Fill metadata omitted by recommendations from the loaded chart catalogue.
                const songsById = new Map(songs.map((s) => [normalizeTrackId(s.trackId || s.id), s]));
                enrichedRecommendations = enrichedRecommendations.map((rec) => {
-                 if (!isPlaceholderArtist(rec.artistName)) return rec;
                  const fallback = songsById.get(normalizeTrackId(rec.product_id || rec.id || rec.trackId));
                  if (!fallback) return rec;
                  return {
                    ...rec,
-                   artistName: fallback.artistName || rec.artistName,
+                   artistName: isPlaceholderArtist(rec.artistName) ? (fallback.artistName || rec.artistName) : rec.artistName,
                    trackName: rec.trackName || fallback.trackName || fallback.albumTitle,
                    collectionName: rec.collectionName || fallback.collectionName,
                    artworkUrl100: rec.artworkUrl100 || fallback.artworkUrl100 || fallback.albumCoverImageUrl,
+                   previewUrl: rec.previewUrl || fallback.previewUrl || fallback.fileUrl,
+                   trackViewUrl: rec.trackViewUrl || fallback.trackViewUrl,
                  };
                });
 
@@ -950,6 +961,12 @@ const TopCharts = () => {
                         </div>
                         <p className="text-xs text-gray-300 truncate font-medium">{recArtistName}</p>
                         <p className="text-xs text-gray-400 truncate">{rec.reason || rec.match_reason}</p>
+                        <ApplePreviewAttribution
+                          previewUrl={rec.previewUrl}
+                          trackViewUrl={rec.trackViewUrl}
+                          trackId={rec.trackId || rec.product_id || rec.id}
+                          className="mt-1"
+                        />
                         
                         {/* Feature Matches */}
                         <div className="flex gap-1 mt-1 flex-wrap">

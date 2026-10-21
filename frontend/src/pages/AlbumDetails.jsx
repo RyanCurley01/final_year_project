@@ -4,6 +4,7 @@ import { useDispatch, useSelector } from 'react-redux';
 import { FaPauseCircle, FaPlayCircle } from 'react-icons/fa';
 import Loader from '../components/Loader';
 import { setActiveSong, playPause } from '../redux/features/playerSlice';
+import ApplePreviewAttribution from '../components/ApplePreviewAttribution';
 
 const fallbackImage = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="250" height="250" viewBox="0 0 250 250"><rect width="250" height="250" fill="#374151"/><circle cx="125" cy="125" r="80" fill="#4B5563"/><circle cx="125" cy="125" r="30" fill="#374151"/><circle cx="125" cy="125" r="10" fill="#6B7280"/></svg>');
 
@@ -75,6 +76,12 @@ const AlbumSongCard = ({ song, isPlaying, activeSong, onPlay, onPause, index }) 
           {song.trackName}
         </p>
         <p className="text-xs text-gray-400 truncate">{song.artistName}</p>
+        <ApplePreviewAttribution
+          previewUrl={song.previewUrl}
+          trackViewUrl={song.trackViewUrl}
+          trackId={song.trackId || song.id}
+          className="mt-2"
+        />
       </div>
     </div>
   );

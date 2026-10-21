@@ -11,6 +11,7 @@ import { FaPauseCircle, FaPlayCircle } from 'react-icons/fa';
 import OnsetImageCard from '../components/OnsetImageCard';
 import envConfig from '../config/environment';
 import { fixTextDeep } from '../utils/fixText';
+import ApplePreviewAttribution from '../components/ApplePreviewAttribution';
 
 const ARTISTS = ['Aphex Twin', 'Boards of Canada', 'Squarepusher'];
 
@@ -215,13 +216,21 @@ const SongCard = ({ song, isPlaying, activeSong, onPlay, onPause, index, onSongN
       </div>
 
       <div className="mt-3 flex flex-col gap-1">
-        <p 
-          className="font-semibold text-sm text-gray-300 truncate leading-tight hover:text-cyan-400 transition-colors cursor-pointer"
-          onClick={handleSongNameClick}
-          title="Click to see similar songs by this artist"
-        >
-          {song.trackName || song.albumTitle}
-        </p>
+        <div className="flex items-start justify-between gap-2">
+          <p
+            className="min-w-0 flex-1 font-semibold text-sm text-gray-300 truncate leading-tight hover:text-cyan-400 transition-colors cursor-pointer"
+            onClick={handleSongNameClick}
+            title="Click to see similar songs by this artist"
+          >
+            {song.trackName || song.albumTitle}
+          </p>
+          <ApplePreviewAttribution
+            previewUrl={song.previewUrl}
+            trackViewUrl={song.trackViewUrl}
+            trackId={song.trackId || song.id}
+            className="shrink-0"
+          />
+        </div>
         <p 
           className="text-xs text-gray-400 truncate hover:text-cyan-400 transition-colors cursor-pointer"
           onClick={handleArtistClick}
@@ -581,7 +590,7 @@ const SimilarSongs = () => {
                let enrichedRecommendations = data.recommendations;
 
                const unresolvedArtistRecs = (data.recommendations || []).filter((rec) =>
-                 isPlaceholderArtist(rec.artistName)
+                 isPlaceholderArtist(rec.artistName) || !rec.trackViewUrl || !rec.previewUrl
                );
                
                if (unresolvedArtistRecs.length > 0) {
@@ -623,6 +632,7 @@ const SimilarSongs = () => {
                            collectionName: rec.collectionName || lookup.collectionName,
                            artworkUrl100: rec.artworkUrl100 || lookup.artworkUrl100,
                            previewUrl: rec.previewUrl || lookup.previewUrl,
+                           trackViewUrl: rec.trackViewUrl || lookup.trackViewUrl,
                          };
                        });
                      }
@@ -799,6 +809,7 @@ const SimilarSongs = () => {
                   trackName: String(s.trackName || s.albumTitle || 'Unknown'),
                   artistName: String(s.artistName),
                   previewUrl: String(s.previewUrl || s.fileUrl || ''),
+                  trackViewUrl: s.trackViewUrl || '',
                 };
                 if (audioFeatures) {
                   candidate.audio_features = audioFeatures;
@@ -878,6 +889,7 @@ const SimilarSongs = () => {
         const warmSongs = cacheMisses.map((s) => ({
           trackId: Number(s.trackId || s.id),
           previewUrl: s.previewUrl || s.fileUrl || '',
+          trackViewUrl: s.trackViewUrl,
           trackName: s.trackName || s.albumTitle || 'Unknown',
           artistName: s.artistName || 'Unknown Artist',
           artworkUrl100: s.artworkUrl100 || '',
@@ -1335,6 +1347,7 @@ const SimilarSongs = () => {
                       artworkUrl100: rec.artworkUrl100 || fallbackSong?.artworkUrl100 || fallbackSong?.albumCoverImageUrl,
                       albumCoverImageUrl: rec.albumCoverImageUrl || fallbackSong?.albumCoverImageUrl || fallbackSong?.artworkUrl100,
                       previewUrl: rec.previewUrl || fallbackSong?.previewUrl || fallbackSong?.fileUrl,
+                      trackViewUrl: rec.trackViewUrl || fallbackSong?.trackViewUrl,
                       similarity_score: rec.similarity_score,
                       live_similarity_score: liveMatch ? liveMatch.similarity_score : rec.similarity_score,
                       tempo_match: liveMatch ? liveMatch.tempo_match : rec.tempo_match,
@@ -1394,6 +1407,12 @@ const SimilarSongs = () => {
                         </div>
                         <p className="text-xs text-gray-300 truncate font-medium">{recArtist}</p>
                         <p className="text-xs text-gray-400 truncate">{rec.reason || rec.match_reason}</p>
+                        <ApplePreviewAttribution
+                          previewUrl={rec.previewUrl}
+                          trackViewUrl={rec.trackViewUrl}
+                          trackId={rec.trackId || rec.product_id || rec.id}
+                          className="mt-1"
+                        />
                         
                         <div className="flex gap-1 mt-1 flex-wrap">
                           <span className={`px-1 py-0.5 rounded text-xs ${

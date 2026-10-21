@@ -72,7 +72,7 @@ export default function MidiExplorer() {
   const targetRef = useRef(targetFeatures);
   targetRef.current = targetFeatures;
   const allowedIdsRef = useRef(null); // [int] — only these product IDs can be recommended
-  const itunesMetaRef = useRef({}); // Map<negativeTrackId, {trackName, artistName, artworkUrl100, previewUrl}>
+  const itunesMetaRef = useRef({});
 
   // enriches incoming recommendation objects with available catalog or iTunes metadata
   // to stop iTunes id's from showing
@@ -92,6 +92,7 @@ export default function MidiExplorer() {
           artistName: r.artistName || catalog?.artistName || meta?.artistName || r.artistName,
           artworkUrl100: r.artworkUrl100 || catalog?.albumCoverImageUrl || meta?.artworkUrl100 || r.artworkUrl100,
           previewUrl: r.previewUrl || catalog?.previewUrl || meta?.previewUrl || r.previewUrl,
+          trackViewUrl: r.trackViewUrl || meta?.trackViewUrl,
         };
       } catch (err) {
         return r;
@@ -139,6 +140,7 @@ export default function MidiExplorer() {
                     artistName: t.artistName,
                     artworkUrl100: t.artworkUrl100,
                     previewUrl: t.previewUrl,
+                    trackViewUrl: t.trackViewUrl,
                   };
                 });
             }
@@ -437,6 +439,7 @@ export default function MidiExplorer() {
                       artistName: item.artistName,
                       artworkUrl100: item.artworkUrl100,
                       previewUrl: item.previewUrl,
+                      trackViewUrl: item.trackViewUrl,
                     };
                   }
                 } catch (err) {
@@ -484,6 +487,7 @@ export default function MidiExplorer() {
             albumCoverImageUrl: r.artworkUrl100 || meta?.artworkUrl100,
             fileUrl: r.previewUrl || meta?.previewUrl,
             previewUrl: r.previewUrl || meta?.previewUrl,
+            trackViewUrl: r.trackViewUrl || meta?.trackViewUrl,
           };
     });
 
@@ -526,6 +530,7 @@ export default function MidiExplorer() {
             albumCoverImageUrl: r.artworkUrl100 || meta?.artworkUrl100,
             fileUrl: r.previewUrl || meta?.previewUrl,
             previewUrl: r.previewUrl || meta?.previewUrl,
+            trackViewUrl: r.trackViewUrl || meta?.trackViewUrl,
           };
     });
     dispatch(updateQueue({ data: recsQueue, currentId: activeSong.id }));

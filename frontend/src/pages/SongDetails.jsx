@@ -15,6 +15,7 @@ import Loader from '../components/Loader';
 import AudioReactiveVideo from '../components/AudioReactiveVideo';
 import { useActionToast } from '../components/CartToast';
 import OnsetImageCard from '../components/OnsetImageCard';
+import ApplePreviewAttribution from '../components/ApplePreviewAttribution';
 import envConfig from '../config/environment';
 import { productService } from '../redux/services';
 import { useAudioFeatures } from '../context/AudioFeaturesContext';
@@ -258,7 +259,6 @@ const SimilarSongCard = ({ song, isPlaying, activeSong, onPlay, onPause, rank, p
             )}
           </div>
         )}
-
         {/* Rank badge */}
         <div className="absolute top-2 left-2 w-7 h-7 bg-linear-to-br from-cyan-400 to-blue-500 rounded-full flex items-center justify-center text-white font-bold text-xs shadow-lg border-2 border-white/30">
           {rank}
@@ -356,22 +356,30 @@ const SimilarSongCard = ({ song, isPlaying, activeSong, onPlay, onPause, rank, p
       )}
 
       <div className="mt-3 flex flex-col gap-1">
-        <p
-          className="font-semibold text-[17px] text-gray-300 truncate leading-tight hover:text-cyan-400 transition-colors cursor-pointer"
-          onClick={(e) => {
-            e.stopPropagation();
-            const id = song.trackId || song.id;
-            navigate(`/songs/${id}`, {
-              state: {
-                song,
-                artistSongs: allSimilarSongs || [],
-                fromDiscover: true,
-              },
-            });
-          }}
-        >
-          {song.trackName}
-        </p>
+        <div className="flex items-start justify-between gap-2">
+          <p
+            className="min-w-0 flex-1 font-semibold text-[17px] text-gray-300 truncate leading-tight hover:text-cyan-400 transition-colors cursor-pointer"
+            onClick={(e) => {
+              e.stopPropagation();
+              const id = song.trackId || song.id;
+              navigate(`/songs/${id}`, {
+                state: {
+                  song,
+                  artistSongs: allSimilarSongs || [],
+                  fromDiscover: true,
+                },
+              });
+            }}
+          >
+            {song.trackName}
+          </p>
+          <ApplePreviewAttribution
+            previewUrl={song.previewUrl || song.fileUrl}
+            trackViewUrl={song.trackViewUrl}
+            trackId={song.trackId || song.id}
+            className="shrink-0"
+          />
+        </div>
         {!isLibrarySong && song.artistName && (
           <p
             className="text-xs text-gray-400 truncate hover:text-cyan-400 transition-colors cursor-pointer"
@@ -580,6 +588,7 @@ const SongDetails = () => {
                       collectionName: fetchedSong.albumTitle,
                       artworkUrl100: fetchedSong.albumCoverImageUrl,
                       previewUrl: fetchedSong.fileUrl,
+                      trackViewUrl: fetchedSong.trackViewUrl,
                       fileUrl: fetchedSong.fileUrl,
                       price: fetchedSong.albumPrice,
                       source: 'database'
@@ -803,12 +812,42 @@ const SongDetails = () => {
                     artworkUrl100: normalizedArtwork,
                     albumCoverImageUrl: song.albumCoverImageUrl || normalizedArtwork,
                     previewUrl: normalizedPreview,
+                    trackViewUrl: song.trackViewUrl || comparisonMeta.trackViewUrl,
                     fileUrl: song.fileUrl || normalizedPreview,
                     source: song.source || (isLibraryRecommendation ? 'database' : 'itunes'),
                 };
             });
 
         let hydratedRecommendations = validRecommendations;
+        const missingStoreLinks = validRecommendations
+          .filter((song) => !song.trackViewUrl && Math.abs(Number(song.trackId || song.id)) >= 1000000)
+          .map((song) => Math.abs(Number(song.trackId || song.id)))
+          .filter((trackId) => Number.isFinite(trackId));
+
+        if (missingStoreLinks.length > 0) {
+          try {
+            const lookupResp = await fetch(
+              `https://itunes.apple.com/lookup?id=${[...new Set(missingStoreLinks)].slice(0, 50).join(',')}`,
+              { signal: AbortSignal.timeout(5000) }
+            );
+            if (!lookupResp.ok) {
+              throw new Error(`iTunes lookup returned ${lookupResp.status}`);
+            }
+            const lookupData = fixTextDeep(await lookupResp.json());
+            const storeUrlsById = new Map(
+              (lookupData.results || [])
+                .filter((item) => item.trackId && item.trackViewUrl)
+                .map((item) => [Math.abs(Number(item.trackId)), item.trackViewUrl])
+            );
+            hydratedRecommendations = validRecommendations.map((song) => ({
+              ...song,
+              trackViewUrl: song.trackViewUrl || storeUrlsById.get(Math.abs(Number(song.trackId || song.id))),
+            }));
+          } catch (lookupError) {
+            console.warn('[SongDetails] Failed to resolve Apple store links:', lookupError);
+          }
+        }
+
         const needsLibraryArtworkHydration = validRecommendations.some((song) => {
           const pid = Number(song.trackId || song.id);
           const hasArtwork = !!(song.artworkUrl100 || song.albumCoverImageUrl || song.imageUrl || song.image);
@@ -822,7 +861,7 @@ const SongDetails = () => {
               (products || []).map((p) => [Number(p.id || p.productId), p])
             );
 
-            hydratedRecommendations = validRecommendations.map((song) => {
+            hydratedRecommendations = hydratedRecommendations.map((song) => {
               const pid = Number(song.trackId || song.id);
               const isLibrarySongById = Number.isFinite(pid) && pid > 0 && pid < 1000000;
               if (!isLibrarySongById) return song;
@@ -849,6 +888,7 @@ const SongDetails = () => {
                 artworkUrl100: song.artworkUrl100 || productArtwork,
                 albumCoverImageUrl: song.albumCoverImageUrl || productArtwork,
                 previewUrl: song.previewUrl || productMedia,
+                trackViewUrl: song.trackViewUrl,
                 fileUrl: song.fileUrl || productMedia,
               };
             });
@@ -901,6 +941,7 @@ const SongDetails = () => {
       artworkUrl100: song.artworkUrl100,
       albumCoverImageUrl: song.albumCoverImageUrl || song.artworkUrl100?.replace('100x100', '600x600'),
       previewUrl: song.previewUrl || song.fileUrl,
+      trackViewUrl: song.trackViewUrl,
       fileUrl: song.previewUrl || song.fileUrl,
       collectionName: song.collectionName
     };
@@ -914,6 +955,7 @@ const SongDetails = () => {
       artworkUrl100: s.artworkUrl100,
       albumCoverImageUrl: s.albumCoverImageUrl || s.artworkUrl100?.replace('100x100', '600x600'),
       previewUrl: s.previewUrl || s.fileUrl,
+      trackViewUrl: s.trackViewUrl,
       fileUrl: s.previewUrl || s.fileUrl,
       collectionName: s.collectionName
     })), i: similarSongs.findIndex(s => s.trackId === song.trackId) }));
@@ -938,6 +980,7 @@ const SongDetails = () => {
       artworkUrl100: targetSong.artworkUrl100,
       albumCoverImageUrl: targetSong.albumCoverImageUrl || targetSong.artworkUrl100?.replace('100x100', '600x600'),
       previewUrl: targetSong.previewUrl || targetSong.fileUrl,
+      trackViewUrl: targetSong.trackViewUrl,
       fileUrl: targetSong.previewUrl || targetSong.fileUrl,
       collectionName: targetSong.collectionName
     };
@@ -1013,8 +1056,9 @@ const SongDetails = () => {
             </div>
 
             {/* Album Art with Play */}
-            <div 
-              className="relative w-48 h-48 shrink-0 mx-auto md:mx-0"
+            <div className="w-48 shrink-0 mx-auto md:mx-0 flex flex-col items-center gap-2">
+              <div
+              className="relative w-full aspect-square"
               onMouseEnter={() => setIsHeaderHovered(true)}
               onMouseLeave={() => setIsHeaderHovered(false)}
             >
@@ -1077,6 +1121,13 @@ const SongDetails = () => {
               <div className={`absolute -bottom-2 left-1/2 -translate-x-1/2 px-3 py-1 ${getArtistBadgeColor(targetSong?.artistName)} rounded-full text-[12px] font-bold text-white shadow-lg whitespace-nowrap`}>
                 {targetSong?.artistName}
               </div>
+              </div>
+              <ApplePreviewAttribution
+                previewUrl={targetSong?.previewUrl || targetSong?.fileUrl}
+                trackViewUrl={targetSong?.trackViewUrl}
+                trackId={targetSong?.trackId || targetSong?.id}
+                className="items-center"
+              />
             </div>
           </div>
         </div>
