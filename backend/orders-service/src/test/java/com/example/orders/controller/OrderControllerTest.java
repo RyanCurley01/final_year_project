@@ -1,6 +1,7 @@
 package com.example.orders.controller;
 
 import com.example.orders.model.Order;
+import com.example.orders.repository.AccountRepository;
 import com.example.orders.service.OrderService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
@@ -46,6 +47,9 @@ class OrderControllerTest {
 
     @MockitoBean
     private OrderService orderService;
+
+    @MockitoBean
+    private AccountRepository accountRepository;
 
     @Autowired
     private ObjectMapper objectMapper;

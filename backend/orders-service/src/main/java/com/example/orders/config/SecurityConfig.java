@@ -50,7 +50,7 @@ public class SecurityConfig {
             .authorizeHttpRequests(auth -> auth
                 // Customers can create and view their own orders
                 .requestMatchers(HttpMethod.POST, "/api/orders").permitAll()
-                .requestMatchers(HttpMethod.GET, "/api/orders/{id}").permitAll()
+                .requestMatchers(HttpMethod.GET, "/api/orders/*").permitAll()
                 .requestMatchers(HttpMethod.GET, "/api/orders/account/**").permitAll()
                 
                 // Manager and Employee can view all orders
