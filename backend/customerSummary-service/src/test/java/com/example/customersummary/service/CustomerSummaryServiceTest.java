@@ -1,6 +1,8 @@
 package com.example.customersummary.service;
 
 import com.example.customersummary.model.CustomerSummary;
+import com.example.customersummary.model.Account;
+import com.example.customersummary.repository.AccountRepository;
 import com.example.customersummary.repository.CustomerSummaryRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -11,6 +13,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.Arrays;
+import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -24,6 +27,9 @@ class CustomerSummaryServiceTest {
 
     @Mock
     private CustomerSummaryRepository customerSummaryRepository;
+
+    @Mock
+    private AccountRepository accountRepository;
 
     @InjectMocks
     private CustomerSummaryService customerSummaryService;
@@ -43,8 +49,16 @@ class CustomerSummaryServiceTest {
     @DisplayName("getAllCustomerSummaries - Should return all summaries")
     void testGetAllCustomerSummaries() {
         when(customerSummaryRepository.findAll()).thenReturn(Arrays.asList(testCustomerSummary));
+        Account account = new Account();
+        account.setId(4L);
+        account.setAccountName("Test customer");
+        when(accountRepository.findAllById(List.of(4L))).thenReturn(List.of(account));
 
-        assertThat(customerSummaryService.getAllCustomerSummaries()).hasSize(1);
+        assertThat(customerSummaryService.getAllCustomerSummaries())
+                .hasSize(1)
+                .first()
+                .extracting(CustomerSummary::getAccountName)
+                .isEqualTo("Test customer");
         verify(customerSummaryRepository).findAll();
     }
 

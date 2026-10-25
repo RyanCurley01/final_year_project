@@ -9,9 +9,9 @@ export const orderItemService = {
   },
 
   getOrderItemById: async (id, email, password) => {
-    return apiCall(`${BASE_URL}/${id}`, {
-      headers: getBasicAuthHeaders(email, password),
-    });
+    const options = {};
+    if (email && password) options.headers = getBasicAuthHeaders(email, password);
+    return apiCall(`${BASE_URL}/${id}`, options);
   },
 
   getOrderItemsByOrderId: async (orderId, email, password) => {

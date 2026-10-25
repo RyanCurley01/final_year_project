@@ -30,4 +30,7 @@ public class CustomerSummary {
     @NotNull(message = "Order ID is required")
     @Column(name = "OrderID", nullable = false)
     private Long orderId;
+
+    @Transient
+    private String accountName;
 }

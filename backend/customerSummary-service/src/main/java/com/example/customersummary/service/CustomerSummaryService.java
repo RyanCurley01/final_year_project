@@ -1,22 +1,37 @@
 package com.example.customersummary.service;
 
 import com.example.customersummary.model.CustomerSummary;
+import com.example.customersummary.repository.AccountRepository;
 import com.example.customersummary.repository.CustomerSummaryRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
 public class CustomerSummaryService {
 
     private final CustomerSummaryRepository customerSummaryRepository;
+    private final AccountRepository accountRepository;
 
     public List<CustomerSummary> getAllCustomerSummaries() {
-        return customerSummaryRepository.findAll();
+        List<CustomerSummary> summaries = customerSummaryRepository.findAll();
+        Map<Long, String> accountNames = accountRepository.findAllById(summaries.stream()
+                        .map(CustomerSummary::getAccountId)
+                        .distinct()
+                        .toList())
+                .stream()
+                .collect(Collectors.toMap(
+                        account -> account.getId(),
+                        account -> account.getAccountName(),
+                        (first, ignored) -> first));
+        summaries.forEach(summary -> summary.setAccountName(accountNames.get(summary.getAccountId())));
+        return summaries;
     }
 
     public Optional<CustomerSummary> getCustomerSummaryById(Long id) {

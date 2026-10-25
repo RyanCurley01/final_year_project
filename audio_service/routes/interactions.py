@@ -1,11 +1,10 @@
 # audio_service/routes/interactions.py
-from fastapi import APIRouter, HTTPException
-from typing import List, Optional
-
+from fastapi import APIRouter, Depends, HTTPException
 from utils import console
 from database import get_db_connection
 from s3_service import generate_presigned_url
 from models import UserInteractionRequest
+from security import require_manager
 
 router = APIRouter()
 
@@ -155,7 +154,7 @@ async def record_interaction(interaction: UserInteractionRequest):
 # ============================================
 
 @router.get("/api/interactions")
-async def get_all_interactions():
+async def get_all_interactions(_manager: dict = Depends(require_manager)):
     """
     Get all user interactions for the manager dashboard.
     """
@@ -167,6 +166,7 @@ async def get_all_interactions():
                         SELECT 
                             InteractionID as interactionId,
                             AccountID as accountId,
+                            Accounts.AccountName as accountName,
                             ProductID as productId,
                             InteractionType as interactionType,
                             InteractionTimestamp as interactionTimestamp,
@@ -176,6 +176,7 @@ async def get_all_interactions():
                             DeviceType as deviceType,
                             SessionID as sessionId
                         FROM UserInteractions
+                        LEFT JOIN Accounts ON Accounts.AccountID = UserInteractions.AccountID
                         ORDER BY InteractionTimestamp ASC
                     """
                     cursor.execute(sql)

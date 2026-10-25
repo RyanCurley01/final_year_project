@@ -1,17 +1,19 @@
 import React, { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
+import { auth as firebaseAuth } from "../firebase";
 import { useAuth } from "../context/AuthContext";
-import { useGetAllInteractionsQuery } from "../redux/services/apiService";
+import { fetchAllInteractions } from "../redux/services/apiService";
 import { productService } from "../redux/services/productService";
-import { accountService } from "../redux/services/accountService";
 import { FaDatabase } from "react-icons/fa";
 import SidebarSearchFilter from './SidebarSearchFilter';
 
 const UserInteractionsSidebar = () => {
   const { currentUser } = useAuth();
   const [isOpen, setIsOpen] = useState(false);
+  const [interactions, setInteractions] = useState([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState(null);
   const [productMap, setProductMap] = useState({});
-  const [accountMap, setAccountMap] = useState({});
 
   const isGoogleAccount = !!currentUser?.firebaseUid;
   const isManager = currentUser?.accountType === "Manager";
@@ -23,51 +25,55 @@ const UserInteractionsSidebar = () => {
   // Re-evaluated to be a Manager account type requirement.
   const canView = isManager && (isGoogleAccount || hasBasicAuth);
 
-  const {
-    data: interactions,
-    isLoading,
-    error,
-  } = useGetAllInteractionsQuery(undefined, {
-    skip: !isOpen || !canView, // Only fetch when open and authorized
-  });
-
-  // Enrich interactions with product and account names
   useEffect(() => {
-    if (!interactions || interactions.length === 0) return;
+    if (!isOpen || !canView) return;
+    let cancelled = false;
     const email = currentUser?.email || currentUser?.accountEmailAddress;
 
     const enrichData = async () => {
-      const uniqueProductIds = [...new Set(interactions.map((i) => i.productId).filter(Boolean))];
-      const pMap = {};
-      await Promise.all(
-        uniqueProductIds.map(async (pid) => {
-          try {
-            const product = await productService.getProductById(pid);
-            pMap[pid] = product;
-          } catch {
-            pMap[pid] = null;
-          }
-        })
-      );
-      setProductMap(pMap);
+      setIsLoading(true);
+      setError(null);
+      try {
+        const firebaseUser = firebaseAuth.currentUser;
+        const firebaseToken = isGoogleAccount
+          ? await firebaseUser?.getIdToken()
+          : undefined;
+        if (isGoogleAccount && !firebaseToken) {
+          throw new Error("Firebase session is unavailable. Sign in again and retry.");
+        }
+        const rows = await fetchAllInteractions({
+          firebaseToken,
+          email,
+          password: currentUser?.password,
+        });
+        if (cancelled) return;
+        setInteractions(rows);
 
-      const uniqueAccountIds = [...new Set(interactions.map((i) => i.accountId).filter(Boolean))];
-      const aMap = {};
-      await Promise.all(
-        uniqueAccountIds.map(async (aid) => {
-          try {
-            const account = await accountService.getAccountById(aid, email, currentUser?.password);
-            aMap[aid] = account;
-          } catch {
-            aMap[aid] = null;
-          }
-        })
-      );
-      setAccountMap(aMap);
+        const uniqueProductIds = [...new Set(rows.map((i) => i.productId).filter(Boolean))];
+        const pMap = {};
+        await Promise.all(
+          uniqueProductIds.map(async (pid) => {
+            try {
+              pMap[pid] = await productService.getProductById(pid);
+            } catch {
+              pMap[pid] = null;
+            }
+          })
+        );
+        if (!cancelled) setProductMap(pMap);
+      } catch (requestError) {
+        console.error(requestError);
+        if (!cancelled) setError(requestError);
+      } finally {
+        if (!cancelled) setIsLoading(false);
+      }
     };
 
     enrichData();
-  }, [interactions, currentUser]);
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, canView, currentUser, isGoogleAccount]);
 
   if (!canView) return null;
 
@@ -109,9 +115,8 @@ const UserInteractionsSidebar = () => {
                   <SidebarSearchFilter
                     data={interactions}
                     getSearchableText={(interaction) => {
-                      const account = accountMap[interaction.accountId];
                       const product = productMap[interaction.productId];
-                      return [account?.accountName, account?.accountEmailAddress, product?.albumTitle, interaction.interactionType, interaction.deviceType].filter(Boolean).join(' ');
+                      return [interaction.accountName, product?.albumTitle, interaction.interactionType, interaction.deviceType].filter(Boolean).join(' ');
                     }}
                     placeholder="Filter by customer, song, type, or device…"
                   >
@@ -132,7 +137,6 @@ const UserInteractionsSidebar = () => {
                     </thead>
                     <tbody>
                       {filteredData.map((interaction, i) => {
-                        const account = accountMap[interaction.accountId];
                         const product = productMap[interaction.productId];
                         return (
                           <tr
@@ -141,7 +145,7 @@ const UserInteractionsSidebar = () => {
                           >
                             <td className="px-4 py-2">{i + 1}</td>
                             <td className="px-4 py-2">
-                              {account?.accountName || account?.accountEmailAddress || "—"}
+                              {interaction.accountName || "—"}
                             </td>
                             <td className="px-4 py-2">
                               {product?.albumTitle || "—"}

@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
+import { auth as firebaseAuth } from "../firebase";
 import { useAuth } from "../context/AuthContext";
 import { customerSummaryService } from "../redux/services/customerSummaryService";
-import { accountService } from "../redux/services/accountService";
 import { productService } from "../redux/services/productService";
 import { orderService } from "../redux/services/orderService";
 import { orderItemService } from "../redux/services/orderItemService";
@@ -14,7 +14,6 @@ const CustomerSummarySidebar = () => {
   const { currentUser } = useAuth();
   const [isOpen, setIsOpen] = useState(false);
   const [data, setData] = useState([]);
-  const [accountMap, setAccountMap] = useState({});
   const [productMap, setProductMap] = useState({});
   const [orderMap, setOrderMap] = useState({});
   const [orderItemsMap, setOrderItemsMap] = useState({});
@@ -30,31 +29,30 @@ const CustomerSummarySidebar = () => {
   const canView = isManager && (isGoogleAccount || hasBasicAuth);
 
   useEffect(() => {
-    if (isOpen && canView) {
+    if (!isOpen || !canView) return;
+    let cancelled = false;
+    const loadSummaries = async () => {
       setIsLoading(true);
+      setError(null);
       const email = currentUser?.email || currentUser?.accountEmailAddress;
-      customerSummaryService
-        .getAllCustomerSummaries(email, currentUser?.password)
-        .then(async (res) => {
-          setData(res);
-
-          // Enrich with account names
-          const uniqueAccountIds = [...new Set(res.map((r) => r.accountId))];
-          const aMap = {};
-          await Promise.all(
-            uniqueAccountIds.map(async (aid) => {
-              try {
-                const account = await accountService.getAccountById(aid, email, currentUser?.password);
-                aMap[aid] = account;
-              } catch {
-                aMap[aid] = null;
-              }
-            })
-          );
-          setAccountMap(aMap);
+      try {
+        const firebaseUser = firebaseAuth.currentUser;
+        const firebaseToken = isGoogleAccount
+          ? await firebaseUser?.getIdToken()
+          : undefined;
+        if (isGoogleAccount && !firebaseToken) {
+          throw new Error("Firebase session is unavailable. Sign in again and retry.");
+        }
+        const summaries = await customerSummaryService.getAllCustomerSummaries(
+          email,
+          currentUser?.password,
+          firebaseToken
+        );
+        if (cancelled) return;
+        setData(summaries);
 
           // Enrich with product names
-          const uniqueProductIds = [...new Set(res.map((r) => r.productId))];
+          const uniqueProductIds = [...new Set(summaries.map((r) => r.productId))];
           const pMap = {};
           await Promise.all(
             uniqueProductIds.map(async (pid) => {
@@ -66,10 +64,11 @@ const CustomerSummarySidebar = () => {
               }
             })
           );
+          if (cancelled) return;
           setProductMap(pMap);
 
           // Enrich with order details
-          const uniqueOrderIds = [...new Set(res.map((r) => r.orderId))];
+          const uniqueOrderIds = [...new Set(summaries.map((r) => r.orderId))];
           const oMap = {};
           const oiMap = {};
           await Promise.all(
@@ -87,18 +86,21 @@ const CustomerSummarySidebar = () => {
               }
             })
           );
+          if (cancelled) return;
           setOrderMap(oMap);
           setOrderItemsMap(oiMap);
-
-          setIsLoading(false);
-        })
-        .catch((err) => {
-          console.error(err);
-          setError(err);
-          setIsLoading(false);
-        });
-    }
-  }, [isOpen, canView, currentUser]);
+      } catch (err) {
+        console.error(err);
+        if (!cancelled) setError(err);
+      } finally {
+        if (!cancelled) setIsLoading(false);
+      }
+    };
+    loadSummaries();
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, canView, currentUser, isGoogleAccount]);
 
   if (!canView) return null;
 
@@ -141,9 +143,8 @@ const CustomerSummarySidebar = () => {
                 <SidebarSearchFilter
                   data={data}
                   getSearchableText={(item) => {
-                    const account = accountMap[item.accountId];
                     const product = productMap[item.productId];
-                    return [account?.accountName, account?.accountEmailAddress, product?.albumTitle].filter(Boolean).join(' ');
+                    return [item.accountName, product?.albumTitle].filter(Boolean).join(' ');
                   }}
                   placeholder="Filter by customer or song name…"
                 >
@@ -161,7 +162,6 @@ const CustomerSummarySidebar = () => {
                   </thead>
                   <tbody>
                     {filteredData.map((item, i) => {
-                      const account = accountMap[item.accountId];
                       const product = productMap[item.productId];
                       const order = orderMap[item.orderId];
                       const orderItems = orderItemsMap[item.orderId] || [];
@@ -175,7 +175,7 @@ const CustomerSummarySidebar = () => {
                         >
                           <td className="px-4 py-2">{i + 1}</td>
                           <td className="px-4 py-2">
-                            {account?.accountName || account?.accountEmailAddress || "—"}
+                            {item.accountName || "—"}
                           </td>
                           <td className="px-4 py-2">
                             {product?.albumTitle || "—"}

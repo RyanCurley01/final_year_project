@@ -1,10 +1,10 @@
-import { getServiceUrl, apiCall, getBasicAuthHeaders } from './api';
+import { getServiceUrl, apiCall, getAuthHeaders, getBasicAuthHeaders } from './api';
 
 const BASE_URL = `${getServiceUrl('CUSTOMER_SUMMARY')}/api/customer-summary`;
 export const customerSummaryService = {
-  getAllCustomerSummaries: async (email, password) => {
+  getAllCustomerSummaries: async (email, password, firebaseToken) => {
     return apiCall(BASE_URL, {
-      headers: getBasicAuthHeaders(email, password),
+      headers: firebaseToken ? getAuthHeaders(firebaseToken) : getBasicAuthHeaders(email, password),
     });
   },
 

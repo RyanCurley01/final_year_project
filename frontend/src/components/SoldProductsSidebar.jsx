@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
+import { auth as firebaseAuth } from "../firebase";
 import { useAuth } from "../context/AuthContext";
 import { soldProductsService } from "../redux/services/soldProductsService";
 import { productService } from "../redux/services/productService";
@@ -26,16 +27,30 @@ const SoldProductsSidebar = () => {
   const canView = isManager && (isGoogleAccount || hasBasicAuth);
 
   useEffect(() => {
-    if (isOpen && canView) {
+    if (!isOpen || !canView) return;
+    let cancelled = false;
+    const loadSoldProducts = async () => {
       setIsLoading(true);
+      setError(null);
       const email = currentUser?.email || currentUser?.accountEmailAddress;
-      soldProductsService
-        .getAllSoldProducts(email, currentUser?.password)
-        .then(async (res) => {
-          setData(res);
+      try {
+        const firebaseUser = firebaseAuth.currentUser;
+        const firebaseToken = isGoogleAccount
+          ? await firebaseUser?.getIdToken()
+          : undefined;
+        if (isGoogleAccount && !firebaseToken) {
+          throw new Error("Firebase session is unavailable. Sign in again and retry.");
+        }
+        const soldProducts = await soldProductsService.getAllSoldProducts(
+          email,
+          currentUser?.password,
+          firebaseToken
+        );
+        if (cancelled) return;
+        setData(soldProducts);
 
           // Enrich with product names
-          const uniqueProductIds = [...new Set(res.map((r) => r.productId))];
+          const uniqueProductIds = [...new Set(soldProducts.map((r) => r.productId))];
           const pMap = {};
           await Promise.all(
             uniqueProductIds.map(async (pid) => {
@@ -47,10 +62,11 @@ const SoldProductsSidebar = () => {
               }
             })
           );
+          if (cancelled) return;
           setProductMap(pMap);
 
           // Enrich with order item details
-          const uniqueOrderItemIds = [...new Set(res.map((r) => r.orderItemId))];
+          const uniqueOrderItemIds = [...new Set(soldProducts.map((r) => r.orderItemId))];
           const oiMap = {};
           await Promise.all(
             uniqueOrderItemIds.map(async (oiid) => {
@@ -62,17 +78,20 @@ const SoldProductsSidebar = () => {
               }
             })
           );
+          if (cancelled) return;
           setOrderItemMap(oiMap);
-
-          setIsLoading(false);
-        })
-        .catch((err) => {
-          console.error(err);
-          setError(err);
-          setIsLoading(false);
-        });
-    }
-  }, [isOpen, canView, currentUser]);
+      } catch (err) {
+        console.error(err);
+        if (!cancelled) setError(err);
+      } finally {
+        if (!cancelled) setIsLoading(false);
+      }
+    };
+    loadSoldProducts();
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, canView, currentUser, isGoogleAccount]);
 
   if (!canView) return null;
 

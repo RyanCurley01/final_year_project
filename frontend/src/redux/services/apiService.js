@@ -42,6 +42,24 @@ const getAudioServiceBaseUrl = () => {
   return `${apiBaseUrl}/api`;
 };
 
+export const fetchAllInteractions = async ({ firebaseToken, email, password } = {}) => {
+  const headers = {};
+  if (firebaseToken) {
+    headers.Authorization = `Bearer ${firebaseToken}`;
+  } else if (email && password) {
+    headers.Authorization = `Basic ${btoa(`${email}:${password}`)}`;
+  }
+  if (isNgrokHost()) {
+    headers['ngrok-skip-browser-warning'] = 'true';
+  }
+
+  const response = await fetch(`${getAudioServiceBaseUrl()}/interactions`, { headers });
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+  }
+  return fixTextDeep(await response.json());
+};
+
 // Dynamic base query that gets the URL at request time
 const dynamicBaseQuery = async (args, api, extraOptions) => {
   const baseUrl = getAudioServiceBaseUrl();
@@ -91,7 +109,15 @@ export const musicServiceApi = createApi({
       pollingInterval: 30000,
     }),
     getAllInteractions: builder.query({
-      query: () => '/interactions',
+      query: ({ firebaseToken, email, password } = {}) => {
+        const headers = {};
+        if (firebaseToken) {
+          headers.Authorization = `Bearer ${firebaseToken}`;
+        } else if (email && password) {
+          headers.Authorization = `Basic ${btoa(`${email}:${password}`)}`;
+        }
+        return { url: '/interactions', headers };
+      },
       providesTags: ['TopPlayedSongs'],
     }),
     recordInteraction: builder.mutation({

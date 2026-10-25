@@ -1,6 +1,7 @@
 package com.example.customersummary.controller;
 
 import com.example.customersummary.model.CustomerSummary;
+import com.example.customersummary.repository.AccountRepository;
 import com.example.customersummary.service.CustomerSummaryService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -36,6 +37,9 @@ class CustomerSummaryControllerTest {
 
     @MockitoBean
     private CustomerSummaryService customerSummaryService;
+
+    @MockitoBean
+    private AccountRepository accountRepository;
 
     private CustomerSummary testCustomerSummary;
 
