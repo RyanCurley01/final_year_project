@@ -1,4 +1,4 @@
-import { getServiceUrl, apiCall, getBasicAuthHeaders } from './api';
+import { getServiceUrl, apiCall, getAuthHeaders, getBasicAuthHeaders } from './api';
 
 const BASE_URL = `${getServiceUrl('ORDERS')}/api/orders`;
 export const orderService = {
@@ -8,8 +8,13 @@ export const orderService = {
     });
   },
 
-  getOrderById: async (id) => {
-    return apiCall(`${BASE_URL}/${id}`);
+  getOrderById: async (id, email, password, firebaseToken) => {
+    const headers = firebaseToken
+      ? getAuthHeaders(firebaseToken)
+      : email && password
+        ? getBasicAuthHeaders(email, password)
+        : undefined;
+    return apiCall(`${BASE_URL}/${id}`, { headers });
   },
 
   getOrdersByAccountId: async (accountId) => {

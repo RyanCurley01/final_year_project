@@ -74,7 +74,12 @@ const CustomerSummarySidebar = () => {
           await Promise.all(
             uniqueOrderIds.map(async (oid) => {
               try {
-                const order = await orderService.getOrderById(oid);
+                const order = await orderService.getOrderById(
+                  oid,
+                  email,
+                  currentUser?.password,
+                  firebaseToken
+                );
                 oMap[oid] = order;
                 
                 // Fetch order items for this order
