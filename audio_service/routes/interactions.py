@@ -164,20 +164,20 @@ async def get_all_interactions(_manager: dict = Depends(require_manager)):
                 with conn.cursor() as cursor:
                     sql = """
                         SELECT 
-                            InteractionID as interactionId,
-                            AccountID as accountId,
-                            Accounts.AccountName as accountName,
-                            ProductID as productId,
-                            InteractionType as interactionType,
-                            InteractionTimestamp as interactionTimestamp,
-                            DurationSeconds as durationSeconds,
-                            CompletionPercentage as completionPercentage,
-                            EngagementScore as engagementScore,
-                            DeviceType as deviceType,
-                            SessionID as sessionId
-                        FROM UserInteractions
-                        LEFT JOIN Accounts ON Accounts.AccountID = UserInteractions.AccountID
-                        ORDER BY InteractionTimestamp ASC
+                            ui.InteractionID as interactionId,
+                            ui.AccountID as accountId,
+                            a.AccountName as accountName,
+                            ui.ProductID as productId,
+                            ui.InteractionType as interactionType,
+                            ui.InteractionTimestamp as interactionTimestamp,
+                            ui.DurationSeconds as durationSeconds,
+                            ui.CompletionPercentage as completionPercentage,
+                            ui.EngagementScore as engagementScore,
+                            ui.DeviceType as deviceType,
+                            ui.SessionID as sessionId
+                        FROM UserInteractions ui
+                        LEFT JOIN Accounts a ON a.AccountID = ui.AccountID
+                        ORDER BY ui.InteractionTimestamp ASC
                     """
                     cursor.execute(sql)
                     results = cursor.fetchall()
