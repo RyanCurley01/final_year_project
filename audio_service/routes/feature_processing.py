@@ -237,9 +237,6 @@ async def extract_all_product_features(
         # Concurrency control: Process 4 songs at a time to check for stuck tasks without blocking all
         sem = asyncio.Semaphore(4)
 
-        # We need the current cache for classification context (Legacy param, but keeping for compatibility)
-        current_cache = ml_service.audio_features_cache.copy()
-
         async def process_product(product):
             async with sem:
                 product_id = product['ProductID']
@@ -300,9 +297,7 @@ async def extract_all_product_features(
                             time_signature=features.get('time_signature', '4/4'),
                             mfcc_mean=features.get('mfcc_mean'),
                             chroma_mean=features.get('chroma_mean'),
-                            spectral_contrast_mean=features.get('spectral_contrast_mean'),
-                            current_cache_size=len(current_cache),
-                            current_cache_items=current_cache
+                            spectral_contrast_mean=features.get('spectral_contrast_mean')
                         )
 
                         # If no real genre was found, predict via KNN trained on iTunes genres.

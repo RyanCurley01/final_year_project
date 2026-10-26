@@ -11,6 +11,7 @@ import blissImage from '../assets/bliss.png';
 import OnsetImageCard from './OnsetImageCard';
 
 const toFiniteNumber = (value) => {
+  if (value === null || value === undefined || value === '') return null;
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : null;
 };
@@ -41,6 +42,7 @@ const DiscoverVisualizer = ({
   
   // Get audio features from shared context
   const { audioFeatures } = useAudioFeatures();
+  const activeFeaturesForDisplay = audioFeatures || displayedFeatures;
   
   // Get playbackRate, isPlaying, and activeSong from Redux
   const { playbackRate, isPlaying, activeSong } = useSelector((state) => state.player);
@@ -157,7 +159,7 @@ const DiscoverVisualizer = ({
         // Only use backend target_features as fallback if no live features available
         const backendFeatures = response.data.target_features;
 
-        if (backendFeatures && !audioFeaturesRef.current) {
+        if (backendFeatures) {
           setDisplayedFeatures(prev => ({
             ...backendFeatures,
             using_cached: backendFeatures.using_cached_features
@@ -242,24 +244,15 @@ const DiscoverVisualizer = ({
       // Update displayed playback rate
       setDisplayedPlaybackRate(rate);
 
-      // Blend displayed features: use cached (librosa) tempo for accuracy since
-      // Web Audio estimates tempo from energy (inaccurate), but use LIVE
-      // energy/valence/danceability so the badges update dynamically during playback.
+      // Use the same cached feature profile the backend uses to rank recommendations.
       const songIdStr = String(songId);
       const cachedForDisplay = cachedFeatures?.[songIdStr] || cachedFeatures?.[String(-Math.abs(Number(songIdStr)))];
-      if (cachedForDisplay && liveFeatures) {
+      if (cachedForDisplay) {
         setDisplayedFeatures({
-          tempo: cachedForDisplay.tempo ? Number(cachedForDisplay.tempo) : (liveFeatures.tempo ? Number(liveFeatures.tempo) : null),
-          energy: liveFeatures.energy != null ? Number(liveFeatures.energy) : (cachedForDisplay.energy ? Number(cachedForDisplay.energy) : null),
-          valence: liveFeatures.valence != null ? Number(liveFeatures.valence) : (cachedForDisplay.valence ? Number(cachedForDisplay.valence) : null),
-          danceability: liveFeatures.danceability != null ? Number(liveFeatures.danceability) : (cachedForDisplay.danceability ? Number(cachedForDisplay.danceability) : null),
-        });
-      } else if (cachedForDisplay) {
-        setDisplayedFeatures({
-          tempo: cachedForDisplay.tempo ? Number(cachedForDisplay.tempo) : null,
-          energy: cachedForDisplay.energy ? Number(cachedForDisplay.energy) : null,
-          valence: cachedForDisplay.valence ? Number(cachedForDisplay.valence) : null,
-          danceability: cachedForDisplay.danceability ? Number(cachedForDisplay.danceability) : null,
+          tempo: toFiniteNumber(cachedForDisplay.tempo),
+          energy: toFiniteNumber(cachedForDisplay.energy),
+          valence: toFiniteNumber(cachedForDisplay.valence),
+          danceability: toFiniteNumber(cachedForDisplay.danceability),
         });
       } else if (liveFeatures) {
         setDisplayedFeatures({
@@ -345,7 +338,7 @@ const DiscoverVisualizer = ({
     
     // Determines if we should use the confirmed backend features (displayedFeatures)
     // or fall back to the raw client-side extracted features (audioFeatures)
-    const featuresToUse = displayedFeatures || audioFeatures;
+    const featuresToUse = audioFeatures || displayedFeatures;
 
     // Failsafe: If absolutely no math features are available locally, simply return 
     // the static, pre-calculated match arrays that were originally sent by the backend.
@@ -380,93 +373,42 @@ const DiscoverVisualizer = ({
     const targetEnergy = toFiniteNumber(rec.energy);
     const targetValence = toFiniteNumber(rec.valence);
     const targetDanceability = toFiniteNumber(rec.danceability);
+    const sourceTempo = toFiniteNumber(currentTempo);
+    const sourceEnergy = toFiniteNumber(featuresToUse.energy);
+    const sourceValence = toFiniteNumber(featuresToUse.valence);
+    const sourceDanceability = toFiniteNumber(featuresToUse.danceability);
     
     // Calculates Absolute Difference: Finds exactly how many BPM apart the two tracks are currently playing
-    const tempoDiff = Math.abs(targetTempo - currentTempo);
+    const tempoDiff = targetTempo === null || sourceTempo === null
+      ? null
+      : Math.abs(targetTempo - sourceTempo);
     
     // Scales the difference out of 100 BPM max, subtracts from 1.0 to formulate a match percentage, bounding at minimum 0
-    const tempoMatch = Math.max(0, 1 - Math.min(tempoDiff / 100.0, 1.0));
+    const tempoMatch = tempoDiff === null
+      ? rec.tempo_match
+      : Math.max(0, 1 - Math.min(tempoDiff / 100.0, 1.0));
     
     // Real-Time Energy Math: Normalizes client-side extraction energy, gets distance from candidate energy, bounding 0 to 1
-    const energyMatch = Math.max(0, 1 - Math.abs((Number(featuresToUse.energy) || 0.5) - targetEnergy));
+    const energyMatch = sourceEnergy === null || targetEnergy === null
+      ? rec.energy_match
+      : Math.max(0, 1 - Math.abs(sourceEnergy - targetEnergy));
     
     // Real-Time Mood Math: Normalizes client-side valence, calculates difference from candidate valence target
-    const moodMatch = Math.max(0, 1 - Math.abs((Number(featuresToUse.valence) || 0.5) - targetValence));
+    const moodMatch = sourceValence === null || targetValence === null
+      ? rec.mood_match
+      : Math.max(0, 1 - Math.abs(sourceValence - targetValence));
     
     // Real-Time Danceability Math: Calculates difference between current active rhythm constraints and candidate track groove
-    const danceabilityMatch = Math.max(0, 1 - Math.abs((Number(featuresToUse.danceability) || 0.5) - targetDanceability));
+    const danceabilityMatch = sourceDanceability === null || targetDanceability === null
+      ? (rec.danceability_match ?? rec.dance_match)
+      : Math.max(0, 1 - Math.abs(sourceDanceability - targetDanceability));
 
-    // Reconstructs the core_match exactly like the backend (Tempo 25%, Energy 30%, Mood 20%, Dance 25%)
-    const coreMatchLive = (
-      tempoMatch * 0.25 +
-      energyMatch * 0.30 +
-      moodMatch * 0.20 +
-      danceabilityMatch * 0.25
-    );
-
-    // Determine genre bonus approximation. Backend uses a small +/- factor (genre_agree * 0.10).
-    // Frontend receives only a boolean `genre_match`, so approximate by awarding +0.10 when true.
-    const genreBonus = rec.genre_match ? 0.10 : 0.0;
-
-    // If the backend returned an already-blended similarity_score and per-trait matches,
-    // it can be infered that the original cosine_norm used server-side and reuse it so that
-    // only the core-match portion changes when the user adjusts playback rate.
-    let cosineNormEstimate = null;
-    if (typeof rec.similarity_score === 'number') {
-      // Reconstruct original core match from backend-provided trait matches
-      const recTempo = Number(rec.tempo_match || rec.tempo_match === 0 ? rec.tempo_match : rec.tempo_match) || 0;
-      const recEnergy = Number(rec.energy_match || rec.energy_match === 0 ? rec.energy_match : rec.energy_match) || 0;
-      const recMood = Number(rec.mood_match || rec.mood_match === 0 ? rec.mood_match : rec.mood_match) || 0;
-      const recDance = Number(rec.danceability_match || rec.dance_match || 0) || 0;
-      const coreMatchOriginal = (recTempo * 0.25) + (recEnergy * 0.30) + (recMood * 0.20) + (recDance * 0.25);
-
-      // Solve for cosine_norm: similarity = 0.80*cosine_norm + 0.10*coreMatchOriginal + genreBonus (+ tiny tie jitter)
-      cosineNormEstimate = (rec.similarity_score - (0.10 * coreMatchOriginal) - genreBonus) / 0.80;
-      if (!isFinite(cosineNormEstimate) || Number.isNaN(cosineNormEstimate)) cosineNormEstimate = null;
-      if (cosineNormEstimate !== null) {
-        cosineNormEstimate = Math.max(0, Math.min(1, cosineNormEstimate));
-      }
-    }
-
-    // If we couldn't infer a cosine norm, fall back to treating core-only match as the displayed similarity
-    if (cosineNormEstimate === null) {
-      let fallback = coreMatchLive;
-      if (fallback > 0.99) fallback = 0.99;
-      return {
-        tempo_match: tempoMatch,
-        energy_match: energyMatch,
-        mood_match: moodMatch,
-        danceability_match: danceabilityMatch,
-        similarity_score: fallback
-      };
-    }
-
-    // Re-blend using the inferred cosine_norm and the live core match (affected by playback rate)
-    let blended = (cosineNormEstimate * 0.80) + (coreMatchLive * 0.10) + genreBonus;
-
-    // Deterministic tie jitter to match backend ordering (small sub-decimal)
-    const targetId = currentSongId || currentProduct?.id || currentProduct?.productId || '';
-    const candId = rec.product_id || rec.productId || rec.id || '';
-    const seedStr = `${targetId}:${candId}`;
-    // Simple stable string hash (djb2-like)
-    let h = 5381;
-    for (let i = 0; i < seedStr.length; i++) {
-      h = ((h << 5) + h) + seedStr.charCodeAt(i);
-      h = h & h;
-    }
-    const tieJitter = (Math.abs(h) % 1000) / 1_000_000.0;
-    blended = blended + tieJitter;
-
-    // Clamp to backend bounds
-    blended = Math.max(0.0, Math.min(0.999, blended));
-
-    // Return the live-updated metrics
     return {
       tempo_match: tempoMatch,
       energy_match: energyMatch,
       mood_match: moodMatch,
       danceability_match: danceabilityMatch,
-      similarity_score: blended
+      similarity_score: rec.similarity_score
     };
   };
 
@@ -551,16 +493,16 @@ const DiscoverVisualizer = ({
         </div>
 
         {/* Audio Feature Badges */}
-        {displayedFeatures && (
+        {activeFeaturesForDisplay && (
           <div className="grid grid-cols-4 gap-1">
-            <FeatureBadge label="Tempo" value={`${Math.round((displayedFeatures.tempo || 0) * (displayedPlaybackRate || 1))}`} />
-            <FeatureBadge label="Energy" value={`${Math.round((displayedFeatures.energy || 0) * 100)}%`} />
-            <FeatureBadge label="Mood" value={`${Math.round((displayedFeatures.valence || 0) * 100)}%`} />
-            <FeatureBadge label="Dance" value={`${Math.round((displayedFeatures.danceability || 0) * 100)}%`} />
+            <FeatureBadge label="Tempo" value={`${Math.round((activeFeaturesForDisplay.tempo || 0) * (displayedPlaybackRate || 1))}`} />
+            <FeatureBadge label="Energy" value={`${Math.round((activeFeaturesForDisplay.energy || 0) * 100)}%`} />
+            <FeatureBadge label="Mood" value={`${Math.round((activeFeaturesForDisplay.valence || 0) * 100)}%`} />
+            <FeatureBadge label="Dance" value={`${Math.round((activeFeaturesForDisplay.danceability || 0) * 100)}%`} />
           </div>
         )}
         
-        {!displayedFeatures && (
+        {!activeFeaturesForDisplay && (
           <p className="text-[12px] text-gray-500 text-center">Analyzing audio features...</p>
         )}
         
@@ -676,7 +618,7 @@ const DiscoverVisualizer = ({
                         color: 'white'
                       }}
                     >
-                      {(rec.similarity_score * 100).toFixed(0)}%
+                      {(rec.similarity_score * 100).toFixed(1)}%
                     </div>
                   </div>
 

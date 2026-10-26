@@ -5,7 +5,6 @@ import json
 import asyncio
 import httpx
 import numpy as np
-from sklearn.metrics.pairwise import cosine_similarity
 
 from utils import console
 from config import executor, ITUNES_API_BASE_URL
@@ -35,6 +34,54 @@ import ml_service
 from ml_service import KEY_NAME_TO_INDEX, TIME_SIG_TO_BEATS, _parse_json_list, _build_feature_vector
 
 router = APIRouter()
+
+_FALLBACK_FEATURE_SCALES = np.array(
+    [200.0, 1.0, 1.0, 1.0, 1.0, 5000.0, 10000.0, 1.0, 1.0, 60.0, 1.0,
+     5000.0, 1.0, 20.0, 1.0, 1.0, 600.0, 11.0, 7.0]
+    + [100.0] * 13
+    + [1.0] * 12
+    + [1.0] * 7,
+    dtype=float,
+)
+
+
+def _feature_vector_similarity(target_vector: list, candidate_vector: list) -> float:
+    """Convert normalized feature distance into a bounded similarity score."""
+    target = np.asarray(target_vector, dtype=float)
+    candidate = np.asarray(candidate_vector, dtype=float)
+    if target.shape != candidate.shape:
+        raise ValueError("Target and candidate feature vectors must have the same shape")
+
+    scales = np.ones(target.shape, dtype=float)
+    if target.size == 51:
+        scaler = ml_service.feature_scaler
+        fitted_scales = getattr(scaler, "scale_", None) if scaler is not None else None
+        if fitted_scales is not None and len(fitted_scales) == target.size:
+            scales = np.asarray(fitted_scales, dtype=float)
+        else:
+            scales = 1.0 / _FALLBACK_FEATURE_SCALES
+
+    normalized_delta = np.clip(np.abs(target - candidate) * scales, 0.0, 4.0)
+    rms_distance = float(np.sqrt(np.mean(np.square(normalized_delta))))
+    return float(np.exp(-rms_distance))
+
+
+def _blended_similarity_score(
+    feature_similarity: float,
+    core_match: float,
+    genre_agreement: float,
+) -> float:
+    """Blend timbral distance with audible traits and a modest genre signal."""
+    genre_score = 0.5 if genre_agreement == 0.0 else max(0.0, genre_agreement)
+    return max(
+        0.0,
+        min(1.0, feature_similarity * 0.60 + core_match * 0.35 + genre_score * 0.05),
+    )
+
+
+def _is_discover_candidate(product_id: int, current_product_id: int) -> bool:
+    """Keep Discover recommendations within the target's library/iTunes ID pool."""
+    return current_product_id == 0 or product_id * current_product_id > 0
 
 
 def _expand_match_target_ids(target_ids: Optional[List[int]]) -> Optional[set[int]]:
@@ -293,14 +340,10 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
         # of the song you are currently playing.
 
         # Step 1: Check Cache (High Quality ML Features)
-        if current_id_int != 0:          
-            # Checks negative (iTunes) variants of the ID in the cache
-            # and positive (local library) variants of the ID in the cache.
-            neg_id = -abs(current_id_int)
-            if neg_id in ml_service.audio_features_cache:               
-                cached_features = ml_service.audio_features_cache[neg_id]
-            elif abs(current_id_int) in ml_service.audio_features_cache:
-                cached_features = ml_service.audio_features_cache[abs(current_id_int)]
+        if current_id_int != 0:
+            cached_features = ml_service.audio_features_cache.get(current_id_int)
+            if cached_features is None:
+                cached_features = ml_service.audio_features_cache.get(-current_id_int)
              
              
         # Checks if the cached_features variable holds any data.
@@ -313,21 +356,6 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
             target_features = cached_features.copy()
             console.log(f"✅ Using CACHED audio features for {clean_current_id} as BASE")
             
-            # Checks whether the client frontend sent any real-time audio features 
-            # (request.audio_features) inside the API request payload.
-            if request.audio_features:
-                req_f = request.audio_features
-                
-                rate = req_f.playback_rate if req_f.playback_rate else 1.0
-                
-                # This checks if the song is being played at a modified speed. 
-                # If the rate is exactly 1.0, nothing needs to change. 
-                # If it's anything else (e.g., 1.5 for 50% faster, or 0.8 for 20% slower), 
-                # you enter the block.
-                if rate != 1.0:
-                    target_features['tempo'] = target_features.get('tempo', 120) * rate
-
-
         # Step 2: Live Extraction from Preview URL (Fallback)
         # If Step 1 fails to find features but a URL was provided, download and extract live.
         if not target_features and request.preview_url:
@@ -356,6 +384,14 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
         
         if not target_features:
             return {"status": "success", "recommendations": [], "target_features": None}
+
+        playback_rate = 1.0
+        if request.audio_features and request.audio_features.playback_rate:
+            playback_rate = float(request.audio_features.playback_rate)
+        scoring_target_features = target_features.copy()
+        scoring_target_features['tempo'] = (
+            float(target_features.get('tempo') or 120.0) * playback_rate
+        )
 
         # Step 3: Select Candidates based on Source and Request Data
         candidates = []
@@ -474,10 +510,12 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
             # the engine will mathematically evaluate the target against EVERY single song loaded in the global cache.
             all_cached = ml_service.audio_features_cache.items()
             
-            # No source filtering — all cached songs (iTunes + library) are candidates.
-            # Only self-exclusion is applied.
+            # Discover recommendations stay within the target's signed-ID namespace.
             candidates = []
             for pid, p in all_cached:
+                if "discover" in source_lower and current_id_int != 0:
+                    if not _is_discover_candidate(int(pid), current_id_int):
+                        continue
                 if str(pid) == clean_current_id or pid == current_id_int:
                     continue
                 try:
@@ -492,7 +530,11 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
         # Step 4: Filters out the same candidate song in a target song list by id
         if not candidates:
              # Fast fail: If there are absolutely zero candidate tracks to process, return empty array immediately.
-             return {"status": "success", "recommendations": []}
+             return {
+                 "status": "success",
+                 "recommendations": [],
+                 "target_features": target_features,
+             }
 
         # Initialize an empty array to track the fully validated and sanitized pool of candidate tracks.
         filtered_candidates = []
@@ -543,11 +585,15 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
 
         # A final circuit breaker if no candidates passed the filtering or if the cache is empty
         if not candidates:         
-            return {"status": "success", "recommendations": []}
+            return {
+                "status": "success",
+                "recommendations": [],
+                "target_features": target_features,
+            }
 
 
-        # To convert the target song's raw properties into a staight line array for cosine similarity. 
-        target_vector = _build_similarity_vector(target_features)
+        # Build matching vectors from the target and candidate features.
+        target_vector = _build_similarity_vector(scoring_target_features)
         
         candidate_vectors = []
         candidate_objs = []
@@ -562,55 +608,83 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
             candidate_objs.append(cand)
              
         if not candidate_vectors:
-            return {"status": "success", "recommendations": []}
+            return {
+                "status": "success",
+                "recommendations": [],
+                "target_features": target_features,
+            }
 
-        # Cosine similarity on manually-normalized vectors.
-        target_arr = np.array(target_vector).reshape(1, -1)
-        
-        candidates_arr = np.array(candidate_vectors)
-        
-        # To calculate the mathematical angle distance (cosine similarity)
-        sims = cosine_similarity(target_arr, candidates_arr)[0]
-        
-        
         # Prepares an empty list to assemble the final response objects
         recommendations = []
         
-        # Loops through the list of raw cosine similarity scores calculated by the ML engine
-        for i, score in enumerate(sims):
+        for i, candidate_vector in enumerate(candidate_vectors):
             
             # Uses the index i to grab the original un-flattened dictionary data for that specific candidate song
             cand = candidate_objs[i]
             
             # Calculates absolute difference in BPM, caps it at 100, scales to percentage and subtracts from 1.0
-            tempo_match=1.0 - min(abs(target_features.get('tempo',120) - (cand.get('tempo') or 120)), 100)/100
+            candidate_tempo = cand.get('tempo')
+            if candidate_tempo is None:
+                candidate_tempo = 120.0
+            tempo_match = max(
+                0.0,
+                1.0 - min(
+                    abs(float(scoring_target_features.get('tempo', 120.0)) - float(candidate_tempo)),
+                    100.0,
+                ) / 100.0,
+            )
             
             # Calculates absolute mathematical distance between target's energy and candidate's energy
-            energy_match=1.0 - abs(target_features.get('energy',0.5) - (cand.get('energy') or 0.5))
+            candidate_energy = cand.get('energy')
+            if candidate_energy is None:
+                candidate_energy = 0.5
+            energy_match = max(
+                0.0,
+                1.0 - abs(
+                    float(scoring_target_features.get('energy', 0.5))
+                    - float(candidate_energy)
+                ),
+            )
             
             # Calculates mood match using standard valence mapping (0.0 sad, 1.0 happy)
-            mood_match=1.0 - abs(target_features.get('valence',0.5) - (cand.get('valence') or 0.5))
+            candidate_valence = cand.get('valence')
+            if candidate_valence is None:
+                candidate_valence = 0.5
+            mood_match = max(
+                0.0,
+                1.0 - abs(
+                    float(scoring_target_features.get('valence', 0.5))
+                    - float(candidate_valence)
+                ),
+            )
             
             # Calculates danceability match, defaulting to 0.5 if keys are missing
-            dance_match=1.0 - abs(target_features.get('danceability',0.5) - (cand.get('danceability') or 0.5))
-
-            # Compresses the cosine similarity score from [-1, 1] into a strict [0, 1] percentage band
-            cosine_norm = max(0.0, min(1.0, (float(score) + 1.0) / 2.0))
+            candidate_danceability = cand.get('danceability')
+            if candidate_danceability is None:
+                candidate_danceability = 0.5
+            dance_match = max(
+                0.0,
+                1.0 - abs(
+                    float(scoring_target_features.get('danceability', 0.5))
+                    - float(candidate_danceability)
+                ),
+            )
             
             # Genre agreement: compare target and candidate genre / genre_cluster.
             # Returns -0.3 (mismatch) to +1.0 (exact match); 0.0 when info is absent.
-            genre_agree = _genre_agreement_score(target_features, cand)
+            genre_agree = _genre_agreement_score(scoring_target_features, cand)
             is_genre_match = genre_agree > 0.5  # True for exact genre or same cluster
             
             # Sums the 4 human-audible traits using set perceptual weights (e.g. Energy 30%, Tempo 25%)
             # This ensures high-dimensional abstract AI matches (Cosine) don't override the 
             # fact that a user just wants a musically-similar Tempo and Energy.
-            core_match = (
+            core_match = min(1.0, (
                 tempo_match * 0.25
                 + energy_match * 0.30
                 + mood_match * 0.20
                 + dance_match * 0.25
-            )
+            ))
+            feature_similarity = _feature_vector_similarity(target_vector, candidate_vector)
             
             # Creates an array of tuples holding Identifier, Match Score, and Contextual String tag
             matches = [
@@ -629,16 +703,9 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
             meta = cand.get('_meta') 
             
 
-            # Score driven by the full 51D cosine similarity (includes MFCCs, chroma,
-            # spectral contrast, spectral bandwidth, etc. that distinguish genres).
-            # The 4 core traits are kept as a minor tiebreaker since they're already
-            # embedded in the 51D vector.
-            # Genre agreement adds up to ±0.10 to separate same-genre from cross-genre.
-            genre_bonus = genre_agree * 0.10
-            blended_score = (cosine_norm * 0.80) + (core_match * 0.10) + genre_bonus
-            
-            # Locks the final score into a ceiling of 0.999 and floor 0.0 to prevent glitch overflows
-            blended_score = max(0.0, min(0.999, blended_score))
+            blended_score = _blended_similarity_score(
+                feature_similarity, core_match, genre_agree
+            )
 
             # Concatenates target song id and candidate song id to create a predictable unique string
             seed_str = f"{clean_current_id}:{cand.get('id', '')}"
@@ -647,7 +714,7 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
             tie_jitter = (abs(hash(seed_str)) % 1000) / 1_000_000.0
             
             # Adds jitter bit forcing absolute math ties to have arbitrary differences so sorting isn't pure random
-            blended_score = max(0.0, min(0.999, blended_score + tie_jitter))
+            blended_score = max(0.0, min(1.0, blended_score + tie_jitter))
             
             
             # Instantiates response model mapping calculation values to 3 decimal places out for readability
@@ -824,14 +891,6 @@ async def get_unified_recommendations(request: UnifiedRecommendationRequest):
         # This allows the frontend web-audio canvas to jump and react even if the actual math 
         # used High-Quality cached features.
         response_features = target_features
-        if request.audio_features:
-             # If we have live data from the frontend, use that as the base format for displaying
-             response_features = request.audio_features.dict()
-             
-             # Fill any missing gaps with our calculation features (defaults or cache)
-             for k, v in target_features.items():
-                  if k not in response_features or response_features[k] is None:
-                       response_features[k] = v
         
         # Return a final dictionary response to FastAPI representing our success JSON payload.
         return {
@@ -935,18 +994,10 @@ async def get_midi_recommendations(request: MidiTargetRequest):
         if not candidate_vectors:
             return {"status": "success", "recommendations": [], "target_features": target_features_raw}
 
-        # Cosine similarity on manually-normalized vectors.
-        target_arr = np.array(target_vector).reshape(1, -1)
-        candidates_arr = np.array(candidate_vectors)
-
-        # To calculate the mathematical angle distance (cosine similarity)
-        sims = cosine_similarity(target_arr, candidates_arr)[0]
-
         # Prepares an empty list to assemble the final response objects
         recommendations = []
 
-        # Loops through the list of raw cosine similarity scores calculated by the ML engine
-        for i, score in enumerate(sims):
+        for i, candidate_vector in enumerate(candidate_vectors):
 
             # Uses the index i to grab the original un-flattened dictionary data for that specific candidate song
             pid, cand = candidate_objs[i]
@@ -963,9 +1014,6 @@ async def get_midi_recommendations(request: MidiTargetRequest):
             # Calculates danceability match, defaulting to 0.5 if keys are missing
             dance_match = 1.0 - abs(target_features.get('danceability', 0.5) - (cand.get('danceability') or 0.5))
 
-            # Compresses the cosine similarity score from [-1, 1] into a strict [0, 1] percentage band
-            cosine_norm = max(0.0, min(1.0, (float(score) + 1.0) / 2.0))
-
             # Genre agreement: compare target and candidate genre / genre_cluster.
             # Returns -0.3 (mismatch) to +1.0 (exact match); 0.0 when info is absent.
             genre_agree = _genre_agreement_score(target_features, cand)
@@ -974,12 +1022,13 @@ async def get_midi_recommendations(request: MidiTargetRequest):
             # Sums the 4 human-audible traits using set perceptual weights (e.g. Energy 30%, Tempo 25%)
             # This ensures high-dimensional abstract AI matches (Cosine) don't override the
             # fact that a user just wants a musically-similar Tempo and Energy.
-            core_match = (
+            core_match = min(1.0, (
                 tempo_match * 0.25
                 + energy_match * 0.30
                 + mood_match * 0.20
                 + dance_match * 0.25
-            )
+            ))
+            feature_similarity = _feature_vector_similarity(target_vector, candidate_vector)
 
             # Creates an array of tuples holding Identifier, Match Score, and Contextual String tag
             matches = [
@@ -994,15 +1043,9 @@ async def get_midi_recommendations(request: MidiTargetRequest):
             # Scans array and targets the tuple possessing the highest Match Score for the output reason
             best_match = max(matches, key=lambda x: x[1])
 
-            # Score driven by the 11D cosine similarity of MIDI-controlled features.
-            # The 4 core traits are kept as a minor tiebreaker since they're already
-            # embedded in the vector.
-            # Genre agreement adds up to ±0.10 to separate same-genre from cross-genre.
-            genre_bonus = genre_agree * 0.10
-            blended_score = (cosine_norm * 0.80) + (core_match * 0.10) + genre_bonus
-
-            # Locks the final score into a ceiling of 0.999 and floor 0.0 to prevent glitch overflows
-            blended_score = max(0.0, min(0.999, blended_score))
+            blended_score = _blended_similarity_score(
+                feature_similarity, core_match, genre_agree
+            )
 
             # Concatenates target knob config and candidate song id to create a predictable unique string
             seed_str = f"midi:{pid}"
@@ -1011,7 +1054,7 @@ async def get_midi_recommendations(request: MidiTargetRequest):
             tie_jitter = (abs(hash(seed_str)) % 1000) / 1_000_000.0
 
             # Adds jitter bit forcing absolute math ties to have arbitrary differences so sorting isn't pure random
-            blended_score = max(0.0, min(0.999, blended_score + tie_jitter))
+            blended_score = max(0.0, min(1.0, blended_score + tie_jitter))
 
             # Instantiates response dict mapping calculation values to 3 decimal places out for readability
             recommendations.append({
@@ -1553,10 +1596,7 @@ async def match_library_songs(request: LibraryMatchRequest):
                 # Converts the current library song's properties into the flattened 51-float math array.
                 lib_vector = _build_similarity_vector(lib_song)
                 
-                # To calculate the mathematical angle distance (cosine similarity)
-                # Compresses the cosine similarity score from [-1, 1] into a strict [0, 1] percentage band
-                cosine_raw = float(cosine_similarity([candidate_vector], [lib_vector])[0][0])
-                cosine_norm = max(0.0, min(1.0, (cosine_raw + 1.0) / 2.0))
+                feature_similarity = _feature_vector_similarity(candidate_vector, lib_vector)
 
                 # Calculates absolute difference in BPM, caps it at 100, scales to percentage and subtracts from 1.0
                 tempo_match = 1.0 - min(abs(candidate_features.get('tempo', 120) - lib_song.get('tempo', 120)), 100) / 100
@@ -1577,23 +1617,15 @@ async def match_library_songs(request: LibraryMatchRequest):
                 # Sums the 4 human-audible traits using set perceptual weights (e.g. Energy 30%, Tempo 25%)
                 # This ensures high-dimensional abstract AI matches (Cosine) don't override the 
                 # fact that a user just wants a musically-similar Tempo and Energy.
-                core_match = (
+                core_match = min(1.0, (
                     tempo_match * 0.25
                     + energy_match * 0.30
                     + mood_match * 0.20
                     + dance_match * 0.25
+                ))
+                blended_score = _blended_similarity_score(
+                    feature_similarity, core_match, genre_agree
                 )
-
-                # Score driven by the full 51D cosine similarity (includes MFCCs, chroma,
-                # spectral contrast, spectral bandwidth, etc. that distinguish genres).
-                # The 4 core traits are kept as a minor tiebreaker since they're already
-                # embedded in the 51D vector.
-                # Genre agreement adds up to ±0.10 to separate same-genre from cross-genre.
-                genre_bonus = genre_agree * 0.10
-                blended_score = (cosine_norm * 0.80) + (core_match * 0.10) + genre_bonus
-
-                # Locks the final score into a ceiling of 0.999 and floor 0.0 to prevent glitch overflows
-                blended_score = max(0.0, min(0.999, blended_score))
 
                 # Concatenates candidate song id and library song id to create a predictable unique string
                 seed_str = f"{candidate.trackId}:{lib_song.get('id', '')}"
@@ -1602,7 +1634,7 @@ async def match_library_songs(request: LibraryMatchRequest):
                 tie_jitter = (abs(hash(seed_str)) % 1000) / 1_000_000.0
 
                 # Adds jitter bit forcing absolute math ties to have arbitrary differences so sorting isn't pure random
-                blended_score = max(0.0, min(0.999, blended_score + tie_jitter))
+                blended_score = max(0.0, min(1.0, blended_score + tie_jitter))
 
                 # Track the best scoring library song and its per-metric scores
                 if blended_score > best_blended_score:
@@ -1791,9 +1823,7 @@ async def _warm_cache_background(songs: List[Dict]):
                     time_signature=features.get('time_signature', '4/4'),
                     mfcc_mean=features.get('mfcc_mean'),
                     chroma_mean=features.get('chroma_mean'),
-                    spectral_contrast_mean=features.get('spectral_contrast_mean'),
-                    current_cache_size=len(ml_service.audio_features_cache),
-                    current_cache_items=ml_service.audio_features_cache
+                    spectral_contrast_mean=features.get('spectral_contrast_mean')
                 )
 
                 predicted_genre = ml_service.predict_real_genre(features) or genre_cluster

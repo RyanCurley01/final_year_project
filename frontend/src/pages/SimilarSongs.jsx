@@ -340,6 +340,7 @@ const SimilarSongs = () => {
   const { activeSong, isPlaying, playbackRate } = useSelector((state) => state.player);
 
   const { audioFeatures } = useAudioFeatures();
+  const activeFeaturesForDisplay = audioFeatures || displayedFeatures;
   
   const audioFeaturesRef = useRef(audioFeatures);
   audioFeaturesRef.current = audioFeatures;
@@ -1066,7 +1067,7 @@ const SimilarSongs = () => {
   };
 
   const calculateLiveMatch = (rec) => {
-    const featuresToUse = displayedFeatures || audioFeatures;
+    const featuresToUse = audioFeatures || displayedFeatures;
 
     if (!featuresToUse) {
        return {
@@ -1098,63 +1099,12 @@ const SimilarSongs = () => {
     const moodMatch = Math.max(0, 1 - Math.abs((Number(featuresToUse.valence) || 0.5) - targetValence));
     const danceabilityMatch = Math.max(0, 1 - Math.abs((Number(featuresToUse.danceability) || 0.5) - targetDanceability));
 
-    const coreMatchLive = (
-      tempoMatch * 0.25 +
-      energyMatch * 0.30 +
-      moodMatch * 0.20 +
-      danceabilityMatch * 0.25
-    );
-
-    const genreBonus = rec.genre_match ? 0.10 : 0.0;
-
-    let cosineNormEstimate = null;
-    if (typeof rec.similarity_score === 'number') {
-      const recTempo = Number(rec.tempo_match || rec.tempo_match === 0 ? rec.tempo_match : rec.tempo_match) || 0;
-      const recEnergy = Number(rec.energy_match || rec.energy_match === 0 ? rec.energy_match : rec.energy_match) || 0;
-      const recMood = Number(rec.mood_match || rec.mood_match === 0 ? rec.mood_match : rec.mood_match) || 0;
-      const recDance = Number(rec.danceability_match || rec.dance_match || 0) || 0;
-      const coreMatchOriginal = (recTempo * 0.25) + (recEnergy * 0.30) + (recMood * 0.20) + (recDance * 0.25);
-
-      cosineNormEstimate = (rec.similarity_score - (0.10 * coreMatchOriginal) - genreBonus) / 0.80;
-      if (!isFinite(cosineNormEstimate) || Number.isNaN(cosineNormEstimate)) cosineNormEstimate = null;
-      if (cosineNormEstimate !== null) {
-        cosineNormEstimate = Math.max(0, Math.min(1, cosineNormEstimate));
-      }
-    }
-
-    if (cosineNormEstimate === null) {
-      let fallback = coreMatchLive;
-      if (fallback > 0.99) fallback = 0.99;
-      return {
-        tempo_match: tempoMatch,
-        energy_match: energyMatch,
-        mood_match: moodMatch,
-        danceability_match: danceabilityMatch,
-        similarity_score: fallback
-      };
-    }
-
-    let blended = (cosineNormEstimate * 0.80) + (coreMatchLive * 0.10) + genreBonus;
-
-    const targetId = currentTargetContext?.id || activeSong?.id || activeSong?.productId || '';
-    const candId = rec.product_id || rec.productId || rec.id || '';
-    const seedStr = `${targetId}:${candId}`;
-    let h = 5381;
-    for (let i = 0; i < seedStr.length; i++) {
-      h = ((h << 5) + h) + seedStr.charCodeAt(i);
-      h = h & h;
-    }
-    const tieJitter = (Math.abs(h) % 1000) / 1_000_000.0;
-    blended = blended + tieJitter;
-
-    blended = Math.max(0.0, Math.min(0.999, blended));
-
     return {
       tempo_match: tempoMatch,
       energy_match: energyMatch,
       mood_match: moodMatch,
       danceability_match: danceabilityMatch,
-      similarity_score: blended
+      similarity_score: rec.similarity_score
     };
   };
 
@@ -1307,16 +1257,16 @@ const SimilarSongs = () => {
               )}
             </div>
             
-            {displayedFeatures && (
+            {activeFeaturesForDisplay && (
               <div className="grid grid-cols-4 gap-1">
-                <FeatureBadge label="Tempo" value={`${Math.round((displayedFeatures.tempo || 0) * (displayedPlaybackRate || 1))}`} />
-                <FeatureBadge label="Energy" value={`${Math.round((displayedFeatures.energy || 0) * 100)}%`} />
-                <FeatureBadge label="Mood" value={`${Math.round((displayedFeatures.valence || 0) * 100)}%`} />
-                <FeatureBadge label="Dance" value={`${Math.round((displayedFeatures.danceability || 0) * 100)}%`} />
+                <FeatureBadge label="Tempo" value={`${Math.round((activeFeaturesForDisplay.tempo || 0) * (displayedPlaybackRate || 1))}`} />
+                <FeatureBadge label="Energy" value={`${Math.round((activeFeaturesForDisplay.energy || 0) * 100)}%`} />
+                <FeatureBadge label="Mood" value={`${Math.round((activeFeaturesForDisplay.valence || 0) * 100)}%`} />
+                <FeatureBadge label="Dance" value={`${Math.round((activeFeaturesForDisplay.danceability || 0) * 100)}%`} />
               </div>
             )}
             
-            {!displayedFeatures && (
+            {!activeFeaturesForDisplay && (
               <p className="text-gray-500 text-center">Analyzing audio features...</p>
             )}
           </div>
@@ -1402,7 +1352,7 @@ const SimilarSongs = () => {
                             scoreForDisplay >= 0.5 ? 'bg-yellow-500' : 
                             'bg-red-500'
                           }`}>
-                            {Math.round(scoreForDisplay * 100)}%
+                            {(scoreForDisplay * 100).toFixed(1)}%
                           </span>
                         </div>
                         <p className="text-xs text-gray-300 truncate font-medium">{recArtist}</p>

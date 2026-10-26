@@ -81,7 +81,7 @@ export const AudioFeaturesProvider = ({ children }) => {
       const timeData = new Uint8Array(bufferLength);
 
       let lastUpdate = 0;
-      const UPDATE_MS = 200;
+      const UPDATE_MS = 3000;
 
       const analyze = (timestamp) => {
         if (!isPlaying) return;
