@@ -210,10 +210,10 @@ Loads env variables in git bash from VS Code so they are persisted
 source ~/.bash_profile
 
 To test the sync between AWS and local database image pools together and remove overflowing ones
-AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" python scripts/s3/sync_image_pools.py --target-size 80
+python scripts/s3/sync_image_pools.py --target-size 80
 
 To apply the sync between AWS and local database image pools together and remove overflowing ones
-AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" python scripts/s3/sync_image_pools.py --target-size 80 --apply
+python scripts/s3/sync_image_pools.py --target-size 80 --apply
 
 to find genre for all songs by genre
 docker exec -i gamestore_services-db-1 mysql -u root -p Game_Store_System -e "

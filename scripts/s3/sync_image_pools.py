@@ -456,6 +456,10 @@ def _backfill_missing_rows(
     for row in rows:
         if not row.source_url:
             failed += 1
+            print(
+                f"Backfill failed for product {row.product_id}, image row {row.image_gen_id}: missing SourceUrl",
+                file=sys.stderr,
+            )
             continue
 
         target_key = row.storage_key or _build_storage_key(s3_prefix, row)
@@ -487,8 +491,20 @@ def _backfill_missing_rows(
                     )
 
             uploaded += 1
-        except Exception:
+        except Exception as exc:
             failed += 1
+            if isinstance(exc, requests.HTTPError) and exc.response is not None:
+                reason = f"HTTP {exc.response.status_code}"
+            elif isinstance(exc, requests.RequestException):
+                reason = type(exc).__name__
+            elif isinstance(exc, ValueError):
+                reason = str(exc)
+            else:
+                reason = type(exc).__name__
+            print(
+                f"Backfill failed for product {row.product_id}, image row {row.image_gen_id}: {reason}",
+                file=sys.stderr,
+            )
 
     return uploaded, failed
 
@@ -626,6 +642,9 @@ def main() -> int:
         print(f"Refreshed DB rows from S3: {refreshed_from_s3}")
         print(f"Backfilled missing kept rows: {uploaded}")
         print(f"Backfill failures: {failed}")
+        if failed:
+            print("\nSync completed with backfill failures.", file=sys.stderr)
+            return 1
         print("\nDone.")
         return 0
 
