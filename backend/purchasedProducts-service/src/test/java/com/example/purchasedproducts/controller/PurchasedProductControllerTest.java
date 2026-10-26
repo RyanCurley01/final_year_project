@@ -1,6 +1,7 @@
 package com.example.purchasedproducts.controller;
 
 import com.example.purchasedproducts.model.PurchasedProduct;
+import com.example.purchasedproducts.repository.AccountRepository;
 import com.example.purchasedproducts.service.PurchasedProductService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -29,6 +30,9 @@ class PurchasedProductControllerTest {
 
     @MockitoBean
     private PurchasedProductService purchasedProductService;
+
+    @MockitoBean
+    private AccountRepository accountRepository;
 
     private PurchasedProduct testPurchasedProduct;
 

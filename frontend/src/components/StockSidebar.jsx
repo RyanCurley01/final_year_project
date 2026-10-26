@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { useAuth } from "../context/AuthContext";
+import { auth as firebaseAuth } from "../firebase";
 import { stockService } from "../redux/services/stockService";
 import { productService } from "../redux/services/productService";
 import { FaWarehouse } from "react-icons/fa";
@@ -105,11 +106,12 @@ const StockSidebar = () => {
 
   const isManager  = currentUser?.accountType === "Manager";
   const isEmployee = currentUser?.accountType === "Employee";
+  const isFirebaseAccount = !!(firebaseAuth.currentUser || currentUser?.firebaseUid);
   const hasBasicAuth =
     !!(currentUser?.email || currentUser?.accountEmailAddress) &&
     !!currentUser?.password;
 
-  const canView = (isManager || isEmployee) && hasBasicAuth;
+  const canView = (isManager || isEmployee) && (isFirebaseAccount || hasBasicAuth);
 
   useEffect(() => {
     if (isOpen && canView) {
@@ -122,8 +124,16 @@ const StockSidebar = () => {
         setIsLoading(false);
       }, 12000);
 
-      stockService
-        .getAllStock(email, currentUser?.password)
+      const request = isFirebaseAccount
+        ? firebaseAuth.currentUser
+          ? firebaseAuth.currentUser.getIdToken().then((token) => {
+            if (!token) throw new Error("Firebase session is unavailable. Sign in again and retry.");
+            return stockService.getAllStock(email, currentUser?.password, token);
+          })
+          : Promise.reject(new Error("Firebase session is unavailable. Sign in again and retry."))
+        : stockService.getAllStock(email, currentUser?.password);
+
+      Promise.resolve(request)
         .then(async (res) => {
           clearTimeout(timeout);
           const raw = res || [];
@@ -156,7 +166,7 @@ const StockSidebar = () => {
 
       return () => clearTimeout(timeout);
     }
-  }, [isOpen, canView, currentUser]);
+  }, [isOpen, canView, currentUser, isFirebaseAccount]);
 
   if (!canView) return null;
 

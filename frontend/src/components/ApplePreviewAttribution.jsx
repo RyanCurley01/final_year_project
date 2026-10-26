@@ -1,8 +1,5 @@
 import { useEffect, useState } from 'react';
 
-const ITUNES_BADGE_URL =
-  'https://linkmaker.itunes.apple.com/assets/shared/badges/en-us/music/itunesmusic.svg';
-
 const getAppleStoreUrl = (value) => {
   if (!value) return null;
   try {
@@ -37,7 +34,6 @@ const isApplePreviewUrl = (value) => {
 };
 
 const ApplePreviewAttribution = ({ previewUrl, trackViewUrl, trackId, className = '' }) => {
-  const [badgeFailed, setBadgeFailed] = useState(false);
   const [resolvedTrackUrl, setResolvedTrackUrl] = useState(() => getAppleStoreUrl(trackViewUrl));
 
   useEffect(() => {
@@ -81,20 +77,9 @@ const ApplePreviewAttribution = ({ previewUrl, trackViewUrl, trackId, className 
         aria-label="Download on iTunes"
         onClick={(event) => event.stopPropagation()}
       >
-        {!badgeFailed && previewUrl && (
-          <img
-            src={ITUNES_BADGE_URL}
-            alt="Download on iTunes"
-            className="h-7 w-auto"
-            loading="lazy"
-            onError={() => setBadgeFailed(true)}
-          />
-        )}
-        {(badgeFailed || !previewUrl) && (
-          <span className="inline-flex h-7 items-center rounded bg-black px-2.5 text-xs text-white">
-            Download on <strong className="ml-1 font-semibold">iTunes</strong>
-          </span>
-        )}
+        <span className="inline-flex h-7 items-center rounded bg-black px-2.5 text-xs text-white">
+          Download on <strong className="ml-1 font-semibold">iTunes</strong>
+        </span>
       </a>
       <span className="text-[10px] leading-tight text-gray-400">
         Preview provided courtesy of iTunes

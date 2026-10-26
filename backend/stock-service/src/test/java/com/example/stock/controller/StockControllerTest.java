@@ -1,6 +1,7 @@
 package com.example.stock.controller;
 
 import com.example.stock.model.Stock;
+import com.example.stock.repository.AccountRepository;
 import com.example.stock.service.StockService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -32,6 +33,9 @@ class StockControllerTest {
 
     @MockitoBean
     private StockService stockService;
+
+    @MockitoBean
+    private AccountRepository accountRepository;
 
     @Autowired
     private ObjectMapper objectMapper;

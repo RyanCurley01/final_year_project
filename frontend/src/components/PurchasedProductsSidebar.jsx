@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { useAuth } from "../context/AuthContext";
+import { auth as firebaseAuth } from "../firebase";
 import { purchasedProductsService } from "../redux/services/purchasedProductsService";
 import { productService } from "../redux/services/productService";
 import { FaShoppingBag } from "react-icons/fa";
@@ -17,12 +18,13 @@ const PurchasedProductsSidebar = () => {
 
   const isManager = currentUser?.accountType === "Manager";
   const isEmployee = currentUser?.accountType === "Employee";
+  const isFirebaseAccount = !!(firebaseAuth.currentUser || currentUser?.firebaseUid);
   const hasBasicAuth =
     !!(currentUser?.email || currentUser?.accountEmailAddress) &&
     !!currentUser?.password;
 
   // Employees and Managers can view
-  const canView = (isManager || isEmployee) && hasBasicAuth;
+  const canView = (isManager || isEmployee) && (isFirebaseAccount || hasBasicAuth);
 
   useEffect(() => {
     if (isOpen && canView) {
@@ -36,8 +38,20 @@ const PurchasedProductsSidebar = () => {
         setIsLoading(false);
       }, 12000);
 
-      purchasedProductsService
-        .getAllPurchasedProducts(email, currentUser?.password)
+      const request = isFirebaseAccount
+        ? firebaseAuth.currentUser
+          ? firebaseAuth.currentUser.getIdToken().then((token) => {
+            if (!token) throw new Error("Firebase session is unavailable. Sign in again and retry.");
+            return purchasedProductsService.getAllPurchasedProducts(
+              email,
+              currentUser?.password,
+              token
+            );
+          })
+          : Promise.reject(new Error("Firebase session is unavailable. Sign in again and retry."))
+        : purchasedProductsService.getAllPurchasedProducts(email, currentUser?.password);
+
+      Promise.resolve(request)
         .then(async (res) => {
           clearTimeout(timeout);
           setData(res);
@@ -67,7 +81,7 @@ const PurchasedProductsSidebar = () => {
 
       return () => clearTimeout(timeout);
     }
-  }, [isOpen, canView, currentUser]);
+  }, [isOpen, canView, currentUser, isFirebaseAccount]);
 
   if (!canView) return null;
 

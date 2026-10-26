@@ -20,13 +20,13 @@ const CustomerSummarySidebar = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  const isGoogleAccount = !!currentUser?.firebaseUid;
+  const isFirebaseAccount = !!(firebaseAuth.currentUser || currentUser?.firebaseUid);
   const isManager = currentUser?.accountType === "Manager";
   const hasBasicAuth =
     !!(currentUser?.email || currentUser?.accountEmailAddress) &&
     !!currentUser?.password;
 
-  const canView = isManager && (isGoogleAccount || hasBasicAuth);
+  const canView = isManager && (isFirebaseAccount || hasBasicAuth);
 
   useEffect(() => {
     if (!isOpen || !canView) return;
@@ -37,10 +37,10 @@ const CustomerSummarySidebar = () => {
       const email = currentUser?.email || currentUser?.accountEmailAddress;
       try {
         const firebaseUser = firebaseAuth.currentUser;
-        const firebaseToken = isGoogleAccount
+        const firebaseToken = isFirebaseAccount
           ? await firebaseUser?.getIdToken()
           : undefined;
-        if (isGoogleAccount && !firebaseToken) {
+        if (isFirebaseAccount && !firebaseToken) {
           throw new Error("Firebase session is unavailable. Sign in again and retry.");
         }
         const summaries = await customerSummaryService.getAllCustomerSummaries(
@@ -105,7 +105,7 @@ const CustomerSummarySidebar = () => {
     return () => {
       cancelled = true;
     };
-  }, [isOpen, canView, currentUser, isGoogleAccount]);
+  }, [isOpen, canView, currentUser, isFirebaseAccount]);
 
   if (!canView) return null;
 
